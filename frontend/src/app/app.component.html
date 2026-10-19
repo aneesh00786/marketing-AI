@@ -1,0 +1,1298 @@
+<div class="hud-container">
+  <!-- Top Banner for One-Click Voice Permission -->
+  <div class="mic-banner" (click)="toggleElevenLabsCall()">
+    🎙️ <strong>CLICK HERE TO CONNECT ROGER // HANDS-FREE FULL-DUPLEX ELEVENLABS VOICE AI</strong>
+  </div>
+
+  <!-- Header -->
+  <header class="hud-header">
+    <div class="hud-brand">
+      <div class="hud-logo-icon"></div>
+      <div>
+        <h1>ROGER <span class="accent-text">// AI MARKETING & EXECUTIVE OS</span></h1>
+        <p class="subtitle">ThriveWoo Digital Products Hub &bull; AI Lead Scoring &bull; Visual HTML Mail &bull; Approved Drafts</p>
+      </div>
+    </div>
+    <div class="hud-status">
+      <span class="chip" [class.active]="!isElevenLabsConnected" [class.calling]="isElevenLabsConnected">
+        {{ isElevenLabsConnected ? '🔴 LIVE VOICE ACTIVE' : '🟢 STANDBY (0 CREDITS)' }}
+      </span>
+      <a class="chip" [href]="serverStatus?.mobile_url" target="_blank" style="text-decoration: none; color: inherit;">
+        📱 MOBILE: {{ serverStatus?.lan_ip }}:8000
+      </a>
+      <span class="agent-tag">AI ENGINE: Telnyx Llama 3.1 &bull; Active</span>
+    </div>
+  </header>
+
+  <!-- HUD Navigation Tabs -->
+  <nav class="hud-nav-tabs">
+    <button class="nav-tab-btn" [class.active]="currentRoute === 'products'" (click)="currentRoute = 'products'">
+      🚀 My Digital Products ({{ digitalProducts.length }})
+    </button>
+    <button class="nav-tab-btn" [class.active]="currentRoute === 'leads'" (click)="currentRoute = 'leads'">
+      👥 Leads CRM & AI Scoring ({{ leads.length }})
+    </button>
+    <button class="nav-tab-btn" [class.active]="currentRoute === 'emails'" (click)="currentRoute = 'emails'">
+      📬 Email Center & Visual HTML ({{ emails.length }})
+    </button>
+    <button class="nav-tab-btn" [class.active]="currentRoute === 'drafts'" (click)="currentRoute = 'drafts'">
+      📝 Mail Drafts & Approvals ({{ drafts.length }})
+    </button>
+    <button class="nav-tab-btn" [class.active]="currentRoute === 'social'" (click)="currentRoute = 'social'">
+      📱 Social Media Studio ({{ socialPosts.length }})
+    </button>
+    <button class="nav-tab-btn" [class.active]="currentRoute === 'businesses'" (click)="currentRoute = 'businesses'">
+      📢 AI Campaigns ({{ connectedBusinesses.length }})
+    </button>
+    <button class="nav-tab-btn" [class.active]="currentRoute === 'voice'" (click)="currentRoute = 'voice'">
+      🎙️ Neural Voice Center
+    </button>
+    <button class="nav-tab-btn" [class.active]="currentRoute === 'appointments'" (click)="currentRoute = 'appointments'">
+      📅 Demos ({{ appointments.length }})
+    </button>
+  </nav>
+
+  <!-- =================================================================== -->
+  <!-- TAB 1: DIGITAL PRODUCTS HUB (THRIVEWOO & AI URL EXTRACTOR) -->
+  <!-- =================================================================== -->
+  <section *ngIf="currentRoute === 'products'" class="hud-panel full-width-panel">
+    <div class="panel-header">
+      <div>
+        <h2>DIGITAL PRODUCTS HUB & AI FEATURE EXTRACTOR</h2>
+        <p class="subtitle">Manage digital platforms for marketing. Enter a product URL (e.g. <code>https://thrivewoo.com</code>) to automatically extract core features with AI.</p>
+      </div>
+      <div class="header-actions">
+        <button class="btn btn-primary" (click)="showNewProductModal = true">➕ Add Product Manually</button>
+      </div>
+    </div>
+
+    <!-- URL Feature Extractor Bar -->
+    <div class="url-extractor-card">
+      <div class="extractor-title-row">
+        <h3>⚡ AI URL Product Extractor (Fastest Method)</h3>
+        <span class="badge badge-accent">Auto Scrapes & Synthesizes Features</span>
+      </div>
+      <p class="helper-text">Enter any product website URL (like <code>https://thrivewoo.com</code> or your other product link). AI will read the website and extract all features and market details automatically:</p>
+      <div class="extractor-input-group">
+        <input type="text" class="hud-input extractor-input" [(ngModel)]="productUrlInput" placeholder="Enter product link (e.g. https://your-product.com)" (keyup.enter)="extractFeaturesFromUrl()" />
+        <button class="btn btn-primary" (click)="extractFeaturesFromUrl()" [disabled]="isExtractingUrl">
+          {{ isExtractingUrl ? 'Extracting with AI...' : '⚡ Extract Features with AI' }}
+        </button>
+        <button class="btn btn-secondary" (click)="showNewProductModal = true">
+          ➕ Or Add Manually
+        </button>
+      </div>
+    </div>
+
+    <!-- Live Extracted Preview Card (if extracted) -->
+    <div *ngIf="extractedProductPreview" class="extracted-preview-box">
+      <div class="preview-header">
+        <div>
+          <span class="badge badge-hot">AI EXTRACTION SUCCESSFUL</span>
+          <h3>{{ extractedProductPreview.name }}</h3>
+          <p class="tagline">{{ extractedProductPreview.tagline }}</p>
+        </div>
+        <div class="preview-actions">
+          <button class="btn btn-primary" (click)="saveExtractedProduct()">💾 Save to My Digital Products Hub</button>
+          <button class="btn btn-accent" (click)="askRogerAboutProduct(extractedProductPreview)">🤖 Ask AI About These Features</button>
+          <button class="btn btn-secondary" (click)="extractedProductPreview = null">✕ Dismiss</button>
+        </div>
+      </div>
+      <p class="product-desc">{{ extractedProductPreview.description }}</p>
+
+      <div class="features-columns">
+        <div class="column-box">
+          <h4>🌟 Extracted Core Features ({{ extractedProductPreview.features?.length || 0 }})</h4>
+          <ul class="feature-bullets">
+            <li *ngFor="let f of extractedProductPreview.features">{{ f }}</li>
+          </ul>
+        </div>
+        <div class="column-box">
+          <h4>🎯 Target Audience Persona</h4>
+          <p class="audience-desc">{{ extractedProductPreview.target_audience }}</p>
+          <div class="realtime-status-card">
+            <div class="sync-badge">🟢 Real-Time HTTP Web Extracted</div>
+            <p class="sync-note">Features parsed dynamically from live website modules. No stored or mock data.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Active Digital Products Catalog -->
+    <div class="section-title-row" style="margin-top: 25px;">
+      <h2>MY ACTIVE DIGITAL PRODUCTS FOR MARKETING</h2>
+      <span class="badge">{{ digitalProducts.length }} Products</span>
+    </div>
+
+    <div class="digital-products-grid">
+      <div *ngFor="let prod of digitalProducts" class="digital-product-card" [class.flagship]="prod.url?.includes('thrivewoo')">
+        <div class="card-badge-row">
+          <span class="pill-badge" [class.owner-badge]="prod.url?.includes('thrivewoo')">
+            {{ prod.url?.includes('thrivewoo') ? '★ FLAGSHIP DIGITAL PRODUCT' : 'ACTIVE DIGITAL PLATFORM' }}
+          </span>
+          <span class="chip active">🟢 {{ prod.status || 'Active' }}</span>
+        </div>
+
+        <h3 class="prod-card-title">{{ prod.name }}</h3>
+        <a [href]="prod.url" target="_blank" class="prod-url-link">🔗 {{ prod.url }}</a>
+        <p class="prod-tagline">{{ prod.tagline }}</p>
+        <p class="prod-desc">{{ prod.description }}</p>
+
+        <div class="features-chip-container">
+          <h4>Key Platform Features:</h4>
+          <div class="features-tags">
+            <span *ngFor="let feat of prod.features" class="feature-tag">✓ {{ feat }}</span>
+          </div>
+        </div>
+
+        <div class="prod-audience-box">
+          <strong>Audience:</strong> {{ prod.target_audience }}
+        </div>
+
+        <div class="prod-card-footer">
+          <button class="btn btn-accent btn-sm" (click)="askRogerAboutProduct(prod)">
+            🤖 Ask AI About Features
+          </button>
+          <button class="btn btn-primary btn-sm" (click)="currentRoute = 'drafts'; newDraftForm.productId = prod.id">
+            📝 Create AI Email Draft
+          </button>
+          <button class="btn btn-secondary btn-sm" (click)="currentRoute = 'businesses'">
+            📢 Generate Campaign
+          </button>
+          <button *ngIf="!prod.url?.includes('thrivewoo')" class="btn btn-danger btn-sm" (click)="deleteDigitalProduct(prod.id)">
+            ✕ Remove
+          </button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- =================================================================== -->
+  <!-- TAB 2: LEADS CRM & EXCEL / CSV IMPORTER WITH AI QUALIFICATION -->
+  <!-- =================================================================== -->
+  <section *ngIf="currentRoute === 'leads'" class="hud-panel full-width-panel">
+    <div class="panel-header">
+      <div>
+        <h2>LEADS CRM & AI QUALIFICATION ENGINE</h2>
+        <p class="subtitle">Manage leads with automated AI Scoring (0-100), Intent Categorization (Hot/Warm/Cold), and personalized follow-ups. Import bulk leads from Excel or CSV.</p>
+      </div>
+      <div class="header-actions">
+        <button class="btn btn-accent" (click)="showExcelImportModal = true">📂 Import Excel / CSV</button>
+        <button class="btn btn-secondary" (click)="qualifyAllLeads()" [disabled]="isQualifyingAll">
+          {{ isQualifyingAll ? 'Scoring...' : '⚡ AI Qualify All Leads' }}
+        </button>
+        <button class="btn btn-primary" (click)="showNewLeadModal = true">+ Add Lead</button>
+      </div>
+    </div>
+
+    <!-- Leads Table with AI Scores -->
+    <div class="table-container full-table">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Contact Name</th>
+            <th>Company</th>
+            <th>Email</th>
+            <th>Phone</th>
+            <th>Product Interest</th>
+            <th>Budget</th>
+            <th>AI Score</th>
+            <th>AI Category</th>
+            <th>AI Strategic Follow-up Advice</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let ld of leads">
+            <td>#{{ ld.id }}</td>
+            <td><strong>{{ ld.name }}</strong></td>
+            <td>{{ ld.company_name || 'Prospect' }}</td>
+            <td>{{ ld.email || '—' }}</td>
+            <td>{{ ld.phone || '—' }}</td>
+            <td><span class="chip">{{ ld.product_interest || 'ThriveWoo B2B' }}</span></td>
+            <td>{{ ld.estimated_budget || '$15,000' }}</td>
+            <td>
+              <div class="score-pill" [class.score-hot]="(ld.ai_score || 50) >= 75" [class.score-warm]="(ld.ai_score || 50) >= 45 && (ld.ai_score || 50) < 75" [class.score-cold]="(ld.ai_score || 50) < 45">
+                {{ ld.ai_score || 50 }}/100
+              </div>
+            </td>
+            <td>
+              <span class="chip" [class.calling]="ld.ai_category === 'Hot'" [class.active]="ld.ai_category === 'Warm'">
+                {{ ld.ai_category === 'Hot' ? '🔥 HOT' : (ld.ai_category === 'Warm' ? '🟡 WARM' : '❄️ COLD') }}
+              </span>
+            </td>
+            <td class="advice-cell">
+              <span class="advice-text">{{ ld.ai_suggestion || 'High fit for wholesale ordering & van sales mobile app. Send live demonstration.' }}</span>
+            </td>
+            <td>
+              <div class="button-group">
+                <button class="btn btn-secondary btn-sm" (click)="quickEmailLead(ld)" title="Compose email with ThriveWoo template">
+                  ✉️ Email
+                </button>
+                <button class="btn btn-secondary btn-sm" (click)="qualifySingleLead(ld)" title="Recalculate AI score">
+                  ⚡ Qualify
+                </button>
+              </div>
+            </td>
+          </tr>
+          <tr *ngIf="leads.length === 0">
+            <td colspan="11" class="empty-state">No leads found. Click "📂 Import Excel / CSV" or "+ Add Lead" to get started.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- =================================================================== -->
+  <!-- TAB 3: EMAIL COMMAND CENTER (VISUAL HTML DISPLAY & SMART REPLIES) -->
+  <!-- =================================================================== -->
+  <section *ngIf="currentRoute === 'emails'" class="hud-panel full-width-panel">
+    <div class="panel-header">
+      <div>
+        <h2>EMAIL COMMAND CENTER (LIVE COMPANY SMTP & IMAP SYNC)</h2>
+        <p class="subtitle">Real Company Email: Send authentic visual HTML outreach via SMTP and sync live inbox replies via IMAP with automatic AI priority screening.</p>
+      </div>
+      <div class="header-actions">
+        <button class="btn btn-secondary" (click)="showMailConfigModal = true">⚙️ Company Mail Auth (SMTP/IMAP)</button>
+        <button class="btn btn-secondary" (click)="syncCompanyMail()" [disabled]="isSyncingMail">
+          {{ isSyncingMail ? 'Syncing...' : '🔄 Sync Mailbox via IMAP' }}
+        </button>
+        <button class="btn btn-primary" (click)="showComposeModal = true">✉️ Compose & Send Email</button>
+      </div>
+    </div>
+
+    <!-- Company Mail Status Bar -->
+    <div class="mail-auth-status-bar" [class.connected]="mailConfig.status === 'Connected'">
+      <div class="status-left">
+        <span class="status-dot" [class.green]="mailConfig.status === 'Connected'" [class.amber]="mailConfig.status === 'Configured'"></span>
+        <span>
+          COMPANY MAILBOX: <strong>{{ mailConfig.smtp_user || 'Not Configured (Using Local Outbox)' }}</strong>
+          &bull; Status: <span class="badge" [class.badge-hot]="mailConfig.status === 'Connected'">{{ mailConfig.status }}</span>
+        </span>
+        <span *ngIf="mailConfig.last_synced_at" class="sync-time">Last Synced: {{ mailConfig.last_synced_at }}</span>
+      </div>
+      <div class="status-right">
+        <button class="btn btn-secondary btn-sm" (click)="showMailConfigModal = true">Configure Authorization</button>
+        <button class="btn btn-primary btn-sm" (click)="syncCompanyMail()" [disabled]="isSyncingMail">
+          {{ isSyncingMail ? 'Fetching...' : '🔄 Sync IMAP' }}
+        </button>
+      </div>
+    </div>
+
+    <!-- Email Items Grid / Cards -->
+    <div class="emails-cards-list">
+      <div *ngFor="let em of emails" class="email-summary-card">
+        <div class="email-card-top">
+          <div class="email-header-meta">
+            <span class="chip" [class.calling]="em.ai_priority === 'Urgent' || em.is_urgent === 1" [class.active]="em.status === 'Sent'">
+              {{ (em.ai_priority || (em.is_urgent === 1 ? 'Urgent' : 'Normal')).toUpperCase() }}
+            </span>
+            <span class="email-sender">From: <strong>{{ em.sender || 'TradeSage Executive' }}</strong> &rarr; To: <strong>{{ em.recipient_name || em.recipient_email }}</strong></span>
+          </div>
+          <span class="email-date">{{ em.sent_at || em.received_at || 'Today' }}</span>
+        </div>
+
+        <h3 class="email-card-subject">{{ em.subject }}</h3>
+
+        <!-- AI Summary Badge -->
+        <div class="ai-summary-banner" *ngIf="em.ai_summary">
+          <span class="ai-icon">⚡ AI Summary:</span> {{ em.ai_summary }}
+        </div>
+
+        <!-- Snippet / Body Text -->
+        <p class="email-snippet-text">{{ em.snippet || em.body }}</p>
+
+        <!-- Visual HTML Indicator -->
+        <div *ngIf="em.html_body" class="html-rendered-preview-bar">
+          <span class="badge badge-accent">📄 Visual HTML Template Included</span>
+          <button class="btn btn-secondary btn-sm" (click)="openVisualEmailModal(em)">
+            👁️ View Rendered Email Page
+          </button>
+        </div>
+
+        <!-- 1-Click AI Smart Reply Suggestions -->
+        <div class="smart-replies-row" *ngIf="em.ai_replies && em.ai_replies.length > 0">
+          <span class="replies-label">💡 1-Click AI Reply Suggestions:</span>
+          <button *ngFor="let rep of em.ai_replies" class="smart-reply-chip" (click)="applySmartReply(rep, em)">
+            {{ rep.label || rep }}
+          </button>
+        </div>
+
+        <!-- Email Actions Footer -->
+        <div class="email-actions-footer">
+          <button class="btn btn-secondary btn-sm" (click)="replyToEmail(em)">✉️ Reply</button>
+          <button class="btn btn-secondary btn-sm" (click)="analyzeEmail(em)" [disabled]="isAnalyzingEmail">
+            ⚡ Re-Analyze with AI
+          </button>
+        </div>
+      </div>
+
+      <div *ngIf="emails.length === 0" class="empty-state-box">
+        No email records available. Click "✉️ Compose & Send HTML Email" to dispatch your first outreach.
+      </div>
+    </div>
+  </section>
+
+  <!-- =================================================================== -->
+  <!-- TAB 4: MAIL DRAFTS & USER APPROVAL WORKFLOW (HUMAN-IN-THE-LOOP) -->
+  <!-- =================================================================== -->
+  <section *ngIf="currentRoute === 'drafts'" class="hud-panel full-width-panel">
+    <div class="panel-header">
+      <div>
+        <h2>AI MAIL DRAFTS & USER APPROVAL WORKFLOW</h2>
+        <p class="subtitle">Generate, personalize, and rewrite professional email drafts. Strictly requires your explicit approval before any email can be sent.</p>
+      </div>
+    </div>
+
+    <!-- Draft Generator Bar -->
+    <div class="draft-generator-box">
+      <div class="section-title-row">
+        <h3>⚡ Generate High-Converting Email Draft with AI</h3>
+        <span class="badge badge-accent">Telnyx Llama 3.1 Synthesis</span>
+      </div>
+      <div class="generator-grid">
+        <div class="form-group">
+          <label>Target Digital Product</label>
+          <select class="hud-input" [(ngModel)]="newDraftForm.productId">
+            <option *ngFor="let p of digitalProducts" [value]="p.id">{{ p.name }}</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Recipient Name</label>
+          <input type="text" class="hud-input" [(ngModel)]="newDraftForm.recipientName" placeholder="e.g. Michael Chang" />
+        </div>
+        <div class="form-group">
+          <label>Recipient Email</label>
+          <input type="email" class="hud-input" [(ngModel)]="newDraftForm.recipientEmail" placeholder="m.chang@apexwholesale.com" />
+        </div>
+        <div class="form-group">
+          <label>Tone of Voice</label>
+          <select class="hud-input" [(ngModel)]="newDraftForm.tone">
+            <option value="Professional">💼 Professional & Direct</option>
+            <option value="Persuasive">🎯 High-Converting & Persuasive</option>
+            <option value="Short">⚡ Short & Punchy</option>
+            <option value="Executive">👔 Executive Briefing</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group" style="margin-top: 10px;">
+        <label>Marketing Goal / Offer Angle</label>
+        <input type="text" class="hud-input" [(ngModel)]="newDraftForm.goal" placeholder="e.g. Introduce ThriveWoo to eliminate handwritten van orders and automate WooCommerce wholesale pricing" />
+      </div>
+      <div style="text-align: right; margin-top: 15px;">
+        <button class="btn btn-primary" (click)="generateNewDraft()" [disabled]="isGeneratingDraft">
+          {{ isGeneratingDraft ? 'Synthesizing Draft...' : '⚡ Generate Email Draft' }}
+        </button>
+      </div>
+    </div>
+
+    <!-- Drafts Split Workspace -->
+    <div class="drafts-workspace-split">
+      <!-- Left: Drafts List -->
+      <div class="drafts-list-col">
+        <div class="section-title-row">
+          <h3>DRAFTS QUEUE ({{ drafts.length }})</h3>
+        </div>
+        <div class="drafts-scroll-list">
+          <div *ngFor="let d of drafts" class="draft-item-card" [class.selected]="selectedDraft?.id === d.id" (click)="selectedDraft = d">
+            <div class="draft-status-badge-row">
+              <span class="chip" [class.calling]="d.status === 'Draft'" [class.active]="d.status === 'Approved'" [style.background]="d.status === 'Sent' ? '#10b981' : ''">
+                {{ d.status.toUpperCase() }}
+              </span>
+              <span class="draft-date">{{ d.updated_at?.substring(0, 10) || 'Recent' }}</span>
+            </div>
+            <h4 class="draft-title">{{ d.subject }}</h4>
+            <p class="draft-target">To: <strong>{{ d.recipient_name || d.recipient_email }}</strong> &bull; Product: {{ d.product_name }}</p>
+          </div>
+          <div *ngIf="drafts.length === 0" class="empty-state">
+            No drafts generated yet. Use the generator box above!
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: Draft Inspector & Approval Console -->
+      <div class="draft-inspector-col" *ngIf="selectedDraft">
+        <div class="inspector-header">
+          <div>
+            <div class="approval-status-tag" [class.approved]="selectedDraft.status === 'Approved'" [class.sent]="selectedDraft.status === 'Sent'">
+              STATUS: {{ selectedDraft.status }}
+            </div>
+            <h2>{{ selectedDraft.subject }}</h2>
+            <p class="inspector-meta">Recipient: <strong>{{ selectedDraft.recipient_name }}</strong> ({{ selectedDraft.recipient_email }}) &bull; Product: <strong>{{ selectedDraft.product_name }}</strong> &bull; Tone: <em>{{ selectedDraft.tone }}</em></p>
+          </div>
+          <div class="approval-main-actions">
+            <button *ngIf="selectedDraft.status === 'Draft'" class="btn btn-accent" (click)="approveDraft(selectedDraft)">
+              ✓ Approve Draft
+            </button>
+            <button class="btn btn-primary" (click)="sendApprovedDraft(selectedDraft)">
+              🚀 {{ selectedDraft.status === 'Approved' ? 'Dispatch Approved Email' : 'Approve & Send Now' }}
+            </button>
+            <button class="btn btn-secondary btn-sm" (click)="deleteDraft(selectedDraft.id)">✕ Delete</button>
+          </div>
+        </div>
+
+        <!-- 1-Click AI Tone Rewriters -->
+        <div class="rewrite-bar">
+          <span class="rewrite-label">⚡ AI Rewrite:</span>
+          <button class="btn btn-secondary btn-sm" (click)="rewriteDraft(selectedDraft, 'More Professional')" [disabled]="isRewritingDraft">
+            💼 More Professional
+          </button>
+          <button class="btn btn-secondary btn-sm" (click)="rewriteDraft(selectedDraft, 'More Persuasive')" [disabled]="isRewritingDraft">
+            🎯 More Persuasive
+          </button>
+          <button class="btn btn-secondary btn-sm" (click)="rewriteDraft(selectedDraft, 'Shorter & Punchier')" [disabled]="isRewritingDraft">
+            ⚡ Shorter & Punchier
+          </button>
+        </div>
+
+        <!-- Visual Rendered Page Container -->
+        <div class="rendered-email-container">
+          <div class="rendered-label-bar">
+            <span>VISUAL PAGE LAYOUT (What the recipient actually sees)</span>
+            <span class="badge">Safe HTML Sandbox</span>
+          </div>
+          <div class="email-render-frame" [innerHTML]="getSafeHtml(selectedDraft.body_html)"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- =================================================================== -->
+  <!-- TAB 4: SOCIAL MEDIA MARKETING STUDIO -->
+  <!-- =================================================================== -->
+  <section *ngIf="currentRoute === 'social'" class="hud-panel full-width-panel">
+    <div class="panel-header">
+      <div>
+        <h2>📱 SOCIAL MEDIA MARKETING STUDIO (AI CONTENT ENGINE)</h2>
+        <p class="subtitle">Generate high-converting organic & paid social copy for LinkedIn, Twitter / X, Instagram, and Facebook for ThriveWoo or any digital product.</p>
+      </div>
+      <div class="header-actions">
+        <button class="btn btn-primary" (click)="generateSocialPost()">⚡ Quick Generate ({{ selectedSocialPlatform }})</button>
+      </div>
+    </div>
+
+    <!-- AI Social Post Creator Bar -->
+    <div class="social-creator-box">
+      <div class="extractor-title-row">
+        <h3>⚡ AI Social Media Copywriter</h3>
+        <span class="badge badge-accent">Platform-Optimized Formats</span>
+      </div>
+
+      <!-- Platform Selection Pills -->
+      <div class="platform-selector-row">
+        <button class="platform-pill" [class.active]="selectedSocialPlatform === 'LinkedIn'" (click)="selectedSocialPlatform = 'LinkedIn'">
+          💼 LinkedIn
+        </button>
+        <button class="platform-pill" [class.active]="selectedSocialPlatform === 'Twitter'" (click)="selectedSocialPlatform = 'Twitter'">
+          🐦 Twitter / X
+        </button>
+        <button class="platform-pill" [class.active]="selectedSocialPlatform === 'Instagram'" (click)="selectedSocialPlatform = 'Instagram'">
+          📸 Instagram
+        </button>
+        <button class="platform-pill" [class.active]="selectedSocialPlatform === 'Facebook'" (click)="selectedSocialPlatform = 'Facebook'">
+          📘 Facebook
+        </button>
+      </div>
+
+      <div class="social-inputs-grid">
+        <div class="form-group" style="margin: 0;">
+          <label style="font-size: 0.8rem; color: #94a3b8;">Campaign Topic / Custom Angle (Optional)</label>
+          <input type="text" class="hud-input" [(ngModel)]="socialCustomTopic" placeholder="e.g. Announce 15-day free pilot for field sales teams, or mobile barcode scanning" />
+        </div>
+
+        <div class="form-group" style="margin: 0;">
+          <label style="font-size: 0.8rem; color: #94a3b8;">Target Digital Product</label>
+          <select class="hud-input" [(ngModel)]="selectedSocialProductId">
+            <option [ngValue]="null">★ All Products (Default ThriveWoo)</option>
+            <option *ngFor="let p of digitalProducts" [ngValue]="p.id">{{ p.name }}</option>
+          </select>
+        </div>
+
+        <div class="form-group" style="margin: 0;">
+          <label style="font-size: 0.8rem; color: #94a3b8;">Voice & Tone</label>
+          <select class="hud-input" [(ngModel)]="socialTone">
+            <option value="High-Converting B2B">💼 High-Converting B2B</option>
+            <option value="Bold & Direct">⚡ Bold & Direct</option>
+            <option value="Founder Storytelling">📖 Founder Story</option>
+            <option value="Urgent Value">🔥 Urgent Value / FOMO</option>
+          </select>
+        </div>
+
+        <div style="align-self: flex-end;">
+          <button class="btn btn-primary" (click)="generateSocialPost()" [disabled]="isGeneratingSocialPost" style="white-space: nowrap;">
+            {{ isGeneratingSocialPost ? 'Writing Post...' : '⚡ Generate AI Post' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Filter Buttons Bar -->
+    <div class="section-title-row" style="margin: 20px 0 14px 0;">
+      <div>
+        <h3>SOCIAL POSTS CATALOG ({{ socialPosts.length }})</h3>
+      </div>
+      <div class="tab-filters">
+        <button class="chip" [class.active]="socialStatusFilter === 'all'" (click)="socialStatusFilter = 'all'; loadSocialPosts()">All</button>
+        <button class="chip" [class.active]="socialStatusFilter === 'Draft'" (click)="socialStatusFilter = 'Draft'; loadSocialPosts()">Drafts</button>
+        <button class="chip" [class.active]="socialStatusFilter === 'Approved'" (click)="socialStatusFilter = 'Approved'; loadSocialPosts()">Approved</button>
+        <button class="chip" [class.active]="socialStatusFilter === 'Published'" (click)="socialStatusFilter = 'Published'; loadSocialPosts()">Published</button>
+      </div>
+    </div>
+
+    <!-- Posts Grid -->
+    <div class="social-cards-grid">
+      <div *ngFor="let post of socialPosts" class="social-card">
+        <div class="social-card-header">
+          <span class="platform-badge" [ngClass]="post.platform?.toLowerCase()">
+            {{ post.platform || 'LinkedIn' }}
+          </span>
+          <span class="chip" [class.active]="post.status === 'Approved'" [class.calling]="post.status === 'Published'">
+            {{ post.status }}
+          </span>
+        </div>
+
+        <h4 class="social-card-title">{{ post.title }}</h4>
+
+        <div class="social-caption-box">
+          {{ post.caption_text }}
+        </div>
+
+        <div class="social-hashtags" *ngIf="post.hashtags">
+          {{ post.hashtags }}
+        </div>
+
+        <div class="social-cta-box" *ngIf="post.call_to_action">
+          🎯 <strong>CTA:</strong> {{ post.call_to_action }}
+        </div>
+
+        <div class="social-card-actions">
+          <button *ngIf="post.status === 'Draft'" class="btn btn-accent btn-sm" (click)="updateSocialPostStatus(post.id, 'Approved')">
+            ✓ Approve Post
+          </button>
+          <button *ngIf="post.status !== 'Published'" class="btn btn-primary btn-sm" (click)="updateSocialPostStatus(post.id, 'Published')">
+            🚀 Mark Published
+          </button>
+          <span *ngIf="post.status === 'Published'" class="chip active">Published ✓</span>
+          <button class="btn btn-secondary btn-sm" (click)="deleteSocialPost(post.id)">🗑️</button>
+        </div>
+      </div>
+
+      <div *ngIf="socialPosts.length === 0" class="empty-state" style="grid-column: 1 / -1; padding: 40px; text-align: center; color: #94a3b8;">
+        No social media posts found. Click "Generate AI Post" above or tell Roger: <em>"Create a LinkedIn post for ThriveWoo"</em>.
+      </div>
+    </div>
+  </section>
+
+  <!-- =================================================================== -->
+  <!-- TAB 5: AI CAMPAIGNS & MULTI-BUSINESS PLAYBOOKS -->
+  <!-- =================================================================== -->
+  <section *ngIf="currentRoute === 'businesses'" class="hud-panel full-width-panel">
+    <div class="panel-header">
+      <div>
+        <h2>AI MARKETING CAMPAIGNS & PLAYBOOKS</h2>
+        <p class="subtitle">Create, schedule, and track AI-powered marketing campaigns tailored for ThriveWoo or any connected client.</p>
+      </div>
+      <div class="header-actions">
+        <button class="btn btn-primary" (click)="showNewBusinessModal = true">+ Connect Client Business</button>
+      </div>
+    </div>
+
+    <!-- Business Selector Pills -->
+    <div class="business-pills-row">
+      <button *ngFor="let b of connectedBusinesses" class="biz-pill-btn" [class.active]="selectedBusiness?.id === b.id" (click)="selectBusiness(b)">
+        <span class="pill-badge" [class.owner-badge]="b.business_type === 'owner'">
+          {{ b.business_type === 'owner' ? '★ THRIVEWOO' : 'CLIENT' }}
+        </span>
+        <span class="pill-name">{{ b.name }}</span>
+      </button>
+    </div>
+
+    <!-- Selected Business Profile -->
+    <div *ngIf="selectedBusiness" class="biz-profile-card">
+      <div class="biz-card-header">
+        <div>
+          <span class="badge" [class.badge-owner]="selectedBusiness.business_type === 'owner'">
+            {{ selectedBusiness.business_type === 'owner' ? '★ YOUR FLAGSHIP DIGITAL PRODUCT' : 'CONNECTED CLIENT ACCOUNT' }}
+          </span>
+          <h3 class="biz-title">{{ selectedBusiness.name }}</h3>
+          <p class="biz-industry">Industry: <strong>{{ selectedBusiness.industry }}</strong> &bull; Website: <a [href]="selectedBusiness.website" target="_blank">{{ selectedBusiness.website || 'N/A' }}</a></p>
+        </div>
+        <button class="btn btn-primary" (click)="generateIdeasForSelectedBusiness()" [disabled]="isGeneratingIdeas">
+          {{ isGeneratingIdeas ? 'Synthesizing...' : '⚡ Generate Campaign Playbooks' }}
+        </button>
+      </div>
+
+      <p class="biz-desc">{{ selectedBusiness.description }}</p>
+
+      <div class="biz-meta-grid">
+        <div class="meta-box">
+          <h4>Target Audience</h4>
+          <p>{{ selectedBusiness.target_audience }}</p>
+        </div>
+        <div class="meta-box">
+          <h4>Core Offerings / Digital Features</h4>
+          <ul class="product-bullets">
+            <li *ngFor="let p of selectedBusiness.products">{{ p }}</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- Campaign Playbooks Grid -->
+    <div class="campaign-results-section">
+      <div class="section-title-row">
+        <h2>TAILORED CAMPAIGN PLAYBOOKS (FOR: {{ selectedBusiness?.name }})</h2>
+        <span class="badge">{{ generatedIdeas.length }} Playbooks</span>
+      </div>
+
+      <div class="ideas-grid">
+        <div *ngFor="let idea of generatedIdeas" class="idea-card">
+          <div class="idea-channel-badge">{{ idea.channel }}</div>
+          <h3 class="idea-angle">{{ idea.angle }}</h3>
+          <div class="idea-subject" *ngIf="idea.subject">
+            <strong>Subject:</strong> "{{ idea.subject }}"
+          </div>
+          <p class="idea-summary">{{ idea.summary }}</p>
+          <div class="idea-tip">
+            💡 <strong>Conversion Strategy:</strong> {{ idea.conversionTip }}
+          </div>
+          <div class="card-footer-action">
+            <button class="btn btn-secondary btn-sm" (click)="dispatchCampaignToLeads(idea)">
+              ✉️ 1-Click Dispatch This Campaign to Leads
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- =================================================================== -->
+  <!-- TAB 6: NEURAL VOICE CENTER (ELEVENLABS + ROGER AI ORB) -->
+  <!-- =================================================================== -->
+  <section *ngIf="currentRoute === 'voice'" class="hud-grid">
+    <div class="hud-panel main-voice-panel">
+      <div class="panel-header">
+        <h2>NEURAL VOICE (SAY "HELLO ROGER")</h2>
+        <span class="chip" [class.calling]="isElevenLabsConnected" [class.active]="!isElevenLabsConnected">
+          {{ isElevenLabsConnected ? 'CONNECTED' : 'STANDBY' }}
+        </span>
+      </div>
+
+      <div class="orb-wrapper" (click)="toggleElevenLabsCall()">
+        <div class="orb-container">
+          <div class="orb-ring ring-3"></div>
+          <div class="orb-ring ring-2"></div>
+          <div class="orb-ring ring-1"></div>
+          <div class="voice-orb" [class.in-call]="isElevenLabsConnected" [class.speaking]="elevenLabsMode === 'speaking'">
+            <div class="orb-core"></div>
+          </div>
+        </div>
+        <div class="tap-hint">SAY "HELLO ROGER" OR TAP ORB</div>
+      </div>
+
+      <div class="call-status-box">
+        <div class="call-timer">{{ callTimer }}</div>
+        <p class="call-status-text">{{ callStatusText }}</p>
+        <p class="call-subtext">{{ callSubText }}</p>
+      </div>
+
+      <div class="call-controls">
+        <button class="call-btn" [class.btn-call]="!isElevenLabsConnected" [class.btn-end-call]="isElevenLabsConnected" (click)="toggleElevenLabsCall()">
+          <span class="icon">{{ isElevenLabsConnected ? '⏹' : '🎙️' }}</span>
+          <span>{{ isElevenLabsConnected ? 'DISCONNECT ROGER' : 'CALL ROGER (ELEVENLABS)' }}</span>
+        </button>
+      </div>
+
+      <div class="transcript-box">
+        <div class="transcript-header">LIVE CONVERSATION TRANSCRIPT</div>
+        <div class="transcript-content">
+          <div *ngFor="let msg of dialogueTranscript" class="msg" [class.user-msg]="msg.role === 'user'" [class.jarvis-msg]="msg.role === 'agent'">
+            <span class="sender">{{ msg.sender }}:</span> {{ msg.text }}
+          </div>
+        </div>
+      </div>
+
+      <!-- AI Quick Command Chips -->
+      <div class="hud-prompt-chips">
+        <button class="chip-action-btn" (click)="sendPresetPrompt('Can you see my product details and features?')">🔍 See Product Details</button>
+        <button class="chip-action-btn" (click)="sendPresetPrompt('What are my emails?')">📬 Check Emails</button>
+        <button class="chip-action-btn" (click)="sendPresetPrompt('Who are my top leads?')">👥 Top Leads</button>
+        <button class="chip-action-btn" (click)="sendPresetPrompt('Draft an email to Michael Chang about ThriveWoo')">📝 Draft to Michael</button>
+        <button class="chip-action-btn" (click)="sendPresetPrompt('Create a LinkedIn post for ThriveWoo')">📱 LinkedIn Post</button>
+        <button class="chip-action-btn" (click)="sendPresetPrompt('Sync my company email')">🔄 Sync Mailbox</button>
+      </div>
+
+      <div class="quick-chat-row">
+        <button class="btn btn-mic-quick" [class.listening]="isListeningQuickChat" (click)="toggleVoiceDictation()" title="Voice Dictation: Speak in English">
+          {{ isListeningQuickChat ? '🔴' : '🎙️' }}
+        </button>
+        <input type="text" class="hud-input" [(ngModel)]="quickTextInput" placeholder="Ask Roger anything or give command (e.g. 'Draft email to Michael Chang about ThriveWoo')" (keyup.enter)="sendQuickText()" [disabled]="isProcessingChat" />
+        <button class="btn btn-primary" (click)="sendQuickText()" [disabled]="isProcessingChat">
+          {{ isProcessingChat ? '...' : 'SEND' }}
+        </button>
+      </div>
+
+      <div class="quick-commands">
+        <h3>SYSTEM & DESKTOP CONTROLS</h3>
+        <div class="button-row" style="margin-bottom: 10px;">
+          <button class="btn btn-secondary" (click)="triggerLaunchApp('calc')">💻 Calc</button>
+          <button class="btn btn-secondary" (click)="triggerLaunchApp('notepad')">📝 Notepad</button>
+          <button class="btn btn-secondary" (click)="triggerSystemControl('volume_up')">🔊 Vol +</button>
+          <button class="btn btn-secondary" (click)="triggerSystemControl('volume_down')">🔉 Vol -</button>
+          <button class="btn btn-primary" (click)="triggerSystemStats()">⚡ CPU/RAM/Battery</button>
+        </div>
+        <h3>EXECUTIVE BRIEFING</h3>
+        <div class="button-row">
+          <button class="btn btn-primary" (click)="loadExecutiveBriefing()">⚡ Executive Briefing</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right Side HUD Digest -->
+    <div class="hud-panel data-panel">
+      <div class="data-section">
+        <div class="section-title-row">
+          <h2>THRIVEWOO PLATFORM SUMMARY</h2>
+          <span class="chip active">🟢 Digital SaaS</span>
+        </div>
+        <p class="helper-text" style="color: #94a3b8; font-size: 13px;">
+          Smart FMCG B2B Sales App — Staff Performance Tracking, Buying Patterns, Customer-Specific Discounts & In-App Messaging.
+        </p>
+        <div class="traivo-quick-stats">
+          <div class="mini-stat">
+            <span class="stat-number">{{ digitalProducts.length }}</span>
+            <span class="stat-label">Products Active</span>
+          </div>
+          <div class="mini-stat">
+            <span class="stat-number">{{ leads.length }}</span>
+            <span class="stat-label">Leads Captured</span>
+          </div>
+          <div class="mini-stat">
+            <span class="stat-number">{{ drafts.length }}</span>
+            <span class="stat-label">Mail Drafts</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="data-section">
+        <div class="section-title-row">
+          <h2>HIGH INTENT LEADS</h2>
+          <span class="badge">{{ leads.length }} Leads</span>
+        </div>
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Contact</th>
+                <th>Score</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr *ngFor="let ld of leads.slice(0, 4)">
+                <td><strong>{{ ld.name }}</strong><br><small style="color: #64748b;">{{ ld.company_name }}</small></td>
+                <td><span class="score-pill score-hot">{{ ld.ai_score || 75 }}/100</span></td>
+                <td><button class="btn btn-secondary btn-sm" (click)="quickEmailLead(ld)">Email</button></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- =================================================================== -->
+  <!-- TAB 7: APPOINTMENTS & DEMOS -->
+  <!-- =================================================================== -->
+  <section *ngIf="currentRoute === 'appointments'" class="hud-panel full-width-panel">
+    <div class="panel-header">
+      <div>
+        <h2>SCHEDULED DEMOS & APPOINTMENTS</h2>
+        <p class="subtitle">Calendar bookings and live technical walkthroughs for your digital products</p>
+      </div>
+      <div class="header-actions">
+        <button class="btn btn-primary" (click)="showBookingModal = true">+ Book Demo</button>
+      </div>
+    </div>
+
+    <div class="table-container full-table">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Customer / Company</th>
+            <th>Service / Demonstration</th>
+            <th>Date</th>
+            <th>Time</th>
+            <th>Notes</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let ap of appointments">
+            <td>#{{ ap.id }}</td>
+            <td><strong>{{ ap.customer_name }}</strong></td>
+            <td>{{ ap.service }}</td>
+            <td>{{ ap.date }}</td>
+            <td>{{ ap.time }}</td>
+            <td>{{ ap.notes || '—' }}</td>
+            <td><span class="chip active">{{ ap.status || 'Confirmed' }}</span></td>
+          </tr>
+          <tr *ngIf="appointments.length === 0">
+            <td colspan="7" class="empty-state">No appointments scheduled. Click "+ Book Demo".</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- =================================================================== -->
+  <!-- MODAL 1: EXCEL / CSV BULK LEAD IMPORTER -->
+  <!-- =================================================================== -->
+  <div *ngIf="showExcelImportModal" class="modal-backdrop" (click)="showExcelImportModal = false">
+    <div class="modal-card wide-modal" (click)="$event.stopPropagation()">
+      <div class="modal-header">
+        <h3>📂 Bulk Import Leads from Excel / CSV</h3>
+        <button class="close-btn" (click)="showExcelImportModal = false">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="helper-text">Upload any spreadsheet (<code>.xlsx</code>, <code>.xls</code>, or <code>.csv</code>). Column headers like <em>Name</em>, <em>Company</em>, <em>Email</em>, <em>Phone</em>, <em>Budget</em> are mapped automatically with instant AI Scoring!</p>
+
+        <!-- Drag & Drop Upload Zone -->
+        <div class="excel-dropzone">
+          <input type="file" id="excelFileInput" accept=".xlsx, .xls, .csv" (change)="onExcelFileSelected($event)" style="display: none;" />
+          <label for="excelFileInput" class="dropzone-label">
+            <div class="dropzone-icon">📊</div>
+            <strong>Click to browse or drop your spreadsheet here</strong>
+            <span class="dropzone-sub">Supports .xlsx, .xls, and .csv files</span>
+          </label>
+        </div>
+
+        <div *ngIf="excelFileName" class="file-loaded-banner">
+          ✓ Loaded file: <strong>{{ excelFileName }}</strong> &bull; ({{ excelPreviewRows.length }} rows found)
+        </div>
+
+        <!-- Preview Table of parsed leads -->
+        <div *ngIf="excelPreviewRows.length > 0" class="excel-preview-table-container table-container">
+          <h4>Parsed Leads Preview (First 5 of {{ excelPreviewRows.length }}):</h4>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Company</th>
+                <th>Email</th>
+                <th>Phone</th>
+                <th>Interest</th>
+                <th>Budget</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr *ngFor="let row of excelPreviewRows.slice(0, 5)">
+                <td><strong>{{ row.name }}</strong></td>
+                <td>{{ row.company }}</td>
+                <td>{{ row.email }}</td>
+                <td>{{ row.phone }}</td>
+                <td>{{ row.interest }}</td>
+                <td>{{ row.budget }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" (click)="showExcelImportModal = false">Cancel</button>
+        <button class="btn btn-primary" (click)="confirmImportExcelLeads()" [disabled]="excelPreviewRows.length === 0 || isImportingLeads">
+          {{ isImportingLeads ? 'Importing & Scoring...' : '🚀 Import ' + excelPreviewRows.length + ' Leads with AI' }}
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- =================================================================== -->
+  <!-- MODAL 2: COMPOSE & SEND VISUAL HTML EMAIL -->
+  <!-- =================================================================== -->
+  <div *ngIf="showComposeModal" class="modal-backdrop" (click)="showComposeModal = false">
+    <div class="modal-card wide-modal" (click)="$event.stopPropagation()">
+      <div class="modal-header">
+        <h3>✉️ Compose & Send Email (Visual HTML Supported)</h3>
+        <button class="close-btn" (click)="showComposeModal = false">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label>Recipient Email</label>
+            <input type="email" class="hud-input" [(ngModel)]="composeEmail.recipient_email" placeholder="e.g. buyer@apexwholesale.com" />
+          </div>
+          <div class="form-group flex-1">
+            <label>Recipient Name</label>
+            <input type="text" class="hud-input" [(ngModel)]="composeEmail.recipient_name" placeholder="e.g. Michael Chang" />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Subject</label>
+          <input type="text" class="hud-input" [(ngModel)]="composeEmail.subject" placeholder="e.g. Accelerate Wholesale Ordering with ThriveWoo B2B" />
+        </div>
+
+        <!-- Mode Toggle: Visual Page vs HTML Code -->
+        <div class="compose-tab-bar">
+          <div class="tab-buttons">
+            <button class="btn btn-sm" [class.btn-primary]="composeTab === 'visual'" [class.btn-secondary]="composeTab !== 'visual'" (click)="composeTab = 'visual'">
+              👁️ Visual Page Preview
+            </button>
+            <button class="btn btn-sm" [class.btn-primary]="composeTab === 'code'" [class.btn-secondary]="composeTab !== 'code'" (click)="composeTab = 'code'">
+              &lt;/&gt; HTML Code / Template
+            </button>
+          </div>
+          <div class="upload-template-btn">
+            <input type="file" id="htmlTemplateInput" accept=".html,.htm" (change)="onHtmlTemplateUpload($event)" style="display: none;" />
+            <label for="htmlTemplateInput" class="btn btn-secondary btn-sm" style="cursor: pointer;">
+              📄 Upload .html File
+            </label>
+          </div>
+        </div>
+
+        <!-- Visual Rendered Preview -->
+        <div *ngIf="composeTab === 'visual'" class="rendered-compose-view">
+          <div *ngIf="composeEmail.html_body" [innerHTML]="getSafeHtml(composeEmail.html_body)"></div>
+          <div *ngIf="!composeEmail.html_body" class="plain-text-preview">
+            <p style="white-space: pre-wrap;">{{ composeEmail.body || 'No message content entered yet.' }}</p>
+          </div>
+        </div>
+
+        <!-- HTML Code Editor -->
+        <div *ngIf="composeTab === 'code'">
+          <textarea class="hud-textarea" rows="8" [(ngModel)]="composeEmail.html_body" placeholder="<div style='...'>Enter your HTML template here...</div>"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" (click)="showComposeModal = false">Cancel</button>
+        <button class="btn btn-primary" (click)="sendOutboundEmail()">🚀 Dispatch Email</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- =================================================================== -->
+  <!-- MODAL 3: VIEW RENDERED EMAIL PAGE POPUP -->
+  <!-- =================================================================== -->
+  <div *ngIf="viewingEmailVisual" class="modal-backdrop" (click)="viewingEmailVisual = null">
+    <div class="modal-card wide-modal" (click)="$event.stopPropagation()">
+      <div class="modal-header">
+        <div>
+          <h3>{{ viewingEmailVisual.subject }}</h3>
+          <p class="subtitle" style="margin: 0;">To: {{ viewingEmailVisual.recipient_email }} &bull; Rendered Visual View</p>
+        </div>
+        <button class="close-btn" (click)="viewingEmailVisual = null">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="rendered-email-container">
+          <div class="email-render-frame" [innerHTML]="getSafeHtml(viewingEmailVisual.html_body || viewingEmailVisual.body)"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" (click)="viewingEmailVisual = null">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- =================================================================== -->
+  <!-- MODAL 4: CAPTURE NEW LEAD -->
+  <!-- =================================================================== -->
+  <div *ngIf="showNewLeadModal" class="modal-backdrop" (click)="showNewLeadModal = false">
+    <div class="modal-card" (click)="$event.stopPropagation()">
+      <div class="modal-header">
+        <h3>👥 Capture New Customer Lead</h3>
+        <button class="close-btn" (click)="showNewLeadModal = false">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>Full Name</label>
+          <input type="text" class="hud-input" [(ngModel)]="newLead.name" placeholder="e.g. Lisa Ray" />
+        </div>
+        <div class="form-group">
+          <label>Company Name</label>
+          <input type="text" class="hud-input" [(ngModel)]="newLead.company_name" placeholder="e.g. Horizon Wholesale Distributors" />
+        </div>
+        <div class="form-group">
+          <label>Email</label>
+          <input type="email" class="hud-input" [(ngModel)]="newLead.email" placeholder="e.g. lisa@horizonbev.com" />
+        </div>
+        <div class="form-group">
+          <label>Phone</label>
+          <input type="text" class="hud-input" [(ngModel)]="newLead.phone" placeholder="+1 (555) 781-9920" />
+        </div>
+        <div class="form-group">
+          <label>Product Interest / Requirements</label>
+          <input type="text" class="hud-input" [(ngModel)]="newLead.interest" placeholder="e.g. ThriveWoo Wholesale Pricing & Van Sales" />
+        </div>
+        <div class="form-group">
+          <label>Estimated Deal Value / Budget</label>
+          <input type="text" class="hud-input" [(ngModel)]="newLead.estimated_budget" placeholder="$18,500" />
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" (click)="showNewLeadModal = false">Cancel</button>
+        <button class="btn btn-primary" (click)="submitNewLead()">Record & AI Score Lead</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- =================================================================== -->
+  <!-- MODAL 5: ADD DIGITAL PRODUCT MANUALLY -->
+  <!-- =================================================================== -->
+  <div *ngIf="showNewProductModal" class="modal-backdrop" (click)="showNewProductModal = false">
+    <div class="modal-card" (click)="$event.stopPropagation()">
+      <div class="modal-header">
+        <h3>🚀 Add Digital Product Manually</h3>
+        <button class="close-btn" (click)="showNewProductModal = false">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>Product Name</label>
+          <input type="text" class="hud-input" [(ngModel)]="newProduct.name" placeholder="e.g. OrderFlow B2B Portal" />
+        </div>
+        <div class="form-group">
+          <label>Product Website URL</label>
+          <input type="text" class="hud-input" [(ngModel)]="newProduct.url" placeholder="https://example.com" />
+        </div>
+        <div class="form-group">
+          <label>Tagline / One-Liner</label>
+          <input type="text" class="hud-input" [(ngModel)]="newProduct.tagline" placeholder="B2B sales automation for modern commerce" />
+        </div>
+        <div class="form-group">
+          <label>Description</label>
+          <textarea class="hud-textarea" rows="2" [(ngModel)]="newProduct.description" placeholder="Brief summary of what the software does..."></textarea>
+        </div>
+        <div class="form-group">
+          <label>Core Features (One per line)</label>
+          <textarea class="hud-textarea" rows="3" [(ngModel)]="newProduct.featuresText" placeholder="Automated Order Routing&#10;Live Stock Sync&#10;Mobile Van Sales App"></textarea>
+        </div>
+        <div class="form-group">
+          <label>Target Audience</label>
+          <input type="text" class="hud-input" [(ngModel)]="newProduct.target_audience" placeholder="B2B Merchants, Wholesalers, Distributors" />
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" (click)="showNewProductModal = false">Cancel</button>
+        <button class="btn btn-primary" (click)="submitNewProduct()">Save Digital Product</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- =================================================================== -->
+  <!-- MODAL 6: CONNECT CLIENT BUSINESS -->
+  <!-- =================================================================== -->
+  <div *ngIf="showNewBusinessModal" class="modal-backdrop" (click)="showNewBusinessModal = false">
+    <div class="modal-card" (click)="$event.stopPropagation()">
+      <div class="modal-header">
+        <h3>🚀 Connect Client Business Account</h3>
+        <button class="close-btn" (click)="showNewBusinessModal = false">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>Company / Business Name</label>
+          <input type="text" class="hud-input" [(ngModel)]="newBusiness.name" placeholder="e.g. Pacific Coast Seafood Wholesale" />
+        </div>
+        <div class="form-group">
+          <label>Industry</label>
+          <input type="text" class="hud-input" [(ngModel)]="newBusiness.industry" placeholder="e.g. Food & Cold Chain Distribution" />
+        </div>
+        <div class="form-group">
+          <label>Website</label>
+          <input type="text" class="hud-input" [(ngModel)]="newBusiness.website" placeholder="https://example.com" />
+        </div>
+        <div class="form-group">
+          <label>Description</label>
+          <textarea class="hud-textarea" rows="2" [(ngModel)]="newBusiness.description" placeholder="Brief summary of their business model..."></textarea>
+        </div>
+        <div class="form-group">
+          <label>Core Products (One per line)</label>
+          <textarea class="hud-textarea" rows="3" [(ngModel)]="newBusiness.productsText" placeholder="Frozen Seafood Delivery&#10;Restaurant Supply Portal&#10;Cold-Chain Route Dispatch"></textarea>
+        </div>
+        <div class="form-group">
+          <label>Target Audience</label>
+          <input type="text" class="hud-input" [(ngModel)]="newBusiness.target_audience" placeholder="Sushi restaurants, seafood markets, culinary buyers" />
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" (click)="showNewBusinessModal = false">Cancel</button>
+        <button class="btn btn-primary" (click)="submitNewBusiness()">Connect Business</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- =================================================================== -->
+  <!-- MODAL 7: BOOK DEMO APPOINTMENT -->
+  <!-- =================================================================== -->
+  <div *ngIf="showBookingModal" class="modal-backdrop" (click)="showBookingModal = false">
+    <div class="modal-card" (click)="$event.stopPropagation()">
+      <div class="modal-header">
+        <h3>📅 Schedule Product Demonstration</h3>
+        <button class="close-btn" (click)="showBookingModal = false">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>Customer Name</label>
+          <input type="text" class="hud-input" [(ngModel)]="newBooking.customer_name" placeholder="e.g. Michael Chang" />
+        </div>
+        <div class="form-group">
+          <label>Service / Demonstration Type</label>
+          <input type="text" class="hud-input" [(ngModel)]="newBooking.service" placeholder="ThriveWoo Wholesale Ordering Demonstration" />
+        </div>
+        <div class="form-group">
+          <label>Date</label>
+          <input type="date" class="hud-input" [(ngModel)]="newBooking.date" />
+        </div>
+        <div class="form-group">
+          <label>Time</label>
+          <input type="text" class="hud-input" [(ngModel)]="newBooking.time" placeholder="02:00 PM" />
+        </div>
+        <div class="form-group">
+          <label>Notes</label>
+          <input type="text" class="hud-input" [(ngModel)]="newBooking.notes" placeholder="Demonstrate mobile van sales order booking and live stock sync" />
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" (click)="showBookingModal = false">Cancel</button>
+        <button class="btn btn-primary" (click)="submitBooking()">Confirm Booking</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- =================================================================== -->
+  <!-- MODAL: COMPANY MAIL AUTHORIZATION & SMTP/IMAP CREDENTIALS -->
+  <!-- =================================================================== -->
+  <div class="modal-backdrop" *ngIf="showMailConfigModal">
+    <div class="modal-dialog wide-modal">
+      <div class="modal-header">
+        <div>
+          <span class="badge badge-accent">AUTHENTIC COMPANY MAIL</span>
+          <h3>⚙️ COMPANY MAIL AUTHORIZATION (SMTP / IMAP)</h3>
+          <p class="subtitle" style="margin: 4px 0 0; color: #94a3b8; font-size: 0.85rem;">
+            Configure your corporate email (info&#64;thrivewoo.com or your business mail). Sends live authentic emails over SMTP and receives client replies over IMAP.
+          </p>
+        </div>
+        <button class="modal-close-btn" (click)="showMailConfigModal = false">✕</button>
+      </div>
+
+      <div class="modal-body" style="max-height: 520px; overflow-y: auto;">
+        <!-- Test Result Alert (if any) -->
+        <div *ngIf="smtpTestResult" class="ai-summary-banner" [style.border-color]="smtpTestResult.success ? '#22c55e' : '#ef4444'" style="margin-bottom: 14px;">
+          <span class="ai-icon">{{ smtpTestResult.success ? '✓' : '⚠️' }}</span>
+          <span>{{ smtpTestResult.message || smtpTestResult.error }}</span>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+          <div class="form-group">
+            <label>Mail Provider Profile</label>
+            <select class="hud-input" [(ngModel)]="mailConfig.provider">
+              <option value="custom_smtp">Custom Company SMTP / IMAP</option>
+              <option value="gmail">Google Workspace / Gmail</option>
+              <option value="office365">Microsoft 365 / Outlook</option>
+              <option value="zoho">Zoho Mail</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label>Sender Display Name</label>
+            <input type="text" class="hud-input" [(ngModel)]="mailConfig.sender_name" placeholder="ThriveWoo Executive Sales" />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Company Email Address (From Address)</label>
+          <input type="email" class="hud-input" [(ngModel)]="mailConfig.sender_email" placeholder="e.g. info@thrivewoo.com" />
+        </div>
+
+        <!-- Section 1: SMTP Outbound (Sending) -->
+        <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(0, 240, 255, 0.25); border-radius: 8px; padding: 14px; margin-top: 14px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <h4 style="margin: 0; color: #00f0ff;">📤 Outbound SMTP Authorization (Send Real Emails)</h4>
+            <button class="btn btn-secondary btn-sm" (click)="testSmtp()" [disabled]="isTestingSmtp">
+              {{ isTestingSmtp ? 'Testing...' : '🔌 Test SMTP Handshake' }}
+            </button>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 12px;">
+            <div class="form-group" style="margin: 0;">
+              <label style="font-size: 0.8rem; color: #94a3b8;">SMTP Host</label>
+              <input type="text" class="hud-input" [(ngModel)]="mailConfig.smtp_host" placeholder="smtp.gmail.com or mail.yourcompany.com" />
+            </div>
+            <div class="form-group" style="margin: 0;">
+              <label style="font-size: 0.8rem; color: #94a3b8;">SMTP Port</label>
+              <input type="number" class="hud-input" [(ngModel)]="mailConfig.smtp_port" placeholder="587" />
+            </div>
+            <div class="form-group" style="margin: 0; display: flex; flex-direction: column; justify-content: center;">
+              <label style="font-size: 0.8rem; color: #94a3b8;">SSL (Port 465)</label>
+              <label style="cursor: pointer; display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 0.85rem;">
+                <input type="checkbox" [(ngModel)]="mailConfig.smtp_secure" /> Secure SSL
+              </label>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px;">
+            <div class="form-group" style="margin: 0;">
+              <label style="font-size: 0.8rem; color: #94a3b8;">SMTP Username / Email</label>
+              <input type="text" class="hud-input" [(ngModel)]="mailConfig.smtp_user" placeholder="e.g. info@thrivewoo.com" />
+            </div>
+            <div class="form-group" style="margin: 0;">
+              <label style="font-size: 0.8rem; color: #94a3b8;">SMTP Password / App Password</label>
+              <input type="password" class="hud-input" [(ngModel)]="mailConfig.smtp_pass" placeholder="••••••••" />
+            </div>
+          </div>
+        </div>
+
+        <!-- Section 2: IMAP Inbound (Receiving) -->
+        <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(0, 240, 255, 0.25); border-radius: 8px; padding: 14px; margin-top: 14px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <h4 style="margin: 0; color: #00f0ff;">📥 Inbound IMAP Authorization (Fetch & Sync Live Emails)</h4>
+            <button class="btn btn-secondary btn-sm" (click)="syncCompanyMail()" [disabled]="isSyncingMail">
+              {{ isSyncingMail ? 'Syncing...' : '🔄 Sync Mailbox Now' }}
+            </button>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 12px;">
+            <div class="form-group" style="margin: 0;">
+              <label style="font-size: 0.8rem; color: #94a3b8;">IMAP Host</label>
+              <input type="text" class="hud-input" [(ngModel)]="mailConfig.imap_host" placeholder="imap.gmail.com or mail.yourcompany.com" />
+            </div>
+            <div class="form-group" style="margin: 0;">
+              <label style="font-size: 0.8rem; color: #94a3b8;">IMAP Port</label>
+              <input type="number" class="hud-input" [(ngModel)]="mailConfig.imap_port" placeholder="993" />
+            </div>
+            <div class="form-group" style="margin: 0; display: flex; flex-direction: column; justify-content: center;">
+              <label style="font-size: 0.8rem; color: #94a3b8;">TLS (Port 993)</label>
+              <label style="cursor: pointer; display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 0.85rem;">
+                <input type="checkbox" [(ngModel)]="mailConfig.imap_tls" /> Use TLS
+              </label>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px;">
+            <div class="form-group" style="margin: 0;">
+              <label style="font-size: 0.8rem; color: #94a3b8;">IMAP Username / Email</label>
+              <input type="text" class="hud-input" [(ngModel)]="mailConfig.imap_user" placeholder="e.g. info@thrivewoo.com" />
+            </div>
+            <div class="form-group" style="margin: 0;">
+              <label style="font-size: 0.8rem; color: #94a3b8;">IMAP Password / App Password</label>
+              <input type="password" class="hud-input" [(ngModel)]="mailConfig.imap_pass" placeholder="••••••••" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-secondary" (click)="showMailConfigModal = false">Close</button>
+        <button class="btn btn-primary" (click)="saveMailConfig()" [disabled]="isSavingMailConfig">
+          {{ isSavingMailConfig ? 'Saving...' : '💾 Save Authorization Settings' }}
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Floating Toast Notification -->
+  <div *ngIf="toastMessage" class="toast-popup">
+    ⚡ {{ toastMessage }}
+  </div>
+</div>

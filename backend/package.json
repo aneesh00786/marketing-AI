@@ -1,0 +1,21 @@
+{
+  "name": "tradesage-ai-backend",
+  "version": "1.0.0",
+  "description": "TradeSage AI - Multi-Tenant Workforce SaaS Backend (Express + SQLite + Telnyx)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "seed": "node seed.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "imapflow": "^2.5.5",
+    "mailparser": "^3.9.46",
+    "mysql2": "^3.24.6",
+    "nodemailer": "^10.1.7",
+    "sqlite3": "^5.1.7"
+  }
+}
