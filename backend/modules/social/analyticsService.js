@@ -32,6 +32,7 @@ async function syncAccountAnalytics(job) {
   const { accountId } = JSON.parse(job.payload_json || '{}');
   const account = await accountService.getAccountRow(job.workspace_id, accountId);
   if (!account || account.status !== 'connected') return { skipped: 'account not connected' };
+  if (accountService.isDemoAccount(account)) return { skipped: 'demo account' };
   const adapter = getAdapter(account.provider_key);
   const source = `${account.provider_key}_api`;
   const summary = { accountMetrics: 0, posts: 0, skipped: [] };

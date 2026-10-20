@@ -17,6 +17,7 @@ const inboxService = require('./inboxService');
 const strategistService = require('./strategistService');
 const settingsService = require('./settingsService');
 const overviewService = require('./overviewService');
+const dashboardService = require('./dashboardService');
 const jobsService = require('./jobsService');
 const meta = require('./providers/meta');
 const providerAppService = require('./providerAppService');
@@ -102,6 +103,12 @@ router.use((req, res, next) => {
 
 router.get('/overview', requireCapability('analytics.view'), wrap(async (req, res) => {
   res.json({ success: true, overview: await overviewService.getOverview(ws(req)) });
+}));
+
+// AI Marketing Command Center (workspace-scoped aggregate of stored data).
+router.get('/dashboard', requireCapability('analytics.view'), wrap(async (req, res) => {
+  const { range, from, to } = req.query;
+  res.json({ success: true, dashboard: await dashboardService.getDashboard(ws(req), { range, from, to }) });
 }));
 
 router.get('/capabilities', wrap(async (req, res) => {

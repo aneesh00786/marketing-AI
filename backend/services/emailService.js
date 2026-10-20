@@ -379,8 +379,8 @@ async function syncIncomingEmails(workspaceId = 1) {
           const receivedAt = parsed.date ? new Date(parsed.date).toISOString().replace('T', ' ').substring(0, 19) : now;
 
           // Auto-run AI Analysis on received email!
-          const analysis = await aiEngine.analyzeEmail(subject, textBody);
-          const isUrgent = analysis.priority === 'Urgent' ? 1 : 0;
+          const analysis = await aiEngine.analyzeEmail({ subject, body: textBody, sender: fromName });
+          const isUrgent = analysis.ai_priority === 'Urgent' ? 1 : 0;
 
           await run(`
             INSERT INTO emails (
@@ -402,9 +402,9 @@ async function syncIncomingEmails(workspaceId = 1) {
             textBody,
             htmlBody,
             snippet,
-            analysis.summary,
-            analysis.priority,
-            JSON.stringify(analysis.suggested_replies || []),
+            analysis.ai_summary,
+            analysis.ai_priority,
+            JSON.stringify(analysis.ai_replies || []),
             isUrgent,
             messageId,
             receivedAt

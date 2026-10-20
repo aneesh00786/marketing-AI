@@ -31,8 +31,18 @@ test('migrations are recorded and every migration is safe to re-apply', async ()
       ensureIndex: async () => false,
       ensureForeignKey: async () => false
     };
+    // Rows already in the new workflow must survive re-application untouched.
+    const ws = await h.createWorkspace();
+    const [ins] = await conn.query("INSERT INTO content_items (workspace_id, platform_key, caption_text, status, published_at, version, created_at) VALUES (?, 'facebook', 'kept', 'published', UTC_TIMESTAMP(), 1, UTC_TIMESTAMP())", [ws.workspaceId]);
+    const [sch] = await conn.query("INSERT INTO content_items (workspace_id, platform_key, caption_text, status, scheduled_at, version, created_at) VALUES (?, 'facebook', 'kept', 'scheduled', UTC_TIMESTAMP() + INTERVAL 1 DAY, 1, UTC_TIMESTAMP())", [ws.workspaceId]);
     for (const f of files) await require(path.join(dir, f)).up(helpers);
     assert.deepEqual(created, [], 'every table and column from the migrations exists');
+    const [[pub]] = await conn.query('SELECT status, published_at FROM content_items WHERE id = ?', [ins.insertId]);
+    const [[sc]] = await conn.query('SELECT status, scheduled_at FROM content_items WHERE id = ?', [sch.insertId]);
+    assert.equal(pub.status, 'published');
+    assert.ok(pub.published_at);
+    assert.equal(sc.status, 'scheduled');
+    assert.ok(sc.scheduled_at);
   } finally {
     await conn.end();
   }

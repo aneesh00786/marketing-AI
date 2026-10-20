@@ -10,6 +10,11 @@ const PUBLIC_COLUMNS = `id, workspace_id, provider_key, account_type, external_a
   profile_url, parent_account_id, scopes_json, status, status_detail, token_expires_at, last_success_at,
   last_checked_at, last_error, created_at, updated_at`;
 
+/** Sample-data accounts (seeded by scripts/seedDemoWorkspace.js) never talk to real providers. */
+function isDemoAccount(row) {
+  return !!row && /^demo_/.test(String(row.external_account_id || ''));
+}
+
 function httpError(status, message, code) {
   const err = new Error(message);
   err.status = status;
@@ -201,6 +206,7 @@ async function getUsableSecret(account) {
 
 async function checkAccountHealth(ctx, accountId) {
   const account = await requireAccountRow(ctx.auth.workspaceId, accountId);
+  if (isDemoAccount(account)) return { ok: true, detail: 'Demo account (sample data) — not connected to a real provider.', account: present(account) };
   const adapter = getAdapter(account.provider_key);
   try {
     const secret = await getUsableSecret(account);
@@ -280,6 +286,7 @@ async function disconnectAccount(ctx, accountId) {
 }
 
 module.exports = {
+  isDemoAccount,
   present,
   listAccounts,
   getAccountRow,

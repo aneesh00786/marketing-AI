@@ -49,6 +49,7 @@ async function syncAccountInbox(job) {
   const { accountId } = JSON.parse(job.payload_json || '{}');
   const account = await accountService.getAccountRow(job.workspace_id, accountId);
   if (!account || account.status !== 'connected') return { skipped: 'account not connected' };
+  if (accountService.isDemoAccount(account)) return { skipped: 'demo account' };
   if (!canAccount(account, 'comments_read')) return { skipped: 'comments_read not available' };
 
   const adapter = getAdapter(account.provider_key);
@@ -290,10 +291,18 @@ async function createLeadFromThread(ctx, threadId, { name, email, phone, notes }
   const thread = await requireThread(workspaceId, threadId);
   if (thread.lead_id) return { leadId: thread.lead_id, alreadyLinked: true };
   const leadName = String(name || thread.author_name || 'Social media contact').slice(0, 255);
+  // Link the product only if the commented post belongs to a campaign with a product in this workspace.
+  const product = thread.content_item_id ? await get(
+    `SELECT p.id FROM content_items c
+     JOIN campaigns cp ON cp.workspace_id = c.workspace_id AND cp.id = c.campaign_id
+     JOIN digital_products p ON p.workspace_id = cp.workspace_id AND p.id = cp.product_id
+     WHERE c.workspace_id = ? AND c.id = ?`,
+    [workspaceId, thread.content_item_id]
+  ) : null;
   const ins = await run(
-    `INSERT INTO leads (workspace_id, name, email, phone, product_interest, notes, status, ai_category, ai_suggestion, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, 'New', ?, ?, UTC_TIMESTAMP())`,
-    [workspaceId, leadName, email || null, phone || null, `Social (${thread.provider_key})`,
+    `INSERT INTO leads (workspace_id, name, email, phone, product_id, product_interest, notes, status, ai_category, ai_suggestion, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'New', ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+    [workspaceId, leadName, email || null, phone || null, product?.id || null, `Social (${thread.provider_key})`,
       `${notes ? `${notes}\n` : ''}From ${thread.account_name} comment: "${String(thread.preview_text || '').slice(0, 400)}"`,
       thread.ai_category === 'lead' ? 'Warm' : 'Cold', thread.ai_summary || null]
   );

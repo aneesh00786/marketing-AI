@@ -78,7 +78,7 @@ async function scheduleRecurring() {
   const accounts = await all(
     `SELECT a.id, a.workspace_id, COALESCE(s.analytics_poll_minutes, 360) AS analytics_minutes, COALESCE(s.inbox_poll_minutes, 30) AS inbox_minutes
      FROM social_accounts a LEFT JOIN social_settings s ON s.workspace_id = a.workspace_id
-     WHERE a.status = 'connected'`
+     WHERE a.status = 'connected' AND a.external_account_id NOT LIKE 'demo\\_%'`
   );
   const now = Date.now();
   for (const a of accounts) {

@@ -41,6 +41,9 @@ function presentJob(row) {
 /** Everything that must hold before a post may be queued or sent. Throws a 4xx with a clear reason. */
 async function preflight(workspaceId, contentRow, accountRow) {
   if (!accountRow) throw httpError(400, 'Choose a connected social account to publish to.');
+  if (accountService.isDemoAccount(accountRow)) {
+    throw httpError(409, 'This is a demo account with sample data; publishing to it is disabled.', 'DEMO_ACCOUNT');
+  }
   if (accountRow.status !== 'connected') {
     throw httpError(409, `The account "${accountRow.display_name}" is ${accountRow.status}. Reconnect it first.`, 'ACCOUNT_NOT_CONNECTED');
   }

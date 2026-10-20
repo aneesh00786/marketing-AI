@@ -12,10 +12,14 @@ const videoService = require('./services/videoService');
 const usageService = require('./services/usageService');
 const aiEngine = require('./services/aiEngine');
 const emailService = require('./services/emailService');
-const { apiGate, legacyWorkspaceOnly } = require('./middleware/auth');
+const { apiGate, legacyWorkspaceOnly, requireCapability } = require('./middleware/auth');
 const { rateLimit } = require('./lib/rateLimit');
+const { resolveSelectedProduct, findProductNamedIn } = require('./lib/productContext');
 const websiteExtractor = require('./services/websiteExtractor');
 const socialRouter = require('./modules/social/routes');
+const leadsRouter = require('./modules/leads/routes');
+const productsRouter = require('./modules/products/routes');
+const leadService = require('./modules/leads/leadService');
 const strategistService = require('./modules/social/strategistService');
 const crypto = require('crypto');
 
@@ -83,6 +87,20 @@ app.use('/api', apiGate({
 
 // Tenant-aware social media marketing module.
 app.use('/api/v1/social', socialRouter);
+
+// Tenant-aware Leads CRM (legacy paths kept as aliases). The voice agent's track_lead tool
+// creates leads through the same validated, workspace-scoped logic.
+app.use(['/api/v1/leads', '/api/leads', '/api/v1/crm/leads'], leadsRouter);
+// Tenant-aware Digital Products.
+app.use(['/api/v1/products', '/api/products'], productsRouter);
+app.post(['/api/tools/track_lead', '/api/track_lead'], requireCapability('leads.manage'), async (req, res, next) => {
+  try {
+    const { lead } = await leadService.createLead(req, req.body || {});
+    res.json({ success: true, lead_id: lead.id, lead, message: `Lead for ${lead.name} recorded.` });
+  } catch (err) {
+    next(err);
+  }
+});
 
 // Remaining modules are single-tenant (workspace 1) until migrated.
 app.use('/api', (req, res, next) => {
@@ -200,8 +218,8 @@ app.post(['/api/v1/assistant/chat', '/api/assistant/chat'], async (req, res) => 
     const connectedBiz = await all('SELECT * FROM connected_businesses ORDER BY id ASC');
     const traivoStats = await queryTraivoMySQL();
     const urgentEmails = await all("SELECT * FROM emails WHERE is_urgent = 1 AND is_read = 0 ORDER BY id DESC LIMIT 5");
-    const allLeads = await all("SELECT * FROM leads ORDER BY id DESC LIMIT 5");
-    const digitalProductsList = await all('SELECT * FROM digital_products ORDER BY id ASC');
+    const allLeads = await all("SELECT * FROM leads WHERE workspace_id = ? ORDER BY id DESC LIMIT 5", [req.auth.workspaceId]);
+    const digitalProductsList = await all('SELECT * FROM digital_products WHERE workspace_id = ? ORDER BY id ASC', [req.auth.workspaceId]);
 
     let contextSnippet = `Live Business Context:
 - Active Digital Products for Marketing (${digitalProductsList.length} total):
@@ -232,7 +250,7 @@ ${connectedBiz.map(b => `  * ${b.business_type === 'owner' ? '[MY BUSINESS]' : '
     else if (lower.includes('draft') && (lower.includes('email') || lower.includes('mail'))) {
       let targetRecipient = null;
       let targetEmail = null;
-      let targetTopic = 'ThriveWoo B2B Platform Overview & Demonstration';
+      let targetTopic = '';
 
       // Parse "to <target> [about|regarding|for|with|saying|pitching|offering <topic>]"
       const toMatch = cleanMsg.match(/to\s+([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}|[a-zA-Z\s]+?)(?:\s+(?:about|regarding|for|with|saying|pitching|offering)\s+(.+))?$/i);
@@ -264,8 +282,8 @@ ${connectedBiz.map(b => `  * ${b.business_type === 'owner' ? '[MY BUSINESS]' : '
       // If we have a name but no email, search CRM leads and B2B clients
       if (!targetEmail && targetRecipient) {
         const matchedLead = await get(
-          "SELECT * FROM leads WHERE LOWER(name) LIKE ? OR LOWER(company_name) LIKE ? LIMIT 1",
-          [`%${targetRecipient.toLowerCase()}%`, `%${targetRecipient.toLowerCase()}%`]
+          "SELECT * FROM leads WHERE workspace_id = ? AND (LOWER(name) LIKE ? OR LOWER(company_name) LIKE ?) LIMIT 1",
+          [req.auth.workspaceId, `%${targetRecipient.toLowerCase()}%`, `%${targetRecipient.toLowerCase()}%`]
         );
         if (matchedLead) {
           targetEmail = matchedLead.email;
@@ -282,23 +300,12 @@ ${connectedBiz.map(b => `  * ${b.business_type === 'owner' ? '[MY BUSINESS]' : '
         }
       }
 
-      if (!targetEmail) {
-        targetEmail = targetRecipient ? `${targetRecipient.toLowerCase().replace(/[^a-z0-9]/g, '')}@example.com` : 'client@example.com';
-      }
-      if (!targetRecipient) {
-        targetRecipient = 'Valued Partner';
-      }
+      // Unknown addresses stay empty; the draft is completed in Mail Drafts before sending.
+      targetEmail = targetEmail || '';
+      targetRecipient = targetRecipient || '';
 
-      // Find appropriate product
-      let targetProduct = null;
-      if (lower.includes('school bus') || lower.includes('safetrack')) {
-        targetProduct = await get("SELECT * FROM digital_products WHERE LOWER(name) LIKE '%safetrack%' OR LOWER(name) LIKE '%school bus%' LIMIT 1");
-      } else {
-        targetProduct = await get("SELECT * FROM digital_products WHERE LOWER(name) LIKE '%thrivewoo%' LIMIT 1");
-      }
-      if (!targetProduct) {
-        targetProduct = await get("SELECT * FROM digital_products ORDER BY id ASC LIMIT 1");
-      }
+      // Only a workspace product named in the message is used; otherwise the draft stays generic.
+      const targetProduct = await findProductNamedIn(req.auth.workspaceId, cleanMsg);
 
       const generatedDraft = await aiEngine.generateMailDraft(
         targetProduct,
@@ -311,8 +318,8 @@ ${connectedBiz.map(b => `  * ${b.business_type === 'owner' ? '[MY BUSINESS]' : '
         `INSERT INTO email_drafts (workspace_id, product_id, product_name, recipient_email, recipient_name, subject, body_html, body_text, tone, status, created_at, updated_at)
          VALUES (1, ?, ?, ?, ?, ?, ?, ?, 'Professional', 'Draft', ?, ?)`,
         [
-          targetProduct?.id || 1,
-          targetProduct?.name || 'ThriveWoo B2B Platform',
+          targetProduct ? targetProduct.id : null,
+          targetProduct ? targetProduct.name : null,
           targetEmail,
           targetRecipient,
           generatedDraft.subject,
@@ -322,7 +329,9 @@ ${connectedBiz.map(b => `  * ${b.business_type === 'owner' ? '[MY BUSINESS]' : '
         ]
       );
 
-      fastReply = `Sir, I have drafted the email to ${targetRecipient} (${targetEmail}) regarding "${targetTopic}". Subject: "${generatedDraft.subject}". The visual HTML email is saved in your Mail Drafts tab ready for your approval and one-click dispatch via company SMTP.`;
+      const draftTo = targetRecipient ? `${targetRecipient}${targetEmail ? ` (${targetEmail})` : ''}` : (targetEmail || 'an unspecified recipient');
+      const gaps = [!targetEmail && 'recipient email', !targetProduct && 'product (none named, so the draft is generic)'].filter(Boolean);
+      fastReply = `Sir, I have drafted the email to ${draftTo}${targetTopic ? ` regarding "${targetTopic}"` : ''}. Subject: "${generatedDraft.subject}". It is saved in your Mail Drafts tab for your review and approval.${gaps.length ? ` Missing: ${gaps.join(', ')}.` : ''}`;
     }
     // 3. Social Media Post generation on command ("what about social media part, all these need to do the ai when i say")
     else if ((lower.includes('post') || lower.includes('tweet')) && (lower.includes('linkedin') || lower.includes('twitter') || lower.includes('instagram') || lower.includes('facebook') || lower.includes('social'))) {
@@ -331,16 +340,14 @@ ${connectedBiz.map(b => `  * ${b.business_type === 'owner' ? '[MY BUSINESS]' : '
       else if (lower.includes('instagram') || lower.includes('ig')) platform = 'Instagram';
       else if (lower.includes('facebook') || lower.includes('fb')) platform = 'Facebook';
 
-      let productKey = 'thrivewoo';
-      if (lower.includes('school bus') || lower.includes('safetrack')) productKey = 'school_bus';
-
       try {
-        const postRes = await marketingService.generateAiSocialPost(1, {
-          productKey,
+        const namedProduct = await findProductNamedIn(req.auth.workspaceId, cleanMsg);
+        const postRes = await marketingService.generateAiSocialPost(req.auth.workspaceId, {
+          productId: namedProduct ? namedProduct.id : null,
           platform,
           customTopic: cleanMsg
         });
-        fastReply = `Sir, I have generated a new ${platform} post for ${postRes.product_name}: "${postRes.title}". Hook: "${postRes.caption_text.substring(0, 95)}...". Hashtags: ${postRes.hashtags}. It is saved in Social Media Marketing → Content Library as a draft for your review and approval.`;
+        fastReply = `Sir, I have generated a new ${platform} post${postRes.product_name ? ` for ${postRes.product_name}` : ' (no product named, so it is generic)'}: "${postRes.title}". Hook: "${postRes.caption_text.substring(0, 95)}...". Hashtags: ${postRes.hashtags}. It is saved in Social Media Marketing → Content Library as a draft for your review and approval.`;
       } catch (e) {
         fastReply = `Sir, I could not write that post: ${e.message}`;
       }
@@ -348,24 +355,47 @@ ${connectedBiz.map(b => `  * ${b.business_type === 'owner' ? '[MY BUSINESS]' : '
     // 4. Send Email on command via real company SMTP
     else if (lower.includes('send email') || lower.includes('send an email') || lower.includes('mail send')) {
       const emailMatch = cleanMsg.match(/to\s+([^\s,]+@[^\s,]+|[a-zA-Z\s]+?)\s+(?:saying|about|with subject)\s+(.+)/i);
-      const recipient = emailMatch ? emailMatch[1].trim() : (clients[0]?.email || 'client@example.com');
-      const subject = cleanMsg.includes('subject') ? 'Follow-up from Roger (Executive Team)' : 'Product Information & Demonstration Follow-up';
-      const body = emailMatch ? emailMatch[2].trim() : 'Thank you for connecting. We have attached the requested executive overview and product documentation.';
-      
-      const sendRes = await emailService.sendRealEmail(1, {
-        to: recipient,
-        recipientName: recipient,
-        subject,
-        html: `<div style="font-family: sans-serif; padding: 20px; line-height: 1.6;"><p>${body}</p></div>`,
-        text: body
-      });
+      // Sends only to an address given in the message or an exact CRM contact match, with the user's own words.
+      let recipient = null;
+      let recipientName = '';
+      if (emailMatch) {
+        const target = emailMatch[1].trim();
+        if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(target)) {
+          recipient = target;
+        } else {
+          const key = target.toLowerCase();
+          let matches = await all("SELECT name, company_name, email FROM leads WHERE workspace_id = ? AND email IS NOT NULL AND email <> '' AND (LOWER(name) = ? OR LOWER(company_name) = ?) LIMIT 2", [req.auth.workspaceId, key, key]);
+          if (!matches.length) {
+            matches = (await all("SELECT contact_name AS name, company_name, email FROM b2b_clients WHERE email IS NOT NULL AND email <> '' AND (LOWER(contact_name) = ? OR LOWER(company_name) = ?) LIMIT 2", [key, key]));
+          }
+          if (matches.length === 1) {
+            recipient = matches[0].email;
+            recipientName = matches[0].name || matches[0].company_name || '';
+          }
+        }
+      }
+      const messageText = emailMatch ? emailMatch[2].trim() : '';
 
-      fastReply = `I have dispatched the email to ${recipient} regarding "${subject}". Status: ${sendRes.smtpStatus}. It is recorded in your outbound email digest, sir.`;
+      if (!recipient || !messageText) {
+        fastReply = `Sir, I did not send anything. ${!emailMatch ? 'Tell me who to send it to and what to say' : 'I could not find a single matching contact with an email address'}, for example: "send email to name@company.com saying ...". You can also ask me to draft the email first and send it from Mail Drafts.`;
+      } else {
+        const subject = messageText.split(/[.!?\n]/)[0].slice(0, 80) || messageText.slice(0, 80);
+        const safeHtml = messageText.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        const sendRes = await emailService.sendRealEmail(1, {
+          to: recipient,
+          recipientName,
+          subject,
+          html: `<div style="font-family: sans-serif; padding: 20px; line-height: 1.6;"><p>${safeHtml}</p></div>`,
+          text: messageText
+        });
+
+        fastReply = `I have sent the email to ${recipientName ? `${recipientName} (${recipient})` : recipient} with the subject "${subject}". Status: ${sendRes.smtpStatus}. It is recorded in your outbound email digest, sir.`;
+      }
     }
     // 5. Client Replies queries
     else if (lower.includes('reply') || lower.includes('replies') || lower.includes('email reply') || lower.includes('what did they say') || lower.includes('customer response')) {
       const topReplies = replies.slice(0, 2).map(r => `"${r.customer_name} from ${r.company_name} replied: '${r.reply_text}'"`).join(' Also, ');
-      fastReply = `Sir, you have ${replies.length} recent client replies. ${topReplies}. Apex Wholesale requested a live walkthrough for their 14 sales reps, and Metro Academy approved funding for 22 buses.`;
+      fastReply = replies.length ? `Sir, you have ${replies.length} recent client replies. ${topReplies}.` : 'Sir, there are no client replies recorded yet.';
     }
     // 6. Email queries (inbox, unread, urgent, read latest)
     else if (lower.includes('urgent') || lower.includes('inbox') || (lower.includes('email') && !lower.includes('send') && !lower.includes('draft')) || (lower.includes('mail') && !lower.includes('send') && !lower.includes('draft'))) {
@@ -385,9 +415,9 @@ ${connectedBiz.map(b => `  * ${b.business_type === 'owner' ? '[MY BUSINESS]' : '
     }
     // 7. Lead queries & CRM Intelligence
     else if (lower.includes('lead') || lower.includes('client') || lower.includes('prospect') || lower.includes('crm') || lower.includes('inquir')) {
-      const topLeadRows = await all("SELECT * FROM leads ORDER BY ai_score DESC, id DESC LIMIT 3");
+      const topLeadRows = await all("SELECT * FROM leads WHERE workspace_id = ? ORDER BY ai_score DESC, id DESC LIMIT 3", [req.auth.workspaceId]);
       if (topLeadRows.length > 0) {
-        const leadSummaries = topLeadRows.map((l, i) => `${i + 1}) ${l.name || l.contact_name} from ${l.company_name} (AI Score: ${l.ai_score || 85}/100 🔥 ${l.ai_category || 'Hot'} - ${l.ai_suggestion || 'Follow up with demo'})`).join('. ');
+        const leadSummaries = topLeadRows.map((l, i) => `${i + 1}) ${l.name || l.contact_name}${l.company_name ? ` from ${l.company_name}` : ''} (lead score: ${l.ai_score === null || l.ai_score === undefined ? 'not scored' : `${l.ai_score}/100`}${l.ai_category ? `, ${l.ai_category}` : ''}${l.ai_suggestion ? ` - ${l.ai_suggestion}` : ''})`).join('. ');
         fastReply = `Sir, you currently have ${allLeads.length} leads in your CRM. Your highest qualified leads are: ${leadSummaries}. All prospects are qualified for immediate multi-channel follow-up. Would you like me to draft an outreach email to any of them?`;
       } else {
         const topClients = clients.slice(0, 3).map(c => `${c.company_name} (${c.product_interest})`).join(', ');
@@ -396,18 +426,8 @@ ${connectedBiz.map(b => `  * ${b.business_type === 'owner' ? '[MY BUSINESS]' : '
     }
     // 8. Marketing Ideas for connected businesses
     else if (lower.includes('marketing idea') || lower.includes('idea') || lower.includes('how to market') || lower.includes('campaign') || lower.includes('grow') || lower.includes('scale')) {
-      if (lower.includes('metro') || lower.includes('school bus') || lower.includes('hastings') || lower.includes('school')) {
-        fastReply = `For Metro Central School District (School Bus Fleet Management SaaS), here are 3 high-impact marketing strategies: First, run targeted outreach to school superintendents emphasizing the 22-bus RFID student boarding verification and live parent GPS arrival alerts. Second, create a grant funding proposal showing how state school safety funds can cover the deployment. Third, offer a 15-day live fleet pilot on 2 bus routes so parents and drivers can test the mobile app.`;
-      } else if (lower.includes('horizon') || lower.includes('beverage') || lower.includes('lisa')) {
-        fastReply = `For Horizon Beverage Distributors (200+ SKU wholesale catalog), here are 3 targeted campaigns: First, launch a 24/7 digital restocking portal for supermarkets, bodegas, and restaurants to eliminate phone-in order errors. Second, create tier-volume discount promotions on fast-moving beverage cases. Third, deploy route batch order fulfillment to reduce delivery truck turnaround times.`;
-      } else if (lower.includes('apex') || lower.includes('wholesale goods') || lower.includes('michael')) {
-        fastReply = `For Apex Wholesale Goods, I recommend arming their 14 field sales reps with mobile order booking and Bluetooth invoice printing, eliminating all handwritten paper slips and providing live warehouse inventory visibility.`;
-      } else if (lower.includes('summit') || lower.includes('freight') || lower.includes('logistics') || lower.includes('vance')) {
-        fastReply = `For Summit Freight & Logistics, I recommend pitching their custom dispatcher dashboard and mobile driver manifest app with electronic Proof of Delivery (ePOD) to 3PL brokers and regional freight shippers.`;
-      } else {
-        // Default to "My Business" (ThriveWoo - Smart FMCG B2B Sales App)
-        fastReply = `For your flagship business ThriveWoo (Smart FMCG B2B Sales App), here are 3 targeted growth strategies based on its live platform features: First, launch cold email outreach to FMCG manufacturers and food/beverage distributors emphasizing eliminating paper order slips with Mobile Van Sales and Staff Target Tracking. Second, offer a live pilot showing how Bulk Excel Customer Import and Customer-Specific Discounts simplify wholesale onboarding. Third, showcase the Real-Time In-App Messaging and Dashboard Status Overview (tracking orders, estimates, bookings, and cancellations) to field sales directors.`;
-      }
+      // No canned strategies: answered by the AI below from the saved products and businesses in contextSnippet.
+      fastReply = null;
     } else if (lower.includes('traivo') && (lower.includes('database') || lower.includes('product') || lower.includes('sku') || lower.includes('catalog'))) {
       fastReply = `Your Traivo B2B database is connected live to MySQL database 'thrivewoo'. It currently has ${traivoStats.totalProducts} active wholesale products and ${traivoStats.totalOrders} processed sales orders.`;
     }
@@ -418,13 +438,22 @@ ${connectedBiz.map(b => `  * ${b.business_type === 'owner' ? '[MY BUSINESS]' : '
       (lower.includes('product') && (lower.includes('what are') || lower.includes('tell me') || lower.includes('what do i have') || lower.includes('show me') || lower.includes('details') || lower.includes('see'))) ||
       (lower.includes('what does') && (lower.includes('thrivewoo') || lower.includes('safetrack') || lower.includes('product') || lower.includes('app') || lower.includes('do')))
     ) {
-      const targetProd = digitalProductsList.find(p => lower.includes('safetrack') ? p.name.toLowerCase().includes('safetrack') : p.name.toLowerCase().includes('thrivewoo')) || digitalProductsList[0];
+      // A product named in the message, or the workspace's only product; never an arbitrary first one.
+      const targetProd = (await findProductNamedIn(req.auth.workspaceId, cleanMsg)) || (digitalProductsList.length === 1 ? digitalProductsList[0] : null);
       if (targetProd) {
-        const features = targetProd.features_json ? JSON.parse(targetProd.features_json) : [];
-        const featureBullets = features.map((f, i) => `${i + 1}. ${f}`).join('\n');
-        fastReply = `Yes sir, I can see all the live details and features for your product: **${targetProd.name}** (${targetProd.url}).\n\n📌 **Tagline:** ${targetProd.tagline}\n🎯 **Target Audience:** ${targetProd.target_audience}\n📋 **Core Features & Modules:**\n${featureBullets}\n\nI understand your product's capabilities and use these live details to generate marketing advice, score your leads, and draft personalized outreach emails.`;
+        let features = [];
+        try { features = targetProd.features_json ? JSON.parse(targetProd.features_json) : []; } catch (e) { features = []; }
+        const lines = [
+          `Yes sir, these are the saved details for **${targetProd.name}**${targetProd.url ? ` (${targetProd.url})` : ''}.`,
+          `📌 **Tagline:** ${targetProd.tagline || '—'}`,
+          `🎯 **Target Audience:** ${targetProd.target_audience || '—'}`,
+          `📋 **Features:**\n${features.length ? features.map((f, i) => `${i + 1}. ${f}`).join('\n') : '— (none saved)'}`
+        ];
+        fastReply = lines.join('\n\n');
+      } else if (digitalProductsList.length) {
+        fastReply = `Sir, you have ${digitalProductsList.length} saved products: ${digitalProductsList.map(p => p.name).join(', ')}. Which one would you like the details for?`;
       } else {
-        fastReply = `Sir, you currently have no products saved in your Digital Products Hub. You can enter any website URL (like https://thrivewoo.com) and click "Extract Features with AI" to let me scrape and see all the product details.`;
+        fastReply = `Sir, you currently have no products saved in your Digital Products Hub. Enter your product's website URL there and click "Extract Features with AI" to import its details.`;
       }
     }
     // 10. Live URL Web Extraction on Chat Command
@@ -433,7 +462,13 @@ ${connectedBiz.map(b => `  * ${b.business_type === 'owner' ? '[MY BUSINESS]' : '
       const targetUrl = urlMatch[0];
       try {
         const extracted = await aiEngine.extractProductFromWebpage(targetUrl);
-        fastReply = `Sir, I have analyzed ${targetUrl} in real time:\n\n**${extracted.name}**\n${extracted.tagline}\n\n**Overview:** ${extracted.description}\n\n**Core Features:**\n${(extracted.features || []).map((f, i) => `${i + 1}. ${f}`).join('\n')}\n\n**Target Audience:** ${extracted.target_audience}`;
+        fastReply = [
+          `Sir, I have analyzed ${targetUrl}:`,
+          `**${extracted.name || '—'}**${extracted.tagline ? `\n${extracted.tagline}` : ''}`,
+          `**Overview:** ${extracted.description || '—'}`,
+          `**Features found on the page:**\n${(extracted.features || []).length ? extracted.features.map((f, i) => `${i + 1}. ${f}`).join('\n') : '— (none found)'}`,
+          `**Target Audience:** ${extracted.target_audience || '—'}`
+        ].join('\n\n');
       } catch (e) {
         fastReply = `Sir, I encountered an issue inspecting ${targetUrl}: ${e.message}`;
       }
@@ -455,12 +490,13 @@ ${connectedBiz.map(b => `  * ${b.business_type === 'owner' ? '[MY BUSINESS]' : '
     if (!reply) {
       // Construct agent system persona prompt
       const systemInstruction = `You are Roger, an elite personal AI executive business assistant and marketing strategist to the founder.
-Specialty: B2B digital product sales (ThriveWoo, custom apps, SaaS), email campaign outreach, client inquiry management, and business scaling.
+Specialty: B2B digital product sales (the products saved in this workspace), email campaign outreach, client inquiry management, and business scaling.
 ${contextSnippet}
 
 Core Rules:
 - Always converse fluently and professionally in natural English.
 - Answer whatever the user actually asks directly.
+- Only describe products, features, customers and figures that appear in the live context. Never invent products, features, prices, metrics, customers or results; say when something is not saved.
 - If asked about digital products or whether you can see product details, you CAN see all of them! Quote the exact product features, tagline, modules, and target audience from the live context.
 - If asked about client inquiries or leads, cite the exact real companies, contacts, and statuses from the live context.
 - If asked about client email replies, quote the real customer replies and sentiments from the live context.
@@ -770,74 +806,7 @@ app.get(['/api/v1/executive/briefing', '/api/executive/briefing'], async (req, r
 // ==========================================
 
 // 1. AI Extract features from webpage URL (Live Real-Time Web Extractor)
-app.post(['/api/v1/products/extract-url', '/api/products/extract-url'], async (req, res) => {
-  try {
-    const { url } = req.body;
-    if (!url) return res.status(400).json({ error: 'Product URL is required' });
-    const { product } = await websiteExtractor.extractFromUrl(url);
-    res.json({ success: true, product });
-  } catch (err) {
-    if (err.code === 'UNSAFE_URL') return res.status(400).json({ error: err.message });
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// 2. Get all digital products
-app.get(['/api/v1/products', '/api/products'], async (req, res) => {
-  try {
-    const list = await all('SELECT * FROM digital_products ORDER BY id ASC');
-    const parsed = list.map(p => ({
-      ...p,
-      features: p.features_json ? JSON.parse(p.features_json) : [],
-      pricing: p.pricing_tiers_json ? JSON.parse(p.pricing_tiers_json) : []
-    }));
-    res.json({ success: true, products: parsed });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// 3. Create a digital product
-app.post(['/api/v1/products', '/api/products'], async (req, res) => {
-  try {
-    const { name, url, tagline, description, features, target_audience, pricing } = req.body;
-    if (!name) return res.status(400).json({ error: 'Product name is required' });
-
-    const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
-    const result = await run(
-      `INSERT INTO digital_products (workspace_id, name, url, tagline, description, features_json, target_audience, pricing_tiers_json, status, created_at)
-       VALUES (1, ?, ?, ?, ?, ?, ?, ?, 'Active', ?)`,
-      [
-        name,
-        url || '',
-        tagline || '',
-        description || '',
-        JSON.stringify(features || []),
-        target_audience || '',
-        JSON.stringify(pricing || []),
-        now
-      ]
-    );
-
-    res.json({
-      success: true,
-      productId: result.lastID,
-      message: `Digital product "${name}" successfully registered.`
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// 4. Delete digital product
-app.delete(['/api/v1/products/:id', '/api/products/:id'], async (req, res) => {
-  try {
-    await run('DELETE FROM digital_products WHERE id = ?', [req.params.id]);
-    res.json({ success: true, message: 'Digital product deleted' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+// Products API lives in modules/products (workspace-scoped), mounted above.
 
 // ==========================================
 // MAIL DRAFTS & USER APPROVAL WORKFLOW
@@ -858,13 +827,8 @@ app.post(['/api/v1/drafts/generate', '/api/drafts/generate'], async (req, res) =
   try {
     const { productId, recipientName, recipientEmail, goal, tone } = req.body;
 
-    let product = null;
-    if (productId) {
-      product = await get('SELECT * FROM digital_products WHERE id = ?', [productId]);
-    }
-    if (!product) {
-      product = await get('SELECT * FROM digital_products WHERE status = "Active" ORDER BY id ASC LIMIT 1');
-    }
+    // Only the explicitly selected product of this workspace; malformed or foreign ids are rejected.
+    const product = await resolveSelectedProduct(req.auth.workspaceId, productId);
 
     const recipient = { name: recipientName, email: recipientEmail };
     const draftContent = await aiEngine.generateMailDraft(product, recipient, goal, tone || 'Professional');
@@ -874,10 +838,10 @@ app.post(['/api/v1/drafts/generate', '/api/drafts/generate'], async (req, res) =
       `INSERT INTO email_drafts (workspace_id, product_id, product_name, recipient_email, recipient_name, subject, body_html, body_text, tone, status, created_at, updated_at)
        VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, 'Draft', ?, ?)`,
       [
-        product?.id || 1,
-        product?.name || 'ThriveWoo B2B Platform',
+        product?.id || null,
+        product?.name || null,
         recipientEmail || '',
-        recipientName || 'Valued Partner',
+        recipientName || '',
         draftContent.subject,
         draftContent.body_html,
         draftContent.body_text,
@@ -887,9 +851,17 @@ app.post(['/api/v1/drafts/generate', '/api/drafts/generate'], async (req, res) =
     );
 
     const created = await get('SELECT * FROM email_drafts WHERE id = ?', [result.lastID]);
-    res.json({ success: true, draft: created, message: 'AI email draft created successfully. Awaiting your approval before sending.' });
+    const missing = draftContent.missing_context || [];
+    res.json({
+      success: true,
+      draft: created,
+      missing_context: missing,
+      message: missing.includes('product')
+        ? 'Draft created without product context: no product was selected, so it contains no product details or links. Review before sending.'
+        : 'Email draft created. Awaiting your approval before sending.'
+    });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message, code: err.code });
   }
 });
 
@@ -897,10 +869,10 @@ app.post(['/api/v1/drafts/generate', '/api/drafts/generate'], async (req, res) =
 app.post(['/api/v1/drafts/:id/rewrite', '/api/drafts/:id/rewrite'], async (req, res) => {
   try {
     const { instruction } = req.body;
-    const draft = await get('SELECT * FROM email_drafts WHERE id = ?', [req.params.id]);
+    const draft = await get('SELECT * FROM email_drafts WHERE id = ? AND workspace_id = ?', [req.params.id, req.auth.workspaceId]);
     if (!draft) return res.status(404).json({ error: 'Draft not found' });
 
-    const rewritten = await aiEngine.rewriteMailDraft(draft, instruction || 'More Professional');
+    const rewritten = await aiEngine.rewriteMailDraft(draft, instruction || 'More Professional', req.auth.workspaceId);
     const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
 
     await run(
@@ -911,7 +883,7 @@ app.post(['/api/v1/drafts/:id/rewrite', '/api/drafts/:id/rewrite'], async (req, 
     const updated = await get('SELECT * FROM email_drafts WHERE id = ?', [draft.id]);
     res.json({ success: true, draft: updated, message: `Draft rewritten to be "${instruction}".` });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message, code: err.code });
   }
 });
 
@@ -936,13 +908,14 @@ app.post(['/api/v1/drafts/:id/send', '/api/drafts/:id/send'], async (req, res) =
   try {
     const draft = await get('SELECT * FROM email_drafts WHERE id = ?', [req.params.id]);
     if (!draft) return res.status(404).json({ error: 'Draft not found' });
+    if (!draft.recipient_email) return res.status(400).json({ error: 'This draft has no recipient email address. Add one before sending.' });
 
     const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
 
     // Dispatch via real company SMTP
     const sendResult = await emailService.sendRealEmail(1, {
-      to: draft.recipient_email || 'client@example.com',
-      recipientName: draft.recipient_name || 'Valued Partner',
+      to: draft.recipient_email,
+      recipientName: draft.recipient_name || '',
       subject: draft.subject,
       html: draft.body_html,
       text: draft.body_text
@@ -1140,9 +1113,9 @@ app.post(['/api/v1/marketing/dispatch-campaign', '/api/marketing/dispatch-campai
     let targetLeads = [];
     if (leadIds && leadIds.length > 0) {
       const placeholders = leadIds.map(() => '?').join(',');
-      targetLeads = await all(`SELECT * FROM leads WHERE id IN (${placeholders})`, leadIds);
+      targetLeads = await all(`SELECT * FROM leads WHERE workspace_id = ? AND id IN (${placeholders})`, [req.auth.workspaceId, ...leadIds]);
     } else {
-      targetLeads = await all('SELECT * FROM leads ORDER BY id DESC LIMIT 5');
+      targetLeads = await all('SELECT * FROM leads WHERE workspace_id = ? ORDER BY id DESC LIMIT 5', [req.auth.workspaceId]);
     }
 
     let sentCount = 0;
@@ -1254,8 +1227,8 @@ app.post(['/api/v1/emails/:id/ai-analyze', '/api/emails/:id/ai-analyze'], async 
     const email = await get('SELECT * FROM emails WHERE id = ?', [req.params.id]);
     if (!email) return res.status(404).json({ error: 'Email not found' });
 
-    const activeProduct = await get('SELECT * FROM digital_products WHERE status = "Active" ORDER BY id ASC LIMIT 1');
-    const analysis = await aiEngine.analyzeEmail(email, activeProduct);
+    // No product is assumed for inbox replies; replies stay generic unless the email itself says more.
+    const analysis = await aiEngine.analyzeEmail(email, null);
 
     await run(
       `UPDATE emails SET ai_summary = ?, ai_priority = ?, ai_replies_json = ? WHERE id = ?`,
@@ -1302,140 +1275,7 @@ app.all(['/api/tools/get_emails', '/api/get_emails'], async (req, res) => {
 // LEADS & APPOINTMENTS (CRM ENGINE)
 // ==========================================
 
-// Leads list & capture
-app.get(['/api/v1/crm/leads', '/api/leads'], async (req, res) => {
-  try {
-    const leads = await all('SELECT * FROM leads ORDER BY id DESC LIMIT 50');
-    res.json({ success: true, leads });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post(['/api/v1/crm/leads', '/api/leads', '/api/tools/track_lead', '/api/track_lead'], async (req, res) => {
-  try {
-    const { name, phone, email, interest, company_name, estimated_budget } = req.body;
-    if (!name) return res.status(400).json({ error: 'Lead name is required' });
-    const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
-    const activeProduct = await get('SELECT * FROM digital_products WHERE status = "Active" ORDER BY id ASC LIMIT 1');
-    const qualification = await aiEngine.qualifyLead({ name, phone, email, product_interest: interest, company_name, estimated_budget }, activeProduct);
-
-    const result = await run(
-      `INSERT INTO leads (workspace_id, name, phone, email, product_interest, company_name, estimated_budget, ai_score, ai_category, ai_suggestion, status, created_at)
-       VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'New', ?)`,
-      [
-        name,
-        phone || '',
-        email || '',
-        interest || '',
-        company_name || '',
-        estimated_budget || '',
-        qualification.ai_score,
-        qualification.ai_category,
-        qualification.ai_suggestion,
-        now
-      ]
-    );
-    res.json({
-      success: true,
-      lead_id: result.lastID,
-      qualification,
-      message: `Lead for ${name} recorded with AI score ${qualification.ai_score} (${qualification.ai_category}).`
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Bulk Import Leads (From Excel / CSV)
-app.post(['/api/v1/leads/import-bulk', '/api/leads/import-bulk'], async (req, res) => {
-  try {
-    const { leads: incomingLeads } = req.body;
-    if (!Array.isArray(incomingLeads) || incomingLeads.length === 0) {
-      return res.status(400).json({ error: 'No leads provided in array' });
-    }
-
-    const activeProduct = await get('SELECT * FROM digital_products WHERE status = "Active" ORDER BY id ASC LIMIT 1');
-    const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
-    let importedCount = 0;
-
-    for (const item of incomingLeads) {
-      const name = (item.name || item.contact_name || item.Contact || item.Name || 'Prospect').toString().trim();
-      if (!name) continue;
-      const email = (item.email || item.Email || '').toString().trim();
-      const phone = (item.phone || item.Phone || '').toString().trim();
-      const company = (item.company || item.company_name || item.Company || '').toString().trim();
-      const interest = (item.interest || item.product_interest || item.Interest || activeProduct?.name || 'ThriveWoo B2B').toString().trim();
-      const budget = (item.budget || item.estimated_budget || item.Budget || '$15,000').toString().trim();
-      const notes = (item.notes || item.Notes || '').toString().trim();
-
-      const qual = await aiEngine.qualifyLead({ name, email, phone, company_name: company, product_interest: interest, estimated_budget: budget, notes }, activeProduct);
-
-      await run(
-        `INSERT INTO leads (workspace_id, name, phone, email, product_interest, company_name, estimated_budget, notes, ai_score, ai_category, ai_suggestion, status, created_at)
-         VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Imported', ?)`,
-        [name, phone, email, interest, company, budget, notes, qual.ai_score, qual.ai_category, qual.ai_suggestion, now]
-      );
-      importedCount++;
-    }
-
-    const updatedLeads = await all('SELECT * FROM leads ORDER BY id DESC LIMIT 50');
-    res.json({
-      success: true,
-      count: importedCount,
-      leads: updatedLeads,
-      message: `Successfully imported ${importedCount} leads with instant AI scoring & qualification.`
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Single Lead AI Qualify
-app.post(['/api/v1/leads/:id/ai-qualify', '/api/leads/:id/ai-qualify'], async (req, res) => {
-  try {
-    const lead = await get('SELECT * FROM leads WHERE id = ?', [req.params.id]);
-    if (!lead) return res.status(404).json({ error: 'Lead not found' });
-
-    const activeProduct = await get('SELECT * FROM digital_products WHERE status = "Active" ORDER BY id ASC LIMIT 1');
-    const qual = await aiEngine.qualifyLead(lead, activeProduct);
-
-    await run(
-      `UPDATE leads SET ai_score = ?, ai_category = ?, ai_suggestion = ? WHERE id = ?`,
-      [qual.ai_score, qual.ai_category, qual.ai_suggestion, lead.id]
-    );
-
-    const updated = await get('SELECT * FROM leads WHERE id = ?', [lead.id]);
-    res.json({ success: true, lead: updated });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Qualify All Leads
-app.post(['/api/v1/leads/ai-qualify-all', '/api/leads/ai-qualify-all'], async (req, res) => {
-  try {
-    const leads = await all('SELECT * FROM leads');
-    const activeProduct = await get('SELECT * FROM digital_products WHERE status = "Active" ORDER BY id ASC LIMIT 1');
-
-    for (const lead of leads) {
-      const qual = await aiEngine.qualifyLead(lead, activeProduct);
-      await run(
-        `UPDATE leads SET ai_score = ?, ai_category = ?, ai_suggestion = ? WHERE id = ?`,
-        [qual.ai_score, qual.ai_category, qual.ai_suggestion, lead.id]
-      );
-    }
-
-    const updatedLeads = await all('SELECT * FROM leads ORDER BY ai_score DESC, id DESC LIMIT 50');
-    res.json({
-      success: true,
-      message: `Qualified ${leads.length} leads with AI.`,
-      leads: updatedLeads
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+// Leads CRM lives in modules/leads (workspace-scoped), mounted above.
 
 // Appointments list & booking
 app.get(['/api/v1/crm/appointments', '/api/appointments'], async (req, res) => {
@@ -1502,7 +1342,7 @@ app.all(['/api/tools/get_business_info', '/api/business_info'], async (req, res)
 // Tool: Executive Briefing
 app.all(['/api/tools/get_briefing'], async (req, res) => {
   try {
-    const totalLeads = await get('SELECT count(*) as count FROM leads');
+    const totalLeads = await get('SELECT count(*) as count FROM leads WHERE workspace_id = ?', [req.auth.workspaceId]);
     const urgentEmails = await get('SELECT count(*) as count FROM emails WHERE is_urgent = 1 AND is_read = 0');
     const appointments = await all("SELECT customer_name, service, date, time FROM appointments WHERE status = 'Confirmed' ORDER BY date, time LIMIT 5");
     const traivoStats = await queryTraivoMySQL();
@@ -1584,11 +1424,12 @@ app.get(['/api/v1/content', '/api/content', '/api/marketing/content'], async (re
 
 app.post(['/api/v1/marketing/generate-post', '/api/marketing/generate-post'], async (req, res) => {
   try {
-    const { campaignId, productKey } = req.body;
-    const post = await marketingService.generateProductPost(1, campaignId || 1, productKey || 'school_bus');
+    // Static product templates are no longer used; posts come from the selected product's stored details.
+    const { campaignId, productId, platform, customTopic } = req.body;
+    const post = await marketingService.generateAiSocialPost(req.auth.workspaceId, { campaignId: campaignId || null, productId, platform, customTopic });
     res.json({ success: true, post });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message, code: err.code });
   }
 });
 
@@ -1604,10 +1445,10 @@ app.post(['/api/v1/content/:id/status', '/api/content/:id/status', '/api/marketi
 
 app.post(['/api/v1/marketing/generate-social-post', '/api/marketing/generate-social-post'], async (req, res) => {
   try {
-    const post = await marketingService.generateAiSocialPost(1, req.body);
+    const post = await marketingService.generateAiSocialPost(req.auth.workspaceId, req.body);
     res.json({ success: true, post });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message, code: err.code });
   }
 });
 
@@ -1794,15 +1635,6 @@ app.put(['/api/v1/business-profile', '/api/business-profile'], async (req, res) 
       [businessName, industry, websiteUrl, description, brandVoice, JSON.stringify(products || [])]
     );
     res.json({ success: true, message: 'Business profile updated successfully' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get(['/api/v1/leads', '/api/leads'], async (req, res) => {
-  try {
-    const leads = await all('SELECT * FROM leads ORDER BY id DESC LIMIT 100');
-    res.json({ leads });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

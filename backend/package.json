@@ -11,7 +11,8 @@
     "migrate:status": "node db/migrate.js --status",
     "worker": "node workers/socialWorker.js",
     "set-password": "node scripts/setPassword.js",
-    "test": "node --test --test-concurrency=1 tests/"
+    "test": "node --test --test-concurrency=1 tests/",
+    "seed:demo": "node scripts/seedDemoWorkspace.js"
   },
   "dependencies": {
     "cors": "^2.8.5",

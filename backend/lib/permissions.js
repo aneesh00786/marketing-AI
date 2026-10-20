@@ -14,6 +14,8 @@ const CAPABILITIES = [
   'analytics.view',
   'inbox.view',
   'inbox.reply',
+  'leads.view',
+  'leads.manage',
   'settings.manage',
   'billing.manage',
   'usage.view'
@@ -24,10 +26,10 @@ const ROLE_CAPABILITIES = {
   'Workspace Admin': CAPABILITIES.filter(c => c !== 'billing.manage'),
   'Marketing Manager': [
     'agents.use', 'content.create', 'content.approve', 'content.publish', 'campaigns.manage',
-    'analytics.view', 'inbox.view', 'inbox.reply', 'usage.view'
+    'analytics.view', 'inbox.view', 'inbox.reply', 'usage.view', 'leads.view', 'leads.manage'
   ],
-  'Approver': ['agents.use', 'content.approve', 'analytics.view', 'inbox.view'],
-  'Member': ['agents.use', 'content.create', 'analytics.view', 'inbox.view']
+  'Approver': ['agents.use', 'content.approve', 'analytics.view', 'inbox.view', 'leads.view'],
+  'Member': ['agents.use', 'content.create', 'analytics.view', 'inbox.view', 'leads.view', 'leads.manage']
 };
 
 function capabilitiesForRole(role) {

@@ -207,12 +207,12 @@ function generateDynamicContextualReply(userQuery, systemRole = '') {
   // 2. Greetings & Pleasantries ("Hi", "Hello", "Good morning")
   const isPureGreeting = /^(hi|hello|hey|good morning|good afternoon|good evening|greetings|howdy)( there| assistant| roger| tradesage)?[\s,!.?]*$/i.test(lower);
   if (isPureGreeting) {
-    return `Hello, sir! Roger is online and ready. How can I assist you with your business, ThriveWoo, or marketing today?`;
+    return `Hello, sir! Roger is online and ready. How can I assist you with your business, products, or marketing today?`;
   }
 
   // 3. Identity, Role & Capabilities ("Who are you?", "What can you do?")
   if (lower.includes('who are you') || lower.includes('what can you do') || lower.includes('what are you') || lower.includes('what is tradesage') || lower.includes('your capability') || lower.includes('your skills') || lower.includes('help me')) {
-    return `I am Roger, your personal executive business assistant and marketing strategist. I can help you formulate marketing campaigns, manage your B2B leads, draft high-converting emails, and scale your digital products like ThriveWoo. What would you like to accomplish, sir?`;
+    return `I am Roger, your personal executive business assistant and marketing strategist. I can help you formulate marketing campaigns, manage your B2B leads, draft high-converting emails, and grow the digital products saved in your workspace. What would you like to accomplish, sir?`;
   }
 
   // 4. Out of scope / Permission limitations
@@ -400,7 +400,7 @@ All platform infrastructure is optimized to run reliably under a lean monthly cl
   return `Thank you for your inquiry, sir. 
 
 As Roger, your personal executive business assistant, I have analyzed your request. Here are the immediate actionable steps we can take:
-1. Execute Strategy: I can draft custom direct-response copy, marketing campaigns, or cold email sequences for ThriveWoo and your digital applications.
+1. Execute Strategy: I can draft custom direct-response copy, marketing campaigns, or cold email sequences for the products saved in your workspace.
 2. Social & Outreach: We can generate targeted LinkedIn or Twitter posts highlighting your software's core features.
 3. Lead Follow-Up: I can qualify incoming leads in your CRM and prepare approved drafts for your review.
 
@@ -446,10 +446,10 @@ Respond in valid JSON ONLY with this exact structure:
           return {
             name: parsed.name,
             url: cleanUrl,
-            tagline: parsed.tagline || `All-in-one digital platform built for scale`,
-            description: parsed.description || `Feature-rich platform designed for high-performance operations and commercial growth.`,
+            tagline: parsed.tagline || null,
+            description: parsed.description || null,
             features: Array.isArray(parsed.features) ? parsed.features : [parsed.features],
-            target_audience: parsed.target_audience || 'B2B Companies, Enterprise Teams & Operators',
+            target_audience: parsed.target_audience || null,
             pricing: [],
             provider: aiRes.provider
           };
@@ -460,29 +460,7 @@ Respond in valid JSON ONLY with this exact structure:
     console.warn('AI feature extraction parse fallback:', err.message);
   }
 
-  // Live Heuristic Extractor based on live webpage text and domain
-  const isThriveWoo = cleanUrl.toLowerCase().includes('thrivewoo') || domain.includes('thrive') || (textContent && textContent.toLowerCase().includes('thrivewoo'));
-  if (isThriveWoo) {
-    return {
-      name: 'ThriveWoo - Smart FMCG B2B Sales App',
-      url: cleanUrl,
-      tagline: 'Smart FMCG B2B Sales App — All-in-One Platform Built for Growth',
-      description: 'Empower your sales team with ThriveWoo — the feature-rich B2B sales app built for FMCG and wholesale distribution. Track staff performance, uncover buying patterns, offer customer-specific discounts, and connect your sales force in real time.',
-      features: [
-        'Dashboard Status Overview: Track orders, estimates, bookings, drafts, and cancellations in one place',
-        'Staff Performance Analysis: Category-wise targets, projections, and rep performance tracking',
-        'Buying Pattern Analysis & Customer-Specific Discounts',
-        'Real-Time In-App Team Communication & Messaging',
-        'Visual Dashboards for Revenue, Collections, Frequently Bought Products & Order Status',
-        'Bulk Customer Data Import via Excel Spreadsheets',
-        'Customer Database & Order Lifecycle Tracking from Creation to Fulfillment'
-      ],
-      target_audience: 'FMCG Brands, Wholesale Distributors, Field Sales Fleets, Consumer Goods Manufacturers',
-      pricing: [],
-      provider: 'Live Real-Time Web Extractor'
-    };
-  }
-
+  // Heuristic extraction from the fetched page only (no built-in product profiles).
   // Dynamic real-time extraction from live headings and bullet points if available
   let dynamicFeatures = [];
   if (headings.length > 0) {
@@ -501,16 +479,11 @@ Respond in valid JSON ONLY with this exact structure:
   return {
     name: pageTitle || capitalizedName,
     url: cleanUrl,
-    tagline: `High-velocity digital platform powering modern commercial operations`,
-    description: `${pageTitle || capitalizedName} provides automated digital workflows, real-time analytics, and customer engagement tools designed to accelerate business productivity.`,
-    features: dynamicFeatures.length > 0 ? dynamicFeatures : [
-      'Automated Workflow & Task Processing Engine',
-      'Real-Time Cloud Synchronization & Telemetry',
-      'Multi-Tier User Permissions & Security Access',
-      'Instant Reporting, Data Analytics & Export Matrix',
-      'Seamless REST API & Third-Party Integration Suite'
-    ],
-    target_audience: 'Enterprise Decision Makers, B2B Operations, Digital Commerce Teams',
+    // Only what the page itself shows; empty fields are left for the user to fill in.
+    tagline: null,
+    description: null,
+    features: dynamicFeatures,
+    target_audience: null,
     pricing: [],
     provider: 'Live Real-Time Web Extractor'
   };
@@ -524,7 +497,7 @@ async function qualifyLead(lead, productContext = null) {
   let category = 'Warm';
   let suggestion = '';
 
-  const productName = productContext?.name || lead.product_interest || 'ThriveWoo B2B';
+  const productName = productContext?.name || lead.product_interest || null;
   const name = lead.name || 'Prospect';
   const company = lead.company_name || 'Enterprise';
   const budget = lead.estimated_budget || '';
@@ -548,14 +521,14 @@ async function qualifyLead(lead, productContext = null) {
 - Company: ${company}
 - Email: ${lead.email || 'N/A'}
 - Phone: ${lead.phone || 'N/A'}
-- Product Interest: ${lead.product_interest || productName}
+- Product Interest: ${lead.product_interest || 'Not specified'}
 - Estimated Budget: ${budget || 'Unspecified'}
 - Notes: ${lead.notes || 'None'}
 
-Target Product: ${productName}
+Target Product: ${productName || 'Not specified'}
 AI Score: ${score}/100 (${category})
 
-Provide a 1-2 sentence high-impact strategic sales recommendation on how to close or advance this lead. Be direct, actionable, and personalized.`;
+Provide a 1-2 sentence high-impact strategic sales recommendation on how to close or advance this lead. Be direct, actionable, and personalized. Do not invent product features, prices or results.`;
 
   try {
     const aiRes = await generateAiResponse(prompt, 'You are an enterprise sales director. Give 1-2 punchy, concrete action steps.');
@@ -568,11 +541,11 @@ Provide a 1-2 sentence high-impact strategic sales recommendation on how to clos
 
   if (!suggestion) {
     if (category === 'Hot') {
-      suggestion = `High purchase intent detected. Schedule a 15-minute live walkthrough of ${productName} highlighting immediate ROI and van sales order flow.`;
+      suggestion = `Strong buying signals. Contact ${name} directly to confirm requirements, timeline and next steps${productName ? ` for ${productName}` : ''}.`;
     } else if (category === 'Warm') {
-      suggestion = `Follow up with an executive product overview deck and case study demonstrating automated pricing and order routing.`;
+      suggestion = `Follow up to confirm their requirements and timeline before proposing next steps.`;
     } else {
-      suggestion = `Nurture via automated monthly product update campaign and invite to upcoming product webinar.`;
+      suggestion = `Keep in touch with occasional, relevant updates until they show clearer intent.`;
     }
   }
 
@@ -589,8 +562,8 @@ Provide a 1-2 sentence high-impact strategic sales recommendation on how to clos
 async function analyzeEmail(email, productContext = null) {
   const subject = email.subject || '';
   const body = email.body || email.snippet || '';
-  const sender = email.sender || email.recipient_name || 'Client';
-  const productName = productContext?.name || 'ThriveWoo B2B';
+  const sender = email.sender || email.recipient_name || 'the sender';
+  const productLine = productContext?.name ? `\nOur product (stored details only): ${productContext.name}${productContext.tagline ? ` - ${productContext.tagline}` : ''}` : '';
 
   const lower = (subject + ' ' + body).toLowerCase();
   let priority = 'Normal';
@@ -606,16 +579,18 @@ async function analyzeEmail(email, productContext = null) {
 From: ${sender}
 Subject: "${subject}"
 Body:
-"${body}"
+"${body}"${productLine}
+
+Reply drafts must not invent prices, plans, discounts, features, dates, attachments or commitments. Where a fact is needed and not given above, write a placeholder in square brackets, e.g. [pricing details].
 
 Respond in JSON ONLY with:
 {
   "summary": "1-2 sentence executive summary of what they want",
   "priority": "Urgent" | "Pricing" | "Inquiry" | "Normal",
   "smart_replies": [
-    {"label": "Schedule Demo", "text": "Draft reply text offering a demo call"},
-    {"label": "Send Pricing", "text": "Draft reply text explaining pricing tiers"},
-    {"label": "Follow Up", "text": "Draft reply text with polite check-in"}
+    {"label": "Offer a Call", "text": "Draft reply offering a short call"},
+    {"label": "Ask for Details", "text": "Draft reply asking what they need"},
+    {"label": "Follow Up", "text": "Draft reply with a polite check-in"}
   ]
 }`;
 
@@ -636,149 +611,142 @@ Respond in JSON ONLY with:
     console.warn('analyzeEmail fallback:', e.message);
   }
 
-  // Fallback smart replies
+  // No AI answer: factual summary and priority only; no canned replies with invented offers.
   return {
-    ai_summary: `${sender} reached out regarding "${subject}".`,
+    ai_summary: `${sender} wrote${subject ? ` about "${subject}"` : ''}.`,
     ai_priority: priority,
-    ai_replies: [
-      {
-        label: '📅 Book 15-Min Demo',
-        text: `Hi ${sender},\n\nThank you for reaching out regarding "${subject}". We would love to show you how ${productName} can solve this for your team. Would tomorrow at 2:00 PM work for a brief 15-minute live walkthrough?\n\nBest regards,\nExecutive Team`
-      },
-      {
-        label: '💼 Share Pricing Deck',
-        text: `Hi ${sender},\n\nThank you for your interest! Pricing for ${productName} starts at $49/mo for standard operations, up to $149/mo for multi-warehouse and field sales routing. I have attached our complete pricing breakdown.\n\nBest regards,\nExecutive Team`
-      },
-      {
-        label: '⚡ Confirm & Follow Up',
-        text: `Hi ${sender},\n\nWe have reviewed your request regarding "${subject}". Our technical team is preparing a customized demonstration environment and will follow up with complete access details shortly.\n\nBest regards,\nExecutive Team`
-      }
-    ]
+    ai_replies: []
+  };
+}
+
+/** Only facts stored on the product record; nothing is filled in when a field is empty. */
+function productFacts(product) {
+  if (!product) return null;
+  let features = [];
+  if (Array.isArray(product.features)) features = product.features;
+  else if (product.features_json) {
+    try { features = JSON.parse(product.features_json); } catch (e) { features = []; }
+  }
+  const url = typeof product.url === 'string' && /^https?:\/\//i.test(product.url.trim()) ? product.url.trim() : null;
+  return {
+    name: String(product.name || '').trim() || null,
+    tagline: String(product.tagline || '').trim() || null,
+    features: (Array.isArray(features) ? features : []).map(f => String(f).trim()).filter(Boolean).slice(0, 4),
+    url
   };
 }
 
 /**
- * AI Mail Draft Generator: Builds styled visual HTML email + text
+ * Mail Draft Generator: builds the HTML + text email from the selected product's stored
+ * details only. Without a product it produces a generic draft with no product claims or
+ * links and reports the missing context in `missing_context`.
  */
 async function generateMailDraft(product, recipient, goal, tone = 'Professional') {
-  const prodName = product?.name || 'ThriveWoo B2B Platform';
-  const prodTagline = product?.tagline || 'B2B Wholesale Ordering & Field Sales for WooCommerce';
-  const prodFeatures = Array.isArray(product?.features) ? product.features : (product?.features_json ? JSON.parse(product.features_json) : ['Automated Wholesale Pricing', 'Field Sales Order App', 'Live Warehouse Sync']);
-  const recipientName = recipient?.name || 'Valued Partner';
-  const recipientEmail = recipient?.email || '';
+  const facts = productFacts(product);
+  const recipientName = String(recipient?.name || '').trim();
+  const greetingName = recipientName || 'there';
+  const purpose = String(goal || '').trim() || facts?.tagline || '[Add the purpose of this email]';
+  const missing = [];
+  if (!facts) missing.push('product');
+  if (!String(goal || '').trim()) missing.push('goal');
 
-  const subject = `Accelerate Your Wholesale & Sales Operations with ${prodName}`;
-  const bulletsHtml = prodFeatures.slice(0, 4).map(f => `<li style="margin-bottom: 8px;"><strong>${f}</strong></li>`).join('');
+  const subject = facts?.name
+    ? `${facts.name}${facts.tagline ? `: ${facts.tagline}` : ''}`.slice(0, 200)
+    : (String(goal || '').trim() ? String(goal).trim().slice(0, 120) : 'Quick introduction');
 
-  const bodyHtml = `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 620px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,0.06);">
+  const header = facts?.name ? `
   <div style="background: linear-gradient(135deg, #0284c7 0%, #2563eb 100%); padding: 32px 28px; text-align: center; color: #ffffff;">
-    <h1 style="margin: 0; font-size: 24px; font-weight: 700; letter-spacing: -0.5px;">${prodName}</h1>
-    <p style="margin: 8px 0 0; font-size: 14px; opacity: 0.95;">${prodTagline}</p>
-  </div>
-  <div style="padding: 32px 28px; color: #1e293b; line-height: 1.6;">
-    <p style="font-size: 16px; margin-top: 0;">Hi ${recipientName},</p>
-    <p style="font-size: 15px; color: #475569;">${goal || `Manual sales order entry and fragmented wholesale pricing slow down business growth and create costly dispatch discrepancies.`}</p>
+    <h1 style="margin: 0; font-size: 24px; font-weight: 700; letter-spacing: -0.5px;">${escapeHtml(facts.name)}</h1>
+    ${facts.tagline ? `<p style="margin: 8px 0 0; font-size: 14px; opacity: 0.95;">${escapeHtml(facts.tagline)}</p>` : ''}
+  </div>` : '';
+  const features = facts?.features.length ? `
     <div style="background: #f8fafc; border-left: 4px solid #0284c7; padding: 18px; margin: 24px 0; border-radius: 6px;">
-      <strong style="color: #0f172a; font-size: 15px;">Key Platform Capabilities:</strong>
+      <strong style="color: #0f172a; font-size: 15px;">Key capabilities:</strong>
       <ul style="margin: 10px 0 0; padding-left: 20px; font-size: 14px; color: #334155;">
-        ${bulletsHtml}
+        ${facts.features.map(f => `<li style="margin-bottom: 8px;"><strong>${escapeHtml(f)}</strong></li>`).join('')}
       </ul>
-    </div>
-    <p style="font-size: 15px; color: #475569;">Would you have 10 to 15 minutes this week for a live demonstration tailored for your operational requirements?</p>
+    </div>` : '';
+  const cta = facts?.url ? `
     <div style="text-align: center; margin: 32px 0;">
-      <a href="${product?.url || 'https://thrivewoo.com'}" style="background: #0284c7; color: #ffffff; text-decoration: none; padding: 13px 32px; border-radius: 6px; font-weight: 600; font-size: 14px; display: inline-block; box-shadow: 0 2px 8px rgba(2, 132, 199, 0.35);">Schedule 15-Minute Live Demo &rarr;</a>
-    </div>
+      <a href="${escapeHtml(facts.url)}" style="background: #0284c7; color: #ffffff; text-decoration: none; padding: 13px 32px; border-radius: 6px; font-weight: 600; font-size: 14px; display: inline-block;">Learn more about ${escapeHtml(facts.name)} &rarr;</a>
+    </div>` : '';
+
+  const bodyHtml = `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 620px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,0.06);">${header}
+  <div style="padding: 32px 28px; color: #1e293b; line-height: 1.6;">
+    <p style="font-size: 16px; margin-top: 0;">Hi ${escapeHtml(greetingName)},</p>
+    <p style="font-size: 15px; color: #475569;">${escapeHtml(purpose)}</p>${features}
+    <p style="font-size: 15px; color: #475569;">Would you be open to a short conversation this week?</p>${cta}
     <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 28px 0;" />
-    <p style="font-size: 13px; color: #64748b; margin-bottom: 0;">Best regards,<br><strong style="color: #0f172a;">Executive Operations Team</strong><br>${prodName}</p>
+    <p style="font-size: 13px; color: #64748b; margin-bottom: 0;">Best regards,<br>[Your name]${facts?.name ? `<br>${escapeHtml(facts.name)}` : ''}</p>
   </div>
 </div>`;
 
-  const bodyText = `Hi ${recipientName},\n\n${goal || 'Manual sales order entry slows down growth.'}\n\nWith ${prodName}, you get:\n${prodFeatures.slice(0, 4).map(f => '- ' + f).join('\n')}\n\nWould you have 15 minutes this week for a live walkthrough?\n\nBest regards,\nExecutive Team\n${prodName}`;
+  const bodyText = [
+    `Hi ${greetingName},`,
+    purpose,
+    facts?.features.length ? `${facts.name ? `With ${facts.name}` : 'Key capabilities'}:\n${facts.features.map(f => '- ' + f).join('\n')}` : null,
+    'Would you be open to a short conversation this week?',
+    facts?.url ? `Learn more: ${facts.url}` : null,
+    `Best regards,\n[Your name]${facts?.name ? `\n${facts.name}` : ''}`
+  ].filter(Boolean).join('\n\n');
 
   return {
     subject,
     body_html: bodyHtml,
     body_text: bodyText,
-    tone
+    tone,
+    missing_context: missing
   };
 }
 
 /**
- * AI Mail Draft Rewriter: Adjusts tone, persuasive angle, or length
+ * Mail Draft Rewriter: asks a real AI model to adjust tone, angle or length of the existing
+ * draft. It only rewrites what is already in the draft; when no model answers it throws
+ * (AI_UNAVAILABLE) instead of substituting canned copy.
  */
-async function rewriteMailDraft(currentDraft, instruction = 'More Professional') {
-  const prompt = `Current email subject: "${currentDraft.subject}"
-Current email content:
-"${currentDraft.body_text || currentDraft.body_html}"
-
-Instruction: Rewrite this email to be: "${instruction}".
-Keep it conversion-oriented with a clear CTA.
+async function rewriteMailDraft(currentDraft, instruction = 'More Professional', workspaceId = 1) {
+  const { generateStructured, untrusted } = require('../lib/aiStructured');
+  const { z } = require('zod');
+  const prompt = `Rewrite the email below to be: "${String(instruction).slice(0, 200)}".
+Keep every fact, product name and link exactly as given. Do not add products, prices, statistics, customer names, links or claims that are not already in the email.
+${untrusted('email_subject', currentDraft.subject, 300)}
+${untrusted('email_body', currentDraft.body_text || currentDraft.body_html)}
 
 Respond in JSON ONLY with:
 {
-  "subject": "New punchy subject line",
+  "subject": "New subject line",
   "body_text": "Plain text version",
-  "bullet_points": ["Key point 1", "Key point 2", "Key point 3"],
+  "bullet_points": ["Point taken from the email"],
   "opening": "Opening paragraph",
-  "call_to_action": "CTA text"
+  "call_to_action": "CTA sentence"
 }`;
+  const schema = z.object({
+    subject: z.string().min(1),
+    body_text: z.string().min(1),
+    bullet_points: z.array(z.string()).optional(),
+    opening: z.string().optional(),
+    call_to_action: z.string().optional()
+  });
+  const { data: p } = await generateStructured({ workspaceId, prompt, system: 'You are an expert email copywriter. Output valid JSON.', schema, referenceType: 'email_draft', referenceId: currentDraft.id || null, maxTokens: 900 });
 
-  try {
-    const aiRes = await generateAiResponse(prompt, 'You are an expert direct-response copywriter. Output valid JSON.');
-    if (aiRes && aiRes.text) {
-      const match = aiRes.text.match(/\{[\s\S]*\}/);
-      if (match) {
-        const p = JSON.parse(match[0]);
-        const bullets = (p.bullet_points || []).map(b => `<li style="margin-bottom: 8px;"><strong>${b}</strong></li>`).join('');
-        const newHtml = `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 620px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,0.06);">
-  <div style="background: linear-gradient(135deg, #0284c7 0%, #2563eb 100%); padding: 32px 28px; text-align: center; color: #ffffff;">
-    <h1 style="margin: 0; font-size: 22px; font-weight: 700;">${p.subject}</h1>
-    <p style="margin: 8px 0 0; font-size: 13px; opacity: 0.95;">Tone: ${instruction}</p>
-  </div>
+  const bullets = (p.bullet_points || []).filter(Boolean);
+  const newHtml = `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 620px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,0.06);">
   <div style="padding: 32px 28px; color: #1e293b; line-height: 1.6;">
-    <p style="font-size: 15px; margin-top: 0; color: #334155;">${p.opening || 'Hello,'}</p>
+    <p style="font-size: 15px; margin-top: 0; color: #334155;">${escapeHtml(p.opening || 'Hello,')}</p>${bullets.length ? `
     <div style="background: #f8fafc; border-left: 4px solid #0284c7; padding: 18px; margin: 20px 0; border-radius: 6px;">
       <ul style="margin: 0; padding-left: 20px; font-size: 14px; color: #334155;">
-        ${bullets}
+        ${bullets.map(b => `<li style="margin-bottom: 8px;"><strong>${escapeHtml(b)}</strong></li>`).join('')}
       </ul>
-    </div>
-    <div style="text-align: center; margin: 28px 0;">
-      <a href="#" style="background: #0284c7; color: #ffffff; text-decoration: none; padding: 12px 28px; border-radius: 6px; font-weight: 600; font-size: 14px; display: inline-block;">${p.call_to_action || 'Get Started Now &rarr;'}</a>
-    </div>
-    <p style="font-size: 13px; color: #64748b; margin-bottom: 0;">Best regards,<br><strong style="color: #0f172a;">Executive Team</strong></p>
+    </div>` : ''}${p.call_to_action ? `
+    <p style="font-size: 15px; color: #334155;"><strong>${escapeHtml(p.call_to_action)}</strong></p>` : ''}
+    <p style="font-size: 13px; color: #64748b; margin-bottom: 0;">Best regards,<br>[Your name]</p>
   </div>
 </div>`;
 
-        return {
-          subject: p.subject || currentDraft.subject,
-          body_html: newHtml,
-          body_text: p.body_text || currentDraft.body_text,
-          tone: instruction
-        };
-      }
-    }
-  } catch (e) {
-    console.warn('rewriteMailDraft fallback:', e.message);
-  }
-
-  // Fallback adjustments
-  let newSubject = currentDraft.subject;
-  let prefix = '';
-  if (instruction.toLowerCase().includes('short')) {
-    newSubject = `Quick Question: Wholesale Automation`;
-    prefix = `Hi,\n\nIn short: our platform automates wholesale orders and eliminates route invoicing delays.`;
-  } else if (instruction.toLowerCase().includes('persuasive')) {
-    newSubject = `Are Manual Order Errors Costing Your Team 15+ Hours Weekly?`;
-    prefix = `What if your sales reps could book wholesale orders directly on mobile in under 10 seconds?`;
-  } else {
-    newSubject = `Executive Briefing: Modernizing Wholesale Operations`;
-    prefix = `Dear Partner,\n\nWe would like to share an executive briefing regarding modern sales automation.`;
-  }
-
   return {
-    subject: newSubject,
-    body_html: currentDraft.body_html,
-    body_text: `${prefix}\n\n${currentDraft.body_text || ''}`,
+    subject: p.subject || currentDraft.subject,
+    body_html: newHtml,
+    body_text: p.body_text || currentDraft.body_text,
     tone: instruction
   };
 }
