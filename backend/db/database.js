@@ -1,4 +1,5 @@
 const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
 const DB_CLIENT = process.env.DB_CLIENT || 'mysql';
 
 let sqliteDb = null;
@@ -14,7 +15,12 @@ if (DB_CLIENT === 'mysql') {
     database: process.env.DB_NAME || 'tradesage',
     waitForConnections: true,
     connectionLimit: 10,
-    queueLimit: 0
+    queueLimit: 0,
+    // Store and read DATETIME values as UTC so scheduling is exact regardless of host time zone.
+    timezone: 'Z'
+  });
+  mysqlPool.pool.on('connection', (conn) => {
+    conn.query("SET time_zone = '+00:00'");
   });
   console.log(`[DB] Configured for MySQL at ${process.env.DB_HOST || '127.0.0.1'}:${process.env.DB_PORT || '3306'} (Database: ${process.env.DB_NAME || 'tradesage'})`);
 } else {
@@ -1224,7 +1230,37 @@ async function queryTraivoMySQL() {
   }
 }
 
+/** Runs fn(tx) inside a transaction on one pooled connection (MySQL only). */
+async function withTransaction(fn) {
+  if (DB_CLIENT !== 'mysql') throw new Error('Transactions require DB_CLIENT=mysql');
+  const conn = await mysqlPool.getConnection();
+  const tx = {
+    run: (sql, params = []) => conn.execute(sql, params).then(([r]) => ({ lastID: r.insertId, changes: r.affectedRows })),
+    get: (sql, params = []) => conn.execute(sql, params).then(([rows]) => rows[0] || null),
+    all: (sql, params = []) => conn.execute(sql, params).then(([rows]) => rows || [])
+  };
+  try {
+    await conn.beginTransaction();
+    const result = await fn(tx);
+    await conn.commit();
+    return result;
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
+}
+
+async function closeDatabase() {
+  if (mysqlPool) await mysqlPool.end();
+  if (sqliteDb) sqliteDb.close();
+}
+
 module.exports = {
+  withTransaction,
+  closeDatabase,
+  DB_CLIENT,
   db: sqliteDb,
   sqliteDb,
   mysqlPool,
@@ -1234,3 +1270,14 @@ module.exports = {
   initDatabase,
   queryTraivoMySQL
 };
+
+if (require.main === module) {
+  initDatabase().then(() => {
+    console.log('[DB] Database initialization completed successfully.');
+    process.exit(0);
+  }).catch(err => {
+    console.error('[DB] Database initialization failed:', err);
+    process.exit(1);
+  });
+}
+

@@ -1,12 +1,17 @@
 {
   "name": "tradesage-ai-backend",
   "version": "1.0.0",
-  "description": "TradeSage AI - Multi-Tenant Workforce SaaS Backend (Express + SQLite + Telnyx)",
+  "description": "TradeSage AI - Multi-Tenant Workforce SaaS Backend (Express + MySQL + Telnyx)",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "seed": "node seed.js"
+    "seed": "node seed.js",
+    "migrate": "node db/migrate.js",
+    "migrate:status": "node db/migrate.js --status",
+    "worker": "node workers/socialWorker.js",
+    "set-password": "node scripts/setPassword.js",
+    "test": "node --test --test-concurrency=1 tests/"
   },
   "dependencies": {
     "cors": "^2.8.5",
@@ -16,6 +21,8 @@
     "mailparser": "^3.9.46",
     "mysql2": "^3.24.6",
     "nodemailer": "^10.1.7",
-    "sqlite3": "^5.1.7"
+    "sqlite3": "^5.1.7",
+    "undici": "^6.29.1",
+    "zod": "^3.25.76"
   }
 }

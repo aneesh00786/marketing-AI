@@ -3,8 +3,8 @@ const { ImapFlow } = require('imapflow');
 const { simpleParser } = require('mailparser');
 const { run, get, all } = require('../db/database');
 const aiEngine = require('./aiEngine');
+const secretBox = require('../lib/secretBox');
 
-const ZEPTO_DEFAULT_TOKEN = 'Zoho-enczapikey wSsVR61//UbyX/wryDaudrhsmgsAVF31Rk9721WiuHeqGvGQocc6kRfGBg+mTvQaRW5gF2RH8LkonBgE0TMG2o8lzlsBXCiF9mqRe1U4J3x17qnvhDzKXWlYkxaMJYMOxAtsm2djFs8l+g==';
 
 /**
  * Enterprise Company Mail Service (ZeptoMail / Custom SMTP & IMAP)
@@ -12,7 +12,10 @@ const ZEPTO_DEFAULT_TOKEN = 'Zoho-enczapikey wSsVR61//UbyX/wryDaudrhsmgsAVF31Rk9
  */
 
 async function sendZeptoMail({ to, recipientName = '', subject, html, text = '', fromAddress = 'support@thrivewoo.com', fromName = 'ThriveWoo Support', replyTo = 'support@thrivewoo.com', token }) {
-  const authToken = token || process.env.ZEPTOMAIL_TOKEN || ZEPTO_DEFAULT_TOKEN;
+  const authToken = token || process.env.ZEPTOMAIL_TOKEN;
+  if (!authToken) {
+    throw new Error('ZeptoMail is not configured. Set ZEPTOMAIL_TOKEN in backend/.env.');
+  }
   const res = await fetch('https://api.zeptomail.com/v1.1/email', {
     method: 'POST',
     headers: {
@@ -50,7 +53,7 @@ async function getRawMailConfig(workspaceId = 1) {
       smtp_port: parseInt(process.env.SMTP_PORT || '587', 10),
       smtp_secure: 0,
       smtp_user: process.env.SMTP_USER || 'emailapikey',
-      smtp_pass: process.env.SMTP_PASS || ZEPTO_DEFAULT_TOKEN,
+      smtp_pass: process.env.SMTP_PASS || '',
       imap_host: process.env.IMAP_HOST || 'imap.zoho.com',
       imap_port: parseInt(process.env.IMAP_PORT || '993', 10),
       imap_tls: 1,
@@ -61,7 +64,17 @@ async function getRawMailConfig(workspaceId = 1) {
       status: 'Connected'
     };
   }
-  return row;
+  // Mailbox passwords are encrypted at rest; decrypt only for transport use.
+  return {
+    ...row,
+    smtp_pass: secretBox.decrypt(row.smtp_pass),
+    imap_pass: secretBox.decrypt(row.imap_pass)
+  };
+}
+
+function encryptIfPossible(value) {
+  if (!value || value.startsWith('[env:')) return value;
+  return secretBox.isConfigured() ? secretBox.encrypt(value) : value;
 }
 
 async function getSafeMailConfig(workspaceId = 1) {
@@ -108,8 +121,8 @@ async function saveMailConfig(workspaceId = 1, config = {}) {
         sender_name = ?, sender_email = ?, status = ?, updated_at = ?
     WHERE workspace_id = ?
   `, [
-    provider, smtpHost, smtpPort, smtpSecure, smtpUser, smtpPass,
-    imapHost, imapPort, imapTls, imapUser, imapPass,
+    provider, smtpHost, smtpPort, smtpSecure, smtpUser, encryptIfPossible(smtpPass),
+    imapHost, imapPort, imapTls, imapUser, encryptIfPossible(imapPass),
     senderName, senderEmail, status, now, workspaceId
   ]);
 
@@ -219,7 +232,7 @@ async function sendRealEmail(workspaceId = 1, {
         fromAddress: config.sender_email || 'support@thrivewoo.com',
         fromName: config.sender_name || 'ThriveWoo Support',
         replyTo: replyTo || config.sender_email || 'support@thrivewoo.com',
-        token: (config.smtp_pass && config.smtp_pass !== '••••••••') ? config.smtp_pass : ZEPTO_DEFAULT_TOKEN
+        token: (config.smtp_pass && config.smtp_pass !== '••••••••' && !config.smtp_pass.startsWith('[env:')) ? config.smtp_pass : undefined
       });
       messageId = zeptoResult.messageId;
       smtpStatus = 'Dispatched via ZeptoMail (support@thrivewoo.com)';

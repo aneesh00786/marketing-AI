@@ -1,4 +1,4 @@
-require('dotenv').config();
+require('dotenv').config({ path: require('path').resolve(__dirname, '.env') });
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
@@ -11,16 +11,43 @@ const marketingService = require('./services/marketingService');
 const videoService = require('./services/videoService');
 const usageService = require('./services/usageService');
 const aiEngine = require('./services/aiEngine');
-const desktopTools = require('./services/desktopTools');
 const emailService = require('./services/emailService');
+const { apiGate, legacyWorkspaceOnly } = require('./middleware/auth');
+const { rateLimit } = require('./lib/rateLimit');
+const websiteExtractor = require('./services/websiteExtractor');
+const socialRouter = require('./modules/social/routes');
+const strategistService = require('./modules/social/strategistService');
+const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 8000;
 
-// Enable CORS and JSON parsing
-app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.disable('x-powered-by');
+
+// Request IDs tie API responses to audit log entries.
+app.use((req, res, next) => {
+  req.requestId = crypto.randomUUID();
+  res.setHeader('X-Request-Id', req.requestId);
+  next();
+});
+app.set('trust proxy', process.env.TRUST_PROXY === '1' ? 1 : false);
+
+// CORS: only the configured frontend origins may call the API from a browser.
+const allowedOrigins = [process.env.FRONTEND_URL, process.env.APP_BASE_URL, ...(process.env.CORS_ORIGINS || '').split(',')]
+  .map(o => (o || '').trim())
+  .filter(Boolean);
+app.use(cors({
+  origin(origin, cb) {
+    if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
+    return cb(null, false);
+  }
+}));
+// Keep the raw body for webhook signature verification.
+app.use(express.json({
+  limit: '2mb',
+  verify: (req, res, buf) => { req.rawBody = buf; }
+}));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
 // Prevent aggressive caching for static/API assets
 app.use((req, res, next) => {
@@ -28,6 +55,39 @@ app.use((req, res, next) => {
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
   next();
+});
+
+// Authentication gate: every /api route requires a signed-in workspace member unless listed here.
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  keyFn: req => `${req.ip}:${String(req.body?.email || '').toLowerCase()}`,
+  message: 'Too many sign-in attempts. Please wait and try again.'
+});
+app.use(['/api/v1/auth/login', '/api/auth/login', '/api/v1/auth/register', '/api/auth/register'], authLimiter);
+app.use('/api', rateLimit({ windowMs: 60 * 1000, max: 300, keyFn: req => req.headers.authorization || req.ip }));
+app.use('/api', apiGate({
+  publicPaths: [
+    '/api/v1/auth/login', '/api/auth/login',
+    '/api/v1/auth/register', '/api/auth/register',
+    '/api/status',
+    // Telephony provider webhooks (carrier-originated, no user session).
+    '/api/v1/telnyx/inbound', '/api/telnyx/inbound',
+    '/api/v1/telnyx/dialogue', '/api/telnyx/dialogue',
+    // OAuth callbacks are authenticated by single-use state; webhooks by provider signatures.
+    /^\/api\/v1\/social\/oauth\/[a-z_]+\/callback$/,
+    /^\/api\/v1\/social\/webhooks\/[a-z_]+$/
+  ],
+  toolPaths: [/^\/api\/(tools\/)?(send_email|track_lead|book_appointment|business_info|get_business_info|get_briefing)$/]
+}));
+
+// Tenant-aware social media marketing module.
+app.use('/api/v1/social', socialRouter);
+
+// Remaining modules are single-tenant (workspace 1) until migrated.
+app.use('/api', (req, res, next) => {
+  if (/^\/(v1\/)?auth\//.test(req.path)) return next();
+  return legacyWorkspaceOnly()(req, res, next);
 });
 
 // Helper: Get local network IP
@@ -69,20 +129,8 @@ app.post(['/api/v1/auth/login', '/api/auth/login'], async (req, res) => {
 
 app.get(['/api/v1/auth/me', '/api/auth/me'], async (req, res) => {
   try {
-    const authHeader = req.headers.authorization;
-    let userId = 1;
-    let workspaceId = 1;
-
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      const payload = authService.verifyToken(authHeader.split(' ')[1]);
-      if (payload) {
-        userId = payload.userId;
-        workspaceId = payload.workspaceId || 1;
-      }
-    }
-
-    const me = await authService.getUserMe(userId, workspaceId);
-    res.json(me);
+    const me = await authService.getUserMe(req.auth.userId, req.auth.workspaceId);
+    res.json({ ...me, role: req.auth.role, capabilities: [...req.auth.capabilities] });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -100,8 +148,8 @@ app.get(['/api/v1/dashboard/summary', '/api/dashboard/summary'], async (req, res
   try {
     const tasksCount = await get('SELECT count(*) as count FROM tasks WHERE workspace_id = 1');
     const campaignsCount = await get('SELECT count(*) as count FROM campaigns WHERE workspace_id = 1');
-    const contentDrafts = await get("SELECT count(*) as count FROM content_items WHERE workspace_id = 1 AND status = 'Draft'");
-    const contentApproved = await get("SELECT count(*) as count FROM content_items WHERE workspace_id = 1 AND status = 'Approved'");
+    const contentDrafts = await get("SELECT count(*) as count FROM content_items WHERE workspace_id = 1 AND status = 'draft'");
+    const contentApproved = await get("SELECT count(*) as count FROM content_items WHERE workspace_id = 1 AND status = 'approved'");
     const videoJobsCount = await get('SELECT count(*) as count FROM video_jobs WHERE workspace_id = 1');
     const leadsCount = await get('SELECT count(*) as count FROM leads WHERE workspace_id = 1');
     const agents = await all('SELECT * FROM agents WHERE workspace_id = 1 OR workspace_id IS NULL');
@@ -286,13 +334,16 @@ ${connectedBiz.map(b => `  * ${b.business_type === 'owner' ? '[MY BUSINESS]' : '
       let productKey = 'thrivewoo';
       if (lower.includes('school bus') || lower.includes('safetrack')) productKey = 'school_bus';
 
-      const postRes = await marketingService.generateAiSocialPost(1, {
-        productKey,
-        platform,
-        customTopic: cleanMsg
-      });
-
-      fastReply = `Sir, I have generated a new ${platform} post for ${postRes.product_name}: "${postRes.title}". Hook: "${postRes.caption_text.substring(0, 95)}...". Hashtags: ${postRes.hashtags}. It has been saved to your Social Media Studio as a Draft for your review.`;
+      try {
+        const postRes = await marketingService.generateAiSocialPost(1, {
+          productKey,
+          platform,
+          customTopic: cleanMsg
+        });
+        fastReply = `Sir, I have generated a new ${platform} post for ${postRes.product_name}: "${postRes.title}". Hook: "${postRes.caption_text.substring(0, 95)}...". Hashtags: ${postRes.hashtags}. It is saved in Social Media Marketing → Content Library as a draft for your review and approval.`;
+      } catch (e) {
+        fastReply = `Sir, I could not write that post: ${e.message}`;
+      }
     }
     // 4. Send Email on command via real company SMTP
     else if (lower.includes('send email') || lower.includes('send an email') || lower.includes('mail send')) {
@@ -388,6 +439,16 @@ ${connectedBiz.map(b => `  * ${b.business_type === 'owner' ? '[MY BUSINESS]' : '
       }
     }
 
+    // Social performance questions are answered from stored analytics only (never invented metrics).
+    if (!fastReply && strategistService.isSocialAnalyticsQuestion(cleanMsg)) {
+      try {
+        const strategist = await strategistService.ask(req, cleanMsg);
+        fastReply = strategist.answer;
+      } catch (e) {
+        console.warn('Social strategist unavailable:', e.message);
+      }
+    }
+
     let reply = fastReply;
     let provider = 'Roger Business Intelligence';
 
@@ -454,8 +515,8 @@ Core Rules:
 // 1. ElevenLabs Signed URL Endpoint for hands-free real-time voice
 app.get(['/api/v1/voice/signed-url', '/api/signed-url', '/api/voice/signed-url'], async (req, res) => {
   try {
-    const apiKey = process.env.ELEVENLABS_API_KEY || 'sk_f0d956ae277bf6725699d28296b9110bf380495c71635b2d';
-    const agentId = process.env.ELEVENLABS_AGENT_ID || 'agent_0101m51y56p2er5tny5gxe8sha5x';
+    const apiKey = process.env.ELEVENLABS_API_KEY;
+    const agentId = process.env.ELEVENLABS_AGENT_ID;
     
     const response = await fetch(`https://api.elevenlabs.io/v1/convai/conversation/get_signed_url?agent_id=${agentId}`, {
       headers: { 'xi-api-key': apiKey }
@@ -711,74 +772,12 @@ app.get(['/api/v1/executive/briefing', '/api/executive/briefing'], async (req, r
 // 1. AI Extract features from webpage URL (Live Real-Time Web Extractor)
 app.post(['/api/v1/products/extract-url', '/api/products/extract-url'], async (req, res) => {
   try {
-    let { url } = req.body;
+    const { url } = req.body;
     if (!url) return res.status(400).json({ error: 'Product URL is required' });
-
-    let targetUrl = url.trim();
-    if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
-      targetUrl = 'https://' + targetUrl;
-    }
-
-    let textContent = '';
-    let pageTitle = '';
-    let headings = [];
-    let bulletPoints = [];
-
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 8000);
-      const resp = await fetch(targetUrl, {
-        signal: controller.signal,
-        redirect: 'follow',
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
-        }
-      });
-      clearTimeout(timeoutId);
-
-      if (resp.ok) {
-        const html = await resp.text();
-        const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
-        if (titleMatch) pageTitle = titleMatch[1].trim();
-
-        // Extract headings for real feature detection
-        const hMatches = html.matchAll(/<h[1-4][^>]*>([\s\S]*?)<\/h[1-4]>/gi);
-        for (const m of hMatches) {
-          const hText = m[1].replace(/<[^>]+>/g, '').trim();
-          if (hText && hText.length > 3 && hText.length < 140 && !headings.includes(hText)) {
-            headings.push(hText);
-          }
-        }
-
-        // Extract list items or module bullet lines
-        const liMatches = html.matchAll(/<li[^>]*>([\s\S]*?)<\/li>/gi);
-        for (const m of liMatches) {
-          const liText = m[1].replace(/<[^>]+>/g, '').trim();
-          if (liText && liText.length > 5 && liText.length < 200 && !bulletPoints.includes(liText)) {
-            bulletPoints.push(liText);
-          }
-        }
-
-        // Strip scripts, styles, tags for clean textual analysis
-        textContent = html
-          .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, ' ')
-          .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, ' ')
-          .replace(/<noscript\b[^<]*(?:(?!<\/noscript>)<[^<]*)*<\/noscript>/gi, ' ')
-          .replace(/<[^>]+>/g, ' ')
-          .replace(/\s+/g, ' ')
-          .trim()
-          .substring(0, 5000);
-      }
-    } catch (fetchErr) {
-      console.warn(`Live URL fetch warning for ${targetUrl}:`, fetchErr.message);
-    }
-
-    const extracted = await aiEngine.extractProductFromWebpage(targetUrl, textContent, pageTitle, { headings, bulletPoints });
-    // Guarantee no pricing is returned for ThriveWoo or any product
-    extracted.pricing = [];
-    res.json({ success: true, product: extracted });
+    const { product } = await websiteExtractor.extractFromUrl(url);
+    res.json({ success: true, product });
   } catch (err) {
+    if (err.code === 'UNSAFE_URL') return res.status(400).json({ error: err.message });
     res.status(500).json({ error: err.message });
   }
 });
@@ -1481,26 +1480,6 @@ app.post(['/api/v1/crm/appointments', '/api/appointments', '/api/tools/book_appo
 // DESKTOP OS SYSTEM TOOLS (PYTHON TOOLS PARITY)
 // ==========================================
 
-app.post(['/api/tools/launch_app', '/api/launch_app'], (req, res) => {
-  const result = desktopTools.launchApplication(req.body.app_name);
-  res.json(result);
-});
-
-app.post(['/api/tools/system_control', '/api/system_control'], (req, res) => {
-  const result = desktopTools.systemControl(req.body.action);
-  res.json(result);
-});
-
-app.all(['/api/tools/system_stats', '/api/system_stats'], (req, res) => {
-  const result = desktopTools.getSystemStats();
-  res.json(result);
-});
-
-app.post(['/api/tools/open_website', '/api/open_website'], (req, res) => {
-  const result = desktopTools.openWebsite(req.body.target);
-  res.json(result);
-});
-
 // Tool: Business facts & overview
 app.all(['/api/tools/get_business_info', '/api/business_info'], async (req, res) => {
   try {
@@ -1548,7 +1527,7 @@ app.get(['/api/status'], (req, res) => {
     status: 'online',
     agent_name: 'ROGER // Executive AI Voice OS',
     voice_engine: 'ElevenLabs Conversational AI',
-    agent_id: process.env.ELEVENLABS_AGENT_ID || 'agent_0101m51y56p2er5tny5gxe8sha5x',
+    agent_id: process.env.ELEVENLABS_AGENT_ID,
     lan_ip: lanIp,
     mobile_url: `http://${lanIp}:${PORT}`
   });
@@ -1619,7 +1598,7 @@ app.post(['/api/v1/content/:id/status', '/api/content/:id/status', '/api/marketi
     const item = await marketingService.updateContentStatus(req.params.id, status, 1);
     res.json({ success: true, item });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -1892,6 +1871,23 @@ app.get(['/api/v1/usage/summary', '/api/usage/summary'], async (req, res) => {
 // 10. ANGULAR CLIENT STATIC SERVING
 // ==========================================
 
+// Unknown API routes return JSON, not the SPA shell.
+app.use('/api', (req, res) => {
+  res.status(404).json({ success: false, error: 'Not found', code: 'NOT_FOUND' });
+});
+
+// Central error handler: log details server-side, return a safe message.
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  const status = err.status || err.statusCode || 500;
+  if (status >= 500) console.error('[api] Unhandled error:', err);
+  res.status(status).json({
+    success: false,
+    error: status >= 500 ? 'Internal server error' : err.message,
+    code: err.code || (status >= 500 ? 'INTERNAL' : 'BAD_REQUEST')
+  });
+});
+
 const ANGULAR_DIST_DIR = path.resolve(__dirname, '../frontend/dist/frontend/browser');
 
 if (require('fs').existsSync(ANGULAR_DIST_DIR)) {
@@ -1919,6 +1915,14 @@ if (require('fs').existsSync(ANGULAR_DIST_DIR)) {
 async function startServer() {
   try {
     await initDatabase();
+    try {
+      const { pending } = await require('./db/migrate').migrate({ statusOnly: true, log: () => {} });
+      if (pending.length) {
+        console.warn(`⚠️  ${pending.length} pending migration(s): ${pending.join(', ')}. Run "npm run migrate" in backend/ — Social Media Marketing needs them.`);
+      }
+    } catch (e) {
+      console.warn('Could not check migrations:', e.message);
+    }
     app.listen(PORT, '0.0.0.0', () => {
       console.log(`====================================================`);
       console.log(`TradeSage AI Enterprise Workforce Platform`);
@@ -1933,4 +1937,8 @@ async function startServer() {
   }
 }
 
-startServer();
+if (require.main === module) {
+  startServer();
+}
+
+module.exports = app;

@@ -337,11 +337,16 @@ async function seedMySQL() {
     `CREATE TABLE IF NOT EXISTS usage_ledger (
       id INT AUTO_INCREMENT PRIMARY KEY,
       workspace_id INT NOT NULL,
-      metric_type VARCHAR(100) NOT NULL,
-      units_consumed DECIMAL(10,2) NOT NULL,
-      cost_usd DECIMAL(10,4) NOT NULL,
+      category VARCHAR(100) NOT NULL DEFAULT 'general',
+      quantity DECIMAL(10,2) NOT NULL DEFAULT 1.00,
+      unit VARCHAR(50) DEFAULT 'unit',
+      estimated_cost DECIMAL(10,4) NOT NULL DEFAULT 0.0000,
+      metric_type VARCHAR(100) NULL,
+      units_consumed DECIMAL(10,2) NULL,
+      cost_usd DECIMAL(10,4) NULL,
       reference_type VARCHAR(100),
       reference_id INT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       recorded_at DATETIME DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 
@@ -576,6 +581,15 @@ async function seedMySQL() {
   await ensureColumn('client_replies', 'campaign_id', 'INT NULL');
   await ensureColumn('client_replies', 'customer_email', 'VARCHAR(255) NULL');
 
+  await ensureColumn('usage_ledger', 'category', "VARCHAR(100) NOT NULL DEFAULT 'general'");
+  await ensureColumn('usage_ledger', 'quantity', "DECIMAL(10,2) NOT NULL DEFAULT 1.00");
+  await ensureColumn('usage_ledger', 'unit', "VARCHAR(50) NOT NULL DEFAULT 'unit'");
+  await ensureColumn('usage_ledger', 'estimated_cost', "DECIMAL(10,4) NOT NULL DEFAULT 0.0000");
+  await ensureColumn('usage_ledger', 'created_at', "DATETIME DEFAULT CURRENT_TIMESTAMP");
+
+  await ensureColumn('email_drafts', 'html_body', 'LONGTEXT NULL');
+  await ensureColumn('email_drafts', 'body_html', 'LONGTEXT NULL');
+
   console.log('\n--- SEEDING FOUNDATIONAL RECORDS ---');
 
   // Seed Helper: Only insert if table is empty
@@ -796,7 +810,7 @@ async function seedMySQL() {
   // 11. Email Drafts
   await seedIfEmpty(
     'email_drafts',
-    'INSERT INTO email_drafts (workspace_id, product_id, lead_id, recipient_name, recipient_email, subject, body, html_body, angle, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO email_drafts (workspace_id, product_id, lead_id, recipient_name, recipient_email, subject, body, body_html, angle, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     [
       [
         1,
@@ -876,7 +890,7 @@ async function seedMySQL() {
       587,
       0,
       'emailapikey',
-      'Zoho-enczapikey wSsVR61//UbyX/wryDaudrhsmgsAVF31Rk9721WiuHeqGvGQocc6kRfGBg+mTvQaRW5gF2RH8LkonBgE0TMG2o8lzlsBXCiF9mqRe1U4J3x17qnvhDzKXWlYkxaMJYMOxAtsm2djFs8l+g==',
+      process.env.ZEPTOMAIL_TOKEN ? '[env:ZEPTOMAIL_TOKEN]' : '',
       'imap.zoho.com',
       993,
       1,

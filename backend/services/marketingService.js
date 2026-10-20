@@ -85,6 +85,9 @@ const PRODUCT_TEMPLATES = {
   ]
 };
 
+const PLATFORM_KEYS = { linkedin: 'linkedin', twitter: 'x', x: 'x', instagram: 'instagram', facebook: 'facebook' };
+const platformKey = (platform) => PLATFORM_KEYS[String(platform || '').toLowerCase()] || null;
+
 async function getCampaigns(workspaceId = 1) {
   return await all('SELECT * FROM campaigns WHERE workspace_id = ? ORDER BY id DESC', [workspaceId]);
 }
@@ -114,9 +117,9 @@ async function generateProductPost(workspaceId = 1, campaignId = 1, productKey =
 
   const result = await run(
     `INSERT INTO content_items (
-      workspace_id, campaign_id, content_type, title, caption_text, hashtags, call_to_action, platform, status, created_at
-    ) VALUES (?, ?, 'post', ?, ?, ?, ?, ?, 'Draft', ?)`,
-    [workspaceId, campaignId, picked.title, picked.captionText, picked.hashtags, picked.callToAction, picked.platform, now]
+      workspace_id, campaign_id, content_type, title, caption_text, hashtags, call_to_action, platform, platform_key, status, version, source, created_at
+    ) VALUES (?, ?, 'post', ?, ?, ?, ?, ?, ?, 'draft', 1, 'template', ?)`,
+    [workspaceId, campaignId, picked.title, picked.captionText, picked.hashtags, picked.callToAction, picked.platform, platformKey(picked.platform), now]
   );
 
   return {
@@ -128,28 +131,22 @@ async function generateProductPost(workspaceId = 1, campaignId = 1, productKey =
     hashtags: picked.hashtags,
     callToAction: picked.callToAction,
     platform: picked.platform,
-    status: 'Draft',
+    status: 'draft',
     createdAt: now
   };
 }
 
 async function updateContentStatus(contentId, newStatus, workspaceId = 1) {
-  const validStatuses = ['Draft', 'Pending Approval', 'Approved', 'Scheduled', 'Published', 'Rejected'];
-  if (!validStatuses.includes(newStatus)) {
-    throw new Error(`Invalid status: ${newStatus}`);
+  const LEGACY_MAP = { 'Draft': 'draft', 'Pending Approval': 'review', 'Rejected': 'rejected' };
+  const target = LEGACY_MAP[newStatus] || newStatus;
+  if (!['draft', 'review', 'rejected', 'cancelled'].includes(target)) {
+    const err = new Error('Approving, scheduling and publishing happen in Social Media Marketing so they are permission-checked, audited and confirmed by the platform.');
+    err.status = 409;
+    throw err;
   }
-
-  const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
-  let publishSql = '';
-  if (newStatus === 'Published') {
-    publishSql = `, published_at = '${now}'`;
-  } else if (newStatus === 'Scheduled') {
-    publishSql = `, scheduled_at = '${now}'`;
-  }
-
   await run(
-    `UPDATE content_items SET status = ? ${publishSql} WHERE id = ? AND workspace_id = ?`,
-    [newStatus, contentId, workspaceId]
+    "UPDATE content_items SET status = ?, updated_at = UTC_TIMESTAMP() WHERE id = ? AND workspace_id = ? AND status NOT IN ('scheduled', 'publishing', 'published')",
+    [target, contentId, workspaceId]
   );
 
   return await get('SELECT * FROM content_items WHERE id = ?', [contentId]);
@@ -205,24 +202,17 @@ Output strictly in JSON format with exactly these keys:
     console.warn('generateAiSocialPost AI fallback:', e.message);
   }
 
-  // Fallback if AI didn't return valid JSON
   if (!parsed || !parsed.caption_text) {
-    const key = (productKey && PRODUCT_TEMPLATES[productKey]) ? productKey : 'thrivewoo';
-    const templates = PRODUCT_TEMPLATES[key] || PRODUCT_TEMPLATES.thrivewoo;
-    const template = templates.find(t => t.platform.toLowerCase() === platform.toLowerCase()) || templates[0];
-    parsed = {
-      title: customTopic ? `${customTopic} - ${productName}` : template.title,
-      caption_text: template.captionText,
-      hashtags: template.hashtags,
-      call_to_action: template.callToAction
-    };
+    const err = new Error('No AI model produced a post. Configure an AI provider (e.g. GROQ_API_KEY) and try again.');
+    err.code = 'AI_UNAVAILABLE';
+    throw err;
   }
 
   const insertRes = await run(
     `INSERT INTO content_items (
-      workspace_id, campaign_id, content_type, title, caption_text, hashtags, call_to_action, platform, status, created_at
-    ) VALUES (?, ?, 'post', ?, ?, ?, ?, ?, 'Draft', ?)`,
-    [workspaceId, campaignId, parsed.title, parsed.caption_text, parsed.hashtags, parsed.call_to_action, platform, now]
+      workspace_id, campaign_id, content_type, title, caption_text, hashtags, call_to_action, platform, platform_key, status, version, source, created_at
+    ) VALUES (?, ?, 'post', ?, ?, ?, ?, ?, ?, 'draft', 1, 'roger_chat', ?)`,
+    [workspaceId, campaignId, parsed.title, parsed.caption_text, parsed.hashtags, parsed.call_to_action, platform, platformKey(platform), now]
   );
 
   return {
@@ -235,14 +225,17 @@ Output strictly in JSON format with exactly these keys:
     hashtags: parsed.hashtags,
     call_to_action: parsed.call_to_action,
     platform: platform,
-    status: 'Draft',
+    status: 'draft',
     created_at: now,
     product_name: productName
   };
 }
 
 async function deleteContentItem(contentId, workspaceId = 1) {
-  await run('DELETE FROM content_items WHERE id = ? AND workspace_id = ?', [contentId, workspaceId]);
+  await run(
+    "DELETE FROM content_items WHERE id = ? AND workspace_id = ? AND status NOT IN ('scheduled', 'publishing', 'published')",
+    [contentId, workspaceId]
+  );
   return { success: true, id: contentId };
 }
 

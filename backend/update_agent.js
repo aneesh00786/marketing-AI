@@ -1,8 +1,10 @@
+require('dotenv').config({ path: require('path').resolve(__dirname, '.env') });
 const fetch = globalThis.fetch || require('node-fetch');
 
 async function updateAgent() {
-  const key = 'sk_f0d956ae277bf6725699d28296b9110bf380495c71635b2d';
-  const agentId = 'agent_0101m51y56p2er5tny5gxe8sha5x';
+  const key = process.env.ELEVENLABS_API_KEY;
+  const agentId = process.env.ELEVENLABS_AGENT_ID;
+  if (!key || !agentId) throw new Error('Set ELEVENLABS_API_KEY and ELEVENLABS_AGENT_ID in backend/.env');
 
   const system_prompt = `You are Roger, personal executive AI assistant, B2B marketing strategist, and strategic business advisor to the founder.
 

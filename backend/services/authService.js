@@ -1,7 +1,19 @@
 const crypto = require('crypto');
 const { run, get, all } = require('../db/database');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'tradesage-enterprise-jwt-secret-key-2026';
+const MIN_SECRET_LENGTH = 32;
+
+// The signing secret must come from the environment. A missing secret is fatal in
+// production; in development a random per-process secret is used (tokens reset on restart).
+let JWT_SECRET = process.env.JWT_SECRET || '';
+if (JWT_SECRET.length < MIN_SECRET_LENGTH) {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(`JWT_SECRET must be set to at least ${MIN_SECRET_LENGTH} characters in production.`);
+  }
+  console.warn('[auth] JWT_SECRET missing or too short; using an ephemeral development secret.');
+  JWT_SECRET = crypto.randomBytes(48).toString('base64url');
+}
+const TOKEN_TTL_SECONDS = parseInt(process.env.JWT_TTL_SECONDS || String(60 * 60 * 12), 10);
 
 function hashPassword(password) {
   const salt = crypto.randomBytes(16).toString('hex');
@@ -14,13 +26,15 @@ function verifyPassword(password, storedHash) {
   const [salt, key] = storedHash.split(':');
   const keyBuffer = Buffer.from(key, 'hex');
   const derivedKey = crypto.scryptSync(password, salt, 64);
+  if (keyBuffer.length !== derivedKey.length) return false;
   return crypto.timingSafeEqual(keyBuffer, derivedKey);
 }
 
 function createToken(payload) {
   const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
-  const exp = Math.floor(Date.now() / 1000) + (60 * 60 * 24 * 7); // 7 days
-  const body = Buffer.from(JSON.stringify({ ...payload, exp })).toString('base64url');
+  const iat = Math.floor(Date.now() / 1000);
+  const exp = iat + TOKEN_TTL_SECONDS;
+  const body = Buffer.from(JSON.stringify({ ...payload, iat, exp })).toString('base64url');
   const signature = crypto.createHmac('sha256', JWT_SECRET).update(`${header}.${body}`).digest('base64url');
   return `${header}.${body}.${signature}`;
 }
@@ -31,7 +45,9 @@ function verifyToken(token) {
   if (parts.length !== 3) return null;
   const [header, body, signature] = parts;
   const expectedSig = crypto.createHmac('sha256', JWT_SECRET).update(`${header}.${body}`).digest('base64url');
-  if (expectedSig !== signature) return null;
+  const a = Buffer.from(expectedSig);
+  const b = Buffer.from(signature);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
 
   try {
     const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
@@ -48,6 +64,12 @@ async function registerUser(email, password, displayName, workspaceName = 'My Wo
   const cleanEmail = (email || '').toLowerCase().trim();
   if (!cleanEmail || !password) {
     throw new Error('Email and password are required.');
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+    throw new Error('Enter a valid email address.');
+  }
+  if (String(password).length < 10) {
+    throw new Error('Password must be at least 10 characters.');
   }
 
   const existing = await get('SELECT id FROM users WHERE email = ?', [cleanEmail]);
@@ -93,11 +115,14 @@ async function registerUser(email, password, displayName, workspaceName = 'My Wo
 
   // 5. Create default Subscription
   const starterPlan = await get('SELECT id FROM plans WHERE plan_key = ?', ['starter']);
-  await run(
-    `INSERT INTO subscriptions (workspace_id, plan_id, status, current_period_start, current_period_end, created_at)
-     VALUES (?, ?, 'Active', ?, date(?, '+30 days'), ?)`,
-    [workspaceId, starterPlan?.id || 1, now, now, now]
-  );
+  if (starterPlan) {
+    const periodEnd = new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString().replace('T', ' ').substring(0, 19);
+    await run(
+      `INSERT INTO subscriptions (workspace_id, plan_id, status, current_period_start, current_period_end, created_at)
+       VALUES (?, ?, 'Active', ?, ?, ?)`,
+      [workspaceId, starterPlan.id, now, periodEnd, now]
+    );
+  }
 
   const token = createToken({ userId, email: cleanEmail, workspaceId, role: 'Workspace Owner' });
 
@@ -120,21 +145,32 @@ async function loginUser(email, password) {
     throw new Error('Invalid email or password.');
   }
 
-  // Get workspace
-  const member = await get('SELECT * FROM workspace_members WHERE user_id = ? LIMIT 1', [user.id]);
-  const workspace = await get('SELECT * FROM workspaces WHERE id = ?', [member?.workspace_id || 1]);
+  if (user.status && user.status !== 'Active') {
+    throw new Error('This account is not active.');
+  }
+
+  // A user may only sign in to a workspace they are an active member of.
+  const member = await get(
+    "SELECT * FROM workspace_members WHERE user_id = ? AND status = 'Active' ORDER BY id ASC LIMIT 1",
+    [user.id]
+  );
+  if (!member) {
+    throw new Error('This account is not a member of any active workspace.');
+  }
+  const workspace = await get('SELECT * FROM workspaces WHERE id = ?', [member.workspace_id]);
 
   const token = createToken({
     userId: user.id,
     email: user.email,
-    workspaceId: workspace?.id || 1,
-    role: member?.role || 'Workspace Owner'
+    workspaceId: member.workspace_id,
+    role: member.role
   });
 
   return {
     token,
     user: { id: user.id, email: user.email, displayName: user.display_name },
-    workspace: workspace || { id: 1, name: 'TradeSage Enterprise', plan: 'Starter' }
+    workspace: workspace ? { id: workspace.id, name: workspace.name, slug: workspace.slug, plan: workspace.plan } : { id: member.workspace_id },
+    role: member.role
   };
 }
 

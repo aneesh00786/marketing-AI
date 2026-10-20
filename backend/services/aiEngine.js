@@ -4,7 +4,8 @@ const { get, all } = require('../db/database');
  * Universal Multi-Provider AI Inference Engine
  * Supports: Groq, OpenAI, Google Gemini, OpenRouter, Local Ollama, and Dynamic Generative Intelligence
  */
-async function generateAiResponse(prompt, systemInstruction = '', workspaceId = 1) {
+async function generateAiResponse(prompt, systemInstruction = '', workspaceId = 1, options = {}) {
+  const maxTokens = options.maxTokens || null;
   const query = (prompt || '').trim();
   if (!query) {
     return {
@@ -34,7 +35,7 @@ async function generateAiResponse(prompt, systemInstruction = '', workspaceId = 
             { role: 'user', content: query }
           ],
           temperature: 0.7,
-          max_tokens: isDraft ? 350 : 90
+          max_tokens: maxTokens || (isDraft ? 350 : 90)
         })
       });
 
@@ -58,7 +59,7 @@ async function generateAiResponse(prompt, systemInstruction = '', workspaceId = 
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'llama3',
+        model: process.env.OLLAMA_MODEL || 'llama3',
         prompt: `${systemInstruction ? systemInstruction + '\n\n' : ''}User: ${query}\nAssistant:`,
         stream: false
       }),
@@ -86,13 +87,13 @@ async function generateAiResponse(prompt, systemInstruction = '', workspaceId = 
           'Authorization': `Bearer ${apiKeyGroq}`
         },
         body: JSON.stringify({
-          model: 'llama-3.1-8b-instant',
+          model: process.env.GROQ_MODEL || 'llama-3.1-8b-instant',
           messages: [
             { role: 'system', content: systemInstruction || 'You are Roger, personal executive AI assistant and strategic business advisor to the founder.' },
             { role: 'user', content: query }
           ],
           temperature: 0.7,
-          max_tokens: 800
+          max_tokens: maxTokens || 800
         })
       });
       const data = await res.json();
@@ -115,13 +116,13 @@ async function generateAiResponse(prompt, systemInstruction = '', workspaceId = 
           'Authorization': `Bearer ${apiKeyOpenAI}`
         },
         body: JSON.stringify({
-          model: 'gpt-4o-mini',
+          model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
           messages: [
             { role: 'system', content: systemInstruction || 'You are Roger, personal executive AI assistant and strategic business advisor to the founder.' },
             { role: 'user', content: query }
           ],
           temperature: 0.7,
-          max_tokens: 800
+          max_tokens: maxTokens || 800
         })
       });
       const data = await res.json();
@@ -144,7 +145,8 @@ async function generateAiResponse(prompt, systemInstruction = '', workspaceId = 
           'Authorization': `Bearer ${apiKeyOpenRouter}`
         },
         body: JSON.stringify({
-          model: 'meta-llama/llama-3.1-8b-instruct:free',
+          model: process.env.OPENROUTER_MODEL || 'meta-llama/llama-3.1-8b-instruct:free',
+          ...(maxTokens ? { max_tokens: maxTokens } : {}),
           messages: [
             { role: 'system', content: systemInstruction || 'You are Roger, personal executive AI assistant and strategic business advisor to the founder.' },
             { role: 'user', content: query }
@@ -164,7 +166,7 @@ async function generateAiResponse(prompt, systemInstruction = '', workspaceId = 
   const apiKeyGemini = process.env.GEMINI_API_KEY;
   if (apiKeyGemini) {
     try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKeyGemini}`;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${process.env.GEMINI_MODEL || 'gemini-1.5-flash'}:generateContent?key=${apiKeyGemini}`;
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
