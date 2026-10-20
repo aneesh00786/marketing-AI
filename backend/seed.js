@@ -468,6 +468,7 @@ async function seedMySQL() {
       subject VARCHAR(255) NOT NULL,
       body LONGTEXT NULL,
       body_html LONGTEXT NULL,
+      html_body LONGTEXT NULL,
       body_text LONGTEXT NULL,
       tone VARCHAR(100) DEFAULT 'Professional',
       angle VARCHAR(150),
@@ -538,9 +539,12 @@ async function seedMySQL() {
   await ensureColumn('appointments', 'time', 'VARCHAR(100) NULL');
 
   await ensureColumn('email_drafts', 'product_name', 'VARCHAR(255) NULL');
+  await ensureColumn('email_drafts', 'body', 'LONGTEXT NULL');
   await ensureColumn('email_drafts', 'body_html', 'LONGTEXT NULL');
+  await ensureColumn('email_drafts', 'html_body', 'LONGTEXT NULL');
   await ensureColumn('email_drafts', 'body_text', 'LONGTEXT NULL');
   await ensureColumn('email_drafts', 'tone', "VARCHAR(100) DEFAULT 'Professional'");
+  await ensureColumn('email_drafts', 'angle', 'VARCHAR(255) NULL');
 
   await ensureColumn('b2b_clients', 'inquiry_details', 'TEXT NULL');
   await ensureColumn('b2b_clients', 'estimated_deal_value', "VARCHAR(100) DEFAULT '$15,000'");
@@ -550,7 +554,9 @@ async function seedMySQL() {
   await ensureColumn('email_campaigns', 'template_body', 'LONGTEXT NULL');
   await ensureColumn('email_campaigns', 'reply_count', 'INT DEFAULT 0');
 
+  await ensureColumn('emails', 'html_body', 'LONGTEXT NULL');
   await ensureColumn('emails', 'snippet', 'TEXT NULL');
+  await ensureColumn('emails', 'body', 'LONGTEXT NULL');
 
   await ensureColumn('connected_businesses', 'website', 'VARCHAR(255) NULL');
   await ensureColumn('connected_businesses', 'target_audience', 'TEXT NULL');
@@ -796,7 +802,7 @@ async function seedMySQL() {
   // 11. Email Drafts
   await seedIfEmpty(
     'email_drafts',
-    'INSERT INTO email_drafts (workspace_id, product_id, lead_id, recipient_name, recipient_email, subject, body, html_body, angle, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO email_drafts (workspace_id, product_id, lead_id, recipient_name, recipient_email, subject, body, body_html, html_body, body_text, angle, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     [
       [
         1,
@@ -830,6 +836,31 @@ async function seedMySQL() {
             <p style="font-size: 13px; color: #94a3b8; text-align: center; margin-top: 24px;">TradeSage Executive Team &bull; Powered by ThriveWoo B2B</p>
           </div>
         </div>`,
+        `<div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,0.06);">
+          <div style="background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); padding: 32px 28px; text-align: center; color: #ffffff;">
+            <h1 style="margin: 0; font-size: 24px; font-weight: 700;">ThriveWoo - Smart FMCG B2B Sales App</h1>
+            <p style="margin: 8px 0 0; font-size: 14px; opacity: 0.95;">Mobile Field Sales Ordering & Staff Performance Tracking</p>
+          </div>
+          <div style="padding: 32px 28px; color: #1e293b; line-height: 1.6;">
+            <p style="font-size: 16px; margin-top: 0;">Hi Michael,</p>
+            <p style="font-size: 15px; color: #475569;">Managing wholesale orders and van deliveries manually slows down your distribution and creates costly fulfillment discrepancies.</p>
+            <div style="background: #f8fafc; border-left: 4px solid #0284c7; padding: 16px 20px; margin: 24px 0; border-radius: 0 8px 8px 0;">
+              <h3 style="margin: 0 0 10px; font-size: 15px; color: #0284c7;">Built for High-Growth Field Sales:</h3>
+              <ul style="margin: 0; padding-left: 18px; color: #334155; font-size: 14px;">
+                <li>Mobile Field Sales Order Booking & Bluetooth Receipt Printing</li>
+                <li>Staff Performance Analysis & Category-Wise Target Tracking</li>
+                <li>Buying Pattern Analysis & Customer-Specific Discounts</li>
+                <li>Real-Time In-App Team Communication & Order Status Dashboard</li>
+              </ul>
+            </div>
+            <p style="font-size: 15px; color: #475569;">Would you have 15 minutes this Tuesday at 10 AM for a live screen walkthrough tailored to Apex Wholesale?</p>
+            <div style="text-align: center; margin: 32px 0 16px;">
+              <a href="https://thrivewoo.com" style="background: #0284c7; color: #ffffff; text-decoration: none; padding: 14px 28px; border-radius: 8px; font-weight: 600; font-size: 15px; display: inline-block;">Confirm Demo Walkthrough</a>
+            </div>
+            <p style="font-size: 13px; color: #94a3b8; text-align: center; margin-top: 24px;">TradeSage Executive Team &bull; Powered by ThriveWoo B2B</p>
+          </div>
+        </div>`,
+        'Hi Michael,\n\nManaging wholesale orders and van deliveries manually slows down distribution and creates double-entry discrepancies.\n\nThriveWoo gives your 14 sales reps live order booking, staff target tracking, and customer-specific discounts right on their phones.\n\nAre you available for a 15-minute demo this Tuesday at 10 AM?\n\nBest regards,\nExecutive Team',
         'Van Sales Order Booking & Staff Targets',
         'Approved',
         now
