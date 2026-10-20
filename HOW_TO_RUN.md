@@ -1,15 +1,15 @@
-# ROGER: Executive AI Voice OS & Multi-Business CRM
+# MARK: Executive AI Voice OS & Multi-Business CRM
 ### Complete Setup & Execution Guide
 
 ---
 
 ## 1. System Overview
 
-**Roger** is an enterprise executive AI voice assistant and CRM constructed with an **Angular 17** frontend and a **Node.js / Express** backend.
+**Mark** is an enterprise executive AI voice assistant and CRM constructed with an **Angular 17** frontend and a **Node.js / Express** backend.
 
 ### Key Capabilities Included:
 1. **🎙️ Neural Voice Center (ElevenLabs Full-Duplex Voice):**
-   - Hands-free conversational voice assistant (Voice: British Executive "Roger").
+   - Hands-free conversational voice assistant (voice selected in your ElevenLabs agent).
    - Real-time full-duplex audio stream via signed WebSocket URL.
    - Zero-credit standby protection (uses 0 ElevenLabs credits on idle).
    - Live spoken conversation transcript and real-time text command bar.
@@ -25,7 +25,7 @@
 4. **📬 Email Command Center (Mail Getting & Sending):**
    - **Mail Getting (Inbox):** Urgent priority digest with read/unread tracking and incoming client replies (Apex Wholesale, Metro Academy, Horizon Beverage).
    - **Need to Send Mail (Outbox):** Dedicated email composition & dispatch modal. Live timestamping and database logging of all sent emails.
-   - **Voice Email Dispatch:** Tell Roger via voice: *"Roger, send an email to Michael Chang saying..."* and Roger automatically logs and dispatches the email.
+   - **Voice Email Dispatch:** Tell Mark via voice: *"Mark, send an email to Michael Chang saying..."* and Mark automatically logs and dispatches the email.
 5. **📅 Scheduled Appointments & Demos:**
    - Demonstrations calendar with date, time, and service type.
    - Booking modal and 1-click test simulation.
@@ -64,7 +64,7 @@
      ```
      http://localhost:8000/
      ```
-   - Start the Roger Executive Voice OS backend server.
+   - Start the Mark Executive Voice OS backend server.
 
 ---
 
@@ -89,7 +89,7 @@ node server.js
 You will see:
 ```
 ====================================================
-TradeSage AI Enterprise Workforce Platform
+Marketech.ai — AI Marketing Workspace
 Running on: http://localhost:8000
 LAN Access: http://192.168.x.x:8000
 ====================================================
@@ -157,11 +157,11 @@ Once built, restart `node server.js` in the `backend` folder to serve the update
 Once the app is running in your browser:
 1. Click the top blue banner or click the glowing **Voice Orb** to connect ElevenLabs.
 2. Speak in English (or type into the command bar):
-   - *"Roger, what are our recent client replies?"*
-   - *"Roger, give me marketing ideas for my business."*
-   - *"Roger, give me marketing ideas for Metro Central School District."*
-   - *"Roger, send an email to Michael Chang saying our team will call him tomorrow at 2 PM."*
-   - *"Roger, what are our hardware system stats?"*
+   - *"Mark, what are our recent client replies?"*
+   - *"Mark, give me marketing ideas for my business."*
+   - *"Mark, give me marketing ideas for Metro Central School District."*
+   - *"Mark, send an email to Michael Chang saying our team will call him tomorrow at 2 PM."*
+   - *"Mark, what are our hardware system stats?"*
 3. Explore the dedicated tabs:
    - **👥 Leads CRM:** Track leads and 1-click email prospects.
    - **📬 Email Command Center:** View inbox replies and send outbound emails.

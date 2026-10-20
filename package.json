@@ -1,7 +1,7 @@
 {
   "name": "marketing-ai",
   "version": "1.0.0",
-  "description": "Marketing AI - Autonomous B2B Sales & Marketing Platform with Roger Voice OS",
+  "description": "Marketing AI - Autonomous B2B Sales & Marketing Platform with Mark Voice OS",
   "scripts": {
     "start": "cd backend && node server.js",
     "seed": "cd backend && node seed.js",

@@ -1,8 +1,8 @@
-# Roger - Marketing AI Platform PowerShell Launcher
+# Mark - Marketing AI Platform PowerShell Launcher
 Set-Location -Path $PSScriptRoot
 
 Write-Host "=======================================================" -ForegroundColor Cyan
-Write-Host "  ROGER // Marketing AI Platform & Executive Voice OS" -ForegroundColor White
+Write-Host "  MARK // Marketing AI Platform & Executive Voice OS" -ForegroundColor White
 Write-Host "=======================================================" -ForegroundColor Cyan
 
 Set-Location -Path (Join-Path $PSScriptRoot "backend")
@@ -25,5 +25,5 @@ Start-Process node -ArgumentList "workers/socialWorker.js" -WorkingDirectory (Ge
 Write-Host "`n[3/3] Opening browser at http://localhost:8000 ..." -ForegroundColor Cyan
 Start-Process "http://localhost:8000"
 
-Write-Host "`nStarting Roger Executive Platform on port 8000..." -ForegroundColor Green
+Write-Host "`nStarting Mark Executive Platform on port 8000..." -ForegroundColor Green
 node server.js

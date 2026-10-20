@@ -11,7 +11,7 @@ import { AuthStateService } from './auth-state.service';
   template: `
     <div class="login-wrap">
       <form class="login-card" (ngSubmit)="submit()" autocomplete="on">
-        <div class="brand"><div class="mark" aria-hidden="true"><span></span></div><h1>TradeSage AI <span>Roger · AI Workforce</span></h1></div>
+        <div class="brand"><div class="mark" aria-hidden="true"><span></span></div><h1>Marketech.ai <span>Mark · AI Workforce</span></h1></div>
         <p class="sub">{{ mode === 'login' ? 'Sign in to your workspace' : 'Create a workspace' }}</p>
         <div *ngIf="expired" class="note">Your session ended. Please sign in again.</div>
         <label>Email<input name="email" type="email" [(ngModel)]="email" required autocomplete="username" /></label>

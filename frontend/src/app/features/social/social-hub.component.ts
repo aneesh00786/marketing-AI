@@ -41,7 +41,7 @@ export class SocialHubComponent implements OnInit, OnDestroy {
     { key: 'queue', label: 'Publishing Queue', icon: '🚀' },
     { key: 'analytics', label: 'Analytics & Reports', icon: '📊' },
     { key: 'inbox', label: 'Engagement Inbox', icon: '💬' },
-    { key: 'strategist', label: 'Roger AI Strategist', icon: '🧠' },
+    { key: 'strategist', label: 'Mark AI Strategist', icon: '🧠' },
     { key: 'settings', label: 'Social Settings', icon: '⚙️' }
   ];
   readonly platforms = PLATFORMS;
@@ -673,7 +673,7 @@ export class SocialHubComponent implements OnInit, OnDestroy {
 
   copyForManualPosting(): void {
     navigator.clipboard?.writeText(this.previewText()).then(
-      () => this.notify('Copied. Post it manually on the platform — TradeSage will not mark it as published.'),
+      () => this.notify('Copied. Post it manually on the platform — Marketech.ai will not mark it as published.'),
       () => this.notify('Copy failed; select the preview text instead.')
     );
   }

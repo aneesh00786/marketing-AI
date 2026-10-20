@@ -56,7 +56,7 @@ export class AppComponent implements OnInit, OnDestroy {
     {
       label: 'Assistant',
       items: [
-        { route: 'voice', label: 'Roger Voice Center', icon: 'voice', subtitle: 'Talk to Roger, your AI executive assistant' }
+        { route: 'voice', label: 'Mark Voice Center', icon: 'voice', subtitle: 'Talk to Mark, your AI executive assistant' }
       ]
     }
   ];
@@ -160,7 +160,7 @@ export class AppComponent implements OnInit, OnDestroy {
     imap_tls: true,
     imap_user: '',
     imap_pass: '',
-    sender_name: 'Roger Executive Team',
+    sender_name: '',
     sender_email: '',
     status: 'Not Configured',
     has_smtp_auth: false,
@@ -177,7 +177,7 @@ export class AppComponent implements OnInit, OnDestroy {
   // Server Status & Mobile LAN
   serverStatus: any = {
     status: 'online',
-    agent_name: 'ROGER // Executive AI Voice & Marketing OS',
+    agent_name: 'MARK // Executive AI Voice & Marketing OS',
     voice_engine: 'ElevenLabs Conversational AI',
     lan_ip: '127.0.0.1',
     mobile_url: 'http://localhost:8000'
@@ -186,7 +186,7 @@ export class AppComponent implements OnInit, OnDestroy {
   // Voice HUD State (ElevenLabs Full-Duplex Real-Time)
   isElevenLabsConnected: boolean = false;
 
-  // "Always listening" switch: keeps a Roger voice session open and reconnects it if it drops.
+  // "Always listening" switch: keeps a Mark voice session open and reconnects it if it drops.
   voiceAlwaysOn = false;
   voiceConnecting = false;
   voiceNeedsGesture = false;
@@ -197,15 +197,15 @@ export class AppComponent implements OnInit, OnDestroy {
   private readonly voiceMaxRetries = 6;
   private voiceGestureHandler: (() => void) | null = null;
   elevenLabsMode: 'listening' | 'speaking' = 'listening';
-  callStatusText: string = 'SAY "HELLO ROGER" OR TAP ORB';
-  callSubText: string = 'Speak naturally to converse with Roger in real time';
+  callStatusText: string = 'SAY "HELLO MARK" OR TAP ORB';
+  callSubText: string = 'Speak naturally to converse with Mark in real time';
   callTimer: string = '00:00';
   private timerInterval: any = null;
   private callSeconds: number = 0;
 
   dialogueTranscript: Array<{ sender: string; text: string; role: 'user' | 'agent'; time?: string }> = [
     {
-      sender: 'ROGER',
+      sender: 'MARK',
       text: 'Standing by, sir. Tap the orb or speak in English. I can extract features for your digital products, score leads, draft approved HTML emails, and execute marketing campaigns for ThriveWoo or any connected client.',
       role: 'agent',
       time: 'Ready'
@@ -271,6 +271,7 @@ export class AppComponent implements OnInit, OnDestroy {
   // 4. Mail Drafts & Approvals Workflow (Human-in-the-loop)
   drafts: any[] = [];
   selectedDraft: any = null;
+  draftRecipientEdit = { name: '', email: '' };
   isGeneratingDraft: boolean = false;
   isRewritingDraft: boolean = false;
   newDraftForm = {
@@ -286,6 +287,15 @@ export class AppComponent implements OnInit, OnDestroy {
   selectedBusiness: any = null;
   generatedIdeas: any[] = [];
   isGeneratingIdeas: boolean = false;
+  playbookProductId: number | null = null;
+  playbookGoal = '';
+  playbookError = '';
+  playbookMissing: string[] = [];
+  dispatchIdea: any = null;
+  dispatchSubject = '';
+  dispatchBody = '';
+  dispatchLeadIds = new Set<number>();
+  isDispatching = false;
   showNewBusinessModal: boolean = false;
   newBusiness = {
     name: '',
@@ -328,6 +338,7 @@ export class AppComponent implements OnInit, OnDestroy {
     if (this.auth.isLoggedIn) {
       this.loadWorkspaceData();
       this.restoreVoiceAlwaysOn();
+      this.checkVoiceReadiness();
     }
   }
 
@@ -359,6 +370,42 @@ export class AppComponent implements OnInit, OnDestroy {
   onLoggedIn(): void {
     this.loadWorkspaceData();
     this.restoreVoiceAlwaysOn();
+    this.checkVoiceReadiness();
+  }
+
+  /**
+   * Login notice when the voice agent cannot work (no ElevenLabs credits, bad key, missing agent).
+   * Shown once per browser session; an unknown result (e.g. ElevenLabs unreachable) shows nothing.
+   */
+  voiceNotice: { status: string; message: string; remainingCredits?: number; creditLimit?: number; resetsAt?: string | null } | null = null;
+  private readonly VOICE_NOTICE_KEY = 'marketech_voice_notice_shown';
+
+  checkVoiceReadiness(): void {
+    try { if (sessionStorage.getItem(this.VOICE_NOTICE_KEY) === '1') return; } catch { /* storage unavailable */ }
+    this.apiService.getVoiceStatus().subscribe({
+      next: (res) => {
+        const v = res?.voice;
+        if (v && v.available === false) {
+          this.voiceNotice = v;
+          try { sessionStorage.setItem(this.VOICE_NOTICE_KEY, '1'); } catch { /* storage unavailable */ }
+        }
+      },
+      error: () => { /* voice not available to this workspace or check failed: no notice */ }
+    });
+  }
+
+  dismissVoiceNotice(): void {
+    this.voiceNotice = null;
+  }
+
+  get voiceNoticeTitle(): string {
+    switch (this.voiceNotice?.status) {
+      case 'no_credits': return 'No voice credits left';
+      case 'not_configured': return 'Voice agent not set up';
+      case 'agent_not_found': return 'Voice agent not found';
+      case 'workspace_unavailable': return 'Voice not available in this workspace';
+      default: return 'Voice agent unavailable';
+    }
   }
 
   logout(): void {
@@ -367,6 +414,8 @@ export class AppComponent implements OnInit, OnDestroy {
     this.removeVoiceGestureHandler();
     this.isElevenLabsConnected = false;
     this.speechService.stopElevenLabsSession();
+    this.voiceNotice = null;
+    try { sessionStorage.removeItem(this.VOICE_NOTICE_KEY); } catch { /* storage unavailable */ }
     this.auth.clear();
   }
 
@@ -422,7 +471,7 @@ export class AppComponent implements OnInit, OnDestroy {
     }
   }
 
-  /** Dashboard switch: on = keep Roger listening (same session as "Call Roger"), off = end it. */
+  /** Dashboard switch: on = keep Mark listening (same session as "Call Mark"), off = end it. */
   setVoiceAlwaysOn(on: boolean): void {
     this.voiceAlwaysOn = on;
     try { localStorage.setItem('tradesage_voice_always_on', on ? '1' : '0'); } catch { /* storage unavailable */ }
@@ -443,7 +492,7 @@ export class AppComponent implements OnInit, OnDestroy {
     if (this.voiceNeedsGesture) return 'Click anywhere to start listening';
     if (this.voiceReconnectPaused) return 'Paused after repeated connection errors';
     if (this.voiceConnecting) return this.voiceRetry > 0 ? 'Reconnecting…' : 'Connecting…';
-    if (this.isElevenLabsConnected) return this.elevenLabsMode === 'speaking' ? 'Roger is speaking' : 'Listening for your command';
+    if (this.isElevenLabsConnected) return this.elevenLabsMode === 'speaking' ? 'Mark is speaking' : 'Listening for your command';
     return this.voiceRetry > 0 ? 'Connection failed — retrying…' : 'Starting…';
   }
 
@@ -456,7 +505,7 @@ export class AppComponent implements OnInit, OnDestroy {
     if (!this.voiceAlwaysOn || this.voiceRetryTimer || this.voiceConnecting) return;
     if (this.voiceRetry >= this.voiceMaxRetries) {
       this.voiceReconnectPaused = true;
-      this.showToast('Roger voice paused after repeated connection errors. Toggle the switch to retry.');
+      this.showToast('Mark voice paused after repeated connection errors. Toggle the switch to retry.');
       return;
     }
     const delay = Math.min(2000 * Math.pow(2, this.voiceRetry), 30000);
@@ -512,7 +561,7 @@ export class AppComponent implements OnInit, OnDestroy {
           this.callStatusText = 'CONVERSATION ACTIVE (SPEAK IN ENGLISH)';
           this.callSubText = '🎙️ Real-time full-duplex voice active. Speak naturally.';
           this.startCallTimer();
-          this.showToast('Connected to Roger (ElevenLabs Conversational AI)');
+          this.showToast('Connected to Mark (ElevenLabs Conversational AI)');
         },
         onDisconnect: () => this.onElevenLabsDisconnected(),
         onError: (err) => {
@@ -521,7 +570,7 @@ export class AppComponent implements OnInit, OnDestroy {
         },
         onMessage: (msg) => {
           this.dialogueTranscript.unshift({
-            sender: msg.role === 'agent' ? 'ROGER' : 'YOU',
+            sender: msg.role === 'agent' ? 'MARK' : 'YOU',
             text: msg.text,
             role: msg.role === 'agent' ? 'agent' : 'user',
             time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -556,10 +605,10 @@ export class AppComponent implements OnInit, OnDestroy {
     this.isElevenLabsConnected = false;
     this.voiceConnecting = false;
     this.stopCallTimer();
-    this.callStatusText = 'SAY "HELLO ROGER" OR TAP ORB';
-    this.callSubText = 'Speak naturally to converse with Roger in real time';
+    this.callStatusText = 'SAY "HELLO MARK" OR TAP ORB';
+    this.callSubText = 'Speak naturally to converse with Mark in real time';
     if (this.voiceAlwaysOn) this.scheduleVoiceReconnect();
-    else if (wasConnected) this.showToast('Roger voice session disconnected.');
+    else if (wasConnected) this.showToast('Mark voice session disconnected.');
   }
 
   async disconnectElevenLabs(): Promise<void> {
@@ -568,9 +617,9 @@ export class AppComponent implements OnInit, OnDestroy {
     await this.speechService.stopElevenLabsSession();
     this.isElevenLabsConnected = false;
     this.stopCallTimer();
-    this.callStatusText = 'SAY "HELLO ROGER" OR TAP ORB';
-    this.callSubText = 'Speak naturally to converse with Roger in real time';
-    this.showToast('Roger voice session disconnected.');
+    this.callStatusText = 'SAY "HELLO MARK" OR TAP ORB';
+    this.callSubText = 'Speak naturally to converse with Mark in real time';
+    this.showToast('Mark voice session disconnected.');
   }
 
   private startCallTimer(): void {
@@ -612,7 +661,7 @@ export class AppComponent implements OnInit, OnDestroy {
       next: (res) => {
         this.isProcessingChat = false;
         this.dialogueTranscript.unshift({
-          sender: 'ROGER',
+          sender: 'MARK',
           text: res.reply || 'Acknowledged, sir.',
           role: 'agent',
           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -624,7 +673,7 @@ export class AppComponent implements OnInit, OnDestroy {
       error: (err) => {
         this.isProcessingChat = false;
         this.dialogueTranscript.unshift({
-          sender: 'ROGER',
+          sender: 'MARK',
           text: `Apologies sir, error processing request: ${err.message}`,
           role: 'agent',
           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -1019,6 +1068,7 @@ export class AppComponent implements OnInit, OnDestroy {
       this.showToast('Recipient email and subject are required');
       return;
     }
+    if (!confirm(`Send "${this.composeEmail.subject}" to ${this.composeEmail.recipient_email} now?`)) return;
 
     if (this.composeEmail.is_html && this.composeEmail.html_body) {
       this.apiService.sendHtmlEmail({
@@ -1027,22 +1077,22 @@ export class AppComponent implements OnInit, OnDestroy {
         subject: this.composeEmail.subject,
         html_body: this.composeEmail.html_body,
         body_text: this.composeEmail.body
-      }).subscribe({
+      }, true).subscribe({
         next: (res) => {
           this.showToast(res.message);
           this.showComposeModal = false;
           this.loadEmails();
         },
-        error: (err) => this.showToast(`Error sending HTML email: ${err.message}`)
+        error: (err) => this.showToast(`Email not sent: ${this.apiError(err)}`)
       });
     } else {
-      this.apiService.sendEmail(this.composeEmail).subscribe({
+      this.apiService.sendEmail(this.composeEmail, true).subscribe({
         next: (res) => {
           this.showToast(res.message);
           this.showComposeModal = false;
           this.loadEmails();
         },
-        error: (err) => this.showToast(`Error sending email: ${err.message}`)
+        error: (err) => this.showToast(`Email not sent: ${this.apiError(err)}`)
       });
     }
   }
@@ -1106,7 +1156,7 @@ export class AppComponent implements OnInit, OnDestroy {
       next: (res) => {
         this.drafts = res.drafts || [];
         if (this.drafts.length > 0 && !this.selectedDraft) {
-          this.selectedDraft = this.drafts[0];
+          this.selectDraft(this.drafts[0]);
         }
       },
       error: (err) => console.warn('Error loading drafts:', err)
@@ -1120,7 +1170,7 @@ export class AppComponent implements OnInit, OnDestroy {
         this.isGeneratingDraft = false;
         this.showToast(res.message);
         this.loadDrafts();
-        this.selectedDraft = res.draft;
+        this.selectDraft(res.draft);
       },
       error: (err) => {
         this.isGeneratingDraft = false;
@@ -1135,7 +1185,7 @@ export class AppComponent implements OnInit, OnDestroy {
       next: (res) => {
         this.isRewritingDraft = false;
         this.showToast(res.message);
-        this.selectedDraft = res.draft;
+        this.selectDraft(res.draft);
         this.loadDrafts();
       },
       error: (err) => {
@@ -1145,34 +1195,64 @@ export class AppComponent implements OnInit, OnDestroy {
     });
   }
 
+  selectDraft(draft: any): void {
+    this.selectedDraft = draft;
+    this.draftRecipientEdit = { name: draft?.recipient_name || '', email: draft?.recipient_email || '' };
+  }
+
+  /** Server error text (e.g. "Approve the draft before sending it.") rather than the generic HTTP message. */
+  apiError(err: any): string {
+    return err?.error?.error || err?.message || 'Request failed';
+  }
+
+  saveDraftRecipient(draft: any): void {
+    this.apiService.updateMailDraft(draft.id, { recipient_name: this.draftRecipientEdit.name.trim(), recipient_email: this.draftRecipientEdit.email.trim() }).subscribe({
+      next: (res) => {
+        this.showToast(res.message);
+        this.selectDraft(res.draft);
+        this.loadDrafts();
+      },
+      error: (err) => this.showToast(`Recipient not saved: ${this.apiError(err)}`)
+    });
+  }
+
   approveDraft(draft: any): void {
     this.apiService.approveMailDraft(draft.id).subscribe({
       next: (res) => {
         this.showToast(res.message);
         this.loadDrafts();
-        if (this.selectedDraft?.id === draft.id) {
-          this.selectedDraft.status = 'Approved';
-        }
+        if (this.selectedDraft?.id === draft.id) this.selectDraft(res.draft);
       },
-      error: (err) => this.showToast(`Approval error: ${err.message}`)
+      error: (err) => this.showToast(`Approval error: ${this.apiError(err)}`)
     });
   }
 
+  // Sending always asks for explicit confirmation; an unapproved draft is approved first.
   sendApprovedDraft(draft: any): void {
-    if (draft.status !== 'Approved') {
-      const confirmApprove = confirm(`Draft is currently in '${draft.status}' status. Do you approve sending this email to ${draft.recipient_email}?`);
-      if (!confirmApprove) return;
+    if (!draft.recipient_email) {
+      this.showToast('Add a recipient email address before sending.');
+      return;
     }
-    this.apiService.sendMailDraft(draft.id).subscribe({
+    if (!confirm(`Send "${draft.subject}" to ${draft.recipient_email} now? This cannot be undone.`)) return;
+    const send = () => this.apiService.sendMailDraft(draft.id, true).subscribe({
       next: (res) => {
         this.showToast(res.message);
         this.loadDrafts();
         this.loadEmails();
-        if (this.selectedDraft?.id === draft.id) {
-          this.selectedDraft.status = 'Sent';
-        }
+        if (this.selectedDraft?.id === draft.id) this.selectedDraft.status = 'Sent';
       },
-      error: (err) => this.showToast(`Dispatch error: ${err.message}`)
+      error: (err) => {
+        this.showToast(`Email not sent: ${this.apiError(err)}`);
+        this.loadDrafts();
+      }
+    });
+    if (draft.status === 'Approved') {
+      send();
+      return;
+    }
+    this.apiService.approveMailDraft(draft.id).subscribe({
+      next: () => send(),
+      error: (err) => this.showToast(`Email not sent: ${this.apiError(err)}`)
     });
   }
 
@@ -1203,39 +1283,78 @@ export class AppComponent implements OnInit, OnDestroy {
     });
   }
 
+  // Selecting a business never generates anything; generation is an explicit click.
   selectBusiness(biz: any): void {
+    if (this.selectedBusiness?.id === biz?.id) return;
     this.selectedBusiness = biz;
-    this.generateIdeasForSelectedBusiness();
+    this.generatedIdeas = [];
+    this.playbookError = '';
+    this.playbookMissing = [];
   }
 
   generateIdeasForSelectedBusiness(): void {
-    if (!this.selectedBusiness) return;
+    if (!this.selectedBusiness || this.isGeneratingIdeas) return;
     this.isGeneratingIdeas = true;
-    this.apiService.generateMarketingIdeas(this.selectedBusiness.id, this.selectedBusiness.name).subscribe({
+    this.playbookError = '';
+    this.apiService.generateMarketingIdeas({ businessId: this.selectedBusiness.id, productId: this.playbookProductId, goal: this.playbookGoal.trim() || undefined }).subscribe({
       next: (res) => {
         this.isGeneratingIdeas = false;
         this.generatedIdeas = res.ideas || [];
+        this.playbookMissing = res.missing_context || [];
       },
       error: (err) => {
         this.isGeneratingIdeas = false;
-        this.showToast(`Error generating ideas: ${err.message}`);
+        this.generatedIdeas = [];
+        this.playbookError = err?.error?.code === 'AI_UNAVAILABLE' || err?.status === 503
+          ? `AI is unavailable, so no playbooks were generated. ${this.apiError(err)}`
+          : `Playbooks were not generated: ${this.apiError(err)}`;
       }
     });
   }
 
-  dispatchCampaignToLeads(idea: any): void {
+  openDispatch(idea: any): void {
+    this.dispatchIdea = idea;
+    this.dispatchSubject = idea.subject || '';
+    this.dispatchBody = idea.email_body || '';
+    this.dispatchLeadIds = new Set<number>();
+  }
+
+  closeDispatch(): void {
+    this.dispatchIdea = null;
+  }
+
+  toggleDispatchLead(id: number): void {
+    if (this.dispatchLeadIds.has(id)) this.dispatchLeadIds.delete(id);
+    else this.dispatchLeadIds.add(id);
+  }
+
+  get dispatchSelectedCount(): number {
+    return this.dispatchLeadIds.size;
+  }
+
+  confirmDispatch(): void {
+    if (!this.dispatchIdea || !this.dispatchLeadIds.size) return;
+    this.isDispatching = true;
     this.apiService.dispatchCampaign({
       businessId: this.selectedBusiness?.id,
-      subject: idea.subject || `Exclusive Solution from ${this.selectedBusiness?.name}`,
-      body: idea.summary + '\n\n' + idea.conversionTip
+      productId: this.playbookProductId,
+      subject: this.dispatchSubject.trim(),
+      body: this.dispatchBody.trim(),
+      leadIds: [...this.dispatchLeadIds]
     }).subscribe({
       next: (res) => {
+        this.isDispatching = false;
         this.showToast(res.message);
-        this.loadEmails();
+        this.dispatchIdea = null;
+        this.loadDrafts();
       },
-      error: (err) => this.showToast(`Error dispatching campaign: ${err.message}`)
+      error: (err) => {
+        this.isDispatching = false;
+        this.showToast(`Drafts not created: ${this.apiError(err)}`);
+      }
     });
   }
+
 
   submitNewBusiness(): void {
     if (!this.newBusiness.name || !this.newBusiness.industry) return;
@@ -1283,7 +1402,7 @@ export class AppComponent implements OnInit, OnDestroy {
       next: (res) => {
         this.executiveBriefing = res.briefing;
         this.dialogueTranscript.unshift({
-          sender: 'ROGER',
+          sender: 'MARK',
           text: res.briefing?.spokenSummary || 'Executive briefing compiled.',
           role: 'agent',
           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })

@@ -8,11 +8,11 @@
     <div class="voice-switch" [class.on]="voiceOn" [class.live]="voiceLive">
       <span class="vs-orb" aria-hidden="true"></span>
       <span class="vs-text">
-        <strong id="voice-switch-label">Roger voice · always listening</strong>
+        <strong id="voice-switch-label">Mark voice · always listening</strong>
         <small aria-live="polite">{{ voiceStatus }}</small>
       </span>
       <button type="button" class="switch" role="switch" [attr.aria-checked]="voiceOn" aria-labelledby="voice-switch-label"
-              (click)="voiceToggle.emit(!voiceOn)" [title]="voiceOn ? 'Turn off: end the voice session' : 'Turn on: Roger listens for your commands'">
+              (click)="voiceToggle.emit(!voiceOn)" [title]="voiceOn ? 'Turn off: end the voice session' : 'Turn on: Mark listens for your commands'">
         <span class="knob"></span>
       </button>
     </div>
@@ -104,7 +104,7 @@
       </button>
     </div>
 
-    <!-- Performance over time + Roger insights -->
+    <!-- Performance over time + Mark insights -->
     <div class="grid-main">
       <section class="card" id="dash-performance">
         <header class="card-head">
@@ -130,7 +130,7 @@
       <section class="card insights">
         <header class="card-head">
           <div>
-            <h3><span class="roger-dot" aria-hidden="true"></span>Roger AI insights</h3>
+            <h3><span class="roger-dot" aria-hidden="true"></span>Mark AI insights</h3>
             <p class="muted small">Computed from your stored data. Nothing is estimated.</p>
           </div>
         </header>
@@ -145,7 +145,7 @@
           </button>
           <div class="empty-mini" *ngIf="!data.insights.length">Not enough activity yet for insights. Publish content to start building a performance history.</div>
         </div>
-        <button class="btn-sm ghost" (click)="go({ route: 'social', section: 'strategist' })">Ask Roger for a deeper analysis</button>
+        <button class="btn-sm ghost" (click)="go({ route: 'social', section: 'strategist' })">Ask Mark for a deeper analysis</button>
       </section>
     </div>
 
@@ -220,7 +220,7 @@
         <ng-template #noCampaigns>
           <div class="empty-block">
             <strong>No campaigns yet</strong>
-            <span class="muted">Create a campaign and Roger will draft platform-specific posts from your real product facts.</span>
+            <span class="muted">Create a campaign and Mark will draft platform-specific posts from your real product facts.</span>
             <button class="btn-sm primary" (click)="go({ route: 'social', section: 'campaigns' })">Create a campaign</button>
           </div>
         </ng-template>

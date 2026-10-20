@@ -1,14 +1,14 @@
-# Roger AI: Executive AI Voice OS & Marketing Platform
+# Mark AI: Executive AI Voice OS & Marketing Platform
 ## Complete Product Specification & Architectural Blueprint
 
 ---
 
 ## 1. Executive Summary & Product Vision
 
-**Roger AI** is an enterprise-grade AI Executive Assistant, Marketing Orchestration Engine, and B2B Sales Acceleration Platform built with **Angular 18**, **Node.js / Express**, and **MySQL**. It is designed to act as a real-time, spoken chief of staff for the founder—listening to spoken voice, extracting product features in real-time, qualifying leads with AI, drafting high-converting sales emails, and executing multi-channel campaigns.
+**Mark AI** is an enterprise-grade AI Executive Assistant, Marketing Orchestration Engine, and B2B Sales Acceleration Platform built with **Angular 18**, **Node.js / Express**, and **MySQL**. It is designed to act as a real-time, spoken chief of staff for the founder—listening to spoken voice, extracting product features in real-time, qualifying leads with AI, drafting high-converting sales emails, and executing multi-channel campaigns.
 
 ### Key Capabilities:
-1. **Personal Chief of Staff & Executive Voice (Roger):**
+1. **Personal Chief of Staff & Executive Voice (Mark):**
    - Live full-duplex conversational voice assistant powered by ElevenLabs.
    - On-demand lead scoring, automated email drafting, strategy recommendations, and operational task delegation.
 2. **Real-Time Live Web Product Extractor:**

@@ -6,8 +6,8 @@
     <div class="sidebar-brand">
       <div class="brand-mark" aria-hidden="true"><span></span></div>
       <div class="brand-text">
-        <span class="brand-name">TradeSage AI</span>
-        <span class="brand-sub">Roger · AI Workforce</span>
+        <span class="brand-name">Marketech.ai</span>
+        <span class="brand-sub">Mark · AI Workforce</span>
       </div>
       <button class="icon-btn sidebar-close" (click)="mobileNavOpen = false" aria-label="Close navigation"><app-icon name="x"></app-icon></button>
     </div>
@@ -26,10 +26,10 @@
 
     <div class="sidebar-footer">
       <button class="roger-card" [class.live]="isElevenLabsConnected" (click)="toggleElevenLabsCall()"
-              [title]="isElevenLabsConnected ? 'End Roger voice session' : 'Start a hands-free voice session with Roger'">
+              [title]="isElevenLabsConnected ? 'End Mark voice session' : 'Start a hands-free voice session with Mark'">
         <span class="roger-orb" aria-hidden="true"></span>
         <span class="roger-text">
-          <strong>{{ isElevenLabsConnected ? 'Roger is live' : 'Talk to Roger' }}</strong>
+          <strong>{{ isElevenLabsConnected ? 'Mark is live' : 'Talk to Mark' }}</strong>
           <small>{{ isElevenLabsConnected ? 'Tap to end voice session' : 'Hands-free voice assistant' }}</small>
         </span>
       </button>
@@ -69,7 +69,7 @@
         </div>
 
         <button class="voice-pill" [class.live]="isElevenLabsConnected" (click)="toggleElevenLabsCall()">
-          <span class="dot"></span>{{ isElevenLabsConnected ? 'Roger live' : 'Roger ready' }}
+          <span class="dot"></span>{{ isElevenLabsConnected ? 'Mark live' : 'Mark ready' }}
         </button>
 
         <button class="icon-btn theme-toggle" (click)="theme.toggle()" [attr.aria-label]="theme.isDark ? 'Switch to light theme' : 'Switch to dark theme'" [title]="theme.isDark ? 'Light theme' : 'Dark theme'">
@@ -374,7 +374,8 @@
             <span class="chip" [class.calling]="em.ai_priority === 'Urgent' || em.is_urgent === 1" [class.active]="em.status === 'Sent'">
               {{ (em.ai_priority || (em.is_urgent === 1 ? 'Urgent' : 'Normal')).toUpperCase() }}
             </span>
-            <span class="email-sender">From: <strong>{{ em.sender || 'TradeSage Executive' }}</strong> &rarr; To: <strong>{{ em.recipient_name || em.recipient_email }}</strong></span>
+            <span class="chip chip-not-sent" *ngIf="em.status === 'Not Sent'" [title]="em.smtp_status || 'This email was never sent'">NOT SENT</span>
+            <span class="email-sender">From: <strong>{{ em.sender || em.sender_email || '—' }}</strong> &rarr; To: <strong>{{ em.recipient_name || em.recipient_email }}</strong></span>
           </div>
           <span class="email-date">{{ em.sent_at || em.received_at || 'Today' }}</span>
         </div>
@@ -482,7 +483,7 @@
           <h3>Drafts queue ({{ drafts.length }})</h3>
         </div>
         <div class="drafts-scroll-list">
-          <div *ngFor="let d of drafts" class="draft-item-card" [class.selected]="selectedDraft?.id === d.id" (click)="selectedDraft = d">
+          <div *ngFor="let d of drafts" class="draft-item-card" [class.selected]="selectedDraft?.id === d.id" (click)="selectDraft(d)">
             <div class="draft-status-badge-row">
               <span class="chip" [class.calling]="d.status === 'Draft'" [class.active]="d.status === 'Approved'" [style.background]="d.status === 'Sent' ? '#10b981' : ''">
                 {{ d.status.toUpperCase() }}
@@ -506,14 +507,19 @@
               STATUS: {{ selectedDraft.status }}
             </div>
             <h2>{{ selectedDraft.subject }}</h2>
-            <p class="inspector-meta">Recipient: <strong>{{ selectedDraft.recipient_name }}</strong> ({{ selectedDraft.recipient_email }}) &bull; Product: <strong>{{ selectedDraft.product_name }}</strong> &bull; Tone: <em>{{ selectedDraft.tone }}</em></p>
+            <p class="inspector-meta">Recipient: <strong>{{ selectedDraft.recipient_name || '—' }}</strong> ({{ selectedDraft.recipient_email || 'no email address' }}) &bull; Product: <strong>{{ selectedDraft.product_name || 'None (generic draft)' }}</strong> &bull; Tone: <em>{{ selectedDraft.tone }}</em></p>
+            <div class="draft-recipient-edit" *ngIf="selectedDraft.status !== 'Sent' && selectedDraft.status !== 'Sending'">
+              <input type="text" class="hud-input" [(ngModel)]="draftRecipientEdit.name" placeholder="Recipient name" aria-label="Recipient name" />
+              <input type="email" class="hud-input" [(ngModel)]="draftRecipientEdit.email" placeholder="name@company.com" aria-label="Recipient email" />
+              <button class="btn btn-secondary btn-sm" (click)="saveDraftRecipient(selectedDraft)">Save recipient</button>
+            </div>
           </div>
           <div class="approval-main-actions">
             <button *ngIf="selectedDraft.status === 'Draft'" class="btn btn-accent" (click)="approveDraft(selectedDraft)">
               ✓ Approve Draft
             </button>
-            <button class="btn btn-primary" (click)="sendApprovedDraft(selectedDraft)">
-              🚀 {{ selectedDraft.status === 'Approved' ? 'Dispatch Approved Email' : 'Approve & Send Now' }}
+            <button class="btn btn-primary" *ngIf="selectedDraft.status !== 'Sent'" (click)="sendApprovedDraft(selectedDraft)">
+              🚀 {{ selectedDraft.status === 'Approved' ? 'Send Approved Email' : 'Approve & Send' }}
             </button>
             <button class="btn btn-secondary btn-sm" (click)="deleteDraft(selectedDraft.id)">✕ Delete</button>
           </div>
@@ -539,7 +545,7 @@
             <span>VISUAL PAGE LAYOUT (What the recipient actually sees)</span>
             <span class="badge">Safe HTML Sandbox</span>
           </div>
-          <div class="email-render-frame" [innerHTML]="getSafeHtml(selectedDraft.body_html)"></div>
+          <iframe class="email-render-frame" sandbox="" title="Email preview" [srcdoc]="getSafeHtml(selectedDraft.body_html)"></iframe>
         </div>
       </div>
     </div>
@@ -556,8 +562,8 @@
   <section *ngIf="currentRoute === 'businesses'" class="hud-panel full-width-panel">
     <div class="panel-header">
       <div>
-        <h2>AI marketing campaigns & playbooks</h2>
-        <p class="subtitle">Create, schedule, and track AI-powered marketing campaigns tailored for ThriveWoo or any connected client.</p>
+        <h2>AI campaign playbooks</h2>
+        <p class="subtitle">Generate campaign ideas with AI from your saved business and product facts, then turn one into Mail Drafts for leads you choose.</p>
       </div>
       <div class="header-actions">
         <button class="btn btn-primary" (click)="showNewBusinessModal = true">+ Connect Client Business</button>
@@ -568,49 +574,71 @@
     <div class="business-pills-row">
       <button *ngFor="let b of connectedBusinesses" class="biz-pill-btn" [class.active]="selectedBusiness?.id === b.id" (click)="selectBusiness(b)">
         <span class="pill-badge" [class.owner-badge]="b.business_type === 'owner'">
-          {{ b.business_type === 'owner' ? '★ THRIVEWOO' : 'CLIENT' }}
+          {{ b.business_type === 'owner' ? '★ YOUR BUSINESS' : 'CLIENT' }}
         </span>
         <span class="pill-name">{{ b.name }}</span>
       </button>
     </div>
+    <div *ngIf="!connectedBusinesses.length" class="empty-box">No businesses yet. Connect one to generate playbooks.</div>
 
     <!-- Selected Business Profile -->
     <div *ngIf="selectedBusiness" class="biz-profile-card">
       <div class="biz-card-header">
         <div>
           <span class="badge" [class.badge-owner]="selectedBusiness.business_type === 'owner'">
-            {{ selectedBusiness.business_type === 'owner' ? '★ YOUR FLAGSHIP DIGITAL PRODUCT' : 'CONNECTED CLIENT ACCOUNT' }}
+            {{ selectedBusiness.business_type === 'owner' ? '★ YOUR BUSINESS' : 'CONNECTED CLIENT ACCOUNT' }}
           </span>
           <h3 class="biz-title">{{ selectedBusiness.name }}</h3>
-          <p class="biz-industry">Industry: <strong>{{ selectedBusiness.industry }}</strong> &bull; Website: <a [href]="selectedBusiness.website" target="_blank">{{ selectedBusiness.website || 'N/A' }}</a></p>
+          <p class="biz-industry">Industry: <strong>{{ selectedBusiness.industry || '—' }}</strong> &bull; Website:
+            <a *ngIf="selectedBusiness.website" [href]="selectedBusiness.website" target="_blank" rel="noopener noreferrer">{{ selectedBusiness.website }}</a>
+            <span *ngIf="!selectedBusiness.website">—</span>
+          </p>
         </div>
-        <button class="btn btn-primary" (click)="generateIdeasForSelectedBusiness()" [disabled]="isGeneratingIdeas">
-          {{ isGeneratingIdeas ? 'Synthesizing...' : '⚡ Generate Campaign Playbooks' }}
-        </button>
       </div>
 
-      <p class="biz-desc">{{ selectedBusiness.description }}</p>
+      <p class="biz-desc">{{ selectedBusiness.description || 'No description saved.' }}</p>
 
       <div class="biz-meta-grid">
         <div class="meta-box">
           <h4>Target Audience</h4>
-          <p>{{ selectedBusiness.target_audience }}</p>
+          <p>{{ selectedBusiness.target_audience || '—' }}</p>
         </div>
         <div class="meta-box">
-          <h4>Core Offerings / Digital Features</h4>
-          <ul class="product-bullets">
+          <h4>Core Offerings</h4>
+          <ul class="product-bullets" *ngIf="selectedBusiness.products?.length">
             <li *ngFor="let p of selectedBusiness.products">{{ p }}</li>
           </ul>
+          <p *ngIf="!selectedBusiness.products?.length">—</p>
         </div>
+      </div>
+
+      <div class="playbook-controls">
+        <label class="form-group">
+          <span>Digital product (optional)</span>
+          <select class="hud-input" [(ngModel)]="playbookProductId">
+            <option [ngValue]="null">No product: use business facts only</option>
+            <option *ngFor="let p of digitalProducts" [ngValue]="p.id">{{ p.name }}</option>
+          </select>
+        </label>
+        <label class="form-group">
+          <span>Campaign goal (optional)</span>
+          <input type="text" class="hud-input" [(ngModel)]="playbookGoal" maxlength="500" placeholder="e.g. Book intro calls with operations managers" />
+        </label>
+        <button class="btn btn-primary" (click)="generateIdeasForSelectedBusiness()" [disabled]="isGeneratingIdeas">
+          {{ isGeneratingIdeas ? 'Generating with AI…' : '⚡ Generate playbooks with AI' }}
+        </button>
       </div>
     </div>
 
     <!-- Campaign Playbooks Grid -->
-    <div class="campaign-results-section">
+    <div class="campaign-results-section" *ngIf="selectedBusiness">
       <div class="section-title-row">
-        <h2>Tailored campaign playbooks · {{ selectedBusiness?.name }}</h2>
+        <h2>Campaign playbooks · {{ selectedBusiness?.name }}</h2>
         <span class="badge">{{ generatedIdeas.length }} Playbooks</span>
       </div>
+      <div *ngIf="playbookError" class="callout callout-warn" role="alert">{{ playbookError }}</div>
+      <div *ngIf="playbookMissing.length" class="callout small">Missing facts: {{ playbookMissing.join(', ') }}. Add them to the business for more specific playbooks; the AI was told not to fill gaps.</div>
+      <div *ngIf="!generatedIdeas.length && !playbookError && !isGeneratingIdeas" class="empty-box">Nothing generated yet. Choose options above and click "Generate playbooks with AI".</div>
 
       <div class="ideas-grid">
         <div *ngFor="let idea of generatedIdeas" class="idea-card">
@@ -619,13 +647,17 @@
           <div class="idea-subject" *ngIf="idea.subject">
             <strong>Subject:</strong> "{{ idea.subject }}"
           </div>
-          <p class="idea-summary">{{ idea.summary }}</p>
-          <div class="idea-tip">
-            💡 <strong>Conversion Strategy:</strong> {{ idea.conversionTip }}
+          <p class="idea-summary" *ngIf="idea.email_body"><strong>Email:</strong> {{ idea.email_body }}</p>
+          <p class="idea-summary muted small" *ngIf="idea.summary">{{ idea.summary }}</p>
+          <div class="idea-flags" *ngIf="idea.needs_verification?.length">
+            ⚠️ Verify before use (not in your facts): {{ idea.needs_verification.join(', ') }}
+          </div>
+          <div class="idea-tip" *ngIf="idea.internal_tip">
+            🔒 <strong>Internal note (never included in emails):</strong> {{ idea.internal_tip }}
           </div>
           <div class="card-footer-action">
-            <button class="btn btn-secondary btn-sm" (click)="dispatchCampaignToLeads(idea)">
-              ✉️ 1-Click Dispatch This Campaign to Leads
+            <button class="btn btn-secondary btn-sm" (click)="openDispatch(idea)" [disabled]="!idea.subject || !idea.email_body">
+              ✉️ Create Mail Drafts for leads…
             </button>
           </div>
         </div>
@@ -634,12 +666,12 @@
   </section>
 
   <!-- =================================================================== -->
-  <!-- TAB 6: NEURAL VOICE CENTER (ELEVENLABS + ROGER AI ORB) -->
+  <!-- TAB 6: NEURAL VOICE CENTER (ELEVENLABS + MARK AI ORB) -->
   <!-- =================================================================== -->
   <section *ngIf="currentRoute === 'voice'" class="hud-grid">
     <div class="hud-panel main-voice-panel">
       <div class="panel-header">
-        <h2>Neural voice · say “Hello Roger”</h2>
+        <h2>Neural voice · say “Hello Mark”</h2>
         <span class="chip" [class.calling]="isElevenLabsConnected" [class.active]="!isElevenLabsConnected">
           {{ isElevenLabsConnected ? 'CONNECTED' : 'READY' }}
         </span>
@@ -654,7 +686,7 @@
             <div class="orb-core"></div>
           </div>
         </div>
-        <div class="tap-hint">SAY "HELLO ROGER" OR TAP ORB</div>
+        <div class="tap-hint">SAY "HELLO MARK" OR TAP ORB</div>
       </div>
 
       <div class="call-status-box">
@@ -666,7 +698,7 @@
       <div class="call-controls">
         <button class="call-btn" [class.btn-call]="!isElevenLabsConnected" [class.btn-end-call]="isElevenLabsConnected" (click)="toggleElevenLabsCall()">
           <span class="icon">{{ isElevenLabsConnected ? '⏹' : '🎙️' }}</span>
-          <span>{{ isElevenLabsConnected ? 'DISCONNECT ROGER' : 'CALL ROGER (ELEVENLABS)' }}</span>
+          <span>{{ isElevenLabsConnected ? 'DISCONNECT MARK' : 'CALL MARK (ELEVENLABS)' }}</span>
         </button>
       </div>
 
@@ -693,7 +725,7 @@
         <button class="btn btn-mic-quick" [class.listening]="isListeningQuickChat" (click)="toggleVoiceDictation()" title="Voice Dictation: Speak in English">
           {{ isListeningQuickChat ? '🔴' : '🎙️' }}
         </button>
-        <input type="text" class="hud-input" [(ngModel)]="quickTextInput" placeholder="Ask Roger anything or give command (e.g. 'Draft email to Michael Chang about ThriveWoo')" (keyup.enter)="sendQuickText()" [disabled]="isProcessingChat" />
+        <input type="text" class="hud-input" [(ngModel)]="quickTextInput" placeholder="Ask Mark anything or give command (e.g. 'Draft email to Michael Chang about ThriveWoo')" (keyup.enter)="sendQuickText()" [disabled]="isProcessingChat" />
         <button class="btn btn-primary" (click)="sendQuickText()" [disabled]="isProcessingChat">
           {{ isProcessingChat ? '...' : 'SEND' }}
         </button>
@@ -808,9 +840,63 @@
     </main>
   </div>
 
+  <!-- Playbook -> Mail Drafts for explicitly selected leads (never sends) -->
+  <div *ngIf="dispatchIdea" class="modal-backdrop" (click)="closeDispatch()">
+    <div class="modal-card wide-modal" role="dialog" aria-modal="true" aria-labelledby="dispatch-title" (click)="$event.stopPropagation()">
+      <div class="modal-header">
+        <h3 id="dispatch-title">✉️ Create Mail Drafts</h3>
+        <button class="close-btn" (click)="closeDispatch()" aria-label="Close">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="callout small">Nothing is sent from here. One draft is created per selected lead in Mail Drafts, where each must be approved and confirmed before sending. The internal note is not included.</div>
+        <label class="form-group"><span>Subject</span><input class="hud-input" [(ngModel)]="dispatchSubject" maxlength="200" /></label>
+        <label class="form-group"><span>Email body (customer-facing)</span><textarea class="hud-textarea" rows="6" [(ngModel)]="dispatchBody" maxlength="4000"></textarea></label>
+        <div class="form-group">
+          <span>Leads ({{ dispatchSelectedCount }} selected)</span>
+          <div class="dispatch-lead-list">
+            <label *ngFor="let ld of leads" class="dispatch-lead" [class.disabled]="!ld.hasValidEmail">
+              <input type="checkbox" [disabled]="!ld.hasValidEmail" [checked]="dispatchLeadIds.has(ld.id)" (change)="toggleDispatchLead(ld.id)" />
+              <span>{{ ld.name }}</span>
+              <span class="muted small">{{ ld.hasValidEmail ? ld.email : 'no valid email' }}</span>
+            </label>
+            <div *ngIf="!leads.length" class="muted small">No leads in this workspace yet.</div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" (click)="closeDispatch()">Cancel</button>
+        <button class="btn btn-primary" (click)="confirmDispatch()" [disabled]="!dispatchSelectedCount || !dispatchSubject.trim() || !dispatchBody.trim() || isDispatching">
+          {{ isDispatching ? 'Creating…' : 'Create ' + dispatchSelectedCount + ' draft' + (dispatchSelectedCount === 1 ? '' : 's') }}
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- =================================================================== -->
   <!-- MODAL 1: EXCEL / CSV BULK LEAD IMPORTER -->
   <!-- =================================================================== -->
+  <!-- Login notice: voice agent cannot work (e.g. no ElevenLabs credits) -->
+  <div *ngIf="voiceNotice" class="modal-backdrop" (click)="dismissVoiceNotice()">
+    <div class="modal-card voice-notice" role="alertdialog" aria-modal="true" aria-labelledby="voice-notice-title" aria-describedby="voice-notice-body" (click)="$event.stopPropagation()">
+      <div class="modal-header">
+        <h3 id="voice-notice-title">🎙️ {{ voiceNoticeTitle }}</h3>
+        <button class="close-btn" (click)="dismissVoiceNotice()" aria-label="Close">✕</button>
+      </div>
+      <div class="modal-body" id="voice-notice-body">
+        <p>{{ voiceNotice.message }}</p>
+        <p *ngIf="voiceNotice.status === 'no_credits'" class="voice-notice-detail">
+          <span *ngIf="voiceNotice.remainingCredits !== undefined && voiceNotice.creditLimit">Credits left: <strong>{{ voiceNotice.remainingCredits | number }}</strong> of {{ voiceNotice.creditLimit | number }}.</span>
+          <span *ngIf="voiceNotice.resetsAt"> The free allowance resets on <strong>{{ voiceNotice.resetsAt | date:'d MMM y, h:mm a' }}</strong>.</span>
+        </p>
+        <p class="voice-notice-detail" *ngIf="voiceNotice.status !== 'workspace_unavailable'">Mark's voice calls will not connect until this is fixed. Other features are not affected.</p>
+        <p class="voice-notice-detail" *ngIf="voiceNotice.status === 'workspace_unavailable'">Other features are not affected.</p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" (click)="dismissVoiceNotice()">OK, got it</button>
+      </div>
+    </div>
+  </div>
+
   <div *ngIf="showExcelImportModal" class="modal-backdrop" (click)="showExcelImportModal = false">
     <div class="modal-card wide-modal" (click)="$event.stopPropagation()">
       <div class="modal-header">
@@ -916,7 +1002,7 @@
 
         <!-- Visual Rendered Preview -->
         <div *ngIf="composeTab === 'visual'" class="rendered-compose-view">
-          <div *ngIf="composeEmail.html_body" [innerHTML]="getSafeHtml(composeEmail.html_body)"></div>
+          <iframe *ngIf="composeEmail.html_body" class="email-render-frame" sandbox="" title="Email preview" [srcdoc]="getSafeHtml(composeEmail.html_body)"></iframe>
           <div *ngIf="!composeEmail.html_body" class="plain-text-preview">
             <p style="white-space: pre-wrap;">{{ composeEmail.body || 'No message content entered yet.' }}</p>
           </div>
@@ -948,7 +1034,7 @@
       </div>
       <div class="modal-body">
         <div class="rendered-email-container">
-          <div class="email-render-frame" [innerHTML]="getSafeHtml(viewingEmailVisual.html_body || viewingEmailVisual.body)"></div>
+          <iframe class="email-render-frame" sandbox="" title="Email content" [srcdoc]="getSafeHtml(viewingEmailVisual.html_body || viewingEmailVisual.body)"></iframe>
         </div>
       </div>
       <div class="modal-footer">

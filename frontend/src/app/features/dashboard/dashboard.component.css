@@ -29,7 +29,7 @@ p { margin: 0; }
 .btn-sm.ghost { background: transparent; border-color: var(--border); color: var(--accent-text); }
 .link { border: 0; background: none; color: var(--accent-text); font: 600 0.84rem var(--font); cursor: pointer; padding: 0; margin-left: 6px; }
 
-/* Roger voice switch */
+/* Mark voice switch */
 .voice-switch { display: flex; align-items: center; gap: 10px; padding: 6px 8px 6px 10px; margin-left: auto; border-radius: 12px; border: 1px solid var(--border); background: var(--surface); box-shadow: var(--shadow-sm); transition: border-color 0.2s ease, background 0.2s ease; }
 .voice-switch.on { border-color: var(--accent-ring); }
 .voice-switch.live { border-color: rgba(34, 197, 94, 0.45); background: linear-gradient(135deg, var(--success-soft), transparent 70%), var(--surface); }

@@ -1,9 +1,9 @@
 @echo off
-title Roger - Marketing AI & Executive Voice OS
+title Mark - Marketing AI & Executive Voice OS
 cd /d "%~dp0"
 
 echo =======================================================
-echo   ROGER // Marketing AI Platform & Executive Voice OS
+echo   MARK // Marketing AI Platform & Executive Voice OS
 echo =======================================================
 echo.
 
@@ -27,7 +27,7 @@ if errorlevel 1 (
 )
 
 echo Starting the social publishing worker in a separate window...
-start "Roger Social Worker" cmd /k node workers\socialWorker.js
+start "Mark Social Worker" cmd /k node workers\socialWorker.js
 
 echo.
 echo [3/3] Opening browser at http://localhost:8000 ...
@@ -35,7 +35,7 @@ timeout /t 2 >nul
 start "" "http://localhost:8000"
 
 echo.
-echo Starting Roger Executive Platform on port 8000...
+echo Starting Mark Executive Platform on port 8000...
 node server.js
 
 pause

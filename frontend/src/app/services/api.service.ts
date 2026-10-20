@@ -148,6 +148,11 @@ export class ApiService {
   }
 
   // 10. Voice & ElevenLabs
+  /** Voice agent readiness (key, agent, remaining ElevenLabs credits). Never starts a call. */
+  getVoiceStatus(): Observable<any> {
+    return this.http.get(`${this.baseUrl}/voice/status`, { headers: this.getHeaders() });
+  }
+
   getVoiceSignedUrl(): Observable<any> {
     return this.http.get(`${this.baseUrl}/voice/signed-url`, { headers: this.getHeaders() });
   }
@@ -207,11 +212,12 @@ export class ApiService {
     return this.http.post(`${this.root}/api/businesses/connected`, data);
   }
 
-  generateMarketingIdeas(businessId?: number, businessName?: string): Observable<any> {
-    return this.http.post(`${this.root}/api/marketing/generate-ideas`, { businessId, businessName });
+  generateMarketingIdeas(data: { businessId: number; productId?: number | null; goal?: string }): Observable<any> {
+    return this.http.post(`${this.root}/api/marketing/generate-ideas`, data);
   }
 
-  dispatchCampaign(data: { businessId?: number; subject: string; body: string; leadIds?: number[] }): Observable<any> {
+  /** Creates Mail Drafts for the selected leads; it never sends. */
+  dispatchCampaign(data: { businessId?: number; productId?: number | null; subject: string; body: string; leadIds: number[] }): Observable<any> {
     return this.http.post(`${this.root}/api/marketing/dispatch-campaign`, data);
   }
 
@@ -220,8 +226,9 @@ export class ApiService {
     return this.http.get(`${this.root}/api/emails`);
   }
 
-  sendEmail(data: { recipient_email: string; recipient_name?: string; subject: string; body: string }): Observable<any> {
-    return this.http.post(`${this.root}/api/emails/send`, data);
+  // Sending requires the user's explicit confirmation; callers pass it after a confirm dialog.
+  sendEmail(data: { recipient_email: string; recipient_name?: string; subject: string; body: string }, confirm: boolean): Observable<any> {
+    return this.http.post(`${this.root}/api/emails/send`, { ...data, confirm });
   }
 
   // 19. Appointments & CRM
@@ -268,8 +275,8 @@ export class ApiService {
   }
 
   // 23. Visual HTML Email & Email AI Analysis
-  sendHtmlEmail(data: { recipient_email: string; recipient_name?: string; subject: string; html_body: string; body_text?: string }): Observable<any> {
-    return this.http.post(`${this.root}/api/emails/send-html`, data);
+  sendHtmlEmail(data: { recipient_email: string; recipient_name?: string; subject: string; html_body: string; body_text?: string }, confirm: boolean): Observable<any> {
+    return this.http.post(`${this.root}/api/emails/send-html`, { ...data, confirm });
   }
 
   analyzeEmailWithAi(emailId: number): Observable<any> {
@@ -293,8 +300,12 @@ export class ApiService {
     return this.http.put(`${this.root}/api/drafts/${id}/approve`, {});
   }
 
-  sendMailDraft(id: number): Observable<any> {
-    return this.http.post(`${this.root}/api/drafts/${id}/send`, {});
+  sendMailDraft(id: number, confirm: boolean): Observable<any> {
+    return this.http.post(`${this.root}/api/drafts/${id}/send`, { confirm });
+  }
+
+  updateMailDraft(id: number, data: { recipient_email?: string; recipient_name?: string; subject?: string }): Observable<any> {
+    return this.http.patch(`${this.root}/api/drafts/${id}`, data);
   }
 
   deleteMailDraft(id: number): Observable<any> {

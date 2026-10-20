@@ -1,12 +1,12 @@
-﻿# TradeSage AI — Autonomous B2B Marketing & Sales Acceleration Platform
+﻿# Marketech.ai — Autonomous B2B Marketing & Sales Acceleration Platform
 
-An enterprise-grade, AI-driven marketing and B2B sales acceleration operating system built with **Angular 18**, **Node.js (Express)**, and **MySQL**. Featuring an executive AI assistant (*Roger*), real-time product web scrapers, automated lead scoring, multi-channel campaign orchestration, and a rich HTML email studio.
+An enterprise-grade, AI-driven marketing and B2B sales acceleration operating system built with **Angular 18**, **Node.js (Express)**, and **MySQL**. Featuring an executive AI assistant (*Mark*), real-time product web scrapers, automated lead scoring, multi-channel campaign orchestration, and a rich HTML email studio.
 
 ---
 
 ## 🌟 Key Capabilities
 
-### 1. 🎙️ Roger — Executive AI Assistant
+### 1. 🎙️ Mark — Executive AI Assistant
 - Conversational executive intelligence with real-time business context awareness.
 - On-demand lead status inquiries, automated email drafting, strategy recommendations, and operational task delegation.
 - Grounds recommendations in your live digital product catalog and real-world features.
@@ -145,7 +145,7 @@ marketing-AI/
 │   ├── db/
 │   │   └── database.js            # Unified MySQL connection pool & SQLite fallback
 │   ├── services/
-│   │   ├── aiEngine.js            # Roger AI prompt pipelines & LLM handlers
+│   │   ├── aiEngine.js            # Mark AI prompt pipelines & LLM handlers
 │   │   ├── emailService.js        # SMTP / IMAP dispatch & retrieval
 │   │   ├── marketingService.js    # Campaign & social post orchestration
 │   │   └── telnyxService.js       # Voice AI call flow handlers
@@ -158,7 +158,7 @@ marketing-AI/
 │   ├── src/
 │   │   ├── app/
 │   │   │   ├── components/        # Angular 18 UI components
-│   │   │   │   ├── assistant/     # Roger AI Executive chat modal
+│   │   │   │   ├── assistant/     # Mark AI Executive chat modal
 │   │   │   │   ├── campaigns/     # Campaign orchestrator
 │   │   │   │   ├── leads/         # Leads CRM & Excel uploader
 │   │   │   │   ├── mail/          # Visual HTML Email Studio

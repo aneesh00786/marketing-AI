@@ -28,13 +28,13 @@ The worker is a separate process. It polls MySQL (`publishing_jobs`, `background
 | `SOCIAL_TOKEN_ENCRYPTION_KEY` | 32 random bytes (base64). AES-256-GCM key for OAuth tokens and mailbox passwords. **Back it up; changing it makes stored tokens unreadable.** |
 | `APP_BASE_URL` | Public API origin. OAuth redirect URLs are `APP_BASE_URL/api/v1/social/oauth/<provider>/callback`. Must be HTTPS for real providers. |
 | `FRONTEND_URL` | Browser origin (CORS + where OAuth returns the user). |
-| One AI key (`GROQ_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`) or a local Ollama | Campaign generation, regeneration, inbox triage, Roger strategist. Without one these features fail with a clear message; no template content is substituted. |
+| One AI key (`GROQ_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`) or a local Ollama | Campaign generation, regeneration, inbox triage, Mark strategist. Without one these features fail with a clear message; no template content is substituted. |
 
 All variables are listed with comments in `backend/.env.example`.
 
 ## 3. Provider app setup
 
-No customer ever gives TradeSage a social media password. Each business connects through the provider's OAuth consent screen.
+No customer ever gives Marketech.ai a social media password. Each business connects through the provider's OAuth consent screen.
 
 **Where app credentials come from.** Each provider needs a developer app (an App ID and App Secret).
 - **Per workspace (default).** In *Social Media Marketing → Connected Accounts*, a workspace owner or admin clicks **Set up** on a provider card. They follow the in-app steps and paste their own app credentials. The secret is encrypted in `provider_apps` and never returned to the browser. Meta credentials are verified with Meta when saved.
@@ -116,7 +116,7 @@ Not integrated: API access requires a paid X plan. Drafts can be copied for manu
 - Content CRUD, versions, submit/approve/reject, approval invalidation on edit, platform validation, scheduling with time-zone conversion, publish now, unschedule, cancel.
 - Publishing worker: Facebook text/link/photo, Instagram image (container → publish), success only on provider confirmation, unknown-outcome handling, retry/backoff, rate limits, crash recovery, atomic claiming.
 - Campaign builder: saved brief → queued generation with real product facts, schema validation, honest failure without AI, unverified-claim flags, suggested schedule.
-- Analytics snapshots and summary (available / unavailable / not collected), Roger strategist grounded in retrieved data, inbox sync / classify / suggest / send / create lead.
+- Analytics snapshots and summary (available / unavailable / not collected), Mark strategist grounded in retrieved data, inbox sync / classify / suggest / send / create lead.
 - Migrations: idempotent re-application; tenant foreign keys enforced.
 
 **Implemented but not live-tested against providers.** No provider app credentials were available. Each needs a real connection before it's relied on:

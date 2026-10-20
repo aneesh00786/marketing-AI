@@ -2,7 +2,7 @@
   <div class="panel-header">
     <div>
       <h2>Social media marketing hub</h2>
-      <p class="subtitle">Connect official accounts, plan campaigns with Roger, approve content, publish on schedule and track real results.</p>
+      <p class="subtitle">Connect official accounts, plan campaigns with Mark, approve content, publish on schedule and track real results.</p>
     </div>
     <div class="header-actions">
       <span class="chip">TZ: {{ settings?.timezone || 'UTC' }}</span>
@@ -127,7 +127,7 @@
 
       <div class="card">
         <div class="row-line">
-          <h3>ROGER'S RECOMMENDATIONS</h3>
+          <h3>MARK'S RECOMMENDATIONS</h3>
           <button class="btn btn-primary btn-sm" (click)="getRecommendations()">🧠 Generate from my data</button>
         </div>
         <div class="muted small">Recommendations are generated on request (to control AI cost) and use only your stored metrics.</div>
@@ -148,7 +148,7 @@
           <span class="ok-text" *ngIf="p.workspaceApp.verifiedAt"> · verified</span>
           <span class="muted" *ngIf="!p.workspaceApp.verifiedAt"> · checked on first Connect</span>
         </div>
-        <div class="small muted" *ngIf="p.appSource === 'platform'">Using the TradeSage platform app. You can set up your own app instead.</div>
+        <div class="small muted" *ngIf="p.appSource === 'platform'">Using the Marketech.ai platform app. You can set up your own app instead.</div>
         <div class="small muted" *ngIf="!p.appSource">Add your {{ p.label.split(' ')[0] }} developer app credentials to enable connecting.</div>
         <div class="small warn-text" *ngIf="!p.encryptionConfigured">The server's credential encryption key is not configured.</div>
 
@@ -188,7 +188,7 @@
         <div class="small muted">{{ m.note }}</div>
       </div>
     </div>
-    <div class="muted small">TradeSage never asks for social media passwords. Access tokens stay encrypted on the server and are never sent to this browser.</div>
+    <div class="muted small">Marketech.ai never asks for social media passwords. Access tokens stay encrypted on the server and are never sent to this browser.</div>
 
     <h3>CONNECTED ACCOUNTS</h3>
     <div *ngIf="accounts.length === 0" class="empty-box">No accounts connected.</div>
@@ -231,7 +231,7 @@
   <div *ngIf="section === 'campaigns'" class="section">
     <div class="row-line">
       <h3>CAMPAIGNS ({{ campaigns.length }})</h3>
-      <button class="btn btn-primary btn-sm" (click)="openWizard()">＋ New campaign with Roger</button>
+      <button class="btn btn-primary btn-sm" (click)="openWizard()">＋ New campaign with Mark</button>
     </div>
 
     <div *ngIf="showCampaignWizard" class="card wizard">
@@ -297,7 +297,7 @@
         </div>
       </details>
 
-      <div class="callout small">Roger only uses the facts above. Prices, statistics and claims that are not in your facts are flagged for verification, and missing information is listed instead of invented.</div>
+      <div class="callout small">Mark only uses the facts above. Prices, statistics and claims that are not in your facts are flagged for verification, and missing information is listed instead of invented.</div>
       <div class="button-row">
         <button class="btn btn-primary" (click)="saveCampaign(true)" [disabled]="busy">Save &amp; generate drafts</button>
         <button class="btn btn-secondary" (click)="saveCampaign(false)" [disabled]="busy">Save brief only</button>
@@ -312,7 +312,7 @@
       </div>
       <div class="small muted">{{ selectedCampaign.objective }} · {{ selectedCampaign.startDate || '—' }} → {{ selectedCampaign.endDate || '—' }} · {{ selectedCampaign.platforms.join(', ') }}</div>
       <div *ngIf="selectedCampaign.generationError" class="banner bad">{{ selectedCampaign.generationError }}</div>
-      <div *ngIf="['queued','running'].includes(selectedCampaign.generationStatus)" class="muted">Roger is writing drafts… (the background worker must be running)</div>
+      <div *ngIf="['queued','running'].includes(selectedCampaign.generationStatus)" class="muted">Mark is writing drafts… (the background worker must be running)</div>
       <div class="button-row" *ngIf="!['queued','running'].includes(selectedCampaign.generationStatus)">
         <button class="btn btn-primary btn-sm" (click)="generate(selectedCampaign)">{{ selectedCampaign.generationStatus === 'completed' ? 'Generate more drafts' : 'Generate drafts' }}</button>
       </div>
@@ -354,7 +354,7 @@
         </tbody>
       </table>
     </div>
-    <div *ngIf="!campaigns.length && !showCampaignWizard" class="empty-box">No campaigns yet. Start one and Roger will draft platform-specific content from your real product facts.</div>
+    <div *ngIf="!campaigns.length && !showCampaignWizard" class="empty-box">No campaigns yet. Start one and Mark will draft platform-specific content from your real product facts.</div>
   </div>
 
   <!-- ===================== CALENDAR ===================== -->
@@ -626,7 +626,7 @@
           </div>
         </div>
         <div *ngIf="activeThread.canReply; else noReply">
-          <textarea class="hud-textarea" rows="3" [(ngModel)]="replyText" placeholder="Write a reply, or ask Roger for a suggestion…"></textarea>
+          <textarea class="hud-textarea" rows="3" [(ngModel)]="replyText" placeholder="Write a reply, or ask Mark for a suggestion…"></textarea>
           <div class="button-row">
             <button class="btn btn-secondary btn-sm" (click)="suggestReply()" [disabled]="busy">🧠 Suggest reply</button>
             <button class="btn btn-primary btn-sm" (click)="sendReply()" [disabled]="busy || !replyText.trim()">Approve &amp; send</button>
@@ -658,7 +658,7 @@
   <!-- ===================== STRATEGIST ===================== -->
   <div *ngIf="section === 'strategist'" class="section">
     <div class="card">
-      <h3>ASK ROGER ABOUT YOUR REAL PERFORMANCE</h3>
+      <h3>ASK MARK ABOUT YOUR REAL PERFORMANCE</h3>
       <div class="button-row">
         <button *ngFor="let p of examplePrompts" class="chip" (click)="askRoger(p)">{{ p }}</button>
       </div>
@@ -666,12 +666,12 @@
         <input class="hud-input" [(ngModel)]="question" (keyup.enter)="askRoger()" placeholder="e.g. Which posts performed best this month?" />
         <button class="btn btn-primary" (click)="askRoger()" [disabled]="isAsking">{{ isAsking ? 'Thinking…' : 'Ask' }}</button>
       </div>
-      <div class="small muted">Roger answers only from metrics stored in your workspace and says when data is unavailable.</div>
+      <div class="small muted">Mark answers only from metrics stored in your workspace and says when data is unavailable.</div>
     </div>
     <div class="card" *ngIf="strategistAnswer">
       <div class="answer">{{ strategistAnswer.answer }}</div>
       <div class="small muted">{{ strategistAnswer.provider ? 'Model: ' + strategistAnswer.provider : 'No AI model used' }}<span *ngIf="!strategistAnswer.hasMetrics"> · No collected metrics yet</span></div>
-      <details><summary class="small">Data Roger used</summary><pre class="data-used">{{ strategistAnswer.dataUsed }}</pre></details>
+      <details><summary class="small">Data Mark used</summary><pre class="data-used">{{ strategistAnswer.dataUsed }}</pre></details>
     </div>
   </div>
 
@@ -766,7 +766,7 @@
           </div>
 
           <details class="field-block" *ngIf="editor.id && canEdit(editor)">
-            <summary class="small">🧠 Regenerate with Roger</summary>
+            <summary class="small">🧠 Regenerate with Mark</summary>
             <div class="button-row">
               <label *ngFor="let f of ['caption','hashtags','title','call_to_action','image_prompt']" class="check-pill" [class.on]="regenForm.fields[f]"><input type="checkbox" [(ngModel)]="regenForm.fields[f]" /> {{ f.replace('_', ' ') }}</label>
             </div>

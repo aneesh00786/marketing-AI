@@ -1,5 +1,5 @@
 /* =====================================================================
-   TradeSage AI — application shell + module styles
+   Marketech.ai — application shell + module styles
    Tokens live in src/styles.css (:root). Keep selectors used by the
    template stable: business logic binds to these class names.
    ===================================================================== */
@@ -349,6 +349,9 @@ input[type='checkbox'], input[type='radio'] { accent-color: var(--accent); }
 .modal-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 18px 22px; border-bottom: 1px solid var(--border); }
 .modal-header h2, .modal-header h3 { font-size: 1rem; font-weight: 650; text-transform: none; letter-spacing: -0.01em; color: var(--text); margin: 0; }
 .modal-body { display: flex; flex-direction: column; gap: 14px; padding: 20px 22px; max-height: 70vh; overflow-y: auto; }
+.voice-notice { max-width: 460px; }
+.voice-notice .modal-body p { margin: 0 0 10px; line-height: 1.5; }
+.voice-notice-detail { color: var(--text-muted); font-size: 0.88rem; }
 .modal-footer { display: flex; justify-content: flex-end; gap: 10px; padding: 14px 22px; border-top: 1px solid var(--border); background: var(--bg-elev); }
 
 /* ---------------------------------------------------------------------
@@ -435,6 +438,10 @@ input[type='checkbox'], input[type='radio'] { accent-color: var(--accent); }
 .rendered-email-container { overflow: hidden; display: flex; flex-direction: column; border: 1px solid var(--border-strong); border-radius: var(--radius-lg); background: var(--surface-2); }
 .rendered-label-bar { padding: 10px 14px; font-size: 0.8rem; color: var(--text-muted); border-bottom: 1px solid var(--border); }
 .email-render-frame { padding: 24px; background: #f8fafc; color: #1e293b; max-height: 520px; overflow-y: auto; }
+/* Email HTML renders in a sandboxed iframe (no scripts, no access to the app). */
+iframe.email-render-frame { display: block; width: 100%; height: 520px; padding: 0; border: 0; background: #ffffff; }
+.draft-recipient-edit { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.draft-recipient-edit .hud-input { flex: 1 1 180px; min-width: 0; }
 .rendered-compose-view { background: #f8fafc; color: #1e293b; border-radius: var(--radius); padding: 16px; max-height: 400px; overflow-y: auto; border: 1px solid #cbd5e1; }
 .plain-text-preview { color: #1e293b; font-size: 0.92rem; line-height: 1.6; }
 
@@ -490,6 +497,18 @@ input[type='checkbox'], input[type='radio'] { accent-color: var(--accent); }
 .idea-angle { font-weight: 600; }
 .idea-subject { color: var(--text); font-size: 0.9rem; }
 .idea-summary { color: var(--text-muted); font-size: 0.86rem; line-height: 1.5; }
+.playbook-controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; margin-top: 16px; }
+.playbook-controls .form-group { flex: 1 1 220px; min-width: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; font-size: 0.82rem; color: var(--text-muted); }
+.chip.chip-not-sent { background: var(--warning-soft); color: var(--warning-text); border-color: transparent; }
+.callout { padding: 10px 12px; border-radius: var(--radius); background: var(--accent-soft); color: var(--text); font-size: 0.86rem; margin: 8px 0; }
+.callout.small { font-size: 0.8rem; }
+.callout-warn { background: var(--warning-soft); color: var(--warning-text); }
+.empty-box { padding: 18px; border: 1px dashed var(--border-strong); border-radius: var(--radius); color: var(--text-muted); text-align: center; margin: 10px 0; }
+.idea-flags { font-size: 0.8rem; color: var(--warning-text); background: var(--warning-soft); border-radius: var(--radius); padding: 6px 10px; }
+.dispatch-lead-list { max-height: 260px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius); padding: 6px; display: flex; flex-direction: column; gap: 2px; }
+.dispatch-lead { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; padding: 6px 8px; border-radius: 6px; cursor: pointer; }
+.dispatch-lead:hover { background: var(--bg-elev); }
+.dispatch-lead.disabled { opacity: 0.55; cursor: not-allowed; }
 .idea-tip { font-size: 0.82rem; color: var(--warning-text); background: var(--warning-soft); border-radius: var(--radius); padding: 8px 10px; }
 .card-footer-action { margin-top: auto; padding-top: 6px; }
 

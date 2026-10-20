@@ -39,7 +39,7 @@ const POST_STATUSES: { key: string; label: string; color: string }[] = [
 })
 export class DashboardComponent implements OnInit {
   @Output() navigate = new EventEmitter<DashboardNavigation>();
-  /** Roger "always listening" switch state, owned by the app shell (which runs the voice session). */
+  /** Mark "always listening" switch state, owned by the app shell (which runs the voice session). */
   @Input() voiceOn = false;
   @Input() voiceLive = false;
   @Input() voiceBusy = false;
