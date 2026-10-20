@@ -1,52 +1,118 @@
-<div class="hud-container">
-  <!-- Top Banner for One-Click Voice Permission -->
-  <div class="mic-banner" (click)="toggleElevenLabsCall()">
-    🎙️ <strong>CLICK HERE TO CONNECT ROGER // HANDS-FREE FULL-DUPLEX ELEVENLABS VOICE AI</strong>
-  </div>
+<app-login *ngIf="!auth.isLoggedIn" (loggedIn)="onLoggedIn()"></app-login>
 
-  <!-- Header -->
-  <header class="hud-header">
-    <div class="hud-brand">
-      <div class="hud-logo-icon"></div>
-      <div>
-        <h1>ROGER <span class="accent-text">// AI MARKETING & EXECUTIVE OS</span></h1>
-        <p class="subtitle">ThriveWoo Digital Products Hub &bull; AI Lead Scoring &bull; Visual HTML Mail &bull; Approved Drafts</p>
+<div class="app-shell" *ngIf="auth.isLoggedIn" [class.collapsed]="sidebarCollapsed" [class.nav-open]="mobileNavOpen">
+  <!-- Sidebar -->
+  <aside class="sidebar" aria-label="Main navigation">
+    <div class="sidebar-brand">
+      <div class="brand-mark" aria-hidden="true"><span></span></div>
+      <div class="brand-text">
+        <span class="brand-name">TradeSage AI</span>
+        <span class="brand-sub">Roger · AI Workforce</span>
       </div>
+      <button class="icon-btn sidebar-close" (click)="mobileNavOpen = false" aria-label="Close navigation"><app-icon name="x"></app-icon></button>
     </div>
-    <div class="hud-status">
-      <span class="chip" [class.active]="!isElevenLabsConnected" [class.calling]="isElevenLabsConnected">
-        {{ isElevenLabsConnected ? '🔴 ROGER ACTIVE' : '🟢 ROGER READY' }}
-      </span>
-    </div>
-  </header>
 
-  <!-- HUD Navigation Tabs -->
-  <nav class="hud-nav-tabs">
-    <button class="nav-tab-btn" [class.active]="currentRoute === 'products'" (click)="currentRoute = 'products'">
-      🚀 My Digital Products ({{ digitalProducts.length }})
-    </button>
-    <button class="nav-tab-btn" [class.active]="currentRoute === 'leads'" (click)="currentRoute = 'leads'">
-      👥 Leads CRM & AI Scoring ({{ leads.length }})
-    </button>
-    <button class="nav-tab-btn" [class.active]="currentRoute === 'emails'" (click)="currentRoute = 'emails'">
-      📬 Email Center & Visual HTML ({{ emails.length }})
-    </button>
-    <button class="nav-tab-btn" [class.active]="currentRoute === 'drafts'" (click)="currentRoute = 'drafts'">
-      📝 Mail Drafts & Approvals ({{ drafts.length }})
-    </button>
-    <button class="nav-tab-btn" [class.active]="currentRoute === 'social'" (click)="currentRoute = 'social'">
-      📱 Social Media Studio ({{ socialPosts.length }})
-    </button>
-    <button class="nav-tab-btn" [class.active]="currentRoute === 'businesses'" (click)="currentRoute = 'businesses'">
-      📢 AI Campaigns ({{ connectedBusinesses.length }})
-    </button>
-    <button class="nav-tab-btn" [class.active]="currentRoute === 'voice'" (click)="currentRoute = 'voice'">
-      🎙️ Neural Voice Center
-    </button>
-    <button class="nav-tab-btn" [class.active]="currentRoute === 'appointments'" (click)="currentRoute = 'appointments'">
-      📅 Demos ({{ appointments.length }})
-    </button>
-  </nav>
+    <nav class="sidebar-nav">
+      <div class="nav-group" *ngFor="let group of navGroups">
+        <div class="nav-group-label">{{ group.label }}</div>
+        <button *ngFor="let item of group.items" class="nav-item" [class.active]="currentRoute === item.route"
+                (click)="navigate(item.route)" [attr.aria-current]="currentRoute === item.route ? 'page' : null" [title]="sidebarCollapsed ? item.label : ''">
+          <app-icon [name]="item.icon" [size]="19"></app-icon>
+          <span class="nav-label">{{ item.label }}</span>
+          <span class="nav-count" *ngIf="navCount(item.route) !== null && navCount(item.route)! > 0">{{ navCount(item.route) }}</span>
+        </button>
+      </div>
+    </nav>
+
+    <div class="sidebar-footer">
+      <button class="roger-card" [class.live]="isElevenLabsConnected" (click)="toggleElevenLabsCall()"
+              [title]="isElevenLabsConnected ? 'End Roger voice session' : 'Start a hands-free voice session with Roger'">
+        <span class="roger-orb" aria-hidden="true"></span>
+        <span class="roger-text">
+          <strong>{{ isElevenLabsConnected ? 'Roger is live' : 'Talk to Roger' }}</strong>
+          <small>{{ isElevenLabsConnected ? 'Tap to end voice session' : 'Hands-free voice assistant' }}</small>
+        </span>
+      </button>
+      <button class="nav-item collapse-toggle" (click)="toggleSidebar()" [attr.aria-label]="sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'">
+        <app-icon [name]="sidebarCollapsed ? 'expand' : 'collapse'" [size]="19"></app-icon>
+        <span class="nav-label">Collapse</span>
+      </button>
+    </div>
+  </aside>
+  <div class="sidebar-scrim" *ngIf="mobileNavOpen" (click)="mobileNavOpen = false"></div>
+
+  <div class="main-area">
+    <!-- Top bar -->
+    <header class="topbar">
+      <button class="icon-btn mobile-menu" (click)="mobileNavOpen = true; $event.stopPropagation()" aria-label="Open navigation"><app-icon name="menu"></app-icon></button>
+      <div class="page-heading">
+        <h1>{{ currentNav.label }}</h1>
+        <p>{{ currentNav.subtitle }}</p>
+      </div>
+
+      <div class="topbar-actions">
+        <div class="menu-anchor">
+          <button class="workspace-btn" (click)="toggleMenu('workspace', $event)" [attr.aria-expanded]="openMenu === 'workspace'" aria-haspopup="true">
+            <span class="ws-avatar">{{ (auth.workspace?.name || 'W')[0] }}</span>
+            <span class="ws-name">{{ auth.workspace?.name || 'Workspace' }}</span>
+            <app-icon name="chevron-down" [size]="16"></app-icon>
+          </button>
+          <div class="dropdown" *ngIf="openMenu === 'workspace'" (click)="$event.stopPropagation()" role="menu">
+            <div class="dropdown-label">Workspace</div>
+            <div class="dropdown-item current">
+              <span class="ws-avatar">{{ (auth.workspace?.name || 'W')[0] }}</span>
+              <span class="grow"><strong>{{ auth.workspace?.name || 'Workspace' }}</strong><small>{{ auth.workspace?.plan || 'Plan' }} plan</small></span>
+              <app-icon name="check" [size]="16"></app-icon>
+            </div>
+            <div class="dropdown-note">Your account belongs to one workspace. Sign in with another account to switch.</div>
+          </div>
+        </div>
+
+        <button class="voice-pill" [class.live]="isElevenLabsConnected" (click)="toggleElevenLabsCall()">
+          <span class="dot"></span>{{ isElevenLabsConnected ? 'Roger live' : 'Roger ready' }}
+        </button>
+
+        <button class="icon-btn theme-toggle" (click)="theme.toggle()" [attr.aria-label]="theme.isDark ? 'Switch to light theme' : 'Switch to dark theme'" [title]="theme.isDark ? 'Light theme' : 'Dark theme'">
+          <app-icon [name]="theme.isDark ? 'sun' : 'moon'"></app-icon>
+        </button>
+
+        <div class="menu-anchor">
+          <button class="icon-btn" (click)="toggleMenu('notifications', $event)" [attr.aria-expanded]="openMenu === 'notifications'" aria-label="Notifications">
+            <app-icon name="bell"></app-icon>
+            <span class="badge-dot" *ngIf="notifications.length">{{ notifications.length }}</span>
+          </button>
+          <div class="dropdown dropdown-wide" *ngIf="openMenu === 'notifications'" (click)="$event.stopPropagation()" role="menu">
+            <div class="dropdown-label">Notifications</div>
+            <button class="dropdown-item" *ngFor="let n of notifications" (click)="navigate(n.route)">
+              <span class="notif-icon" [ngClass]="'tone-' + n.tone"><app-icon [name]="n.icon" [size]="16"></app-icon></span>
+              <span class="grow"><strong>{{ n.title }}</strong><small>{{ n.detail }}</small></span>
+            </button>
+            <div class="dropdown-empty" *ngIf="!notifications.length">You're all caught up.</div>
+          </div>
+        </div>
+
+        <div class="menu-anchor">
+          <button class="avatar-btn" (click)="toggleMenu('profile', $event)" [attr.aria-expanded]="openMenu === 'profile'" aria-label="Account menu">{{ userInitials }}</button>
+          <div class="dropdown" *ngIf="openMenu === 'profile'" (click)="$event.stopPropagation()" role="menu">
+            <div class="profile-head">
+              <span class="avatar-btn static">{{ userInitials }}</span>
+              <span class="grow"><strong>{{ auth.user?.displayName || 'Signed in' }}</strong><small>{{ auth.user?.email }}</small></span>
+            </div>
+            <button class="dropdown-item" (click)="theme.toggle()">
+              <app-icon [name]="theme.isDark ? 'sun' : 'moon'" [size]="16"></app-icon>
+              <span class="grow">{{ theme.isDark ? 'Light theme' : 'Dark theme' }}</span>
+            </button>
+            <button class="dropdown-item danger" (click)="logout()"><app-icon name="logout" [size]="16"></app-icon><span class="grow">Sign out</span></button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="content">
+  <app-dashboard *ngIf="currentRoute === 'dashboard'" (navigate)="onDashboardNavigate($event)"
+                 [voiceOn]="voiceAlwaysOn" [voiceLive]="isElevenLabsConnected" [voiceBusy]="voiceConnecting" [voiceStatus]="voiceStatusLabel"
+                 (voiceToggle)="setVoiceAlwaysOn($event)"></app-dashboard>
+
 
   <!-- =================================================================== -->
   <!-- TAB 1: DIGITAL PRODUCTS HUB (THRIVEWOO & AI URL EXTRACTOR) -->
@@ -54,7 +120,7 @@
   <section *ngIf="currentRoute === 'products'" class="hud-panel full-width-panel">
     <div class="panel-header">
       <div>
-        <h2>DIGITAL PRODUCTS HUB & AI FEATURE EXTRACTOR</h2>
+        <h2>Digital products hub & AI feature extractor</h2>
         <p class="subtitle">Manage digital platforms for marketing. Enter a product URL (e.g. <code>https://thrivewoo.com</code>) to automatically extract core features with AI.</p>
       </div>
       <div class="header-actions">
@@ -116,7 +182,7 @@
 
     <!-- Active Digital Products Catalog -->
     <div class="section-title-row" style="margin-top: 25px;">
-      <h2>MY ACTIVE DIGITAL PRODUCTS FOR MARKETING</h2>
+      <h2>Active digital products</h2>
       <span class="badge">{{ digitalProducts.length }} Products</span>
     </div>
 
@@ -169,74 +235,97 @@
   <section *ngIf="currentRoute === 'leads'" class="hud-panel full-width-panel">
     <div class="panel-header">
       <div>
-        <h2>LEADS CRM & AI QUALIFICATION ENGINE</h2>
-        <p class="subtitle">Manage leads with automated AI Scoring (0-100), Intent Categorization (Hot/Warm/Cold), and personalized follow-ups. Import bulk leads from Excel or CSV.</p>
+        <h2>Leads CRM</h2>
+        <p class="subtitle">Leads linked to your products. Lead scores are rule-based (contact details, budget and buying-intent words); follow-up advice comes from AI when a provider is available.</p>
       </div>
       <div class="header-actions">
-        <button class="btn btn-accent" (click)="showExcelImportModal = true">📂 Import Excel / CSV</button>
-        <button class="btn btn-secondary" (click)="qualifyAllLeads()" [disabled]="isQualifyingAll">
-          {{ isQualifyingAll ? 'Scoring...' : '⚡ AI Qualify All Leads' }}
+        <button class="btn btn-accent" (click)="showExcelImportModal = true; leadImportResult = null">📂 Import Excel / CSV</button>
+        <button class="btn btn-secondary" (click)="qualifyAllLeads()" [disabled]="isQualifyingAll" title="Refresh rule-based scores and generate AI advice (up to 50 leads per run)">
+          {{ isQualifyingAll ? 'Working…' : '⚡ Rescore & AI advice' }}
         </button>
-        <button class="btn btn-primary" (click)="showNewLeadModal = true">+ Add Lead</button>
+        <button class="btn btn-primary" (click)="openNewLead()">+ Add Lead</button>
       </div>
     </div>
 
-    <!-- Leads Table with AI Scores -->
+    <div class="lead-filters">
+      <select class="hud-input" [(ngModel)]="leadFilters.productId" (change)="applyLeadFilters()" aria-label="Filter by product">
+        <option value="">All products</option>
+        <option value="none">No product selected</option>
+        <option *ngFor="let p of leadProducts" [value]="p.id">{{ p.name }}</option>
+      </select>
+      <select class="hud-input" [(ngModel)]="leadFilters.status" (change)="applyLeadFilters()" aria-label="Filter by status">
+        <option value="">All statuses</option>
+        <option *ngFor="let st of leadStatuses" [value]="st">{{ st }}</option>
+      </select>
+      <input class="hud-input" [(ngModel)]="leadFilters.q" (keyup.enter)="applyLeadFilters()" placeholder="Search name, email, company or phone" aria-label="Search leads" />
+      <button class="btn btn-secondary btn-sm" (click)="applyLeadFilters()">Search</button>
+      <span class="lead-count">{{ leadTotal }} lead{{ leadTotal === 1 ? '' : 's' }}</span>
+    </div>
+
     <div class="table-container full-table">
       <table class="data-table">
         <thead>
           <tr>
-            <th>ID</th>
-            <th>Contact Name</th>
+            <th>Contact</th>
             <th>Company</th>
             <th>Email</th>
             <th>Phone</th>
-            <th>Product Interest</th>
+            <th>Product</th>
             <th>Budget</th>
-            <th>AI Score</th>
-            <th>AI Category</th>
-            <th>AI Strategic Follow-up Advice</th>
+            <th>Status</th>
+            <th title="Rule-based score: contact details, budget and buying-intent words">Lead score (rule-based)</th>
+            <th>AI follow-up advice</th>
             <th>Actions</th>
           </tr>
         </thead>
         <tbody>
           <tr *ngFor="let ld of leads">
-            <td>#{{ ld.id }}</td>
-            <td><strong>{{ ld.name }}</strong></td>
-            <td>{{ ld.company_name || 'Prospect' }}</td>
-            <td>{{ ld.email || '—' }}</td>
-            <td>{{ ld.phone || '—' }}</td>
-            <td><span class="chip">{{ ld.product_interest || 'ThriveWoo B2B' }}</span></td>
-            <td>{{ ld.estimated_budget || '$15,000' }}</td>
+            <td><strong>{{ ld.name }}</strong><div class="lead-sub" *ngIf="ld.notes" [title]="ld.notes">📝 {{ ld.notes | slice:0:50 }}{{ ld.notes.length > 50 ? '…' : '' }}</div></td>
+            <td>{{ dash(ld.companyName) }}</td>
+            <td>{{ dash(ld.email) }}</td>
+            <td>{{ dash(ld.phone) }}</td>
             <td>
-              <div class="score-pill" [class.score-hot]="(ld.ai_score || 50) >= 75" [class.score-warm]="(ld.ai_score || 50) >= 45 && (ld.ai_score || 50) < 75" [class.score-cold]="(ld.ai_score || 50) < 45">
-                {{ ld.ai_score || 50 }}/100
-              </div>
+              <span class="chip" *ngIf="ld.productName">{{ ld.productName }}</span>
+              <span class="lead-muted" *ngIf="!ld.productName && !ld.productMissing">No product selected</span>
+              <span class="lead-warn" *ngIf="ld.productMissing">Product removed</span>
+              <div class="lead-warn" *ngIf="ld.productReviewNote" [title]="ld.productReviewNote">⚠ Needs product review</div>
             </td>
+            <td>{{ dash(ld.estimatedBudget) }}</td>
+            <td>{{ dash(ld.status) }}</td>
             <td>
-              <span class="chip" [class.calling]="ld.ai_category === 'Hot'" [class.active]="ld.ai_category === 'Warm'">
-                {{ ld.ai_category === 'Hot' ? '🔥 HOT' : (ld.ai_category === 'Warm' ? '🟡 WARM' : '❄️ COLD') }}
-              </span>
+              <div class="score-pill" *ngIf="ld.score !== null" [class.score-hot]="ld.category === 'Hot'" [class.score-warm]="ld.category === 'Warm'" [class.score-cold]="ld.category === 'Cold'"
+                   [title]="scoreFactorsText(ld)">
+                {{ ld.score }}/100 · {{ ld.category || '—' }}
+              </div>
+              <span *ngIf="ld.score === null">—</span>
             </td>
             <td class="advice-cell">
-              <span class="advice-text">{{ ld.ai_suggestion || 'High fit for wholesale ordering & van sales mobile app. Send live demonstration.' }}</span>
+              <span class="advice-text" *ngIf="ld.aiSuggestion" [title]="ld.aiSuggestion">{{ ld.aiSuggestion }}</span>
+              <span class="lead-muted" *ngIf="!ld.aiSuggestion">{{ ld.aiStatus === 'unavailable' ? 'AI unavailable' : 'No AI advice yet' }}</span>
+              <div class="lead-muted" *ngIf="ld.aiSuggestion && ld.aiStatus === 'unavailable'">Last refresh: AI unavailable</div>
             </td>
             <td>
               <div class="button-group">
-                <button class="btn btn-secondary btn-sm" (click)="quickEmailLead(ld)" title="Compose email with ThriveWoo template">
-                  ✉️ Email
-                </button>
-                <button class="btn btn-secondary btn-sm" (click)="qualifySingleLead(ld)" title="Recalculate AI score">
-                  ⚡ Qualify
-                </button>
+                <button class="btn btn-secondary btn-sm" (click)="openEditLead(ld)">Edit</button>
+                <button class="btn btn-secondary btn-sm" (click)="quickEmailLead(ld)" [disabled]="!ld.hasValidEmail" [title]="ld.hasValidEmail ? 'Draft an email about ' + (ld.productName || 'their needs') : 'No valid email address'">✉️ Email</button>
+                <button class="btn btn-secondary btn-sm" (click)="qualifySingleLead(ld)" title="Refresh the rule-based score and ask AI for advice">⚡ AI advice</button>
+                <button class="btn btn-danger btn-sm" (click)="deleteLead(ld)" aria-label="Delete lead">🗑</button>
               </div>
             </td>
           </tr>
-          <tr *ngIf="leads.length === 0">
-            <td colspan="11" class="empty-state">No leads found. Click "📂 Import Excel / CSV" or "+ Add Lead" to get started.</td>
+          <tr *ngIf="!leadsLoading && leads.length === 0">
+            <td colspan="10" class="empty-state">No leads match. Click "📂 Import Excel / CSV" or "+ Add Lead" to get started.</td>
+          </tr>
+          <tr *ngIf="leadsLoading && leads.length === 0">
+            <td colspan="10" class="empty-state">Loading leads…</td>
           </tr>
         </tbody>
       </table>
+    </div>
+    <div class="lead-pager" *ngIf="leadPageCount > 1">
+      <button class="btn btn-secondary btn-sm" (click)="changeLeadPage(-1)" [disabled]="leadPage <= 1">‹ Previous</button>
+      <span>Page {{ leadPage }} of {{ leadPageCount }}</span>
+      <button class="btn btn-secondary btn-sm" (click)="changeLeadPage(1)" [disabled]="leadPage >= leadPageCount">Next ›</button>
     </div>
   </section>
 
@@ -246,7 +335,7 @@
   <section *ngIf="currentRoute === 'emails'" class="hud-panel full-width-panel">
     <div class="panel-header">
       <div>
-        <h2>EMAIL COMMAND CENTER (LIVE COMPANY SMTP & IMAP SYNC)</h2>
+        <h2>Email command center</h2>
         <p class="subtitle">Real Company Email: Send authentic visual HTML outreach via SMTP and sync live inbox replies via IMAP with automatic AI priority screening.</p>
       </div>
       <div class="header-actions">
@@ -337,7 +426,7 @@
   <section *ngIf="currentRoute === 'drafts'" class="hud-panel full-width-panel">
     <div class="panel-header">
       <div>
-        <h2>AI MAIL DRAFTS & USER APPROVAL WORKFLOW</h2>
+        <h2>AI mail drafts & approvals</h2>
         <p class="subtitle">Generate, personalize, and rewrite professional email drafts. Strictly requires your explicit approval before any email can be sent.</p>
       </div>
     </div>
@@ -352,7 +441,8 @@
         <div class="form-group">
           <label>Target Digital Product</label>
           <select class="hud-input" [(ngModel)]="newDraftForm.productId">
-            <option *ngFor="let p of digitalProducts" [value]="p.id">{{ p.name }}</option>
+            <option [ngValue]="null">No product (generic draft, no product details)</option>
+            <option *ngFor="let p of digitalProducts" [ngValue]="p.id">{{ p.name }}</option>
           </select>
         </div>
         <div class="form-group">
@@ -375,7 +465,7 @@
       </div>
       <div class="form-group" style="margin-top: 10px;">
         <label>Marketing Goal / Offer Angle</label>
-        <input type="text" class="hud-input" [(ngModel)]="newDraftForm.goal" placeholder="e.g. Introduce ThriveWoo to eliminate handwritten van orders and automate WooCommerce wholesale pricing" />
+        <input type="text" class="hud-input" [(ngModel)]="newDraftForm.goal" placeholder="e.g. Introduce our product and ask for a short call" />
       </div>
       <div style="text-align: right; margin-top: 15px;">
         <button class="btn btn-primary" (click)="generateNewDraft()" [disabled]="isGeneratingDraft">
@@ -389,7 +479,7 @@
       <!-- Left: Drafts List -->
       <div class="drafts-list-col">
         <div class="section-title-row">
-          <h3>DRAFTS QUEUE ({{ drafts.length }})</h3>
+          <h3>Drafts queue ({{ drafts.length }})</h3>
         </div>
         <div class="drafts-scroll-list">
           <div *ngFor="let d of drafts" class="draft-item-card" [class.selected]="selectedDraft?.id === d.id" (click)="selectedDraft = d">
@@ -458,128 +548,7 @@
   <!-- =================================================================== -->
   <!-- TAB 4: SOCIAL MEDIA MARKETING STUDIO -->
   <!-- =================================================================== -->
-  <section *ngIf="currentRoute === 'social'" class="hud-panel full-width-panel">
-    <div class="panel-header">
-      <div>
-        <h2>📱 SOCIAL MEDIA MARKETING STUDIO</h2>
-        <p class="subtitle">Generate high-converting organic & paid social copy for LinkedIn, Twitter / X, Instagram, and Facebook for ThriveWoo or any digital product.</p>
-      </div>
-      <div class="header-actions">
-        <button class="btn btn-primary" (click)="generateSocialPost()">⚡ Quick Generate ({{ selectedSocialPlatform }})</button>
-      </div>
-    </div>
-
-    <!-- AI Social Post Creator Bar -->
-    <div class="social-creator-box">
-      <div class="extractor-title-row">
-        <h3>⚡ AI Social Media Copywriter</h3>
-        <span class="badge badge-accent">Platform-Optimized Formats</span>
-      </div>
-
-      <!-- Platform Selection Pills -->
-      <div class="platform-selector-row">
-        <button class="platform-pill" [class.active]="selectedSocialPlatform === 'LinkedIn'" (click)="selectedSocialPlatform = 'LinkedIn'">
-          💼 LinkedIn
-        </button>
-        <button class="platform-pill" [class.active]="selectedSocialPlatform === 'Twitter'" (click)="selectedSocialPlatform = 'Twitter'">
-          🐦 Twitter / X
-        </button>
-        <button class="platform-pill" [class.active]="selectedSocialPlatform === 'Instagram'" (click)="selectedSocialPlatform = 'Instagram'">
-          📸 Instagram
-        </button>
-        <button class="platform-pill" [class.active]="selectedSocialPlatform === 'Facebook'" (click)="selectedSocialPlatform = 'Facebook'">
-          📘 Facebook
-        </button>
-      </div>
-
-      <div class="social-inputs-grid">
-        <div class="form-group" style="margin: 0;">
-          <label style="font-size: 0.8rem; color: #94a3b8;">Campaign Topic / Custom Angle (Optional)</label>
-          <input type="text" class="hud-input" [(ngModel)]="socialCustomTopic" placeholder="e.g. Announce 15-day free pilot for field sales teams, or mobile barcode scanning" />
-        </div>
-
-        <div class="form-group" style="margin: 0;">
-          <label style="font-size: 0.8rem; color: #94a3b8;">Target Digital Product</label>
-          <select class="hud-input" [(ngModel)]="selectedSocialProductId">
-            <option [ngValue]="null">★ All Products (Default ThriveWoo)</option>
-            <option *ngFor="let p of digitalProducts" [ngValue]="p.id">{{ p.name }}</option>
-          </select>
-        </div>
-
-        <div class="form-group" style="margin: 0;">
-          <label style="font-size: 0.8rem; color: #94a3b8;">Voice & Tone</label>
-          <select class="hud-input" [(ngModel)]="socialTone">
-            <option value="High-Converting B2B">💼 High-Converting B2B</option>
-            <option value="Bold & Direct">⚡ Bold & Direct</option>
-            <option value="Founder Storytelling">📖 Founder Story</option>
-            <option value="Urgent Value">🔥 Urgent Value / FOMO</option>
-          </select>
-        </div>
-
-        <div style="align-self: flex-end;">
-          <button class="btn btn-primary" (click)="generateSocialPost()" [disabled]="isGeneratingSocialPost" style="white-space: nowrap;">
-            {{ isGeneratingSocialPost ? 'Writing Post...' : '⚡ Generate AI Post' }}
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Filter Buttons Bar -->
-    <div class="section-title-row" style="margin: 20px 0 14px 0;">
-      <div>
-        <h3>SOCIAL POSTS CATALOG ({{ socialPosts.length }})</h3>
-      </div>
-      <div class="tab-filters">
-        <button class="chip" [class.active]="socialStatusFilter === 'all'" (click)="socialStatusFilter = 'all'; loadSocialPosts()">All</button>
-        <button class="chip" [class.active]="socialStatusFilter === 'Draft'" (click)="socialStatusFilter = 'Draft'; loadSocialPosts()">Drafts</button>
-        <button class="chip" [class.active]="socialStatusFilter === 'Approved'" (click)="socialStatusFilter = 'Approved'; loadSocialPosts()">Approved</button>
-        <button class="chip" [class.active]="socialStatusFilter === 'Published'" (click)="socialStatusFilter = 'Published'; loadSocialPosts()">Published</button>
-      </div>
-    </div>
-
-    <!-- Posts Grid -->
-    <div class="social-cards-grid">
-      <div *ngFor="let post of socialPosts" class="social-card">
-        <div class="social-card-header">
-          <span class="platform-badge" [ngClass]="post.platform?.toLowerCase()">
-            {{ post.platform || 'LinkedIn' }}
-          </span>
-          <span class="chip" [class.active]="post.status === 'Approved'" [class.calling]="post.status === 'Published'">
-            {{ post.status }}
-          </span>
-        </div>
-
-        <h4 class="social-card-title">{{ post.title }}</h4>
-
-        <div class="social-caption-box">
-          {{ post.caption_text }}
-        </div>
-
-        <div class="social-hashtags" *ngIf="post.hashtags">
-          {{ post.hashtags }}
-        </div>
-
-        <div class="social-cta-box" *ngIf="post.call_to_action">
-          🎯 <strong>CTA:</strong> {{ post.call_to_action }}
-        </div>
-
-        <div class="social-card-actions">
-          <button *ngIf="post.status === 'Draft'" class="btn btn-accent btn-sm" (click)="updateSocialPostStatus(post.id, 'Approved')">
-            ✓ Approve Post
-          </button>
-          <button *ngIf="post.status !== 'Published'" class="btn btn-primary btn-sm" (click)="updateSocialPostStatus(post.id, 'Published')">
-            🚀 Mark Published
-          </button>
-          <span *ngIf="post.status === 'Published'" class="chip active">Published ✓</span>
-          <button class="btn btn-secondary btn-sm" (click)="deleteSocialPost(post.id)">🗑️</button>
-        </div>
-      </div>
-
-      <div *ngIf="socialPosts.length === 0" class="empty-state" style="grid-column: 1 / -1; padding: 40px; text-align: center; color: #94a3b8;">
-        No social media posts found. Click "Generate AI Post" above or tell Roger: <em>"Create a LinkedIn post for ThriveWoo"</em>.
-      </div>
-    </div>
-  </section>
+  <app-social-hub *ngIf="currentRoute === 'social'" [initialSection]="socialSection" [initialCampaignId]="socialCampaignId" [initialLibraryStatus]="socialLibraryStatus" [oauthResult]="socialOauthResult" (toast)="showToast($event)"></app-social-hub>
 
   <!-- =================================================================== -->
   <!-- TAB 5: AI CAMPAIGNS & MULTI-BUSINESS PLAYBOOKS -->
@@ -587,7 +556,7 @@
   <section *ngIf="currentRoute === 'businesses'" class="hud-panel full-width-panel">
     <div class="panel-header">
       <div>
-        <h2>AI MARKETING CAMPAIGNS & PLAYBOOKS</h2>
+        <h2>AI marketing campaigns & playbooks</h2>
         <p class="subtitle">Create, schedule, and track AI-powered marketing campaigns tailored for ThriveWoo or any connected client.</p>
       </div>
       <div class="header-actions">
@@ -639,7 +608,7 @@
     <!-- Campaign Playbooks Grid -->
     <div class="campaign-results-section">
       <div class="section-title-row">
-        <h2>TAILORED CAMPAIGN PLAYBOOKS (FOR: {{ selectedBusiness?.name }})</h2>
+        <h2>Tailored campaign playbooks · {{ selectedBusiness?.name }}</h2>
         <span class="badge">{{ generatedIdeas.length }} Playbooks</span>
       </div>
 
@@ -670,7 +639,7 @@
   <section *ngIf="currentRoute === 'voice'" class="hud-grid">
     <div class="hud-panel main-voice-panel">
       <div class="panel-header">
-        <h2>NEURAL VOICE (SAY "HELLO ROGER")</h2>
+        <h2>Neural voice · say “Hello Roger”</h2>
         <span class="chip" [class.calling]="isElevenLabsConnected" [class.active]="!isElevenLabsConnected">
           {{ isElevenLabsConnected ? 'CONNECTED' : 'READY' }}
         </span>
@@ -731,15 +700,7 @@
       </div>
 
       <div class="quick-commands">
-        <h3>SYSTEM & DESKTOP CONTROLS</h3>
-        <div class="button-row" style="margin-bottom: 10px;">
-          <button class="btn btn-secondary" (click)="triggerLaunchApp('calc')">💻 Calc</button>
-          <button class="btn btn-secondary" (click)="triggerLaunchApp('notepad')">📝 Notepad</button>
-          <button class="btn btn-secondary" (click)="triggerSystemControl('volume_up')">🔊 Vol +</button>
-          <button class="btn btn-secondary" (click)="triggerSystemControl('volume_down')">🔉 Vol -</button>
-          <button class="btn btn-primary" (click)="triggerSystemStats()">⚡ CPU/RAM/Battery</button>
-        </div>
-        <h3>EXECUTIVE BRIEFING</h3>
+        <h3>Executive briefing</h3>
         <div class="button-row">
           <button class="btn btn-primary" (click)="loadExecutiveBriefing()">⚡ Executive Briefing</button>
         </div>
@@ -750,10 +711,10 @@
     <div class="hud-panel data-panel">
       <div class="data-section">
         <div class="section-title-row">
-          <h2>THRIVEWOO PLATFORM SUMMARY</h2>
+          <h2>ThriveWoo platform summary</h2>
           <span class="chip active">🟢 Digital SaaS</span>
         </div>
-        <p class="helper-text" style="color: #94a3b8; font-size: 13px;">
+        <p class="helper-text" style="color: var(--text-muted); font-size: 13px;">
           Smart FMCG B2B Sales App — Staff Performance Tracking, Buying Patterns, Customer-Specific Discounts & In-App Messaging.
         </p>
         <div class="traivo-quick-stats">
@@ -762,7 +723,7 @@
             <span class="stat-label">Products Active</span>
           </div>
           <div class="mini-stat">
-            <span class="stat-number">{{ leads.length }}</span>
+            <span class="stat-number">{{ leadTotal || leads.length }}</span>
             <span class="stat-label">Leads Captured</span>
           </div>
           <div class="mini-stat">
@@ -774,23 +735,23 @@
 
       <div class="data-section">
         <div class="section-title-row">
-          <h2>HIGH INTENT LEADS</h2>
-          <span class="badge">{{ leads.length }} Leads</span>
+          <h2>High-intent leads</h2>
+          <span class="badge">{{ leadTotal || leads.length }} Leads</span>
         </div>
         <div class="table-container">
           <table class="data-table">
             <thead>
               <tr>
                 <th>Contact</th>
-                <th>Score</th>
+                <th title="Rule-based lead score">Lead score</th>
                 <th>Action</th>
               </tr>
             </thead>
             <tbody>
-              <tr *ngFor="let ld of leads.slice(0, 4)">
-                <td><strong>{{ ld.name }}</strong><br><small style="color: #64748b;">{{ ld.company_name }}</small></td>
-                <td><span class="score-pill score-hot">{{ ld.ai_score || 75 }}/100</span></td>
-                <td><button class="btn btn-secondary btn-sm" (click)="quickEmailLead(ld)">Email</button></td>
+              <tr *ngFor="let ld of topScoredLeads">
+                <td><strong>{{ ld.name }}</strong><br><small style="color: var(--text-subtle);">{{ ld.companyName || '' }}</small></td>
+                <td><span class="score-pill" [class.score-hot]="ld.category === 'Hot'" [class.score-warm]="ld.category === 'Warm'" [class.score-cold]="ld.category === 'Cold'">{{ ld.score === null ? '—' : ld.score + '/100' }}</span></td>
+                <td><button class="btn btn-secondary btn-sm" (click)="quickEmailLead(ld)" [disabled]="!ld.hasValidEmail" [title]="ld.hasValidEmail ? 'Draft an email' : 'No valid email address'">Email</button></td>
               </tr>
             </tbody>
           </table>
@@ -805,7 +766,7 @@
   <section *ngIf="currentRoute === 'appointments'" class="hud-panel full-width-panel">
     <div class="panel-header">
       <div>
-        <h2>SCHEDULED DEMOS & APPOINTMENTS</h2>
+        <h2>Scheduled demos & appointments</h2>
         <p class="subtitle">Calendar bookings and live technical walkthroughs for your digital products</p>
       </div>
       <div class="header-actions">
@@ -844,6 +805,9 @@
     </div>
   </section>
 
+    </main>
+  </div>
+
   <!-- =================================================================== -->
   <!-- MODAL 1: EXCEL / CSV BULK LEAD IMPORTER -->
   <!-- =================================================================== -->
@@ -854,53 +818,53 @@
         <button class="close-btn" (click)="showExcelImportModal = false">✕</button>
       </div>
       <div class="modal-body">
-        <p class="helper-text">Upload any spreadsheet (<code>.xlsx</code>, <code>.xls</code>, or <code>.csv</code>). Column headers like <em>Name</em>, <em>Company</em>, <em>Email</em>, <em>Phone</em>, <em>Budget</em> are mapped automatically with instant AI Scoring!</p>
+        <p class="helper-text">Upload a spreadsheet (<code>.xlsx</code>, <code>.xls</code> or <code>.csv</code>). Recognised columns: <em>Name</em>, <em>Company</em>, <em>Email</em>, <em>Phone</em>, <em>Product</em> (name) or <em>Product ID</em>, <em>Budget</em>, <em>Notes</em>. Blank cells stay blank. Products must already exist in Products; unmatched ones are flagged for review.</p>
 
-        <!-- Drag & Drop Upload Zone -->
         <div class="excel-dropzone">
           <input type="file" id="excelFileInput" accept=".xlsx, .xls, .csv" (change)="onExcelFileSelected($event)" style="display: none;" />
           <label for="excelFileInput" class="dropzone-label">
             <div class="dropzone-icon">📊</div>
-            <strong>Click to browse or drop your spreadsheet here</strong>
+            <strong>Click to browse for your spreadsheet</strong>
             <span class="dropzone-sub">Supports .xlsx, .xls, and .csv files</span>
           </label>
         </div>
 
         <div *ngIf="excelFileName" class="file-loaded-banner">
-          ✓ Loaded file: <strong>{{ excelFileName }}</strong> &bull; ({{ excelPreviewRows.length }} rows found)
+          ✓ Loaded <strong>{{ excelFileName }}</strong> · {{ excelPreviewRows.length }} rows with a name<span *ngIf="excelSkippedNoName"> · {{ excelSkippedNoName }} without a name will be skipped</span>
         </div>
+        <div *ngIf="excelUnmatchedCount" class="lead-review-banner">⚠ {{ excelUnmatchedCount }} row{{ excelUnmatchedCount === 1 ? ' references' : 's reference' }} a product that is not in this workspace. They will be imported without a product and flagged for review.</div>
 
-        <!-- Preview Table of parsed leads -->
         <div *ngIf="excelPreviewRows.length > 0" class="excel-preview-table-container table-container">
-          <h4>Parsed Leads Preview (First 5 of {{ excelPreviewRows.length }}):</h4>
           <table class="data-table">
             <thead>
-              <tr>
-                <th>Name</th>
-                <th>Company</th>
-                <th>Email</th>
-                <th>Phone</th>
-                <th>Interest</th>
-                <th>Budget</th>
-              </tr>
+              <tr><th>Name</th><th>Company</th><th>Email</th><th>Phone</th><th>Product</th><th>Budget</th></tr>
             </thead>
             <tbody>
-              <tr *ngFor="let row of excelPreviewRows.slice(0, 5)">
+              <tr *ngFor="let row of excelPreviewRows.slice(0, 8)">
                 <td><strong>{{ row.name }}</strong></td>
-                <td>{{ row.company }}</td>
-                <td>{{ row.email }}</td>
-                <td>{{ row.phone }}</td>
-                <td>{{ row.interest }}</td>
-                <td>{{ row.budget }}</td>
+                <td>{{ dash(row.companyName) }}</td>
+                <td>{{ dash(row.email) }}</td>
+                <td>{{ dash(row.phone) }}</td>
+                <td><span [class.lead-warn]="previewProductMatch(row).ok === false" [class.lead-muted]="previewProductMatch(row).ok === null">{{ previewProductMatch(row).label }}</span></td>
+                <td>{{ dash(row.estimatedBudget) }}</td>
               </tr>
             </tbody>
           </table>
+          <p class="helper-text" *ngIf="excelPreviewRows.length > 8">Showing 8 of {{ excelPreviewRows.length }} rows.</p>
+        </div>
+
+        <div *ngIf="leadImportResult" class="lead-import-result">
+          <strong>Import finished:</strong> {{ leadImportResult.imported }} imported<span *ngIf="leadImportResult.flagged.length">, {{ leadImportResult.flagged.length }} need product review</span><span *ngIf="leadImportResult.duplicates.length">, {{ leadImportResult.duplicates.length }} duplicate emails skipped</span><span *ngIf="leadImportResult.skipped.length">, {{ leadImportResult.skipped.length }} rows skipped</span>.
+          <ul *ngIf="leadImportResult.flagged.length || leadImportResult.skipped.length">
+            <li *ngFor="let f of leadImportResult.flagged.slice(0, 6)">Row {{ f.row }} ({{ f.name }}): {{ f.reason }}</li>
+            <li *ngFor="let k of leadImportResult.skipped.slice(0, 6)">Row {{ k.row }}: {{ k.reason }}</li>
+          </ul>
         </div>
       </div>
       <div class="modal-footer">
-        <button class="btn btn-secondary" (click)="showExcelImportModal = false">Cancel</button>
+        <button class="btn btn-secondary" (click)="showExcelImportModal = false">{{ leadImportResult ? 'Close' : 'Cancel' }}</button>
         <button class="btn btn-primary" (click)="confirmImportExcelLeads()" [disabled]="excelPreviewRows.length === 0 || isImportingLeads">
-          {{ isImportingLeads ? 'Importing & Scoring...' : '🚀 Import ' + excelPreviewRows.length + ' Leads with AI' }}
+          {{ isImportingLeads ? 'Importing…' : 'Import ' + excelPreviewRows.length + ' leads' }}
         </button>
       </div>
     </div>
@@ -999,38 +963,56 @@
   <div *ngIf="showNewLeadModal" class="modal-backdrop" (click)="showNewLeadModal = false">
     <div class="modal-card" (click)="$event.stopPropagation()">
       <div class="modal-header">
-        <h3>👥 Capture New Customer Lead</h3>
+        <h3>{{ editingLeadId ? 'Edit lead' : 'Add a lead' }}</h3>
         <button class="close-btn" (click)="showNewLeadModal = false">✕</button>
       </div>
       <div class="modal-body">
         <div class="form-group">
-          <label>Full Name</label>
+          <label>Full name *</label>
           <input type="text" class="hud-input" [(ngModel)]="newLead.name" placeholder="e.g. Lisa Ray" />
         </div>
         <div class="form-group">
-          <label>Company Name</label>
-          <input type="text" class="hud-input" [(ngModel)]="newLead.company_name" placeholder="e.g. Horizon Wholesale Distributors" />
+          <label>Product</label>
+          <select class="hud-input" [(ngModel)]="newLead.productId">
+            <option [ngValue]="null">No product selected</option>
+            <option *ngFor="let p of leadProducts" [ngValue]="p.id">{{ p.name }}</option>
+          </select>
+          <span class="helper-text" *ngIf="!leadProducts.length">No products in this workspace yet — add one in Digital Products to link leads to it.</span>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Company</label>
+            <input type="text" class="hud-input" [(ngModel)]="newLead.company_name" placeholder="Company name" />
+          </div>
+          <div class="form-group">
+            <label>Estimated budget</label>
+            <input type="text" class="hud-input" [(ngModel)]="newLead.estimated_budget" placeholder="e.g. $12,000 or AED 15k" />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Email</label>
+            <input type="email" class="hud-input" [(ngModel)]="newLead.email" placeholder="name@company.com" />
+          </div>
+          <div class="form-group">
+            <label>Phone</label>
+            <input type="text" class="hud-input" [(ngModel)]="newLead.phone" placeholder="Phone number" />
+          </div>
+        </div>
+        <div class="form-group" *ngIf="editingLeadId">
+          <label>Status</label>
+          <select class="hud-input" [(ngModel)]="newLead.status">
+            <option *ngFor="let st of leadStatuses" [value]="st">{{ st }}</option>
+          </select>
         </div>
         <div class="form-group">
-          <label>Email</label>
-          <input type="email" class="hud-input" [(ngModel)]="newLead.email" placeholder="e.g. lisa@horizonbev.com" />
-        </div>
-        <div class="form-group">
-          <label>Phone</label>
-          <input type="text" class="hud-input" [(ngModel)]="newLead.phone" placeholder="+1 (555) 781-9920" />
-        </div>
-        <div class="form-group">
-          <label>Product Interest / Requirements</label>
-          <input type="text" class="hud-input" [(ngModel)]="newLead.interest" placeholder="e.g. ThriveWoo Wholesale Pricing & Van Sales" />
-        </div>
-        <div class="form-group">
-          <label>Estimated Deal Value / Budget</label>
-          <input type="text" class="hud-input" [(ngModel)]="newLead.estimated_budget" placeholder="$18,500" />
+          <label>Notes</label>
+          <textarea class="hud-textarea" rows="3" [(ngModel)]="newLead.notes" placeholder="What they asked for, next steps…"></textarea>
         </div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" (click)="showNewLeadModal = false">Cancel</button>
-        <button class="btn btn-primary" (click)="submitNewLead()">Record & AI Score Lead</button>
+        <button class="btn btn-primary" (click)="submitNewLead()" [disabled]="!newLead.name?.trim()">{{ editingLeadId ? 'Save changes' : 'Save lead' }}</button>
       </div>
     </div>
   </div>
@@ -1165,8 +1147,8 @@
       <div class="modal-header">
         <div>
           <span class="badge badge-accent">AUTHENTIC COMPANY MAIL</span>
-          <h3>⚙️ COMPANY MAIL AUTHORIZATION (SMTP / IMAP)</h3>
-          <p class="subtitle" style="margin: 4px 0 0; color: #94a3b8; font-size: 0.85rem;">
+          <h3>⚙️ Company mail authorization (SMTP / IMAP)</h3>
+          <p class="subtitle" style="margin: 4px 0 0; color: var(--text-muted); font-size: 0.85rem;">
             Configure your corporate email (info&#64;thrivewoo.com or your business mail). Sends live authentic emails over SMTP and receives client replies over IMAP.
           </p>
         </div>
@@ -1205,16 +1187,16 @@
         <!-- ZeptoMail Active Banner -->
         <div *ngIf="mailConfig.provider === 'zeptomail' || mailConfig.sender_email?.includes('thrivewoo.com')" 
              style="background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 8px; padding: 10px 14px; margin-top: 10px; display: flex; align-items: center; justify-content: space-between;">
-          <div style="font-size: 0.82rem; color: #a7f3d0;">
-            <strong style="color: #34d399;">✓ ZeptoMail Outbound Connected:</strong> Dispatches all live emails from <strong>{{ mailConfig.sender_email || 'support@thrivewoo.com' }}</strong>.
+          <div style="font-size: 0.82rem; color: var(--success-text);">
+            <strong style="color: var(--success-text);">✓ ZeptoMail Outbound Connected:</strong> Dispatches all live emails from <strong>{{ mailConfig.sender_email || 'support@thrivewoo.com' }}</strong>.
           </div>
           <span class="chip active" style="margin: 0; background: #059669; color: white;">READY TO SEND</span>
         </div>
 
         <!-- Section 1: SMTP Outbound (Sending) -->
-        <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(0, 240, 255, 0.25); border-radius: 8px; padding: 14px; margin-top: 14px;">
+        <div style="background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; margin-top: 14px;">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-            <h4 style="margin: 0; color: #00f0ff;">📤 Outbound SMTP Authorization (Send Real Emails)</h4>
+            <h4 style="margin: 0; color: var(--accent-text);">📤 Outbound SMTP Authorization (Send Real Emails)</h4>
             <button class="btn btn-secondary btn-sm" (click)="testSmtp()" [disabled]="isTestingSmtp">
               {{ isTestingSmtp ? 'Testing...' : '🔌 Test SMTP Handshake' }}
             </button>
@@ -1222,15 +1204,15 @@
 
           <div style="display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 12px;">
             <div class="form-group" style="margin: 0;">
-              <label style="font-size: 0.8rem; color: #94a3b8;">SMTP Host</label>
+              <label style="font-size: 0.8rem; color: var(--text-muted);">SMTP Host</label>
               <input type="text" class="hud-input" [(ngModel)]="mailConfig.smtp_host" placeholder="smtp.gmail.com or mail.yourcompany.com" />
             </div>
             <div class="form-group" style="margin: 0;">
-              <label style="font-size: 0.8rem; color: #94a3b8;">SMTP Port</label>
+              <label style="font-size: 0.8rem; color: var(--text-muted);">SMTP Port</label>
               <input type="number" class="hud-input" [(ngModel)]="mailConfig.smtp_port" placeholder="587" />
             </div>
             <div class="form-group" style="margin: 0; display: flex; flex-direction: column; justify-content: center;">
-              <label style="font-size: 0.8rem; color: #94a3b8;">SSL (Port 465)</label>
+              <label style="font-size: 0.8rem; color: var(--text-muted);">SSL (Port 465)</label>
               <label style="cursor: pointer; display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 0.85rem;">
                 <input type="checkbox" [(ngModel)]="mailConfig.smtp_secure" /> Secure SSL
               </label>
@@ -1239,39 +1221,39 @@
 
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px;">
             <div class="form-group" style="margin: 0;">
-              <label style="font-size: 0.8rem; color: #94a3b8;">SMTP Username / Email</label>
+              <label style="font-size: 0.8rem; color: var(--text-muted);">SMTP Username / Email</label>
               <input type="text" class="hud-input" [(ngModel)]="mailConfig.smtp_user" placeholder="e.g. info@thrivewoo.com" />
             </div>
             <div class="form-group" style="margin: 0;">
-              <label style="font-size: 0.8rem; color: #94a3b8;">SMTP Password / App Password</label>
+              <label style="font-size: 0.8rem; color: var(--text-muted);">SMTP Password / App Password</label>
               <input type="password" class="hud-input" [(ngModel)]="mailConfig.smtp_pass" placeholder="••••••••" />
             </div>
           </div>
         </div>
 
         <!-- Section 2: IMAP Inbound (Receiving) -->
-        <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(0, 240, 255, 0.25); border-radius: 8px; padding: 14px; margin-top: 14px;">
+        <div style="background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; margin-top: 14px;">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-            <h4 style="margin: 0; color: #00f0ff;">📥 Inbound IMAP Authorization (Fetch & Sync Live Emails)</h4>
+            <h4 style="margin: 0; color: var(--accent-text);">📥 Inbound IMAP Authorization (Fetch & Sync Live Emails)</h4>
             <button class="btn btn-secondary btn-sm" (click)="syncCompanyMail()" [disabled]="isSyncingMail">
               {{ isSyncingMail ? 'Syncing...' : '🔄 Sync Mailbox Now' }}
             </button>
           </div>
-          <p style="font-size: 0.78rem; color: #94a3b8; margin: 0 0 10px 0;">
+          <p style="font-size: 0.78rem; color: var(--text-muted); margin: 0 0 10px 0;">
             ℹ️ <em>ZeptoMail is strictly an outbound delivery engine. To pull incoming customer replies from your Zoho inbox into this Hub, enter your Zoho Mail App Password below. (Outbound sending works independently).</em>
           </p>
 
           <div style="display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 12px;">
             <div class="form-group" style="margin: 0;">
-              <label style="font-size: 0.8rem; color: #94a3b8;">IMAP Host</label>
+              <label style="font-size: 0.8rem; color: var(--text-muted);">IMAP Host</label>
               <input type="text" class="hud-input" [(ngModel)]="mailConfig.imap_host" placeholder="imap.gmail.com or mail.yourcompany.com" />
             </div>
             <div class="form-group" style="margin: 0;">
-              <label style="font-size: 0.8rem; color: #94a3b8;">IMAP Port</label>
+              <label style="font-size: 0.8rem; color: var(--text-muted);">IMAP Port</label>
               <input type="number" class="hud-input" [(ngModel)]="mailConfig.imap_port" placeholder="993" />
             </div>
             <div class="form-group" style="margin: 0; display: flex; flex-direction: column; justify-content: center;">
-              <label style="font-size: 0.8rem; color: #94a3b8;">TLS (Port 993)</label>
+              <label style="font-size: 0.8rem; color: var(--text-muted);">TLS (Port 993)</label>
               <label style="cursor: pointer; display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 0.85rem;">
                 <input type="checkbox" [(ngModel)]="mailConfig.imap_tls" /> Use TLS
               </label>
@@ -1280,11 +1262,11 @@
 
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px;">
             <div class="form-group" style="margin: 0;">
-              <label style="font-size: 0.8rem; color: #94a3b8;">IMAP Username / Email</label>
+              <label style="font-size: 0.8rem; color: var(--text-muted);">IMAP Username / Email</label>
               <input type="text" class="hud-input" [(ngModel)]="mailConfig.imap_user" placeholder="e.g. info@thrivewoo.com" />
             </div>
             <div class="form-group" style="margin: 0;">
-              <label style="font-size: 0.8rem; color: #94a3b8;">IMAP Password / App Password</label>
+              <label style="font-size: 0.8rem; color: var(--text-muted);">IMAP Password / App Password</label>
               <input type="password" class="hud-input" [(ngModel)]="mailConfig.imap_pass" placeholder="••••••••" />
             </div>
           </div>
@@ -1301,7 +1283,7 @@
   </div>
 
   <!-- Floating Toast Notification -->
-  <div *ngIf="toastMessage" class="toast-popup">
-    ⚡ {{ toastMessage }}
+  <div *ngIf="toastMessage" class="toast-popup" role="status" aria-live="polite">
+    <app-icon name="sparkles" [size]="16"></app-icon><span>{{ toastMessage }}</span>
   </div>
 </div>

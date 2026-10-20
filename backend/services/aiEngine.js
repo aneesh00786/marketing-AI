@@ -10,7 +10,7 @@ async function generateAiResponse(prompt, systemInstruction = '', workspaceId = 
   if (!query) {
     return {
       text: "How can I assist you with your marketing, video production, mobile apps, or telephone workforce today?",
-      provider: "TradeSage Core"
+      provider: "Marketech.ai Core"
     };
   }
 
@@ -20,7 +20,7 @@ async function generateAiResponse(prompt, systemInstruction = '', workspaceId = 
     try {
       const isDraft = /\b(draft|write|compose|campaign|email|article|full plan)\b/i.test(query);
       const telnyxSys = systemInstruction || 
-        'You are Roger, personal executive AI assistant, B2B marketing strategist, and strategic business advisor to the founder. You converse naturally and warmly like a real human. Keep spoken replies concise (1-2 natural sentences) unless asked to draft a full article. Never dump repetitive bullet templates. If asked something unethical or out of scope, politely state that you do not have permission or capability to do that.';
+        'You are Mark, personal executive AI assistant, B2B marketing strategist, and strategic business advisor to the founder. You converse naturally and warmly like a real human. Keep spoken replies concise (1-2 natural sentences) unless asked to draft a full article. Never dump repetitive bullet templates. If asked something unethical or out of scope, politely state that you do not have permission or capability to do that.';
       
       const telnyxRes = await fetch('https://api.telnyx.com/v2/ai/chat/completions', {
         method: 'POST',
@@ -89,7 +89,7 @@ async function generateAiResponse(prompt, systemInstruction = '', workspaceId = 
         body: JSON.stringify({
           model: process.env.GROQ_MODEL || 'llama-3.1-8b-instant',
           messages: [
-            { role: 'system', content: systemInstruction || 'You are Roger, personal executive AI assistant and strategic business advisor to the founder.' },
+            { role: 'system', content: systemInstruction || 'You are Mark, personal executive AI assistant and strategic business advisor to the founder.' },
             { role: 'user', content: query }
           ],
           temperature: 0.7,
@@ -118,7 +118,7 @@ async function generateAiResponse(prompt, systemInstruction = '', workspaceId = 
         body: JSON.stringify({
           model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
           messages: [
-            { role: 'system', content: systemInstruction || 'You are Roger, personal executive AI assistant and strategic business advisor to the founder.' },
+            { role: 'system', content: systemInstruction || 'You are Mark, personal executive AI assistant and strategic business advisor to the founder.' },
             { role: 'user', content: query }
           ],
           temperature: 0.7,
@@ -148,7 +148,7 @@ async function generateAiResponse(prompt, systemInstruction = '', workspaceId = 
           model: process.env.OPENROUTER_MODEL || 'meta-llama/llama-3.1-8b-instruct:free',
           ...(maxTokens ? { max_tokens: maxTokens } : {}),
           messages: [
-            { role: 'system', content: systemInstruction || 'You are Roger, personal executive AI assistant and strategic business advisor to the founder.' },
+            { role: 'system', content: systemInstruction || 'You are Mark, personal executive AI assistant and strategic business advisor to the founder.' },
             { role: 'user', content: query }
           ]
         })
@@ -188,7 +188,7 @@ async function generateAiResponse(prompt, systemInstruction = '', workspaceId = 
   // Accurately answers questions, composes custom copy, explains concepts, and holds genuine conversations
   return {
     text: generateDynamicContextualReply(query, systemInstruction),
-    provider: 'TradeSage Conversational AI'
+    provider: 'Marketech.ai Conversational AI'
   };
 }
 
@@ -205,14 +205,14 @@ function generateDynamicContextualReply(userQuery, systemRole = '') {
   }
 
   // 2. Greetings & Pleasantries ("Hi", "Hello", "Good morning")
-  const isPureGreeting = /^(hi|hello|hey|good morning|good afternoon|good evening|greetings|howdy)( there| assistant| roger| tradesage)?[\s,!.?]*$/i.test(lower);
+  const isPureGreeting = /^(hi|hello|hey|good morning|good afternoon|good evening|greetings|howdy)( there| assistant| mark| roger| tradesage| marketech(?:\.ai)?)?[\s,!.?]*$/i.test(lower);
   if (isPureGreeting) {
-    return `Hello, sir! Roger is online and ready. How can I assist you with your business, products, or marketing today?`;
+    return `Hello, sir! Mark is online and ready. How can I assist you with your business, products, or marketing today?`;
   }
 
   // 3. Identity, Role & Capabilities ("Who are you?", "What can you do?")
-  if (lower.includes('who are you') || lower.includes('what can you do') || lower.includes('what are you') || lower.includes('what is tradesage') || lower.includes('your capability') || lower.includes('your skills') || lower.includes('help me')) {
-    return `I am Roger, your personal executive business assistant and marketing strategist. I can help you formulate marketing campaigns, manage your B2B leads, draft high-converting emails, and grow the digital products saved in your workspace. What would you like to accomplish, sir?`;
+  if (lower.includes('who are you') || lower.includes('what is your name') || lower.includes("what's your name") || lower.includes('what can you do') || lower.includes('what are you') || lower.includes('what is tradesage') || lower.includes('what is marketech') || lower.includes('your capability') || lower.includes('your skills') || lower.includes('help me')) {
+    return `I am Mark, your personal executive business assistant and marketing strategist. I can help you formulate marketing campaigns, manage your B2B leads, draft high-converting emails, and grow the digital products saved in your workspace. What would you like to accomplish, sir?`;
   }
 
   // 4. Out of scope / Permission limitations
@@ -260,7 +260,7 @@ Our School Bus Management System brings complete transparency and peace of mind 
 We would be delighted to provide your transportation team with a brief 15-minute live walkthrough of the platform this week. 
 
 Best regards,
-TradeSage AI Workforce Operations`;
+Marketech.ai Workforce Operations`;
     }
 
     const topic = query.replace(/^(can you |please |i want you to |write |draft |create |generate |make )(a |an |me )?/i, '').trim();
@@ -277,7 +277,7 @@ Key Highlights:
 
 Call to Action: Book a private 15-minute dashboard walkthrough today and see how our automated workforce accelerates your business.
 
-Hashtags: #${topic.replace(/[^a-zA-Z0-9]/g, '')} #TradeSageAI #BusinessAutomation #EdTech #Innovation #GrowthHacking
+Hashtags: #${topic.replace(/[^a-zA-Z0-9]/g, '')} #MarketechAI #BusinessAutomation #EdTech #Innovation #GrowthHacking
 
 This draft has been prepared for your Content Studio. You can review, approve, or schedule it across LinkedIn, Twitter, and Instagram.`;
   }
@@ -336,7 +336,7 @@ Every contract includes explicit weekly milestones, complete source code ownersh
   if (lower.includes('phone') || lower.includes('telnyx') || lower.includes('call') || lower.includes('voice') || lower.includes('receptionist') || lower.includes('telephony') || lower.includes('ivr')) {
     if (lower.includes('how') || lower.includes('work') || lower.includes('setup') || lower.includes('integrate')) {
       return `Our Telnyx Telephone AI Agent functions as an autonomous 24/7 business receptionist:
-1. When a prospect dials your company phone number, Telnyx fires a webhook to our TradeSage backend.
+1. When a prospect dials your company phone number, Telnyx fires a webhook to our Marketech.ai backend.
 2. The AI delivers a natural, professional brand greeting using neural speech synthesis.
 3. The caller speaks naturally; Telnyx transcribes the caller's speech via TeXML and streams it to our AI engine.
 4. Our AI analyzes the inquiry, answers product questions accurately (e.g. School Bus GPS or Flutter development), and captures their contact information.
@@ -364,7 +364,7 @@ Key Highlights:
 
 Call to Action: Book a private 15-minute dashboard walkthrough today and see how our automated workforce accelerates your business.
 
-Hashtags: #${topic.replace(/[^a-zA-Z0-9]/g, '')} #TradeSageAI #BusinessAutomation #EdTech #Innovation #GrowthHacking
+Hashtags: #${topic.replace(/[^a-zA-Z0-9]/g, '')} #MarketechAI #BusinessAutomation #EdTech #Innovation #GrowthHacking
 
 This draft has been prepared for your Content Studio. You can review, approve, or schedule it across LinkedIn, Twitter, and Instagram.`;
   }
@@ -380,7 +380,7 @@ You can preview, play, and generate reels right now in the 9:16 Video Studio scr
 
   // 8. Pricing & Subscription Plans
   if (lower.includes('plan') || lower.includes('pricing') || lower.includes('subscription') || lower.includes('tier') || lower.includes('dollar') || lower.includes('cost')) {
-    return `TradeSage AI offers three transparent subscription tiers:
+    return `Marketech.ai offers three transparent subscription tiers:
 1. Starter Plan ($29/mo): 1,500 AI credits, 1 specialist agent, manual content approvals, and community support.
 2. Professional Plan ($79/mo): 5,000 AI credits, full 5-agent workforce, 9:16 video studio, In-app voice, and 2 Telnyx phone numbers.
 3. Enterprise Plan ($199/mo): Unlimited AI credits, custom domain white-labeling, unlimited telephony minutes, and dedicated account manager.
@@ -390,7 +390,7 @@ All platform infrastructure is optimized to run reliably under a lean monthly cl
 
   // 9. Technical & Architecture Questions
   if (lower.includes('database') || lower.includes('sqlite') || lower.includes('mysql') || lower.includes('backend') || lower.includes('node') || lower.includes('api')) {
-    return `TradeSage AI is built on an enterprise dual-database architecture:
+    return `Marketech.ai is built on an enterprise dual-database architecture:
 • Production Support: Dual-mode SQLite and MySQL 8.0 support via connection pooling (mysql2 and sqlite3). You can run SQLite with zero setup or flip the DB_CLIENT flag to MySQL for multi-server enterprise clusters.
 • Backend: High-performance Node.js REST API with tokenized HMAC-SHA256 authentication, salted PBKDF2 password security, and streaming telephony endpoints.
 • Frontend: Modern Angular 17 single-page application with standalone components, reactive data stores, and zero-cost Web Speech audio synthesis.`;
@@ -399,7 +399,7 @@ All platform infrastructure is optimized to run reliably under a lean monthly cl
   // 10. General Comprehensive Conversational Reply
   return `Thank you for your inquiry, sir. 
 
-As Roger, your personal executive business assistant, I have analyzed your request. Here are the immediate actionable steps we can take:
+As Mark, your personal executive business assistant, I have analyzed your request. Here are the immediate actionable steps we can take:
 1. Execute Strategy: I can draft custom direct-response copy, marketing campaigns, or cold email sequences for the products saved in your workspace.
 2. Social & Outreach: We can generate targeted LinkedIn or Twitter posts highlighting your software's core features.
 3. Lead Follow-Up: I can qualify incoming leads in your CRM and prepare approved drafts for your review.

@@ -15,7 +15,7 @@ const DB_NAME = process.env.DB_NAME || 'tradesage';
 
 async function seedMySQL() {
   console.log('====================================================');
-  console.log('🚀 TradeSage AI - MySQL Database Migration & Seeder');
+  console.log('🚀 Marketech.ai - MySQL Database Migration & Seeder');
   console.log(`Connecting to MySQL at ${DB_HOST}:${DB_PORT} as ${DB_USER}...`);
   console.log('====================================================');
 
@@ -627,17 +627,17 @@ async function seedMySQL() {
     [[1, 1, 'Workspace Owner', 'Active', now]]
   );
 
-  // 4. Agents (Roger Executive AI Assistant)
+  // 4. Agents (Mark Executive AI Assistant)
   await seedIfEmpty(
     'agents',
     'INSERT INTO agents (workspace_id, agent_key, name, description, agent_type, system_instructions, avatar_emoji, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
     [[
       1,
       'executive_assistant',
-      'Roger',
+      'Mark',
       'Personal AI Executive Business Assistant & Marketing Strategist',
       'executive',
-      'You are Roger, personal executive AI assistant for B2B growth and marketing.',
+      'You are Mark, personal executive AI assistant for B2B growth and marketing.',
       '🎙️',
       'Active',
       now
@@ -841,7 +841,7 @@ async function seedMySQL() {
             <div style="text-align: center; margin: 32px 0 16px;">
               <a href="https://thrivewoo.com" style="background: #0284c7; color: #ffffff; text-decoration: none; padding: 14px 28px; border-radius: 8px; font-weight: 600; font-size: 15px; display: inline-block;">Confirm Demo Walkthrough</a>
             </div>
-            <p style="font-size: 13px; color: #94a3b8; text-align: center; margin-top: 24px;">TradeSage Executive Team &bull; Powered by ThriveWoo B2B</p>
+            <p style="font-size: 13px; color: #94a3b8; text-align: center; margin-top: 24px;">Marketech.ai</p>
           </div>
         </div>`,
         'Van Sales Order Booking & Staff Targets',

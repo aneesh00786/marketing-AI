@@ -1,7 +1,7 @@
 {
   "name": "tradesage-ai-backend",
   "version": "1.0.0",
-  "description": "TradeSage AI - Multi-Tenant Workforce SaaS Backend (Express + MySQL + Telnyx)",
+  "description": "Marketech.ai - Multi-Tenant Workforce SaaS Backend (Express + MySQL + Telnyx)",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

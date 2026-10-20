@@ -17,6 +17,7 @@ const campaignService = require('../modules/social/campaignService');
 const analyticsService = require('../modules/social/analyticsService');
 const inboxService = require('../modules/social/inboxService');
 const accountService = require('../modules/social/accountService');
+const outreachSender = require('../modules/outreach/outreachSender');
 
 const WORKER_ID = `${os.hostname()}:${process.pid}`;
 const POLL_MS = parseInt(process.env.SOCIAL_WORKER_POLL_MS || '5000', 10);
@@ -73,6 +74,16 @@ async function processBackground() {
   return jobs.length;
 }
 
+/** Email outreach campaigns: sends due sequence emails inside each campaign's window and limits. */
+async function processOutreach() {
+  try {
+    return await outreachSender.processOutreach(WORKER_ID);
+  } catch (err) {
+    log('outreach error:', err.message);
+    return 0;
+  }
+}
+
 /** Enqueues periodic syncs per account, using time buckets as idempotency keys. */
 async function scheduleRecurring() {
   const accounts = await all(
@@ -103,7 +114,7 @@ async function loop() {
         await scheduleRecurring();
         lastSchedule = Date.now();
       }
-      const worked = (await processPublishing()) + (await processBackground());
+      const worked = (await processPublishing()) + (await processBackground()) + (await processOutreach());
       if (worked > 0) continue;
     } catch (err) {
       log('loop error:', err.message);
@@ -126,4 +137,4 @@ if (require.main === module) {
   loop().then(() => process.exit(0));
 }
 
-module.exports = { processPublishing, processBackground, scheduleRecurring, HANDLERS };
+module.exports = { processPublishing, processBackground, processOutreach, scheduleRecurring, HANDLERS };

@@ -5,6 +5,9 @@
   "scripts": {
     "start": "cd backend && node server.js",
     "seed": "cd backend && node seed.js",
-    "build:frontend": "cd frontend && npm install && npm run build"
+    "build:frontend": "cd frontend && npm install && npm run build",
+    "migrate": "cd backend && node db/migrate.js",
+    "worker": "cd backend && node workers/socialWorker.js",
+    "test": "cd backend && npm test"
   }
 }

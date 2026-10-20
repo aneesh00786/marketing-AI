@@ -1,30 +1,150 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import * as XLSX from 'xlsx';
 import { ApiService } from './services/api.service';
 import { SpeechService } from './services/speech.service';
+import { AuthStateService } from './core/auth-state.service';
+import { ThemeService } from './core/theme.service';
+import { LoginComponent } from './core/login.component';
+import { SocialHubComponent } from './features/social/social-hub.component';
+import { IconComponent } from './shared/icon.component';
+import { DashboardComponent, DashboardNavigation } from './features/dashboard/dashboard.component';
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, LoginComponent, SocialHubComponent, IconComponent, DashboardComponent],
   templateUrl: './app.component.html',
   styleUrls: ['./app.component.css']
 })
 export class AppComponent implements OnInit, OnDestroy {
   // Navigation: Directly accessible HUD
-  currentRoute: 'products' | 'leads' | 'emails' | 'drafts' | 'businesses' | 'social' | 'voice' | 'appointments' = 'products';
+  currentRoute: 'dashboard' | 'products' | 'leads' | 'emails' | 'drafts' | 'businesses' | 'social' | 'voice' | 'appointments' = 'dashboard';
 
-  // Social Media Studio State
-  socialPosts: any[] = [];
-  selectedSocialPlatform: 'LinkedIn' | 'Twitter' | 'Instagram' | 'Facebook' = 'LinkedIn';
-  selectedSocialProductId: number | null = null;
-  socialCustomTopic: string = '';
-  socialTone: string = 'High-Converting B2B';
-  isGeneratingSocialPost: boolean = false;
-  socialStatusFilter: string = 'all';
+  // ---------- App shell (sidebar, top bar, menus) ----------
+  readonly navGroups: { label: string; items: { route: AppComponent['currentRoute']; label: string; icon: string; subtitle: string }[] }[] = [
+    {
+      label: 'Overview',
+      items: [
+        { route: 'dashboard', label: 'Command Center', icon: 'dashboard', subtitle: 'Campaigns, content performance, leads and what needs attention' }
+      ]
+    },
+    {
+      label: 'Sell',
+      items: [
+        { route: 'products', label: 'Digital Products', icon: 'products', subtitle: 'Your products, live website features and AI extraction' },
+        { route: 'leads', label: 'Leads CRM', icon: 'leads', subtitle: 'AI-scored leads, Excel import and follow-up advice' },
+        { route: 'appointments', label: 'Demos', icon: 'calendar', subtitle: 'Booked demos and appointments' }
+      ]
+    },
+    {
+      label: 'Communicate',
+      items: [
+        { route: 'emails', label: 'Mail Center', icon: 'mail', subtitle: 'Inbox, visual HTML mail and AI smart replies' },
+        { route: 'drafts', label: 'Mail Drafts', icon: 'drafts', subtitle: 'AI drafts, rewrites and approval before sending' }
+      ]
+    },
+    {
+      label: 'Market',
+      items: [
+        { route: 'social', label: 'Social Media Marketing', icon: 'social', subtitle: 'Accounts, campaigns, publishing and real analytics' },
+        { route: 'businesses', label: 'AI Campaigns', icon: 'campaigns', subtitle: 'Business playbooks and AI campaign ideas' }
+      ]
+    },
+    {
+      label: 'Assistant',
+      items: [
+        { route: 'voice', label: 'Roger Voice Center', icon: 'voice', subtitle: 'Talk to Roger, your AI executive assistant' }
+      ]
+    }
+  ];
+  sidebarCollapsed = false;
+  mobileNavOpen = false;
+  openMenu: 'workspace' | 'notifications' | 'profile' | null = null;
+
+  get currentNav() {
+    for (const g of this.navGroups) {
+      const item = g.items.find(i => i.route === this.currentRoute);
+      if (item) return item;
+    }
+    return this.navGroups[0].items[0];
+  }
+
+  navCount(route: string): number | null {
+    const counts: Record<string, number> = {
+      products: this.digitalProducts.length,
+      leads: this.leadTotal || this.leads.length,
+      emails: this.emails.length,
+      drafts: this.drafts.length,
+      businesses: this.connectedBusinesses.length,
+      appointments: this.appointments.length
+    };
+    return route in counts ? counts[route] : null;
+  }
+
+  navigate(route: AppComponent['currentRoute']): void {
+    // Sidebar navigation opens a module at its default view.
+    this.socialSection = null;
+    this.socialCampaignId = null;
+    this.socialLibraryStatus = null;
+    this.currentRoute = route;
+    this.mobileNavOpen = false;
+    this.openMenu = null;
+    if (typeof window !== 'undefined') window.scrollTo({ top: 0 });
+  }
+
+  toggleSidebar(): void {
+    this.sidebarCollapsed = !this.sidebarCollapsed;
+    try { localStorage.setItem('tradesage_sidebar_collapsed', this.sidebarCollapsed ? '1' : '0'); } catch { /* storage unavailable */ }
+  }
+
+  toggleMenu(menu: 'workspace' | 'notifications' | 'profile', event: Event): void {
+    event.stopPropagation();
+    this.openMenu = this.openMenu === menu ? null : menu;
+  }
+
+  /** Notifications derived from data the app has already loaded (no extra API calls). */
+  get notifications(): { icon: string; title: string; detail: string; route: AppComponent['currentRoute']; tone: 'danger' | 'warning' | 'info' }[] {
+    const out: { icon: string; title: string; detail: string; route: AppComponent['currentRoute']; tone: 'danger' | 'warning' | 'info' }[] = [];
+    const urgent = this.emails.filter(e => (e.is_urgent === 1 || e.ai_priority === 'Urgent') && !e.is_read);
+    if (urgent.length) out.push({ icon: 'mail', title: `${urgent.length} urgent email${urgent.length > 1 ? 's' : ''}`, detail: urgent[0].subject || 'Needs a reply', route: 'emails', tone: 'danger' });
+    const pendingDrafts = this.drafts.filter(d => d.status === 'Draft' || d.status === 'Pending Approval');
+    if (pendingDrafts.length) out.push({ icon: 'drafts', title: `${pendingDrafts.length} draft${pendingDrafts.length > 1 ? 's' : ''} awaiting approval`, detail: pendingDrafts[0].subject || 'Review before sending', route: 'drafts', tone: 'warning' });
+    const hot = this.leads.filter(l => l.category === 'Hot');
+    if (hot.length) out.push({ icon: 'leads', title: `${hot.length} hot lead${hot.length > 1 ? 's' : ''}`, detail: hot[0].name || 'High purchase intent', route: 'leads', tone: 'info' });
+    if (this.appointments.length) out.push({ icon: 'calendar', title: `${this.appointments.length} scheduled demo${this.appointments.length > 1 ? 's' : ''}`, detail: this.appointments[0].customer_name || this.appointments[0].contact_name || 'Upcoming', route: 'appointments', tone: 'info' });
+    return out;
+  }
+
+  /** Highest rule-based scores first; unscored leads go last. */
+  get topScoredLeads(): any[] {
+    return [...this.leads].sort((a, b) => (b.score ?? -1) - (a.score ?? -1)).slice(0, 4);
+  }
+
+  get userInitials(): string {
+    const name = this.auth.user?.displayName || this.auth.user?.email || '?';
+    return name.split(/[\s@.]+/).filter(Boolean).slice(0, 2).map((p: string) => p[0]?.toUpperCase()).join('') || '?';
+  }
+
+  @HostListener('document:click')
+  closeMenus(): void {
+    this.openMenu = null;
+  }
+
+  @HostListener('document:keydown.escape')
+  onEscape(): void {
+    this.openMenu = null;
+    this.mobileNavOpen = false;
+  }
+
+  // Social Media Marketing hub deep-link (e.g. returning from an OAuth provider)
+  socialSection: any = null;
+  socialCampaignId: number | null = null;
+  socialLibraryStatus: string | null = null;
+  socialOauthResult: Record<string, string> | null = null;
+  private sessionSub: any = null;
 
   // Company Mail Authorization State (SMTP & IMAP)
   showMailConfigModal: boolean = false;
@@ -65,6 +185,17 @@ export class AppComponent implements OnInit, OnDestroy {
 
   // Voice HUD State (ElevenLabs Full-Duplex Real-Time)
   isElevenLabsConnected: boolean = false;
+
+  // "Always listening" switch: keeps a Roger voice session open and reconnects it if it drops.
+  voiceAlwaysOn = false;
+  voiceConnecting = false;
+  voiceNeedsGesture = false;
+  voiceReconnectPaused = false;
+  private voiceManualStop = false;
+  private voiceRetry = 0;
+  private voiceRetryTimer: any = null;
+  private readonly voiceMaxRetries = 6;
+  private voiceGestureHandler: (() => void) | null = null;
   elevenLabsMode: 'listening' | 'speaking' = 'listening';
   callStatusText: string = 'SAY "HELLO ROGER" OR TAP ORB';
   callSubText: string = 'Speak naturally to converse with Roger in real time';
@@ -109,15 +240,18 @@ export class AppComponent implements OnInit, OnDestroy {
   excelPreviewRows: any[] = [];
   isImportingLeads: boolean = false;
   isQualifyingAll: boolean = false;
-  newLead = {
-    name: '',
-    phone: '',
-    email: '',
-    interest: 'ThriveWoo B2B Platform',
-    company_name: '',
-    estimated_budget: '$15,000',
-    notes: ''
-  };
+  // Lead form (create + edit). No invented defaults: empty fields stay empty.
+  editingLeadId: number | null = null;
+  newLead: any = this.blankLead();
+  leadProducts: any[] = [];
+  leadStatuses: string[] = [];
+  leadFilters = { productId: '', status: '', q: '' };
+  leadPage = 1;
+  leadTotal = 0;
+  readonly leadPageSize = 50;
+  leadsLoading = false;
+  leadImportResult: any = null;
+  excelSkippedNoName = 0;
 
   // 3. Email Command Center (Visual HTML Rendering & AI Summaries)
   emails: any[] = [];
@@ -143,7 +277,7 @@ export class AppComponent implements OnInit, OnDestroy {
     productId: null as any,
     recipientName: '',
     recipientEmail: '',
-    goal: 'Automate wholesale ordering, van sales mobile app, and tiered wholesale pricing',
+    goal: '',
     tone: 'Professional'
   };
 
@@ -182,24 +316,78 @@ export class AppComponent implements OnInit, OnDestroy {
   constructor(
     public apiService: ApiService,
     public speechService: SpeechService,
+    public auth: AuthStateService,
+    public theme: ThemeService,
     private sanitizer: DomSanitizer
   ) {}
 
   ngOnInit(): void {
+    try { this.sidebarCollapsed = localStorage.getItem('tradesage_sidebar_collapsed') === '1'; } catch { this.sidebarCollapsed = false; }
+    this.readDeepLink();
+    this.sessionSub = this.auth.sessionExpired$.subscribe(() => this.showToast('Session ended — please sign in again.'));
+    if (this.auth.isLoggedIn) {
+      this.loadWorkspaceData();
+      this.restoreVoiceAlwaysOn();
+    }
+  }
+
+  /** Reads ?view=social&section=…&oauth=… set by the OAuth callback redirect, then cleans the URL. */
+  private readDeepLink(): void {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('view') === 'social') {
+      this.currentRoute = 'social';
+      this.socialSection = params.get('section');
+      if (params.get('oauth')) {
+        this.socialOauthResult = Object.fromEntries(['oauth', 'provider', 'reason', 'connected'].filter(k => params.get(k)).map(k => [k, params.get(k) as string]));
+      }
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }
+
+  /** Deep links from the Command Center into a module (and Social hub section). */
+  onDashboardNavigate(nav: DashboardNavigation): void {
+    this.navigate(nav.route);
+    if (nav.route === 'social') {
+      // Inputs are read when the hub is created during the next change detection.
+      this.socialSection = nav.section || null;
+      this.socialCampaignId = nav.campaignId ?? null;
+      this.socialLibraryStatus = nav.status || null;
+    }
+  }
+
+  onLoggedIn(): void {
+    this.loadWorkspaceData();
+    this.restoreVoiceAlwaysOn();
+  }
+
+  logout(): void {
+    this.voiceManualStop = true;
+    this.clearVoiceRetry();
+    this.removeVoiceGestureHandler();
+    this.isElevenLabsConnected = false;
+    this.speechService.stopElevenLabsSession();
+    this.auth.clear();
+  }
+
+  private loadWorkspaceData(): void {
     this.loadStatus();
     this.loadDigitalProducts();
     this.loadLeads();
     this.loadEmails();
     this.loadDrafts();
-    this.loadSocialPosts();
     this.loadMailConfig();
     this.loadConnectedBusinesses();
     this.loadAppointments();
   }
 
   ngOnDestroy(): void {
+    this.voiceManualStop = true;
+    this.clearVoiceRetry();
+    this.removeVoiceGestureHandler();
     this.stopCallTimer();
     this.speechService.stopElevenLabsSession();
+    this.sessionSub?.unsubscribe();
   }
 
   showToast(msg: string): void {
@@ -226,13 +414,90 @@ export class AppComponent implements OnInit, OnDestroy {
 
   async toggleElevenLabsCall(): Promise<void> {
     if (this.isElevenLabsConnected) {
-      await this.disconnectElevenLabs();
+      // A manual disconnect also turns "always listening" off, so it never fights the user.
+      if (this.voiceAlwaysOn) this.setVoiceAlwaysOn(false);
+      else await this.disconnectElevenLabs();
     } else {
       await this.connectElevenLabs();
     }
   }
 
+  /** Dashboard switch: on = keep Roger listening (same session as "Call Roger"), off = end it. */
+  setVoiceAlwaysOn(on: boolean): void {
+    this.voiceAlwaysOn = on;
+    try { localStorage.setItem('tradesage_voice_always_on', on ? '1' : '0'); } catch { /* storage unavailable */ }
+    this.clearVoiceRetry();
+    this.voiceReconnectPaused = false;
+    this.voiceNeedsGesture = false;
+    this.removeVoiceGestureHandler();
+    if (on) {
+      this.voiceRetry = 0;
+      if (!this.isElevenLabsConnected) this.connectElevenLabs();
+    } else if (this.isElevenLabsConnected) {
+      this.disconnectElevenLabs();
+    }
+  }
+
+  get voiceStatusLabel(): string {
+    if (!this.voiceAlwaysOn) return this.isElevenLabsConnected ? 'Live (manual call)' : 'Off';
+    if (this.voiceNeedsGesture) return 'Click anywhere to start listening';
+    if (this.voiceReconnectPaused) return 'Paused after repeated connection errors';
+    if (this.voiceConnecting) return this.voiceRetry > 0 ? 'Reconnecting…' : 'Connecting…';
+    if (this.isElevenLabsConnected) return this.elevenLabsMode === 'speaking' ? 'Roger is speaking' : 'Listening for your command';
+    return this.voiceRetry > 0 ? 'Connection failed — retrying…' : 'Starting…';
+  }
+
+  private clearVoiceRetry(): void {
+    if (this.voiceRetryTimer) clearTimeout(this.voiceRetryTimer);
+    this.voiceRetryTimer = null;
+  }
+
+  private scheduleVoiceReconnect(): void {
+    if (!this.voiceAlwaysOn || this.voiceRetryTimer || this.voiceConnecting) return;
+    if (this.voiceRetry >= this.voiceMaxRetries) {
+      this.voiceReconnectPaused = true;
+      this.showToast('Roger voice paused after repeated connection errors. Toggle the switch to retry.');
+      return;
+    }
+    const delay = Math.min(2000 * Math.pow(2, this.voiceRetry), 30000);
+    this.voiceRetry++;
+    this.voiceRetryTimer = setTimeout(() => {
+      this.voiceRetryTimer = null;
+      if (this.voiceAlwaysOn && !this.isElevenLabsConnected) this.connectElevenLabs();
+    }, delay);
+  }
+
+  /** Browsers only allow microphone/audio after a user gesture; resume on the first click. */
+  private waitForVoiceGesture(): void {
+    if (this.voiceGestureHandler || typeof document === 'undefined') return;
+    this.voiceNeedsGesture = true;
+    this.voiceGestureHandler = () => {
+      this.removeVoiceGestureHandler();
+      this.voiceNeedsGesture = false;
+      if (this.voiceAlwaysOn && !this.isElevenLabsConnected) this.connectElevenLabs();
+    };
+    document.addEventListener('pointerdown', this.voiceGestureHandler, { once: true, capture: true });
+  }
+
+  private removeVoiceGestureHandler(): void {
+    if (this.voiceGestureHandler) document.removeEventListener('pointerdown', this.voiceGestureHandler, { capture: true } as any);
+    this.voiceGestureHandler = null;
+  }
+
+  /** Restores the saved switch state after sign-in or a page reload. */
+  private restoreVoiceAlwaysOn(): void {
+    try { this.voiceAlwaysOn = localStorage.getItem('tradesage_voice_always_on') === '1'; } catch { this.voiceAlwaysOn = false; }
+    if (!this.voiceAlwaysOn) return;
+    const nav: any = typeof navigator !== 'undefined' ? navigator : null;
+    const activated = nav?.userActivation ? nav.userActivation.hasBeenActive : false;
+    if (activated) this.connectElevenLabs();
+    else this.waitForVoiceGesture();
+  }
+
   async connectElevenLabs(): Promise<void> {
+    if (this.voiceConnecting || this.isElevenLabsConnected) return;
+    this.voiceConnecting = true;
+    this.voiceManualStop = false;
     try {
       this.callStatusText = 'CONNECTING TO ELEVENLABS...';
       const res: any = await this.apiService.getVoiceSignedUrl().toPromise();
@@ -241,12 +506,15 @@ export class AppComponent implements OnInit, OnDestroy {
       await this.speechService.startElevenLabsSession(res.signed_url, {
         onConnect: () => {
           this.isElevenLabsConnected = true;
+          this.voiceConnecting = false;
+          this.voiceRetry = 0;
+          this.voiceReconnectPaused = false;
           this.callStatusText = 'CONVERSATION ACTIVE (SPEAK IN ENGLISH)';
           this.callSubText = '🎙️ Real-time full-duplex voice active. Speak naturally.';
           this.startCallTimer();
           this.showToast('Connected to Roger (ElevenLabs Conversational AI)');
         },
-        onDisconnect: () => this.disconnectElevenLabs(),
+        onDisconnect: () => this.onElevenLabsDisconnected(),
         onError: (err) => {
           console.warn('ElevenLabs Error:', err);
           this.callStatusText = 'VOICE SESSION ERROR';
@@ -265,13 +533,38 @@ export class AppComponent implements OnInit, OnDestroy {
       });
     } catch (err: any) {
       console.error('Failed to connect ElevenLabs:', err);
+      this.voiceConnecting = false;
       this.callStatusText = 'STANDBY (CLICK TO CONNECT)';
       this.callSubText = `Connection error: ${err.message || 'Check ElevenLabs key'}`;
-      this.showToast('Could not connect to ElevenLabs voice session.');
+      if (this.voiceAlwaysOn) {
+        // Autoplay/microphone blocked without a gesture: wait for a click instead of retrying.
+        if (err?.name === 'NotAllowedError' && !(navigator as any)?.userActivation?.hasBeenActive) this.waitForVoiceGesture();
+        else this.scheduleVoiceReconnect();
+      } else {
+        this.showToast('Could not connect to ElevenLabs voice session.');
+      }
+    } finally {
+      if (!this.isElevenLabsConnected) this.voiceConnecting = false;
     }
   }
 
+  /** Session ended by ElevenLabs or the network (not by the user). */
+  private async onElevenLabsDisconnected(): Promise<void> {
+    if (this.voiceManualStop) return;
+    const wasConnected = this.isElevenLabsConnected;
+    await this.speechService.stopElevenLabsSession();
+    this.isElevenLabsConnected = false;
+    this.voiceConnecting = false;
+    this.stopCallTimer();
+    this.callStatusText = 'SAY "HELLO ROGER" OR TAP ORB';
+    this.callSubText = 'Speak naturally to converse with Roger in real time';
+    if (this.voiceAlwaysOn) this.scheduleVoiceReconnect();
+    else if (wasConnected) this.showToast('Roger voice session disconnected.');
+  }
+
   async disconnectElevenLabs(): Promise<void> {
+    this.voiceManualStop = true;
+    this.clearVoiceRetry();
     await this.speechService.stopElevenLabsSession();
     this.isElevenLabsConnected = false;
     this.stopCallTimer();
@@ -327,7 +620,6 @@ export class AppComponent implements OnInit, OnDestroy {
         this.loadEmails();
         this.loadLeads();
         this.loadDrafts();
-        this.loadSocialPosts();
       },
       error: (err) => {
         this.isProcessingChat = false;
@@ -383,7 +675,6 @@ export class AppComponent implements OnInit, OnDestroy {
         this.digitalProducts = res.products || [];
         if (this.digitalProducts.length > 0 && !this.selectedProduct) {
           this.selectedProduct = this.digitalProducts[0];
-          this.newDraftForm.productId = this.selectedProduct.id;
         }
       },
       error: (err) => console.warn('Error loading digital products:', err)
@@ -468,12 +759,85 @@ export class AppComponent implements OnInit, OnDestroy {
   // ==========================================
   // 3. LEADS CRM & EXCEL / CSV IMPORTER
   // ==========================================
+  private blankLead(): any {
+    return { name: '', phone: '', email: '', company_name: '', estimated_budget: '', notes: '', productId: null, status: 'New' };
+  }
+
   loadLeads(): void {
-    this.apiService.getLeads().subscribe({
+    this.leadsLoading = true;
+    const params: any = { page: this.leadPage, limit: this.leadPageSize };
+    if (this.leadFilters.productId) params.productId = this.leadFilters.productId;
+    if (this.leadFilters.status) params.status = this.leadFilters.status;
+    if (this.leadFilters.q.trim()) params.q = this.leadFilters.q.trim();
+    this.apiService.getLeads(params).subscribe({
       next: (res) => {
+        this.leadsLoading = false;
         this.leads = res.leads || [];
+        this.leadTotal = res.total ?? this.leads.length;
+        this.leadStatuses = res.statuses || this.leadStatuses;
       },
-      error: (err) => console.warn('Error loading leads:', err)
+      error: (err) => {
+        this.leadsLoading = false;
+        console.warn('Error loading leads:', err);
+      }
+    });
+    if (!this.leadProducts.length) this.loadLeadProducts();
+  }
+
+  loadLeadProducts(): void {
+    this.apiService.getLeadProducts().subscribe({
+      next: (res) => this.leadProducts = res.products || [],
+      error: () => this.leadProducts = []
+    });
+  }
+
+  applyLeadFilters(): void {
+    this.leadPage = 1;
+    this.loadLeads();
+  }
+
+  changeLeadPage(delta: number): void {
+    const last = Math.max(1, Math.ceil(this.leadTotal / this.leadPageSize));
+    this.leadPage = Math.min(Math.max(1, this.leadPage + delta), last);
+    this.loadLeads();
+  }
+
+  get leadPageCount(): number {
+    return Math.max(1, Math.ceil(this.leadTotal / this.leadPageSize));
+  }
+
+  scoreFactorsText(ld: any): string {
+    const f = ld.scoreFactors || [];
+    return f.length ? `Rule-based factors: ${f.map((x: any) => `${x.label} +${x.points}`).join(', ')}` : 'Rule-based score';
+  }
+
+  /** Display helper: missing values show as an em dash, never as invented data. */
+  dash(v: any): string {
+    return v === null || v === undefined || v === '' ? '—' : String(v);
+  }
+
+  openNewLead(): void {
+    this.editingLeadId = null;
+    this.newLead = this.blankLead();
+    if (!this.leadProducts.length) this.loadLeadProducts();
+    this.showNewLeadModal = true;
+  }
+
+  openEditLead(ld: any): void {
+    this.editingLeadId = ld.id;
+    this.newLead = {
+      name: ld.name || '', phone: ld.phone || '', email: ld.email || '', company_name: ld.companyName || '',
+      estimated_budget: ld.estimatedBudget || '', notes: ld.notes || '', productId: ld.productId ?? null, status: ld.status || 'New'
+    };
+    if (!this.leadProducts.length) this.loadLeadProducts();
+    this.showNewLeadModal = true;
+  }
+
+  deleteLead(ld: any): void {
+    if (!confirm(`Delete lead "${ld.name}"? This cannot be undone.`)) return;
+    this.apiService.deleteLead(ld.id).subscribe({
+      next: () => { this.showToast('Lead deleted.'); this.loadLeads(); },
+      error: (err) => this.showToast(`Delete failed: ${err?.error?.error || err.message}`)
     });
   }
 
@@ -482,50 +846,76 @@ export class AppComponent implements OnInit, OnDestroy {
     if (!files || files.length === 0) return;
     const file = files[0];
     this.excelFileName = file.name;
+    this.leadImportResult = null;
+    if (!this.leadProducts.length) this.loadLeadProducts();
 
+    const pick = (row: any, keys: string[]) => {
+      for (const k of keys) {
+        const v = row[k];
+        if (v !== undefined && v !== null && String(v).trim() !== '') return String(v).trim();
+      }
+      return '';
+    };
     const reader = new FileReader();
     reader.onload = (e: any) => {
       try {
-        const bstr = e.target.result;
-        const wb = XLSX.read(bstr, { type: 'binary' });
-        const firstSheetName = wb.SheetNames[0];
-        const ws = wb.Sheets[firstSheetName];
-        const rawJson: any[] = XLSX.utils.sheet_to_json(ws);
-
-        this.excelPreviewRows = rawJson.map((row: any) => ({
-          name: row['Name'] || row['name'] || row['Contact Name'] || row['Full Name'] || 'Prospect',
-          company: row['Company'] || row['company'] || row['Company Name'] || 'Enterprise',
-          email: row['Email'] || row['email'] || '',
-          phone: row['Phone'] || row['phone'] || '',
-          interest: row['Interest'] || row['interest'] || row['Product'] || 'ThriveWoo B2B Platform',
-          budget: row['Budget'] || row['budget'] || '$15,000',
-          notes: row['Notes'] || row['notes'] || ''
+        const wb = XLSX.read(e.target.result, { type: 'array' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const rawJson: any[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
+        // Map known column names only; blank cells stay blank (no invented values).
+        const rows = rawJson.map((row: any) => ({
+          name: pick(row, ['Name', 'name', 'Contact Name', 'Full Name', 'Contact']),
+          companyName: pick(row, ['Company', 'company', 'Company Name', 'Organisation', 'Organization']),
+          email: pick(row, ['Email', 'email', 'E-mail', 'Email Address']),
+          phone: pick(row, ['Phone', 'phone', 'Mobile', 'Phone Number', 'Contact Number']),
+          product: pick(row, ['Product', 'product', 'Product Name', 'Interest', 'interest']),
+          productId: pick(row, ['Product ID', 'product_id', 'productId', 'Product Id']),
+          estimatedBudget: pick(row, ['Budget', 'budget', 'Estimated Budget', 'Deal Value']),
+          notes: pick(row, ['Notes', 'notes', 'Comments'])
         }));
-
-        this.showToast(`Parsed ${this.excelPreviewRows.length} leads from "${file.name}". Ready to import!`);
+        this.excelSkippedNoName = rows.filter(r => !r.name).length;
+        this.excelPreviewRows = rows.filter(r => r.name);
+        this.showToast(`Parsed ${this.excelPreviewRows.length} leads from "${file.name}".${this.excelSkippedNoName ? ` ${this.excelSkippedNoName} rows without a name will be skipped.` : ''}`);
       } catch (err: any) {
         this.showToast(`Error reading spreadsheet: ${err.message}`);
       }
     };
-    reader.readAsBinaryString(file);
+    reader.readAsArrayBuffer(file);
+  }
+
+  /** Preview-only product match (the server re-validates against the workspace on import). */
+  previewProductMatch(row: any): { label: string; ok: boolean | null } {
+    if (row.productId) {
+      const p = this.leadProducts.find(x => String(x.id) === String(row.productId));
+      return p ? { label: p.name, ok: true } : { label: `ID ${row.productId} not found — needs review`, ok: false };
+    }
+    if (row.product) {
+      const p = this.leadProducts.find(x => x.name.trim().toLowerCase() === row.product.trim().toLowerCase());
+      return p ? { label: p.name, ok: true } : { label: `"${row.product}" not found — needs review`, ok: false };
+    }
+    return { label: 'No product selected', ok: null };
+  }
+
+  get excelUnmatchedCount(): number {
+    return this.excelPreviewRows.filter(r => this.previewProductMatch(r).ok === false).length;
   }
 
   confirmImportExcelLeads(): void {
     if (this.excelPreviewRows.length === 0) return;
     this.isImportingLeads = true;
-
     this.apiService.importLeadsBulk(this.excelPreviewRows).subscribe({
       next: (res) => {
         this.isImportingLeads = false;
         this.showToast(res.message);
-        this.showExcelImportModal = false;
-        this.excelFileName = '';
+        this.leadImportResult = res;
         this.excelPreviewRows = [];
+        this.excelFileName = '';
+        this.leadPage = 1;
         this.loadLeads();
       },
       error: (err) => {
         this.isImportingLeads = false;
-        this.showToast(`Import failed: ${err.message}`);
+        this.showToast(`Import failed: ${err?.error?.error || err.message}`);
       }
     });
   }
@@ -533,16 +923,16 @@ export class AppComponent implements OnInit, OnDestroy {
   qualifySingleLead(lead: any): void {
     this.apiService.qualifyLeadWithAi(lead.id).subscribe({
       next: (res) => {
-        this.showToast(`Lead qualified! AI Score: ${res.lead?.ai_score}/100 (${res.lead?.ai_category})`);
+        this.showToast(res.message);
         this.loadLeads();
       },
-      error: (err) => this.showToast(`Qualify error: ${err.message}`)
+      error: (err) => this.showToast(`Qualify error: ${err?.error?.error || err.message}`)
     });
   }
 
   qualifyAllLeads(): void {
     this.isQualifyingAll = true;
-    this.apiService.qualifyAllLeadsWithAi().subscribe({
+    this.apiService.qualifyAllLeadsWithAi(this.leadFilters.productId && this.leadFilters.productId !== 'none' ? Number(this.leadFilters.productId) : undefined).subscribe({
       next: (res) => {
         this.isQualifyingAll = false;
         this.showToast(res.message);
@@ -550,56 +940,52 @@ export class AppComponent implements OnInit, OnDestroy {
       },
       error: (err) => {
         this.isQualifyingAll = false;
-        this.showToast(`Error: ${err.message}`);
+        this.showToast(`Error: ${err?.error?.error || err.message}`);
       }
     });
   }
 
   submitNewLead(): void {
-    if (!this.newLead.name) return;
-    this.apiService.trackLead(this.newLead).subscribe({
+    if (!this.newLead.name?.trim()) { this.showToast('Lead name is required.'); return; }
+    const payload: any = {
+      name: this.newLead.name.trim(),
+      email: this.newLead.email?.trim() || null,
+      phone: this.newLead.phone?.trim() || null,
+      companyName: this.newLead.company_name?.trim() || null,
+      estimatedBudget: this.newLead.estimated_budget?.trim() || null,
+      notes: this.newLead.notes?.trim() || null,
+      productId: this.newLead.productId ? Number(this.newLead.productId) : null
+    };
+    if (this.editingLeadId) payload.status = this.newLead.status || null;
+    const req = this.editingLeadId ? this.apiService.updateLead(this.editingLeadId, payload) : this.apiService.createLead(payload);
+    req.subscribe({
       next: (res) => {
-        this.showToast(res.message);
+        this.showToast(res.message || (this.editingLeadId ? 'Lead updated.' : 'Lead recorded.'));
         this.showNewLeadModal = false;
-        this.newLead = { name: '', phone: '', email: '', interest: 'ThriveWoo B2B Platform', company_name: '', estimated_budget: '$15,000', notes: '' };
+        this.editingLeadId = null;
+        this.newLead = this.blankLead();
         this.loadLeads();
       },
-      error: (err) => this.showToast(`Error tracking lead: ${err.message}`)
+      error: (err) => this.showToast(`Could not save lead: ${err?.error?.error || err.message}`)
     });
   }
 
+
+  /** Opens the compose window with a draft built from the lead's real product (never a placeholder address). */
   quickEmailLead(lead: any): void {
-    this.composeEmail = {
-      recipient_email: lead.email || 'lead@example.com',
-      recipient_name: lead.name,
-      subject: `Accelerate Wholesale Operations with ThriveWoo B2B`,
-      body: `Hi ${lead.name},\n\nThank you for your interest in ThriveWoo. We help WooCommerce merchants automate field sales and customer wholesale pricing.\n\nWould you have 15 minutes this week for a live demonstration?\n\nBest regards,\nExecutive Team`,
-      html_body: `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,0.06);">
-  <div style="background: linear-gradient(135deg, #0ea5e9 0%, #3b82f6 100%); padding: 28px; text-align: center; color: #ffffff;">
-    <h1 style="margin: 0; font-size: 22px; font-weight: 700;">ThriveWoo B2B Wholesale Platform</h1>
-    <p style="margin: 6px 0 0; font-size: 13px; opacity: 0.95;">Wholesale Ordering & Mobile Field Sales for WooCommerce</p>
-  </div>
-  <div style="padding: 28px; color: #1e293b; line-height: 1.6;">
-    <p style="font-size: 16px; margin-top: 0;">Hi ${lead.name},</p>
-    <p style="font-size: 15px; color: #475569;">Managing wholesale orders manually creates costly fulfillment discrepancies.</p>
-    <div style="background: #f8fafc; border-left: 4px solid #0ea5e9; padding: 16px; margin: 20px 0; border-radius: 4px;">
-      <strong style="color: #0f172a; font-size: 14px;">ThriveWoo Key Capabilities:</strong>
-      <ul style="margin: 8px 0 0; padding-left: 20px; font-size: 14px; color: #334155;">
-        <li>Mobile field sales order booking app for sales reps</li>
-        <li>Customer-tier wholesale pricing & bulk volume matrix</li>
-        <li>Multi-warehouse live inventory sync & automated PDF invoice receipts</li>
-      </ul>
-    </div>
-    <div style="text-align: center; margin: 28px 0;">
-      <a href="https://thrivewoo.com" style="background: #0ea5e9; color: #ffffff; text-decoration: none; padding: 12px 28px; border-radius: 6px; font-weight: 600; font-size: 14px; display: inline-block;">Schedule 15-Min Live Demo &rarr;</a>
-    </div>
-    <p style="font-size: 13px; color: #64748b; margin-bottom: 0;">Best regards,<br><strong style="color: #0f172a;">Executive Team</strong><br>ThriveWoo Operations</p>
-  </div>
-</div>`,
-      is_html: true
-    };
-    this.composeTab = 'visual';
-    this.showComposeModal = true;
+    if (!lead.hasValidEmail) {
+      this.showToast('This lead has no valid email address. Edit the lead to add one.');
+      return;
+    }
+    this.apiService.getLeadEmailDraft(lead.id).subscribe({
+      next: (res) => {
+        const d = res.draft;
+        this.composeEmail = { recipient_email: d.to, recipient_name: d.recipientName, subject: d.subject, body: d.body, html_body: d.html, is_html: true };
+        this.composeTab = 'visual';
+        this.showComposeModal = true;
+      },
+      error: (err) => this.showToast(err?.error?.error || 'Could not prepare the email draft.')
+    });
   }
 
   // ==========================================
@@ -892,28 +1278,6 @@ export class AppComponent implements OnInit, OnDestroy {
     });
   }
 
-  // Desktop OS Controls
-  triggerLaunchApp(appName: string): void {
-    this.apiService.launchApp(appName).subscribe({
-      next: (res) => this.showToast(res.message),
-      error: (err) => this.showToast(`Error: ${err.message}`)
-    });
-  }
-
-  triggerSystemControl(action: string): void {
-    this.apiService.systemControl(action).subscribe({
-      next: (res) => this.showToast(res.message),
-      error: (err) => this.showToast(`Error: ${err.message}`)
-    });
-  }
-
-  triggerSystemStats(): void {
-    this.apiService.getSystemStats().subscribe({
-      next: (res) => this.showToast('System statistics retrieved.'),
-      error: (err) => this.showToast(`Error: ${err.message}`)
-    });
-  }
-
   loadExecutiveBriefing(): void {
     this.apiService.getExecutiveBriefing().subscribe({
       next: (res) => {
@@ -927,60 +1291,6 @@ export class AppComponent implements OnInit, OnDestroy {
         this.showToast('Executive briefing delivered.');
       },
       error: (err) => this.showToast(`Error: ${err.message}`)
-    });
-  }
-
-  // ==========================================
-  // 8. SOCIAL MEDIA STUDIO & AI POST GENERATOR
-  // ==========================================
-  loadSocialPosts(): void {
-    this.apiService.getContent(this.socialStatusFilter).subscribe({
-      next: (res) => {
-        this.socialPosts = res.contentItems || [];
-      },
-      error: (err) => console.warn('Error loading social posts:', err)
-    });
-  }
-
-  generateSocialPost(platform?: 'LinkedIn' | 'Twitter' | 'Instagram' | 'Facebook'): void {
-    const plat = platform || this.selectedSocialPlatform;
-    this.isGeneratingSocialPost = true;
-    this.apiService.generateSocialPost({
-      productId: this.selectedSocialProductId || (this.selectedProduct ? this.selectedProduct.id : undefined),
-      platform: plat,
-      customTopic: this.socialCustomTopic,
-      tone: this.socialTone
-    }).subscribe({
-      next: (res) => {
-        this.isGeneratingSocialPost = false;
-        this.socialCustomTopic = '';
-        this.showToast(`AI generated new ${plat} post: "${res.post?.title || 'Post'}"`);
-        this.loadSocialPosts();
-      },
-      error: (err) => {
-        this.isGeneratingSocialPost = false;
-        this.showToast(`Error generating post: ${err.message}`);
-      }
-    });
-  }
-
-  updateSocialPostStatus(id: number, status: string): void {
-    this.apiService.updateContentStatus(id, status).subscribe({
-      next: () => {
-        this.showToast(`Post status updated to ${status}.`);
-        this.loadSocialPosts();
-      },
-      error: (err) => this.showToast(`Error updating post status: ${err.message}`)
-    });
-  }
-
-  deleteSocialPost(id: number): void {
-    this.apiService.deleteContent(id).subscribe({
-      next: () => {
-        this.showToast('Post removed.');
-        this.loadSocialPosts();
-      },
-      error: (err) => this.showToast(`Error deleting post: ${err.message}`)
     });
   }
 

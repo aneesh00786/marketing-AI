@@ -43,7 +43,7 @@ const VIDEO_TEMPLATES = {
       },
       {
         sceneNumber: 5,
-        headline: "TradeSage School Bus SaaS",
+        headline: "Marketech.ai School Bus SaaS",
         subtext: "Book your school's 15-minute live demo today",
         badge: "BOOK DEMO",
         gradient: "linear-gradient(135deg, #090d16 0%, #312e81 100%)",
@@ -85,7 +85,7 @@ const VIDEO_TEMPLATES = {
       },
       {
         sceneNumber: 4,
-        headline: "Build with TradeSage AI",
+        headline: "Build with Marketech.ai",
         subtext: "Get your free technical architecture scoping session",
         badge: "GET STARTED",
         gradient: "linear-gradient(135deg, #090d16 0%, #1e1b4b 100%)",

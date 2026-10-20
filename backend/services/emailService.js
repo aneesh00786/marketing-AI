@@ -4,17 +4,55 @@ const { simpleParser } = require('mailparser');
 const { run, get, all } = require('../db/database');
 const aiEngine = require('./aiEngine');
 const secretBox = require('../lib/secretBox');
+const dns = require('dns');
+const net = require('net');
+const { isBlockedAddress } = require('../lib/safeFetch');
+const { LEGACY_WORKSPACE_ID } = require('../middleware/auth');
+
+const isLegacy = workspaceId => Number(workspaceId) === LEGACY_WORKSPACE_ID;
+const EMAIL_RE = /^[^\s@<>"',;]+@[^\s@<>"',;]+\.[^\s@<>"',;]+$/;
+// Reserved / placeholder domains (RFC 2606) are never real recipients.
+const PLACEHOLDER_DOMAIN_RE = /@(?:[^@]+\.)?(example\.(com|org|net)|[^@]+\.(example|test|invalid|localhost))$/i;
+const isValidRecipient = v => EMAIL_RE.test(String(v || '').trim()) && !PLACEHOLDER_DOMAIN_RE.test(String(v || '').trim());
+
+function mailError(message, status, code) {
+  const err = new Error(message);
+  err.status = status;
+  err.code = code;
+  return err;
+}
+
+/**
+ * SMTP/IMAP hosts come from workspace settings, so they must not point at private,
+ * loopback or metadata addresses (set MAIL_ALLOW_PRIVATE_HOSTS=true for a local relay).
+ */
+async function assertSafeMailHost(host) {
+  if (process.env.MAIL_ALLOW_PRIVATE_HOSTS === 'true') return;
+  const h = String(host || '').trim().replace(/^\[|\]$/g, '');
+  if (!h) throw mailError('Mail server host is missing.', 400, 'MAIL_NOT_CONFIGURED');
+  if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.internal') || h.endsWith('.local')) {
+    throw mailError('Private or internal mail hosts are not allowed.', 400, 'UNSAFE_HOST');
+  }
+  const addresses = net.isIP(h) ? [{ address: h }] : await dns.promises.lookup(h, { all: true }).catch(() => {
+    throw mailError(`Mail server host ${h} could not be resolved.`, 400, 'MAIL_HOST_UNRESOLVED');
+  });
+  if (addresses.some(a => isBlockedAddress(a.address))) {
+    throw mailError('Private, loopback and metadata mail hosts are not allowed.', 400, 'UNSAFE_HOST');
+  }
+}
 
 
 /**
- * Enterprise Company Mail Service (ZeptoMail / Custom SMTP & IMAP)
- * Connected to support@thrivewoo.com (via ZeptoMail from busskit-webstore)
+ * Company Mail Service (ZeptoMail / custom SMTP & IMAP). Every call is for one workspace
+ * and uses only that workspace's saved settings; the .env mailbox serves the legacy
+ * workspace only.
  */
 
-async function sendZeptoMail({ to, recipientName = '', subject, html, text = '', fromAddress = 'support@thrivewoo.com', fromName = 'ThriveWoo Support', replyTo = 'support@thrivewoo.com', token }) {
-  const authToken = token || process.env.ZEPTOMAIL_TOKEN;
+async function sendZeptoMail({ to, recipientName = '', subject, html, text = '', fromAddress, fromName, replyTo, token }) {
+  // The caller resolves the token for its own workspace; there is no shared fallback here.
+  const authToken = token;
   if (!authToken) {
-    throw new Error('ZeptoMail is not configured. Set ZEPTOMAIL_TOKEN in backend/.env.');
+    throw mailError('ZeptoMail is not configured for this workspace. Add the ZeptoMail token in Mail Settings.', 503, 'MAIL_NOT_CONFIGURED');
   }
   const res = await fetch('https://api.zeptomail.com/v1.1/email', {
     method: 'POST',
@@ -23,9 +61,9 @@ async function sendZeptoMail({ to, recipientName = '', subject, html, text = '',
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      from: { address: fromAddress, name: fromName },
+      from: { address: fromAddress, name: fromName || fromAddress },
       to: [{ email_address: { address: to, name: recipientName || to } }],
-      reply_to: [{ address: replyTo, name: fromName }],
+      reply_to: [{ address: replyTo || fromAddress, name: fromName || fromAddress }],
       subject: subject,
       htmlbody: html || `<p>${text || ''}</p>`
     })
@@ -43,8 +81,17 @@ async function sendZeptoMail({ to, recipientName = '', subject, html, text = '',
   };
 }
 
-async function getRawMailConfig(workspaceId = 1) {
+async function getRawMailConfig(workspaceId) {
+  if (!workspaceId) throw mailError('Workspace is required.', 400, 'WORKSPACE_REQUIRED');
   let row = await get('SELECT * FROM mail_configurations WHERE workspace_id = ? LIMIT 1', [workspaceId]);
+  if (!row && !isLegacy(workspaceId)) {
+    // Other workspaces never inherit the server's mailbox or credentials.
+    return {
+      workspace_id: workspaceId, provider: null, smtp_host: null, smtp_port: 587, smtp_secure: 0, smtp_user: null, smtp_pass: '',
+      imap_host: null, imap_port: 993, imap_tls: 1, imap_user: null, imap_pass: '', sender_name: null, sender_email: null,
+      status: 'Not Configured', last_synced_at: null, exists: false
+    };
+  }
   if (!row) {
     row = {
       workspace_id: workspaceId,
@@ -77,7 +124,19 @@ function encryptIfPossible(value) {
   return secretBox.isConfigured() ? secretBox.encrypt(value) : value;
 }
 
-async function getSafeMailConfig(workspaceId = 1) {
+/** ZeptoMail token: the workspace's own; the .env token only ever serves the legacy workspace. */
+function zeptoToken(workspaceId, config) {
+  const own = (config.smtp_pass && config.smtp_pass !== '••••••••' && !String(config.smtp_pass).startsWith('[env:')) ? config.smtp_pass : null;
+  return own || (isLegacy(workspaceId) ? process.env.ZEPTOMAIL_TOKEN : null) || null;
+}
+
+function usesZepto(workspaceId, config) {
+  if (config.provider === 'zeptomail') return true;
+  // Historical heuristic kept for the legacy workspace only.
+  return isLegacy(workspaceId) && !!(config.sender_email && config.sender_email.includes('thrivewoo.com'));
+}
+
+async function getSafeMailConfig(workspaceId) {
   const raw = await getRawMailConfig(workspaceId);
   return {
     ...raw,
@@ -88,7 +147,7 @@ async function getSafeMailConfig(workspaceId = 1) {
   };
 }
 
-async function saveMailConfig(workspaceId = 1, config = {}) {
+async function saveMailConfig(workspaceId, config = {}) {
   const existing = await getRawMailConfig(workspaceId);
   const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
 
@@ -102,29 +161,41 @@ async function saveMailConfig(workspaceId = 1, config = {}) {
     : (existing.imap_pass || '');
 
   const provider = config.provider || existing.provider || 'custom_smtp';
-  const smtpHost = config.smtp_host || existing.smtp_host || 'smtp.gmail.com';
+  const smtpHost = config.smtp_host || existing.smtp_host || null;
   const smtpPort = parseInt(config.smtp_port || existing.smtp_port || '587', 10);
   const smtpSecure = config.smtp_secure ? 1 : 0;
   const smtpUser = (config.smtp_user !== undefined) ? config.smtp_user : existing.smtp_user;
-  const imapHost = config.imap_host || existing.imap_host || 'imap.gmail.com';
+  const imapHost = config.imap_host || existing.imap_host || null;
   const imapPort = parseInt(config.imap_port || existing.imap_port || '993', 10);
   const imapTls = config.imap_tls ? 1 : 0;
   const imapUser = (config.imap_user !== undefined) ? config.imap_user : (config.smtp_user || existing.imap_user);
-  const senderName = config.sender_name || existing.sender_name || 'Roger Executive Team';
-  const senderEmail = config.sender_email || config.smtp_user || existing.sender_email || 'executive@thrivewoo.com';
-  const status = (smtpUser && smtpPass) ? 'Configured' : 'Not Configured';
+  const senderName = config.sender_name || existing.sender_name || null;
+  // No invented sender: an explicit address, or the SMTP login when it is an address.
+  const senderEmail = config.sender_email || existing.sender_email || (EMAIL_RE.test(smtpUser || '') ? smtpUser : null);
+  const hasTransport = provider === 'zeptomail' ? !!smtpPass : !!(smtpUser && smtpPass);
+  const status = hasTransport ? 'Configured' : 'Not Configured';
 
-  await run(`
-    UPDATE mail_configurations
-    SET provider = ?, smtp_host = ?, smtp_port = ?, smtp_secure = ?, smtp_user = ?, smtp_pass = ?,
-        imap_host = ?, imap_port = ?, imap_tls = ?, imap_user = ?, imap_pass = ?,
-        sender_name = ?, sender_email = ?, status = ?, updated_at = ?
-    WHERE workspace_id = ?
-  `, [
+  const params = [
     provider, smtpHost, smtpPort, smtpSecure, smtpUser, encryptIfPossible(smtpPass),
     imapHost, imapPort, imapTls, imapUser, encryptIfPossible(imapPass),
-    senderName, senderEmail, status, now, workspaceId
-  ]);
+    senderName, senderEmail, status, now
+  ];
+  const row = await get('SELECT id FROM mail_configurations WHERE workspace_id = ? LIMIT 1', [workspaceId]);
+  if (row) {
+    await run(`
+      UPDATE mail_configurations
+      SET provider = ?, smtp_host = ?, smtp_port = ?, smtp_secure = ?, smtp_user = ?, smtp_pass = ?,
+          imap_host = ?, imap_port = ?, imap_tls = ?, imap_user = ?, imap_pass = ?,
+          sender_name = ?, sender_email = ?, status = ?, updated_at = ?
+      WHERE workspace_id = ?
+    `, [...params, workspaceId]);
+  } else {
+    await run(`
+      INSERT INTO mail_configurations (provider, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass,
+        imap_host, imap_port, imap_tls, imap_user, imap_pass, sender_name, sender_email, status, updated_at, created_at, workspace_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [...params, now, workspaceId]);
+  }
 
   return await getSafeMailConfig(workspaceId);
 }
@@ -151,56 +222,61 @@ function createSmtpTransporter(config) {
   });
 }
 
-async function verifySmtpConnection(workspaceId = 1, testConfig = null) {
-  try {
-    const config = testConfig || await getRawMailConfig(workspaceId);
-
-    // If ZeptoMail provider or support@thrivewoo.com
-    if (config.provider === 'zeptomail' || (config.sender_email && config.sender_email.includes('thrivewoo.com'))) {
-      await run("UPDATE mail_configurations SET status = 'Connected' WHERE workspace_id = ?", [workspaceId]);
-      return {
-        success: true,
-        message: `ZeptoMail authorization verified successfully for ${config.sender_email || 'support@thrivewoo.com'}`
-      };
+/**
+ * Checks the workspace's saved settings, optionally overlaid with unsaved form values.
+ * Saved passwords are used when the form sends the mask; nothing falls back to another
+ * workspace or to the server's mailbox (except the legacy workspace's .env defaults).
+ */
+async function verifySmtpConnection(workspaceId, testConfig = null) {
+  const saved = await getRawMailConfig(workspaceId);
+  const config = { ...saved };
+  if (testConfig && typeof testConfig === 'object') {
+    for (const k of ['provider', 'smtp_host', 'smtp_port', 'smtp_secure', 'smtp_user', 'sender_email', 'sender_name']) {
+      if (testConfig[k] !== undefined && testConfig[k] !== null && testConfig[k] !== '') config[k] = testConfig[k];
     }
+    if (testConfig.smtp_pass && testConfig.smtp_pass !== '••••••••') config.smtp_pass = testConfig.smtp_pass;
+  }
+  const setStatus = status => (saved.exists === false ? null : run('UPDATE mail_configurations SET status = ? WHERE workspace_id = ?', [status, workspaceId]));
 
-    if (!config.smtp_user || !config.smtp_pass) {
-      return {
-        success: false,
-        error: 'Missing SMTP Username or App Password. Please provide company authorization credentials.'
-      };
+  if (usesZepto(workspaceId, config)) {
+    if (!zeptoToken(workspaceId, config)) {
+      return { success: false, error: 'No ZeptoMail token is saved for this workspace.' };
     }
-
-    const transporter = createSmtpTransporter(config);
-    if (!transporter) {
-      return { success: false, error: 'Could not initialize SMTP transport.' };
-    }
-
-    await transporter.verify();
-
-    // Mark as Connected in database
-    await run(
-      "UPDATE mail_configurations SET status = 'Connected' WHERE workspace_id = ?",
-      [workspaceId]
-    );
-
+    // ZeptoMail has no credential check that does not send mail, so this is not claimed as verified.
     return {
       success: true,
+      verified: false,
+      message: `A ZeptoMail token is saved for ${config.sender_email || 'this workspace'}. Delivery is confirmed on the first send.`
+    };
+  }
+
+  if (!config.smtp_user || !config.smtp_pass) {
+    return { success: false, error: 'Missing SMTP Username or App Password. Please provide company authorization credentials.' };
+  }
+
+  try {
+    await assertSafeMailHost(config.smtp_host);
+    const transporter = createSmtpTransporter(config);
+    if (!transporter) return { success: false, error: 'Could not initialize SMTP transport.' };
+    await transporter.verify();
+    await setStatus('Connected');
+    return {
+      success: true,
+      verified: true,
       message: `SMTP handshake verified successfully with ${config.smtp_host}:${config.smtp_port} for ${config.smtp_user}`
     };
   } catch (err) {
-    await run(
-      "UPDATE mail_configurations SET status = 'Auth Failed' WHERE workspace_id = ?",
-      [workspaceId]
-    );
-    return {
-      success: false,
-      error: `SMTP connection failed: ${err.message}`
-    };
+    await setStatus('Auth Failed');
+    return { success: false, error: err.code === 'UNSAFE_HOST' || err.code === 'MAIL_HOST_UNRESOLVED' ? err.message : `SMTP connection failed: ${err.message}` };
   }
 }
 
-async function sendRealEmail(workspaceId = 1, {
+/**
+ * Sends one email with the workspace's own mail settings and records it as Sent.
+ * Throws (and records nothing) when the recipient is invalid, mail is not configured,
+ * or the provider rejects the message; there is no "saved in outbox" success.
+ */
+async function sendRealEmail(workspaceId, {
   to,
   recipientName = '',
   subject,
@@ -210,75 +286,64 @@ async function sendRealEmail(workspaceId = 1, {
   clientId = null,
   replyTo = null
 }) {
+  const recipient = String(to || '').trim();
+  if (!isValidRecipient(recipient)) throw mailError('A valid recipient email address is required (placeholder domains such as example.com are not accepted).', 400, 'INVALID_RECIPIENT');
+  if (!String(subject || '').trim()) throw mailError('A subject is required.', 400, 'VALIDATION_ERROR');
+  html = html || `<p>${String(text || '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))}</p>`;
+
   const config = await getRawMailConfig(workspaceId);
+  const senderEmail = config.sender_email || (EMAIL_RE.test(config.smtp_user || '') ? config.smtp_user : null);
+  if (!senderEmail) throw mailError('Mail is not configured for this workspace. Add a sender address in Mail Settings.', 503, 'MAIL_NOT_CONFIGURED');
+  const fromAddress = config.sender_name ? `"${String(config.sender_name).replace(/"/g, '')}" <${senderEmail}>` : senderEmail;
+  const plain = text || html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
   const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
-  const fromAddress = `"${config.sender_name || 'ThriveWoo Support'}" <${config.sender_email || 'support@thrivewoo.com'}>`;
-  const snippet = (text || html.replace(/<[^>]+>/g, '')).substring(0, 120);
 
-  let messageId = `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-  let smtpStatus = 'Delivered';
-  let isRealSmtp = false;
+  let messageId = null;
+  let smtpStatus = null;
   let deliveryDetails = null;
+  let lastError = null;
 
-  // 1. Try ZeptoMail directly (from busskit-webstore configuration)
-  if (config.provider === 'zeptomail' || (config.sender_email && config.sender_email.includes('thrivewoo.com'))) {
+  // 1. ZeptoMail with this workspace's token.
+  if (usesZepto(workspaceId, config)) {
     try {
       const zeptoResult = await sendZeptoMail({
-        to,
-        recipientName,
-        subject,
-        html,
-        text,
-        fromAddress: config.sender_email || 'support@thrivewoo.com',
-        fromName: config.sender_name || 'ThriveWoo Support',
-        replyTo: replyTo || config.sender_email || 'support@thrivewoo.com',
-        token: (config.smtp_pass && config.smtp_pass !== '••••••••' && !config.smtp_pass.startsWith('[env:')) ? config.smtp_pass : undefined
+        to: recipient, recipientName, subject, html, text,
+        fromAddress: senderEmail,
+        fromName: config.sender_name || senderEmail,
+        replyTo: replyTo || senderEmail,
+        token: zeptoToken(workspaceId, config)
       });
       messageId = zeptoResult.messageId;
-      smtpStatus = 'Dispatched via ZeptoMail (support@thrivewoo.com)';
-      isRealSmtp = true;
+      smtpStatus = 'Sent via ZeptoMail';
       deliveryDetails = zeptoResult.data;
     } catch (zeptoErr) {
-      console.warn('ZeptoMail dispatch error, trying standard SMTP fallback:', zeptoErr.message);
+      lastError = zeptoErr;
+      console.warn('ZeptoMail dispatch error:', zeptoErr.message);
     }
   }
 
-  // 2. Standard SMTP Transport
-  if (!isRealSmtp) {
-    const transporter = createSmtpTransporter(config);
+  // 2. The workspace's SMTP server.
+  if (!messageId) {
+    const transporter = config.smtp_host ? createSmtpTransporter(config) : null;
     if (transporter) {
       try {
-        const mailOptions = {
-          from: fromAddress,
-          to: to,
-          subject: subject,
-          text: text || html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(),
-          html: html
-        };
-        if (replyTo || config.sender_email) {
-          mailOptions.replyTo = replyTo || config.sender_email;
-        }
-
-        const info = await transporter.sendMail(mailOptions);
-        messageId = info.messageId || messageId;
-        smtpStatus = 'Dispatched via Company SMTP';
-        isRealSmtp = true;
-        deliveryDetails = {
-          response: info.response,
-          accepted: info.accepted
-        };
+        await assertSafeMailHost(config.smtp_host);
+        const info = await transporter.sendMail({ from: fromAddress, to: recipient, subject, text: plain, html, replyTo: replyTo || senderEmail });
+        messageId = info.messageId || `smtp_${Date.now()}`;
+        smtpStatus = 'Sent via SMTP';
+        deliveryDetails = { response: info.response, accepted: info.accepted };
       } catch (err) {
-        console.warn('Real SMTP dispatch warning:', err.message);
-        smtpStatus = `SMTP Error: ${err.message.substring(0, 80)}`;
-        throw new Error(`Failed to send email via SMTP (${config.smtp_host}): ${err.message}`);
+        lastError = err;
+        console.warn('SMTP dispatch error:', err.message);
       }
-    } else {
-      // If SMTP credentials not provided yet, save in local outbox
-      smtpStatus = 'Saved in Outbox (SMTP Authorization Pending)';
     }
   }
 
-  // Insert into emails table
+  if (!messageId) {
+    if (lastError) throw mailError(`Email was not sent: ${lastError.message}`, lastError.status === 400 ? 400 : 502, lastError.code || 'MAIL_SEND_FAILED');
+    throw mailError('Email was not sent: mail is not configured for this workspace. Add SMTP or ZeptoMail settings in Mail Settings.', 503, 'MAIL_NOT_CONFIGURED');
+  }
+
   const insertRes = await run(`
     INSERT INTO emails (
       workspace_id, campaign_id, client_id, sender, sender_email, recipient_email, recipient_name,
@@ -288,35 +353,23 @@ async function sendRealEmail(workspaceId = 1, {
       ?, ?, ?, ?, 0, 1, 'Sent', ?, ?, ?
     )
   `, [
-    workspaceId,
-    campaignId,
-    clientId,
-    config.sender_name || 'Executive Team',
-    config.sender_email || config.smtp_user || 'executive@thrivewoo.com',
-    to,
-    recipientName || to,
-    subject,
-    text || html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(),
-    html,
-    snippet,
-    messageId,
-    smtpStatus,
-    now
+    workspaceId, campaignId, clientId, config.sender_name || senderEmail, senderEmail, recipient, recipientName || recipient,
+    subject, plain, html, plain.substring(0, 120), messageId, smtpStatus, now
   ]);
 
   return {
     success: true,
     emailId: insertRes.lastID,
     messageId,
-    isRealSmtp,
+    isRealSmtp: true,
     smtpStatus,
-    recipient: to,
+    recipient,
     subject,
     deliveryDetails
   };
 }
 
-async function syncIncomingEmails(workspaceId = 1) {
+async function syncIncomingEmails(workspaceId) {
   const config = await getRawMailConfig(workspaceId);
   const isInvalidImapPass = !config.imap_pass || 
     config.imap_pass === 'demo_app_password_123' || 
@@ -326,8 +379,14 @@ async function syncIncomingEmails(workspaceId = 1) {
     return {
       success: false,
       isImapConfigured: false,
-      error: 'Inbound IMAP sync requires a Zoho Mail App Password. (Outbound sending via ZeptoMail support@thrivewoo.com is active and verified).'
+      error: 'Inbound sync needs IMAP settings and an app password in Mail Settings.'
     };
+  }
+
+  try {
+    await assertSafeMailHost(config.imap_host);
+  } catch (err) {
+    return { success: false, isImapConfigured: false, error: err.message };
   }
 
   const client = new ImapFlow({
@@ -365,13 +424,13 @@ async function syncIncomingEmails(workspaceId = 1) {
           const messageId = msg.envelope?.messageId || `imap_${msg.seq}_${msg.uid}`;
 
           // Check if already saved in emails table
-          const existing = await get('SELECT id FROM emails WHERE message_id = ? LIMIT 1', [messageId]);
+          const existing = await get('SELECT id FROM emails WHERE workspace_id = ? AND message_id = ? LIMIT 1', [workspaceId, messageId]);
           if (existing) continue;
 
           // Parse full MIME message source
           const parsed = await simpleParser(msg.source);
-          const fromAddr = parsed.from?.value?.[0]?.address || 'unknown@example.com';
-          const fromName = parsed.from?.value?.[0]?.name || fromAddr;
+          const fromAddr = parsed.from?.value?.[0]?.address || null;
+          const fromName = parsed.from?.value?.[0]?.name || fromAddr || '(unknown sender)';
           const subject = parsed.subject || '(No Subject)';
           const textBody = parsed.text || '';
           const htmlBody = parsed.html || `<p>${textBody.replace(/\n/g, '<br>')}</p>`;
@@ -397,7 +456,7 @@ async function syncIncomingEmails(workspaceId = 1) {
             fromName,
             fromAddr,
             config.imap_user,
-            config.sender_name,
+            config.sender_name || config.imap_user,
             subject,
             textBody,
             htmlBody,
@@ -438,7 +497,7 @@ async function syncIncomingEmails(workspaceId = 1) {
       (err.message && (err.message.includes('AUTHENTICATIONFAILED') || err.message.includes('Invalid credentials') || err.message.includes('Command failed')));
 
     const friendlyError = isAuthErr
-      ? 'Zoho Mail authentication failed. Please enter your valid Zoho Mail App Password in Mail Auth Settings.'
+      ? 'Mailbox authentication failed. Check the IMAP username and app password in Mail Settings.'
       : `IMAP connection error (${config.imap_host}): ${err.message}`;
 
     return {
@@ -450,6 +509,8 @@ async function syncIncomingEmails(workspaceId = 1) {
 }
 
 module.exports = {
+  EMAIL_RE,
+  isValidRecipient,
   getRawMailConfig,
   getSafeMailConfig,
   saveMailConfig,

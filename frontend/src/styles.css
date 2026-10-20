@@ -1,1 +1,156 @@
-/* You can add global styles to this file, and also import other style files */
+/* TradeSage AI — global design tokens shared by every component. */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+:root,
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --bg: #0a0c11;
+  --bg-elev: #0f121a;
+  --surface: #141823;
+  --surface-2: #1a1f2c;
+  --surface-3: #212738;
+  --surface-hover: #1e2433;
+  --border: rgba(148, 163, 184, 0.12);
+  --border-strong: rgba(148, 163, 184, 0.22);
+
+  --text: #e8eaf0;
+  --text-muted: #9aa3b5;
+  --text-subtle: #6b7489;
+
+  --accent: #7b6cf6;
+  --accent-strong: #6a5af0;
+  --accent-soft: rgba(123, 108, 246, 0.14);
+  --accent-ring: rgba(123, 108, 246, 0.45);
+  --accent-text: #b4abff;
+  --accent-gradient: linear-gradient(135deg, #7b6cf6 0%, #4f8cff 100%);
+
+  --success: #22c55e;
+  --success-text: #4ade80;
+  --success-soft: rgba(34, 197, 94, 0.12);
+  --warning: #f59e0b;
+  --warning-text: #fbbf24;
+  --warning-soft: rgba(245, 158, 11, 0.12);
+  --danger: #ef4444;
+  --danger-text: #f87171;
+  --danger-soft: rgba(239, 68, 68, 0.12);
+  --info: #38bdf8;
+  --info-text: #7dd3fc;
+  --info-soft: rgba(56, 189, 248, 0.12);
+  --violet-text: #c4b5fd;
+  --cyan-text: #67e8f9;
+  --orange-text: #fdba74;
+  --text-strong: #ffffff;
+  --on-accent: #ffffff;
+  --topbar-bg: rgba(10, 12, 17, 0.82);
+  --scrim: rgba(5, 7, 12, 0.66);
+  --chart-1: #8b7cf8;
+  --chart-2: #4f8cff;
+  --chart-3: #2dd4bf;
+  --chart-4: #fbbf24;
+  --chart-5: #f472b6;
+  --chart-6: #94a3b8;
+  --chart-grid: rgba(148, 163, 184, 0.12);
+
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.25), 0 8px 24px rgba(0, 0, 0, 0.25);
+  --shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.5);
+
+  --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+
+  --sidebar-w: 252px;
+  --sidebar-w-collapsed: 72px;
+  --topbar-h: 64px;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+
+/* ---------- Light theme (default; dark is opt-in via the theme toggle) ---------- */
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --bg: #f4f6fb;
+  --bg-elev: #f8f9fc;
+  --surface: #ffffff;
+  --surface-2: #f1f3f8;
+  --surface-3: #e5e8f0;
+  --surface-hover: #eef1f7;
+  --border: rgba(15, 23, 42, 0.08);
+  --border-strong: rgba(15, 23, 42, 0.15);
+
+  --text: #141a2b;
+  --text-muted: #5a6478;
+  --text-subtle: #8a93a6;
+  --text-strong: #0b1020;
+
+  --accent: #6a5af0;
+  --accent-strong: #5a49e6;
+  --accent-soft: rgba(106, 90, 240, 0.09);
+  --accent-ring: rgba(106, 90, 240, 0.32);
+  --accent-text: #5444d8;
+  --accent-gradient: linear-gradient(135deg, #6a5af0 0%, #3d7bfa 100%);
+
+  --success-text: #15803d;
+  --success-soft: rgba(34, 197, 94, 0.11);
+  --warning-text: #b45309;
+  --warning-soft: rgba(245, 158, 11, 0.13);
+  --danger-text: #dc2626;
+  --danger-soft: rgba(239, 68, 68, 0.09);
+  --info-text: #0369a1;
+  --info-soft: rgba(56, 189, 248, 0.13);
+  --violet-text: #6d28d9;
+  --cyan-text: #0e7490;
+  --orange-text: #c2410c;
+
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.06);
+  --shadow: 0 1px 2px rgba(16, 24, 40, 0.05), 0 6px 20px rgba(16, 24, 40, 0.06);
+  --shadow-lg: 0 24px 60px rgba(16, 24, 40, 0.16);
+
+  --topbar-bg: rgba(255, 255, 255, 0.86);
+  --scrim: rgba(15, 23, 42, 0.38);
+  --chart-1: #6a5af0;
+  --chart-2: #2f6ff0;
+  --chart-3: #0d9488;
+  --chart-4: #d97706;
+  --chart-5: #db2777;
+  --chart-6: #94a3b8;
+  --chart-grid: rgba(15, 23, 42, 0.07);
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  transition: background-color 0.2s ease, color 0.2s ease;
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+a { color: var(--accent-text); }
+
+::selection { background: var(--accent-ring); color: #fff; }
+
+/* Subtle, consistent scrollbars. */
+* { scrollbar-width: thin; scrollbar-color: var(--surface-3) transparent; }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 999px; border: 3px solid transparent; background-clip: padding-box; }
+*::-webkit-scrollbar-thumb:hover { background: var(--text-subtle); background-clip: padding-box; border: 3px solid transparent; }
+
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
+}

@@ -1,12 +1,14 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Observable } from 'rxjs';
+import { apiRoot } from '../core/api-base';
 
 @Injectable({
   providedIn: 'root'
 })
 export class ApiService {
-  private baseUrl = 'http://localhost:8000/api/v1';
+  private root = apiRoot();
+  private baseUrl = `${this.root}/api/v1`;
 
   constructor(private http: HttpClient) {}
 
@@ -68,16 +70,8 @@ export class ApiService {
     return this.http.post(`${this.baseUrl}/marketing/campaigns`, campaignData, { headers: this.getHeaders() });
   }
 
-  getContent(status: string = 'all'): Observable<any> {
-    return this.http.get(`${this.baseUrl}/content?status=${status}`, { headers: this.getHeaders() });
-  }
-
-  generatePost(campaignId: number, productKey: string): Observable<any> {
-    return this.http.post(`${this.baseUrl}/marketing/generate-post`, { campaignId, productKey }, { headers: this.getHeaders() });
-  }
-
-  updateContentStatus(id: number, status: string): Observable<any> {
-    return this.http.post(`${this.baseUrl}/content/${id}/status`, { status }, { headers: this.getHeaders() });
+  generatePost(campaignId: number | null, productId: number | null, customTopic = ''): Observable<any> {
+    return this.http.post(`${this.baseUrl}/marketing/generate-post`, { campaignId, productId, customTopic }, { headers: this.getHeaders() });
   }
 
   // 6. Video Studio
@@ -111,8 +105,29 @@ export class ApiService {
     return this.http.put(`${this.baseUrl}/business-profile`, data, { headers: this.getHeaders() });
   }
 
-  getLeads(): Observable<any> {
-    return this.http.get(`${this.baseUrl}/leads`, { headers: this.getHeaders() });
+  // Leads CRM (workspace-scoped; the server derives the workspace from the session)
+  getLeads(params: Record<string, any> = {}): Observable<any> {
+    return this.http.get(`${this.baseUrl}/leads`, { params });
+  }
+
+  getLeadProducts(): Observable<any> {
+    return this.http.get(`${this.baseUrl}/leads/products`);
+  }
+
+  createLead(data: any): Observable<any> {
+    return this.http.post(`${this.baseUrl}/leads`, data);
+  }
+
+  updateLead(id: number, data: any): Observable<any> {
+    return this.http.patch(`${this.baseUrl}/leads/${id}`, data);
+  }
+
+  deleteLead(id: number): Observable<any> {
+    return this.http.delete(`${this.baseUrl}/leads/${id}`);
+  }
+
+  getLeadEmailDraft(id: number): Observable<any> {
+    return this.http.post(`${this.baseUrl}/leads/${id}/email-draft`, {});
   }
 
   // 9. Billing & Usage
@@ -185,148 +200,126 @@ export class ApiService {
 
   // 17. Connected Businesses (My Business + Client Businesses)
   getConnectedBusinesses(): Observable<any> {
-    return this.http.get('http://localhost:8000/api/businesses/connected');
+    return this.http.get(`${this.root}/api/businesses/connected`);
   }
 
   connectBusiness(data: any): Observable<any> {
-    return this.http.post('http://localhost:8000/api/businesses/connected', data);
+    return this.http.post(`${this.root}/api/businesses/connected`, data);
   }
 
   generateMarketingIdeas(businessId?: number, businessName?: string): Observable<any> {
-    return this.http.post('http://localhost:8000/api/marketing/generate-ideas', { businessId, businessName });
+    return this.http.post(`${this.root}/api/marketing/generate-ideas`, { businessId, businessName });
   }
 
   dispatchCampaign(data: { businessId?: number; subject: string; body: string; leadIds?: number[] }): Observable<any> {
-    return this.http.post('http://localhost:8000/api/marketing/dispatch-campaign', data);
+    return this.http.post(`${this.root}/api/marketing/dispatch-campaign`, data);
   }
 
   // 18. Email Command Center (Inbox & Send Mail)
   getEmails(): Observable<any> {
-    return this.http.get('http://localhost:8000/api/emails');
+    return this.http.get(`${this.root}/api/emails`);
   }
 
   sendEmail(data: { recipient_email: string; recipient_name?: string; subject: string; body: string }): Observable<any> {
-    return this.http.post('http://localhost:8000/api/emails/send', data);
+    return this.http.post(`${this.root}/api/emails/send`, data);
   }
 
   // 19. Appointments & CRM
   getAppointments(): Observable<any> {
-    return this.http.get('http://localhost:8000/api/appointments');
+    return this.http.get(`${this.root}/api/appointments`);
   }
 
   bookAppointment(data: { customer_name: string; service?: string; date: string; time: string; notes?: string }): Observable<any> {
-    return this.http.post('http://localhost:8000/api/appointments', data);
+    return this.http.post(`${this.root}/api/appointments`, data);
   }
 
-  trackLead(data: { name: string; phone?: string; email?: string; interest?: string; company_name?: string; estimated_budget?: string }): Observable<any> {
-    return this.http.post('http://localhost:8000/api/leads', data);
-  }
-
-  // 20. Desktop Tools & System Controls (Python Parity)
-  launchApp(appName: string): Observable<any> {
-    return this.http.post('http://localhost:8000/api/tools/launch_app', { app_name: appName });
-  }
-
-  systemControl(action: string): Observable<any> {
-    return this.http.post('http://localhost:8000/api/tools/system_control', { action });
-  }
-
-  getSystemStats(): Observable<any> {
-    return this.http.get('http://localhost:8000/api/tools/system_stats');
+  trackLead(data: any): Observable<any> {
+    return this.createLead(data);
   }
 
   // 21. Digital Products Hub & AI URL Extractor
   extractProductFromUrl(url: string): Observable<any> {
-    return this.http.post('http://localhost:8000/api/products/extract-url', { url });
+    return this.http.post(`${this.root}/api/products/extract-url`, { url });
   }
 
   getDigitalProducts(): Observable<any> {
-    return this.http.get('http://localhost:8000/api/products');
+    return this.http.get(`${this.root}/api/products`);
   }
 
   createDigitalProduct(data: any): Observable<any> {
-    return this.http.post('http://localhost:8000/api/products', data);
+    return this.http.post(`${this.root}/api/products`, data);
   }
 
   deleteDigitalProduct(id: number): Observable<any> {
-    return this.http.delete(`http://localhost:8000/api/products/${id}`);
+    return this.http.delete(`${this.root}/api/products/${id}`);
   }
 
   // 22. Bulk Lead Import & AI Qualification
   importLeadsBulk(leads: any[]): Observable<any> {
-    return this.http.post('http://localhost:8000/api/leads/import-bulk', { leads });
+    return this.http.post(`${this.baseUrl}/leads/import-bulk`, { leads });
   }
 
   qualifyLeadWithAi(leadId: number): Observable<any> {
-    return this.http.post(`http://localhost:8000/api/leads/${leadId}/ai-qualify`, {});
+    return this.http.post(`${this.baseUrl}/leads/${leadId}/ai-qualify`, {});
   }
 
-  qualifyAllLeadsWithAi(): Observable<any> {
-    return this.http.post('http://localhost:8000/api/leads/ai-qualify-all', {});
+  qualifyAllLeadsWithAi(productId?: number): Observable<any> {
+    return this.http.post(`${this.baseUrl}/leads/ai-qualify-all`, productId ? { productId } : {});
   }
 
   // 23. Visual HTML Email & Email AI Analysis
   sendHtmlEmail(data: { recipient_email: string; recipient_name?: string; subject: string; html_body: string; body_text?: string }): Observable<any> {
-    return this.http.post('http://localhost:8000/api/emails/send-html', data);
+    return this.http.post(`${this.root}/api/emails/send-html`, data);
   }
 
   analyzeEmailWithAi(emailId: number): Observable<any> {
-    return this.http.post(`http://localhost:8000/api/emails/${emailId}/ai-analyze`, {});
+    return this.http.post(`${this.root}/api/emails/${emailId}/ai-analyze`, {});
   }
 
   // 24. Mail Drafts & Approvals Workflow
   getMailDrafts(): Observable<any> {
-    return this.http.get('http://localhost:8000/api/drafts');
+    return this.http.get(`${this.root}/api/drafts`);
   }
 
   generateMailDraft(data: { productId?: number; recipientName?: string; recipientEmail?: string; goal?: string; tone?: string }): Observable<any> {
-    return this.http.post('http://localhost:8000/api/drafts/generate', data);
+    return this.http.post(`${this.root}/api/drafts/generate`, data);
   }
 
   rewriteMailDraft(id: number, instruction: string): Observable<any> {
-    return this.http.post(`http://localhost:8000/api/drafts/${id}/rewrite`, { instruction });
+    return this.http.post(`${this.root}/api/drafts/${id}/rewrite`, { instruction });
   }
 
   approveMailDraft(id: number): Observable<any> {
-    return this.http.put(`http://localhost:8000/api/drafts/${id}/approve`, {});
+    return this.http.put(`${this.root}/api/drafts/${id}/approve`, {});
   }
 
   sendMailDraft(id: number): Observable<any> {
-    return this.http.post(`http://localhost:8000/api/drafts/${id}/send`, {});
+    return this.http.post(`${this.root}/api/drafts/${id}/send`, {});
   }
 
   deleteMailDraft(id: number): Observable<any> {
-    return this.http.delete(`http://localhost:8000/api/drafts/${id}`);
-  }
-
-  // 25. Social Media Studio
-  generateSocialPost(data: { productId?: number; productKey?: string; platform?: string; customTopic?: string; tone?: string; campaignId?: number }): Observable<any> {
-    return this.http.post('http://localhost:8000/api/marketing/generate-social-post', data);
-  }
-
-  deleteContent(id: number): Observable<any> {
-    return this.http.delete(`http://localhost:8000/api/content/${id}`);
+    return this.http.delete(`${this.root}/api/drafts/${id}`);
   }
 
   // 26. Company Mail Authorization (SMTP & IMAP)
   getMailConfig(): Observable<any> {
-    return this.http.get('http://localhost:8000/api/mail/config');
+    return this.http.get(`${this.root}/api/mail/config`);
   }
 
   saveMailConfig(config: any): Observable<any> {
-    return this.http.post('http://localhost:8000/api/mail/config', config);
+    return this.http.post(`${this.root}/api/mail/config`, config);
   }
 
   testSmtp(config?: any): Observable<any> {
-    return this.http.post('http://localhost:8000/api/mail/test-smtp', { config });
+    return this.http.post(`${this.root}/api/mail/test-smtp`, { config });
   }
 
   syncCompanyMail(): Observable<any> {
-    return this.http.post('http://localhost:8000/api/mail/sync', {});
+    return this.http.post(`${this.root}/api/mail/sync`, {});
   }
 
   getStatus(): Observable<any> {
-    return this.http.get('http://localhost:8000/api/status');
+    return this.http.get(`${this.root}/api/status`);
   }
 }
 

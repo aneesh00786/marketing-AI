@@ -1,0 +1,261 @@
+<div class="dash">
+  <!-- Toolbar -->
+  <div class="toolbar">
+    <div>
+      <h2>Marketing command center</h2>
+      <p class="muted">{{ data ? rangeLabel() + ' · ' + data.range.timezone : 'Loading your workspace data…' }}</p>
+    </div>
+    <div class="voice-switch" [class.on]="voiceOn" [class.live]="voiceLive">
+      <span class="vs-orb" aria-hidden="true"></span>
+      <span class="vs-text">
+        <strong id="voice-switch-label">Roger voice · always listening</strong>
+        <small aria-live="polite">{{ voiceStatus }}</small>
+      </span>
+      <button type="button" class="switch" role="switch" [attr.aria-checked]="voiceOn" aria-labelledby="voice-switch-label"
+              (click)="voiceToggle.emit(!voiceOn)" [title]="voiceOn ? 'Turn off: end the voice session' : 'Turn on: Roger listens for your commands'">
+        <span class="knob"></span>
+      </button>
+    </div>
+    <div class="range-controls">
+      <div class="segmented" role="tablist" aria-label="Date range">
+        <button *ngFor="let r of ranges" role="tab" [attr.aria-selected]="range === r.key" [class.on]="range === r.key" (click)="setRange(r.key)">{{ r.label }}</button>
+      </div>
+      <div class="custom" *ngIf="range === 'custom'">
+        <input type="date" [(ngModel)]="customFrom" [max]="customTo" aria-label="From date" />
+        <span class="muted">to</span>
+        <input type="date" [(ngModel)]="customTo" [min]="customFrom" aria-label="To date" />
+        <button class="btn-sm primary" (click)="applyCustom()">Apply</button>
+      </div>
+      <button class="icon-btn" (click)="load()" [disabled]="loading" aria-label="Refresh" title="Refresh">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" [class.spin]="loading"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 4v5h-5"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Error state -->
+  <div class="state error" *ngIf="error && !loading" role="alert">
+    <strong>Couldn't load the dashboard.</strong> {{ error }}
+    <button class="btn-sm" (click)="load()">Try again</button>
+  </div>
+
+  <!-- Loading skeleton -->
+  <ng-container *ngIf="loading && !data">
+    <div class="kpi-grid"><div class="kpi skeleton" *ngFor="let i of [1,2,3,4,5,6,7]"></div></div>
+    <div class="grid-2"><div class="card skeleton tall"></div><div class="card skeleton tall"></div></div>
+  </ng-container>
+
+  <ng-container *ngIf="data">
+    <div class="banner info" *ngIf="!data.dataQuality.connectedAccounts">
+      No social account is connected yet, so platform metrics are unavailable. Campaign, content and lead figures below are real.
+      <button class="link" (click)="go({ route: 'social', section: 'accounts' })">Connect accounts →</button>
+    </div>
+
+    <!-- KPI cards -->
+    <div class="kpi-grid" [class.refreshing]="loading">
+      <button class="kpi" (click)="go({ route: 'social', section: 'campaigns' })">
+        <span class="kpi-label">Total campaigns</span>
+        <span class="kpi-value">{{ num(data.kpis.totalCampaigns.value) }}</span>
+        <span class="kpi-foot muted">All time</span>
+      </button>
+      <button class="kpi" (click)="go({ route: 'social', section: 'campaigns' })">
+        <span class="kpi-label">Active campaigns</span>
+        <span class="kpi-value">{{ num(data.kpis.activeCampaigns.value) }}</span>
+        <span class="kpi-foot muted">Currently running</span>
+      </button>
+      <button class="kpi" (click)="go({ route: 'social', section: 'analytics' })">
+        <span class="kpi-label">Published posts</span>
+        <span class="kpi-value">{{ num(data.kpis.publishedPosts.value) }}</span>
+        <span class="kpi-foot">
+          <span class="delta" *ngIf="data.kpis.publishedPosts.change" [ngClass]="changeClass(data.kpis.publishedPosts.change)">{{ changeText(data.kpis.publishedPosts.change) }}</span>
+          <span class="muted">{{ data.kpis.publishedPosts.change ? 'vs previous period' : 'Platform-confirmed' }}</span>
+        </span>
+      </button>
+      <button class="kpi" (click)="go({ route: 'social', section: 'analytics' })" [title]="coverage(data.kpis.reach)">
+        <span class="kpi-label">Reach</span>
+        <span class="kpi-value" [class.na]="data.kpis.reach.value === null">{{ data.kpis.reach.value === null ? 'Unavailable' : compact(data.kpis.reach.value) }}</span>
+        <span class="kpi-foot">
+          <span class="delta" *ngIf="data.kpis.reach.change" [ngClass]="changeClass(data.kpis.reach.change)">{{ changeText(data.kpis.reach.change) }}</span>
+          <span class="muted">Impressions: {{ data.kpis.impressions.value === null ? 'unavailable' : compact(data.kpis.impressions.value) }}</span>
+        </span>
+      </button>
+      <button class="kpi" (click)="go({ route: 'social', section: 'analytics' })" [title]="data.kpis.engagementRate.basedOnPosts ? 'Engagements ÷ reach over ' + data.kpis.engagementRate.basedOnPosts + ' posts reporting both' : 'Needs posts that report both engagement and reach'">
+        <span class="kpi-label">Engagement rate</span>
+        <span class="kpi-value" [class.na]="data.kpis.engagementRate.value === null">{{ data.kpis.engagementRate.value === null ? 'Unavailable' : data.kpis.engagementRate.value + '%' }}</span>
+        <span class="kpi-foot">
+          <span class="delta" *ngIf="data.kpis.engagementRate.change" [ngClass]="changeClass(data.kpis.engagementRate.change)">{{ changeText(data.kpis.engagementRate.change) }}</span>
+          <span class="muted">{{ data.kpis.engagementRate.basedOnPosts ? 'Across ' + data.kpis.engagementRate.basedOnPosts + ' post' + (data.kpis.engagementRate.basedOnPosts === 1 ? '' : 's') : 'Engagements ÷ reach' }}</span>
+        </span>
+      </button>
+      <button class="kpi" (click)="go({ route: 'social', section: 'analytics' })" [title]="coverage(data.kpis.clicks)">
+        <span class="kpi-label">Clicks</span>
+        <span class="kpi-value" [class.na]="data.kpis.clicks.value === null">{{ data.kpis.clicks.value === null ? 'Unavailable' : compact(data.kpis.clicks.value) }}</span>
+        <span class="kpi-foot">
+          <span class="delta" *ngIf="data.kpis.clicks.change" [ngClass]="changeClass(data.kpis.clicks.change)">{{ changeText(data.kpis.clicks.change) }}</span>
+          <span class="muted">{{ coverage(data.kpis.clicks) }}</span>
+        </span>
+      </button>
+      <button class="kpi" (click)="go({ route: 'leads' })">
+        <span class="kpi-label">Leads generated</span>
+        <span class="kpi-value">{{ num(data.kpis.leads.value) }}</span>
+        <span class="kpi-foot">
+          <span class="delta" *ngIf="data.kpis.leads.change" [ngClass]="changeClass(data.kpis.leads.change)">{{ changeText(data.kpis.leads.change) }}</span>
+          <span class="muted">{{ data.kpis.leads.fromSocial }} from social</span>
+        </span>
+      </button>
+    </div>
+
+    <!-- Performance over time + Roger insights -->
+    <div class="grid-main">
+      <section class="card" id="dash-performance">
+        <header class="card-head">
+          <div>
+            <h3>Campaign performance</h3>
+            <p class="muted small">{{ seriesMetric === 'leads' ? 'Leads created per day (all sources).' : 'Latest collected metrics of posts, by the day they were published.' }}</p>
+          </div>
+          <div class="chips" role="tablist" aria-label="Metric">
+            <button *ngFor="let m of seriesMetrics" role="tab" [attr.aria-selected]="seriesMetric === m.key" [class.on]="seriesMetric === m.key" (click)="seriesMetric = m.key; rebuild()">
+              <span class="dot" [style.background]="m.color"></span>{{ m.label }}
+            </button>
+          </div>
+        </header>
+        <div class="series-total">
+          <span class="big">{{ seriesTotal === null ? 'Unavailable' : num(seriesTotal) }}</span>
+          <span class="muted small">{{ activeSeries.label }} in period{{ seriesTotal === null && seriesMetric !== 'leads' ? ' · no posts reported this metric' : '' }}</span>
+        </div>
+        <app-line-chart [points]="linePoints" [color]="activeSeries.color" [seriesLabel]="activeSeries.label.toLowerCase()" [height]="250"
+          [emptyText]="seriesMetric === 'leads' ? 'No leads were created in this period.' : 'No published post reported ' + activeSeries.label.toLowerCase() + ' in this period.'"
+          [ariaLabel]="activeSeries.label + ' over time'"></app-line-chart>
+      </section>
+
+      <section class="card insights">
+        <header class="card-head">
+          <div>
+            <h3><span class="roger-dot" aria-hidden="true"></span>Roger AI insights</h3>
+            <p class="muted small">Computed from your stored data. Nothing is estimated.</p>
+          </div>
+        </header>
+        <div class="insight-list">
+          <button class="insight" *ngFor="let i of data.insights" [ngClass]="'tone-' + i.tone" (click)="openInsight(i.link)">
+            <span class="insight-bar"></span>
+            <span class="insight-body">
+              <strong>{{ i.title }}</strong>
+              <span>{{ i.text }}</span>
+              <span class="insight-link">View supporting data →</span>
+            </span>
+          </button>
+          <div class="empty-mini" *ngIf="!data.insights.length">Not enough activity yet for insights. Publish content to start building a performance history.</div>
+        </div>
+        <button class="btn-sm ghost" (click)="go({ route: 'social', section: 'strategist' })">Ask Roger for a deeper analysis</button>
+      </section>
+    </div>
+
+    <!-- Comparisons -->
+    <div class="grid-3">
+      <section class="card">
+        <header class="card-head">
+          <h3>Campaign comparison</h3>
+          <select class="mini-select" [(ngModel)]="compareMetric" (change)="rebuild()" aria-label="Comparison metric">
+            <option *ngFor="let m of compareMetrics" [value]="m.key">{{ m.label }}</option>
+          </select>
+        </header>
+        <app-bar-chart [items]="campaignBars" [clickable]="true" color="var(--chart-2)" (select)="onCampaignBar($event)"
+          emptyText="No campaign has published posts in this period."></app-bar-chart>
+      </section>
+
+      <section class="card" id="dash-platforms">
+        <header class="card-head">
+          <h3>Platform performance</h3>
+          <select class="mini-select" [(ngModel)]="platformMetric" (change)="rebuild()" aria-label="Platform metric">
+            <option *ngFor="let m of compareMetrics" [value]="m.key">{{ m.label }}</option>
+          </select>
+        </header>
+        <app-bar-chart [items]="platformBars" [clickable]="true" color="var(--chart-3)" (select)="onPlatformBar()"
+          emptyText="Connect Facebook, Instagram, LinkedIn or YouTube to compare platforms."></app-bar-chart>
+        <div class="platform-foot">
+          <span *ngFor="let p of data.platforms" class="pf" [class.off]="!p.connected" [title]="p.connected ? p.accounts.length + ' account(s)' : 'Not connected'">
+            <span class="pf-dot"></span>{{ platformLabels[p.key] }}<span class="muted" *ngIf="p.connected && p.followers !== null"> · {{ compact(p.followers) }} followers</span>
+          </span>
+        </div>
+      </section>
+
+      <section class="card">
+        <header class="card-head"><h3>Content status</h3></header>
+        <app-donut-chart [segments]="statusSegments" centerLabel="posts" (select)="openStatus($event)" emptyText="No content created yet."></app-donut-chart>
+        <div class="campaign-status muted small" *ngIf="(data.campaignStatus | keyvalue).length">
+          Campaigns:
+          <span *ngFor="let s of data.campaignStatus | keyvalue" class="cs"><span class="tone" [ngClass]="statusTone($any(s.key))"></span>{{ s.key }} {{ s.value }}</span>
+        </div>
+      </section>
+    </div>
+
+    <!-- Campaign table + activities -->
+    <div class="grid-main">
+      <section class="card table-card" id="dash-campaigns">
+        <header class="card-head">
+          <h3>Campaigns</h3>
+          <button class="btn-sm ghost" (click)="go({ route: 'social', section: 'campaigns' })">All campaigns →</button>
+        </header>
+        <div class="table-wrap" *ngIf="data.campaigns.length; else noCampaigns">
+          <table>
+            <thead>
+              <tr><th>Campaign</th><th>Platforms</th><th>Status</th><th>Next scheduled</th><th class="r">Posts</th><th class="r">Reach</th><th class="r">Engagements</th><th class="r">Clicks</th><th></th></tr>
+            </thead>
+            <tbody>
+              <tr *ngFor="let c of data.campaigns; trackBy: trackById" (click)="openCampaign(c.id)" tabindex="0" (keydown.enter)="openCampaign(c.id)">
+                <td><strong>{{ c.name }}</strong><div class="muted small" *ngIf="c.objective">{{ c.objective }}</div></td>
+                <td><span class="plat" *ngFor="let p of c.platforms">{{ platformLabel(p) }}</span><span class="muted" *ngIf="!c.platforms.length">—</span></td>
+                <td><span class="pill" [ngClass]="statusTone(c.status)">{{ c.status || 'Draft' }}</span>
+                  <span class="pill danger" *ngIf="c.generationStatus === 'failed'">Generation failed</span></td>
+                <td class="nowrap">{{ c.nextScheduled ? fmtDate(c.nextScheduled) : '—' }}</td>
+                <td class="r">{{ c.publishedInRange }}</td>
+                <td class="r" [class.na]="c.metrics.reach === null">{{ c.metrics.reach === null ? '—' : num(c.metrics.reach) }}</td>
+                <td class="r" [class.na]="c.metrics.engagements === null">{{ c.metrics.engagements === null ? '—' : num(c.metrics.engagements) }}</td>
+                <td class="r" [class.na]="c.metrics.clicks === null">{{ c.metrics.clicks === null ? '—' : num(c.metrics.clicks) }}</td>
+                <td class="r"><span class="open">Open →</span></td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="muted small table-note">"—" means the platforms did not report that metric for this campaign's posts in the selected period.</p>
+        </div>
+        <ng-template #noCampaigns>
+          <div class="empty-block">
+            <strong>No campaigns yet</strong>
+            <span class="muted">Create a campaign and Roger will draft platform-specific posts from your real product facts.</span>
+            <button class="btn-sm primary" (click)="go({ route: 'social', section: 'campaigns' })">Create a campaign</button>
+          </div>
+        </ng-template>
+      </section>
+
+      <section class="card activities">
+        <header class="card-head"><h3>Upcoming & needs attention</h3></header>
+        <div class="act-group" *ngIf="data.activities.failedJobs.length || data.activities.attention.length">
+          <div class="act-title danger">Needs attention</div>
+          <button class="act" *ngFor="let j of data.activities.failedJobs" (click)="go({ route: 'social', section: 'queue', status: 'failed' })">
+            <span class="act-icon danger">!</span>
+            <span class="act-body"><strong>{{ j.title || 'Untitled post' }}</strong><span class="muted small">{{ j.status === 'needs_review' ? 'Outcome unknown — check the platform' : 'Publishing failed' }} · {{ j.account_name }}</span></span>
+          </button>
+          <button class="act" *ngFor="let a of data.activities.attention" (click)="go({ route: 'social', section: a.type === 'account' ? 'accounts' : 'campaigns', campaignId: a.type === 'campaign' ? a.id : undefined })">
+            <span class="act-icon warn">!</span>
+            <span class="act-body"><strong>{{ a.title }}</strong><span class="muted small">{{ a.detail }}</span></span>
+          </button>
+        </div>
+        <div class="act-group">
+          <div class="act-title">Scheduled posts</div>
+          <button class="act" *ngFor="let s of data.activities.scheduled" (click)="go({ route: 'social', section: 'calendar' })">
+            <span class="act-date"><b>{{ fmtDate(s.scheduledAt, false) }}</b><small>{{ fmtDate(s.scheduledAt).split(', ').pop() }}</small></span>
+            <span class="act-body"><strong>{{ s.title || (s.caption | slice:0:60) }}</strong><span class="muted small">{{ platformLabel(s.platformKey) }} · {{ s.accountName || 'No account' }}</span></span>
+          </button>
+          <div class="empty-mini" *ngIf="!data.activities.scheduled.length">Nothing scheduled.</div>
+        </div>
+        <div class="act-group">
+          <div class="act-title">Pending approval</div>
+          <button class="act" *ngFor="let a of data.activities.pendingApprovals" (click)="go({ route: 'social', section: 'library', status: 'review' })">
+            <span class="act-icon warn">✓</span>
+            <span class="act-body"><strong>{{ a.title || (a.caption | slice:0:60) }}</strong><span class="muted small">{{ platformLabel(a.platformKey) }} · v{{ a.version }}</span></span>
+          </button>
+          <div class="empty-mini" *ngIf="!data.activities.pendingApprovals.length">No approvals waiting.</div>
+        </div>
+      </section>
+    </div>
+  </ng-container>
+</div>

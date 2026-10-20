@@ -23,7 +23,7 @@ async function resolveSelectedProduct(workspaceId, productId) {
 }
 
 /**
- * For free-text commands (Roger chat): the workspace product whose full name appears in the
+ * For free-text commands (Mark chat): the workspace product whose full name appears in the
  * message. Returns null when none or more than one product matches.
  */
 async function findProductNamedIn(workspaceId, text) {

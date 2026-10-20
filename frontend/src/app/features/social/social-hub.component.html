@@ -1,0 +1,839 @@
+<section class="hud-panel social-hub">
+  <div class="panel-header">
+    <div>
+      <h2>Social media marketing hub</h2>
+      <p class="subtitle">Connect official accounts, plan campaigns with Roger, approve content, publish on schedule and track real results.</p>
+    </div>
+    <div class="header-actions">
+      <span class="chip">TZ: {{ settings?.timezone || 'UTC' }}</span>
+      <span class="chip" [class.active]="!settings?.requireApproval">{{ settings?.requireApproval ? 'Approval required' : 'Approval optional' }}</span>
+    </div>
+  </div>
+
+  <nav class="sub-nav" aria-label="Social Media Marketing sections">
+    <button *ngFor="let s of sections" class="sub-nav-btn" [class.active]="section === s.key" (click)="go(s.key)">
+      <span aria-hidden="true">{{ s.icon }}</span> {{ s.label }}
+    </button>
+  </nav>
+
+  <div *ngIf="oauthBanner" class="banner" [class.ok]="oauthBanner.ok" [class.bad]="!oauthBanner.ok">
+    {{ oauthBanner.text }} <button class="link-btn" (click)="oauthBanner = null">Dismiss</button>
+  </div>
+  <div *ngIf="error" class="banner bad">{{ error }} <button class="link-btn" (click)="error = null">Dismiss</button></div>
+
+  <!-- ===================== OVERVIEW ===================== -->
+  <div *ngIf="section === 'overview'" class="section">
+    <div *ngIf="loading && !overview" class="muted">Loading…</div>
+    <ng-container *ngIf="overview">
+      <div class="stat-grid">
+        <div class="stat-card">
+          <div class="stat-label">Connected accounts</div>
+          <div class="stat-value">{{ overview.connectionHealth.connected }}</div>
+          <div class="stat-sub" [class.warn-text]="overview.connectionHealth.needsAttention">{{ overview.connectionHealth.needsAttention }} need attention</div>
+        </div>
+        <div class="stat-card clickable" (click)="go('campaigns')">
+          <div class="stat-label">Active campaigns</div>
+          <div class="stat-value">{{ overview.activeCampaigns.length }}</div>
+        </div>
+        <div class="stat-card clickable" (click)="libraryFilters.status = 'review'; go('library')">
+          <div class="stat-label">Awaiting approval</div>
+          <div class="stat-value">{{ overview.contentCounts['review'] || 0 }}</div>
+        </div>
+        <div class="stat-card clickable" (click)="go('calendar')">
+          <div class="stat-label">Scheduled</div>
+          <div class="stat-value">{{ overview.contentCounts['scheduled'] || 0 }}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Published (confirmed)</div>
+          <div class="stat-value">{{ overview.contentCounts['published'] || 0 }}</div>
+        </div>
+        <div class="stat-card clickable" [class.alert]="overview.failedPublications.length" (click)="queueStatus = 'failed,needs_review'; go('queue')">
+          <div class="stat-label">Failed publications</div>
+          <div class="stat-value">{{ overview.failedPublications.length }}</div>
+        </div>
+      </div>
+
+      <div *ngIf="overview.accounts.length === 0" class="callout">
+        <strong>No social accounts connected yet.</strong> Content can be drafted and approved now; publishing and analytics need a connected account.
+        <button class="btn btn-primary btn-sm" (click)="go('accounts')">Connect accounts</button>
+      </div>
+
+      <div class="two-col">
+        <div class="card">
+          <h3>CONNECTION HEALTH</h3>
+          <div *ngIf="overview.accounts.length === 0" class="muted">None connected.</div>
+          <div *ngFor="let a of overview.accounts" class="row-line">
+            <span>{{ platformIcon(a.platformKey) }} {{ a.displayName }}</span>
+            <span class="status-pill" [ngClass]="'acct-' + a.status">{{ a.status }}</span>
+          </div>
+          <div class="muted small" *ngFor="let p of overview.providers">
+            {{ p.label }}: {{ p.configured ? 'app configured' : 'setup required' }}
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>REAL PERFORMANCE ({{ fmt(overview.metrics.range.from, false) }} – {{ fmt(overview.metrics.range.to, false) }})</h3>
+          <div class="muted small">Only metrics returned by the platforms are shown. "Unavailable" is not zero.</div>
+          <div class="metric-mini-grid">
+            <div *ngFor="let k of ['reach','impressions','likes','comments','shares','clicks']" class="metric-mini" [title]="metricCoverage(overview.metrics.totals[k])">
+              <span class="metric-name">{{ metricLabels[k] }}</span>
+              <span class="metric-num" [class.na]="overview.metrics.totals[k].value === null">{{ metricValue(overview.metrics.totals[k]) }}</span>
+            </div>
+          </div>
+          <div class="row-line" *ngFor="let f of overview.metrics.followers">
+            <span>Followers · {{ f.accountName }}</span>
+            <span [class.na]="f.latest === null" [title]="f.reason || ''">{{ f.latest === null ? 'Unavailable' : (f.latest | number) }}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="two-col">
+        <div class="card">
+          <h3>DRAFTS AWAITING APPROVAL</h3>
+          <div *ngIf="overview.awaitingApproval.length === 0" class="muted">Nothing waiting.</div>
+          <div *ngFor="let c of overview.awaitingApproval" class="row-line clickable" (click)="section = 'library'; openEditor(c)">
+            <span>{{ platformIcon(c.platformKey) }} {{ c.title || (c.caption | slice:0:60) }}</span>
+            <span class="status-pill st-review">review</span>
+          </div>
+        </div>
+        <div class="card">
+          <h3>UPCOMING SCHEDULED POSTS</h3>
+          <div *ngIf="overview.scheduled.length === 0" class="muted">Nothing scheduled.</div>
+          <div *ngFor="let c of overview.scheduled" class="row-line clickable" (click)="section = 'library'; openEditor(c)">
+            <span>{{ platformIcon(c.platformKey) }} {{ c.title || (c.caption | slice:0:50) }} · {{ c.accountName }}</span>
+            <span class="muted small">{{ fmt(c.scheduledAt) }}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="two-col">
+        <div class="card">
+          <h3>RECENTLY PUBLISHED</h3>
+          <div *ngIf="overview.recentlyPublished.length === 0" class="muted">No provider-confirmed publications yet.</div>
+          <div *ngFor="let c of overview.recentlyPublished" class="row-line">
+            <span>{{ platformIcon(c.platformKey) }} {{ c.title || (c.caption | slice:0:50) }}</span>
+            <a *ngIf="c.externalUrl" [href]="c.externalUrl" target="_blank" rel="noopener" class="small">View post ↗</a>
+          </div>
+        </div>
+        <div class="card" [class.alert-card]="overview.failedPublications.length">
+          <h3>FAILED PUBLICATIONS</h3>
+          <div *ngIf="overview.failedPublications.length === 0" class="muted">No failures.</div>
+          <div *ngFor="let j of overview.failedPublications" class="row-line clickable" (click)="queueStatus = 'failed,needs_review'; go('queue')">
+            <span>{{ j.title || 'Untitled' }} · {{ j.account_name }}</span>
+            <span class="status-pill" [ngClass]="'job-' + j.status">{{ j.status === 'needs_review' ? 'check platform' : 'failed' }}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="row-line">
+          <h3>ROGER'S RECOMMENDATIONS</h3>
+          <button class="btn btn-primary btn-sm" (click)="getRecommendations()">🧠 Generate from my data</button>
+        </div>
+        <div class="muted small">Recommendations are generated on request (to control AI cost) and use only your stored metrics.</div>
+      </div>
+    </ng-container>
+  </div>
+
+  <!-- ===================== CONNECTED ACCOUNTS ===================== -->
+  <div *ngIf="section === 'accounts'" class="section">
+    <h3>PROVIDERS</h3>
+    <div class="provider-grid">
+      <div *ngFor="let p of providers" class="card provider-card" [class.setup-open]="setupProvider === p.providerKey">
+        <div class="row-line">
+          <strong>{{ p.label }}</strong>
+          <span class="status-pill" [ngClass]="p.configured ? 'acct-connected' : 'acct-setup'">{{ p.configured ? 'Ready to connect' : 'Setup required' }}</span>
+        </div>
+        <div class="small" *ngIf="p.appSource === 'workspace'">Using your app: <code>{{ p.workspaceApp.clientId }}</code>
+          <span class="ok-text" *ngIf="p.workspaceApp.verifiedAt"> · verified</span>
+          <span class="muted" *ngIf="!p.workspaceApp.verifiedAt"> · checked on first Connect</span>
+        </div>
+        <div class="small muted" *ngIf="p.appSource === 'platform'">Using the TradeSage platform app. You can set up your own app instead.</div>
+        <div class="small muted" *ngIf="!p.appSource">Add your {{ p.label.split(' ')[0] }} developer app credentials to enable connecting.</div>
+        <div class="small warn-text" *ngIf="!p.encryptionConfigured">The server's credential encryption key is not configured.</div>
+
+        <div class="button-row">
+          <button class="btn btn-primary btn-sm" *ngIf="p.configured" [disabled]="busy" (click)="connect(p)">Connect {{ p.label.split(' ')[0] }}</button>
+          <button class="btn btn-sm" [ngClass]="p.configured ? 'btn-secondary' : 'btn-primary'" (click)="setupProvider === p.providerKey ? setupProvider = null : openSetup(p)">
+            {{ setupProvider === p.providerKey ? 'Close setup' : (p.appSource === 'workspace' ? 'Edit app' : '⚙ Set up') }}
+          </button>
+          <button class="btn btn-danger btn-sm" *ngIf="p.appSource === 'workspace'" (click)="removeProviderApp(p)">Remove app</button>
+        </div>
+
+        <div *ngIf="setupProvider === p.providerKey" class="card inset setup-panel">
+          <strong class="small">Set up {{ p.label }} for this workspace</strong>
+          <ol class="small setup-steps">
+            <li *ngFor="let step of setupGuides[p.providerKey]?.steps">{{ step }}</li>
+          </ol>
+          <a class="small" [href]="setupGuides[p.providerKey]?.consoleUrl" target="_blank" rel="noopener">Open {{ setupGuides[p.providerKey]?.console }} ↗</a>
+          <div class="small">Redirect URL</div>
+          <div class="quick-row"><code class="grow">{{ p.redirectUri }}</code><button class="btn btn-secondary btn-sm" (click)="copy(p.redirectUri)">Copy</button></div>
+          <details class="small">
+            <summary>Permissions / scopes to add ({{ p.scopes.length }})</summary>
+            <code *ngFor="let s of p.scopes" class="scope">{{ s }}</code>
+            <button class="btn btn-secondary btn-sm" (click)="copy(p.scopes.join(', '))">Copy all</button>
+          </details>
+          <label>{{ p.labels.id }}<input class="hud-input" [(ngModel)]="setupForm.clientId" autocomplete="off" /></label>
+          <label>{{ p.labels.secret }}
+            <input class="hud-input" type="password" [(ngModel)]="setupForm.clientSecret" autocomplete="new-password" [placeholder]="p.workspaceApp ? 'Leave blank to keep the saved secret' : ''" />
+          </label>
+          <div class="small muted">The secret is encrypted on the server and is never shown again. Only workspace owners and admins can change it.</div>
+          <div class="button-row">
+            <button class="btn btn-primary btn-sm" [disabled]="busy" (click)="saveProviderApp(p)">{{ busy ? 'Checking…' : 'Save & verify' }}</button>
+          </div>
+        </div>
+      </div>
+      <div *ngFor="let m of manualPlatforms()" class="card provider-card">
+        <div class="row-line"><strong>{{ m.label }}</strong><span class="status-pill acct-setup">Manual only</span></div>
+        <div class="small muted">{{ m.note }}</div>
+      </div>
+    </div>
+    <div class="muted small">TradeSage never asks for social media passwords. Access tokens stay encrypted on the server and are never sent to this browser.</div>
+
+    <h3>CONNECTED ACCOUNTS</h3>
+    <div *ngIf="accounts.length === 0" class="empty-box">No accounts connected.</div>
+    <div *ngFor="let a of accounts" class="card account-card">
+      <div class="row-line">
+        <div class="account-id">
+          <img *ngIf="a.avatarUrl" [src]="a.avatarUrl" alt="" class="avatar" referrerpolicy="no-referrer" />
+          <div>
+            <strong>{{ platformIcon(a.platformKey) }} {{ a.displayName }}</strong>
+            <div class="small muted">{{ a.accountTypeLabel }}<span *ngIf="a.username"> · &#64;{{ a.username }}</span></div>
+          </div>
+        </div>
+        <span class="status-pill" [ngClass]="'acct-' + a.status">{{ a.status }}</span>
+      </div>
+      <div class="small" *ngIf="a.statusDetail" [class.warn-text]="a.status !== 'connected'">{{ a.statusDetail }}</div>
+      <div class="small warn-text" *ngIf="a.status !== 'connected'">To reconnect, use the provider's Connect button above and grant all requested permissions.</div>
+      <div class="small muted">
+        Last successful operation: {{ fmt(a.lastSuccessAt) }} · Last checked: {{ fmt(a.lastCheckedAt) }}
+        <span *ngIf="a.tokenExpiresAt"> · Token expires: {{ fmt(a.tokenExpiresAt) }}</span>
+      </div>
+      <div class="small warn-text" *ngIf="a.lastError">Last error: {{ a.lastError }}</div>
+      <details>
+        <summary class="small">What this account can do</summary>
+        <table class="data-table compact">
+          <tr *ngFor="let f of featureList()">
+            <td>{{ registry.features[f] }}</td>
+            <td><span class="cap" [ngClass]="capabilityClass(a.capabilities[f]?.status)">{{ capabilityText(a.capabilities[f]?.status) }}</span></td>
+            <td class="small muted">{{ a.capabilities[f]?.missingScopes?.length ? 'Needs: ' + a.capabilities[f].missingScopes.join(', ') : (a.capabilities[f]?.note || '') }}</td>
+          </tr>
+        </table>
+      </details>
+      <div class="button-row">
+        <button class="btn btn-secondary btn-sm" (click)="checkAccount(a)">Check health</button>
+        <button class="btn btn-danger btn-sm" (click)="disconnect(a)">Disconnect</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== CAMPAIGNS ===================== -->
+  <div *ngIf="section === 'campaigns'" class="section">
+    <div class="row-line">
+      <h3>CAMPAIGNS ({{ campaigns.length }})</h3>
+      <button class="btn btn-primary btn-sm" (click)="openWizard()">＋ New campaign with Roger</button>
+    </div>
+
+    <div *ngIf="showCampaignWizard" class="card wizard">
+      <h3>CAMPAIGN BRIEF</h3>
+      <div class="form-grid">
+        <label>Campaign name *<input class="hud-input" [(ngModel)]="campaignForm.name" placeholder="e.g. VanSale Pro – Q4 distributor launch" /></label>
+        <label>Objective<select class="hud-input" [(ngModel)]="campaignForm.objective">
+          <option value="">Choose…</option><option>Awareness</option><option>Lead generation</option><option>Demo bookings</option><option>Product launch</option><option>Engagement</option><option>Customer retention</option>
+        </select></label>
+        <label>Product / business
+          <select class="hud-input" [(ngModel)]="campaignForm.productId">
+            <option [ngValue]="null">— Business profile only —</option>
+            <option *ngFor="let p of products" [ngValue]="p.id">{{ p.name }}</option>
+          </select>
+        </label>
+        <label>Target audience<input class="hud-input" [(ngModel)]="campaignForm.targetAudience" placeholder="e.g. FMCG distributors with 5–50 van routes" /></label>
+        <label class="span-2">Offer<input class="hud-input" [(ngModel)]="campaignForm.offer" placeholder="Only real offers — e.g. 14-day free pilot" /></label>
+        <label class="span-2">Key message<textarea class="hud-textarea" rows="2" [(ngModel)]="campaignForm.keyMessage"></textarea></label>
+        <label>Start date<input type="date" class="hud-input" [(ngModel)]="campaignForm.startDate" /></label>
+        <label>End date<input type="date" class="hud-input" [(ngModel)]="campaignForm.endDate" /></label>
+        <label>Tone<select class="hud-input" [(ngModel)]="campaignForm.tone"><option>Professional</option><option>Friendly</option><option>Bold &amp; direct</option><option>Educational</option><option>Founder storytelling</option></select></label>
+        <label>Language<select class="hud-input" [(ngModel)]="campaignForm.language"><option value="en">English</option><option value="ar">Arabic</option><option value="hi">Hindi</option><option value="ml">Malayalam</option><option value="ta">Tamil</option><option value="es">Spanish</option><option value="fr">French</option></select></label>
+        <label>Number of posts<input type="number" min="1" max="20" class="hud-input" [(ngModel)]="campaignForm.desiredPostCount" /></label>
+        <label>Call to action<input class="hud-input" [(ngModel)]="campaignForm.callToAction" placeholder="e.g. Book a 15-minute demo" /></label>
+        <label class="span-2">Landing page<input class="hud-input" [(ngModel)]="campaignForm.landingUrl" placeholder="https://…" /></label>
+        <label>Image requirements<input class="hud-input" [(ngModel)]="campaignForm.imageRequirements" placeholder="e.g. real product screenshots" /></label>
+        <label>Video requirements<input class="hud-input" [(ngModel)]="campaignForm.videoRequirements" placeholder="e.g. 30s vertical demo" /></label>
+      </div>
+
+      <div class="field-block">
+        <div class="small">Target platforms *</div>
+        <div class="button-row">
+          <label *ngFor="let p of platforms" class="check-pill" [class.on]="campaignForm.platforms[p.key]">
+            <input type="checkbox" [(ngModel)]="campaignForm.platforms[p.key]" /> {{ p.icon }} {{ p.label }}
+          </label>
+        </div>
+      </div>
+      <div class="field-block" *ngIf="accounts.length">
+        <div class="small">Publish to accounts (optional)</div>
+        <div class="button-row">
+          <ng-container *ngFor="let a of accounts">
+            <label *ngIf="campaignForm.platforms[a.platformKey]" class="check-pill" [class.on]="campaignForm.accountIds[a.id]">
+              <input type="checkbox" [(ngModel)]="campaignForm.accountIds[a.id]" /> {{ platformIcon(a.platformKey) }} {{ a.displayName }}
+            </label>
+          </ng-container>
+        </div>
+      </div>
+
+      <details class="field-block">
+        <summary class="small">Import real product facts from a website (reviewed before saving)</summary>
+        <div class="quick-row">
+          <input class="hud-input" [(ngModel)]="factsUrl" placeholder="https://your-product-site.com" />
+          <button class="btn btn-secondary btn-sm" (click)="extractFacts()" [disabled]="isExtracting">{{ isExtracting ? 'Reading…' : 'Extract facts' }}</button>
+        </div>
+        <div *ngIf="extractedFacts" class="card inset">
+          <label>Name<input class="hud-input" [(ngModel)]="extractedFacts.name" /></label>
+          <label>Tagline<input class="hud-input" [(ngModel)]="extractedFacts.tagline" /></label>
+          <label>Description<textarea class="hud-textarea" rows="2" [(ngModel)]="extractedFacts.description"></textarea></label>
+          <div class="small">Features found on the page:</div>
+          <ul class="small"><li *ngFor="let f of extractedFacts.features">{{ f }}</li></ul>
+          <div class="small muted">Source: {{ extractedFacts.provider }} · pricing is never extracted.</div>
+          <button class="btn btn-primary btn-sm" (click)="saveExtractedProduct()">Facts are correct — save as product</button>
+        </div>
+      </details>
+
+      <div class="callout small">Roger only uses the facts above. Prices, statistics and claims that are not in your facts are flagged for verification, and missing information is listed instead of invented.</div>
+      <div class="button-row">
+        <button class="btn btn-primary" (click)="saveCampaign(true)" [disabled]="busy">Save &amp; generate drafts</button>
+        <button class="btn btn-secondary" (click)="saveCampaign(false)" [disabled]="busy">Save brief only</button>
+        <button class="btn btn-secondary" (click)="showCampaignWizard = false">Close</button>
+      </div>
+    </div>
+
+    <div *ngIf="selectedCampaign" class="card">
+      <div class="row-line">
+        <h3>{{ selectedCampaign.name | uppercase }}</h3>
+        <span class="status-pill" [ngClass]="'gen-' + selectedCampaign.generationStatus">{{ selectedCampaign.generationStatus.replace('_', ' ') }}</span>
+      </div>
+      <div class="small muted">{{ selectedCampaign.objective }} · {{ selectedCampaign.startDate || '—' }} → {{ selectedCampaign.endDate || '—' }} · {{ selectedCampaign.platforms.join(', ') }}</div>
+      <div *ngIf="selectedCampaign.generationError" class="banner bad">{{ selectedCampaign.generationError }}</div>
+      <div *ngIf="['queued','running'].includes(selectedCampaign.generationStatus)" class="muted">Roger is writing drafts… (the background worker must be running)</div>
+      <div class="button-row" *ngIf="!['queued','running'].includes(selectedCampaign.generationStatus)">
+        <button class="btn btn-primary btn-sm" (click)="generate(selectedCampaign)">{{ selectedCampaign.generationStatus === 'completed' ? 'Generate more drafts' : 'Generate drafts' }}</button>
+      </div>
+      <div *ngIf="selectedCampaign.brief" class="card inset">
+        <strong>Brief</strong>
+        <p>{{ selectedCampaign.brief.summary }}</p>
+        <div class="small" *ngIf="selectedCampaign.brief.key_messages?.length">Key messages: {{ selectedCampaign.brief.key_messages.join(' · ') }}</div>
+        <div class="small" *ngIf="selectedCampaign.brief.success_measures?.length">Measure success by: {{ selectedCampaign.brief.success_measures.join(' · ') }}</div>
+        <div class="small warn-text" *ngIf="selectedCampaign.brief.missing_information?.length">Missing information: {{ selectedCampaign.brief.missing_information.join(' · ') }}</div>
+        <div class="small muted" *ngIf="selectedCampaign.assumptions?.length">Assumptions: {{ selectedCampaign.assumptions.join(' · ') }}</div>
+        <div class="small muted">Model: {{ selectedCampaign.brief.provider }}</div>
+      </div>
+      <div class="content-grid">
+        <div *ngFor="let c of selectedCampaignContent" class="content-card clickable" (click)="openEditor(c)">
+          <div class="row-line">
+            <span>{{ platformIcon(c.platformKey) }} {{ platformLabel(c.platformKey) }} <span *ngIf="c.variantLabel" class="variant">Variant {{ c.variantLabel }}</span></span>
+            <span class="status-pill" [ngClass]="statusClass(c.status)">{{ c.status }}</span>
+          </div>
+          <strong>{{ c.title }}</strong>
+          <p class="caption-clip">{{ c.caption }}</p>
+          <div class="small warn-text" *ngFor="let a of c.assumptions">⚠️ {{ a }}</div>
+          <div class="small muted" *ngIf="c.suggestedPublishAt">Suggested: {{ fmt(c.suggestedPublishAt) }}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="table-container" *ngIf="campaigns.length">
+      <table class="data-table">
+        <thead><tr><th>Name</th><th>Objective</th><th>Dates</th><th>Platforms</th><th>Drafts / Approved / Published</th><th>Generation</th></tr></thead>
+        <tbody>
+          <tr *ngFor="let c of campaigns" class="clickable" (click)="openCampaign(c)">
+            <td>{{ c.name }}</td>
+            <td>{{ c.objective || '—' }}</td>
+            <td class="small">{{ c.startDate || '—' }} → {{ c.endDate || '—' }}</td>
+            <td>{{ c.platforms.length ? c.platforms.join(', ') : '—' }}</td>
+            <td>{{ c.contentCounts?.draft || 0 }} / {{ c.contentCounts?.approved || 0 }} / {{ c.contentCounts?.published || 0 }}</td>
+            <td><span class="status-pill" [ngClass]="'gen-' + c.generationStatus">{{ c.generationStatus.replace('_', ' ') }}</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div *ngIf="!campaigns.length && !showCampaignWizard" class="empty-box">No campaigns yet. Start one and Roger will draft platform-specific content from your real product facts.</div>
+  </div>
+
+  <!-- ===================== CALENDAR ===================== -->
+  <div *ngIf="section === 'calendar'" class="section">
+    <div class="toolbar">
+      <div class="button-row">
+        <button class="btn btn-secondary btn-sm" (click)="shiftCalendar(-1)">‹</button>
+        <strong class="cal-title">{{ calendarTitle() }}</strong>
+        <button class="btn btn-secondary btn-sm" (click)="shiftCalendar(1)">›</button>
+        <button class="btn btn-secondary btn-sm" (click)="goToday()">Today</button>
+      </div>
+      <div class="button-row">
+        <button *ngFor="let v of ['month','week','list']" class="chip" [class.active]="calendarView === v" (click)="calendarView = $any(v); loadCalendar()">{{ v }}</button>
+      </div>
+    </div>
+    <div class="filter-row">
+      <select class="hud-input" [(ngModel)]="calendarFilters.platformKey" (change)="loadCalendar()"><option value="">All platforms</option><option *ngFor="let p of platforms" [value]="p.key">{{ p.label }}</option></select>
+      <select class="hud-input" [(ngModel)]="calendarFilters.accountId" (change)="loadCalendar()"><option value="">All accounts</option><option *ngFor="let a of accounts" [value]="a.id">{{ a.displayName }}</option></select>
+      <select class="hud-input" [(ngModel)]="calendarFilters.campaignId" (change)="loadCalendar()"><option value="">All campaigns</option><option *ngFor="let c of campaigns" [value]="c.id">{{ c.name }}</option></select>
+      <select class="hud-input" [(ngModel)]="calendarFilters.status" (change)="loadCalendar()"><option value="">All statuses</option><option *ngFor="let s of ['scheduled','published','failed','approved','review','draft']" [value]="s">{{ s }}</option></select>
+    </div>
+    <div class="legend small">
+      <span class="status-pill st-scheduled">scheduled</span> <span class="status-pill st-published">published</span>
+      <span class="status-pill st-failed">failed</span> <span class="status-pill suggestion">suggested time (not scheduled)</span>
+      <span class="muted">Times shown in {{ settings.timezone }}.</span>
+    </div>
+
+    <div *ngIf="calendarView !== 'list'" class="calendar" [class.week]="calendarView === 'week'">
+      <div *ngFor="let d of ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']" class="cal-head">{{ d }}</div>
+      <div *ngFor="let day of calendarDays()" class="cal-cell" [class.other]="isOtherMonth(day)" [class.today]="isToday(day)">
+        <div class="cal-date">{{ day.getDate() }}</div>
+        <div *ngFor="let i of itemsOn(day)" class="cal-item" [ngClass]="i.isSuggestion ? 'suggestion' : statusClass(i.status)" (click)="section = 'library'; openEditor(i)" [title]="(i.title || i.caption) + ' · ' + i.status">
+          {{ platformIcon(i.platformKey) }} {{ fmt(i.calendarAt).split(', ').pop() }} {{ i.title || (i.caption | slice:0:24) }}
+        </div>
+      </div>
+    </div>
+
+    <div *ngIf="calendarView === 'list'" class="table-container">
+      <table class="data-table">
+        <thead><tr><th>When ({{ settings.timezone }})</th><th>Platform</th><th>Account</th><th>Content</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr *ngFor="let i of calendarItems" class="clickable" (click)="section = 'library'; openEditor(i)">
+            <td>{{ fmt(i.calendarAt) }}<span *ngIf="i.isSuggestion" class="small muted"> (suggested)</span></td>
+            <td>{{ platformIcon(i.platformKey) }} {{ platformLabel(i.platformKey) }}</td>
+            <td>{{ i.accountName || '—' }}</td>
+            <td>{{ i.title || (i.caption | slice:0:60) }}</td>
+            <td><span class="status-pill" [ngClass]="statusClass(i.status)">{{ i.status }}</span></td>
+          </tr>
+          <tr *ngIf="!calendarItems.length"><td colspan="5" class="empty-state">Nothing in this period.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ===================== CONTENT LIBRARY ===================== -->
+  <div *ngIf="section === 'library'" class="section">
+    <div class="toolbar">
+      <div class="filter-row">
+        <select class="hud-input" [(ngModel)]="libraryFilters.status" (change)="loadLibrary()"><option value="all">All statuses</option><option *ngFor="let s of contentStatuses" [value]="s">{{ s }}</option></select>
+        <select class="hud-input" [(ngModel)]="libraryFilters.platformKey" (change)="loadLibrary()"><option value="">All platforms</option><option *ngFor="let p of platforms" [value]="p.key">{{ p.label }}</option></select>
+        <select class="hud-input" [(ngModel)]="libraryFilters.campaignId" (change)="loadLibrary()"><option value="">All campaigns</option><option *ngFor="let c of campaigns" [value]="c.id">{{ c.name }}</option></select>
+        <select class="hud-input" [(ngModel)]="libraryFilters.accountId" (change)="loadLibrary()"><option value="">All accounts</option><option *ngFor="let a of accounts" [value]="a.id">{{ a.displayName }}</option></select>
+        <input class="hud-input" [(ngModel)]="libraryFilters.q" (keyup.enter)="loadLibrary()" placeholder="Search…" />
+      </div>
+      <div class="button-row">
+        <button class="chip" [class.active]="libraryView === 'grid'" (click)="libraryView = 'grid'">grid</button>
+        <button class="chip" [class.active]="libraryView === 'list'" (click)="libraryView = 'list'">list</button>
+        <button class="btn btn-primary btn-sm" (click)="newContent()">＋ New post</button>
+      </div>
+    </div>
+
+    <div *ngIf="libraryView === 'grid'" class="content-grid">
+      <div *ngFor="let c of content" class="content-card clickable" (click)="openEditor(c)">
+        <div class="row-line">
+          <span>{{ platformIcon(c.platformKey) }} {{ platformLabel(c.platformKey) }}</span>
+          <span class="status-pill" [ngClass]="statusClass(c.status)">{{ c.status }}</span>
+        </div>
+        <strong>{{ c.title || 'Untitled' }}</strong>
+        <p class="caption-clip">{{ c.caption }}</p>
+        <div class="small muted">{{ c.hashtags.join(' ') }}</div>
+        <div class="small warn-text" *ngIf="c.lastError">{{ c.lastError }}</div>
+        <div class="small muted">v{{ c.version }} · updated {{ fmt(c.updatedAt || c.createdAt) }}</div>
+      </div>
+      <div *ngIf="!content.length" class="empty-box span-all">No content matches these filters.</div>
+    </div>
+
+    <div *ngIf="libraryView === 'list'" class="table-container">
+      <table class="data-table">
+        <thead><tr><th>Platform</th><th>Title / caption</th><th>Status</th><th>Scheduled / published</th><th>Version</th></tr></thead>
+        <tbody>
+          <tr *ngFor="let c of content" class="clickable" (click)="openEditor(c)">
+            <td>{{ platformIcon(c.platformKey) }} {{ platformLabel(c.platformKey) }}</td>
+            <td>{{ c.title || (c.caption | slice:0:70) }}</td>
+            <td><span class="status-pill" [ngClass]="statusClass(c.status)">{{ c.status }}</span></td>
+            <td class="small">{{ c.publishedAt ? fmt(c.publishedAt) : fmt(c.scheduledAt) }}</td>
+            <td>v{{ c.version }}</td>
+          </tr>
+          <tr *ngIf="!content.length"><td colspan="5" class="empty-state">No content.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ===================== PUBLISHING QUEUE ===================== -->
+  <div *ngIf="section === 'queue'" class="section">
+    <div class="toolbar">
+      <div class="button-row">
+        <button *ngFor="let s of [['all','All'],['queued','Queued'],['running','Publishing'],['failed,needs_review','Needs attention'],['succeeded','Published'],['cancelled','Cancelled']]" class="chip" [class.active]="queueStatus === s[0]" (click)="queueStatus = s[0]; loadQueue()">{{ s[1] }}</button>
+      </div>
+      <button class="btn btn-secondary btn-sm" (click)="loadQueue()">Refresh</button>
+    </div>
+    <div class="muted small">The worker publishes due jobs. "Check platform" means the request may have reached the provider; confirm on the platform before retrying so nothing is posted twice.</div>
+    <div class="table-container">
+      <table class="data-table">
+        <thead><tr><th>Content</th><th>Account</th><th>Scheduled ({{ settings.timezone }})</th><th>Status</th><th>Attempts</th><th>Result</th><th></th></tr></thead>
+        <tbody>
+          <tr *ngFor="let j of jobs">
+            <td class="clickable" (click)="openContentById(j.contentItemId)">{{ platformIcon(j.platformKey) }} {{ j.contentTitle || 'Untitled' }}</td>
+            <td>{{ j.accountName }}</td>
+            <td class="small">{{ fmt(j.scheduledFor) }}<div class="muted" *ngIf="j.scheduleTimezone !== settings.timezone">({{ j.scheduleTimezone }})</div></td>
+            <td><span class="status-pill" [ngClass]="'job-' + j.status">{{ j.status === 'needs_review' ? 'check platform' : j.status }}</span></td>
+            <td>{{ j.attemptCount }} / {{ j.maxAttempts }}</td>
+            <td class="small">
+              <a *ngIf="j.externalUrl" [href]="j.externalUrl" target="_blank" rel="noopener">View post ↗</a>
+              <span *ngIf="j.lastError" class="warn-text">{{ j.lastErrorCode }}: {{ j.lastError }}</span>
+              <span *ngIf="j.status === 'queued' && j.attemptCount > 0" class="muted"> next try {{ fmt(j.nextAttemptAt) }}</span>
+            </td>
+            <td class="nowrap">
+              <button *ngIf="['failed','needs_review'].includes(j.status)" class="btn btn-secondary btn-sm" (click)="retryJob(j)">Retry</button>
+              <button *ngIf="['queued','failed','needs_review'].includes(j.status)" class="btn btn-danger btn-sm" (click)="cancelJob(j)">Cancel</button>
+            </td>
+          </tr>
+          <tr *ngIf="!jobs.length"><td colspan="7" class="empty-state">Queue is empty.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ===================== ANALYTICS ===================== -->
+  <div *ngIf="section === 'analytics'" class="section">
+    <div class="toolbar">
+      <div class="filter-row">
+        <label class="inline">From <input type="date" class="hud-input" [(ngModel)]="analyticsFilters.from" /></label>
+        <label class="inline">To <input type="date" class="hud-input" [(ngModel)]="analyticsFilters.to" /></label>
+        <select class="hud-input" [(ngModel)]="analyticsFilters.platformKey"><option value="">All platforms</option><option *ngFor="let p of platforms" [value]="p.key">{{ p.label }}</option></select>
+        <select class="hud-input" [(ngModel)]="analyticsFilters.accountId"><option value="">All accounts</option><option *ngFor="let a of accounts" [value]="a.id">{{ a.displayName }}</option></select>
+        <select class="hud-input" [(ngModel)]="analyticsFilters.campaignId"><option value="">All campaigns</option><option *ngFor="let c of campaigns" [value]="c.id">{{ c.name }}</option></select>
+        <button class="btn btn-primary btn-sm" (click)="loadAnalytics()">Apply</button>
+      </div>
+      <button class="btn btn-secondary btn-sm" (click)="syncAnalytics()">Sync from platforms</button>
+    </div>
+    <div class="muted small">All figures come from platform APIs with their collection time. <strong>Unavailable</strong> = the platform did not report it; <strong>Not collected</strong> = no sync has run for that post yet. Neither is shown as zero.</div>
+
+    <ng-container *ngIf="analytics">
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-label">Published posts (confirmed)</div><div class="stat-value">{{ analytics.publishedCount }}</div></div>
+        <div *ngFor="let k of metricKeys" class="stat-card" [title]="metricCoverage(analytics.totals[k])">
+          <div class="stat-label">{{ metricLabels[k] }}</div>
+          <div class="stat-value" [class.na]="analytics.totals[k].value === null">{{ metricValue(analytics.totals[k]) }}</div>
+          <div class="stat-sub">{{ metricCoverage(analytics.totals[k]) }}</div>
+        </div>
+      </div>
+
+      <div class="two-col">
+        <div class="card">
+          <h3>BY PLATFORM</h3>
+          <table class="data-table compact">
+            <thead><tr><th>Platform</th><th>Posts</th><th>Reach</th><th>Likes</th><th>Comments</th><th>Shares</th><th>Clicks</th></tr></thead>
+            <tr *ngFor="let e of objectEntries(analytics.byPlatform)">
+              <td>{{ platformIcon(e[0]) }} {{ platformLabel(e[0]) }}</td><td>{{ e[1].posts }}</td>
+              <td [class.na]="e[1].metrics.reach.value === null">{{ metricValue(e[1].metrics.reach) }}</td>
+              <td [class.na]="e[1].metrics.likes.value === null">{{ metricValue(e[1].metrics.likes) }}</td>
+              <td [class.na]="e[1].metrics.comments.value === null">{{ metricValue(e[1].metrics.comments) }}</td>
+              <td [class.na]="e[1].metrics.shares.value === null">{{ metricValue(e[1].metrics.shares) }}</td>
+              <td [class.na]="e[1].metrics.clicks.value === null">{{ metricValue(e[1].metrics.clicks) }}</td>
+            </tr>
+            <tr *ngIf="!objectEntries(analytics.byPlatform).length"><td colspan="7" class="empty-state">No published posts in range.</td></tr>
+          </table>
+        </div>
+        <div class="card">
+          <h3>BY CAMPAIGN</h3>
+          <table class="data-table compact">
+            <thead><tr><th>Campaign</th><th>Posts</th><th>Clicks</th><th>Engagement (likes)</th></tr></thead>
+            <tr *ngFor="let e of objectEntries(analytics.byCampaign)">
+              <td>{{ e[1].name }}</td><td>{{ e[1].posts }}</td>
+              <td [class.na]="e[1].metrics.clicks.value === null">{{ metricValue(e[1].metrics.clicks) }}</td>
+              <td [class.na]="e[1].metrics.likes.value === null">{{ metricValue(e[1].metrics.likes) }}</td>
+            </tr>
+            <tr *ngIf="!objectEntries(analytics.byCampaign).length"><td colspan="4" class="empty-state">No data.</td></tr>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>FOLLOWERS</h3>
+        <div *ngFor="let f of analytics.followers" class="row-line">
+          <span>{{ platformIcon(f.platformKey) }} {{ f.accountName }}</span>
+          <span *ngIf="f.latest !== null">{{ f.latest | number }} <span class="small" [class.ok-text]="f.change > 0" [class.warn-text]="f.change < 0" *ngIf="f.change !== null">({{ f.change >= 0 ? '+' : '' }}{{ f.change }} in period)</span> <span class="small muted">as of {{ fmt(f.collectedAt) }}</span></span>
+          <span *ngIf="f.latest === null" class="na small">Unavailable — {{ f.reason }}</span>
+        </div>
+        <div *ngIf="!analytics.followers.length" class="muted">No connected accounts.</div>
+      </div>
+
+      <div class="card">
+        <h3>POSTS</h3>
+        <div class="table-container">
+          <table class="data-table compact">
+            <thead><tr><th>Post</th><th>Published</th><th *ngFor="let k of metricKeys">{{ metricLabels[k] }}</th></tr></thead>
+            <tr *ngFor="let p of analytics.posts">
+              <td>{{ platformIcon(p.platformKey) }} <a *ngIf="p.externalUrl" [href]="p.externalUrl" target="_blank" rel="noopener">{{ p.title || 'Post' }}</a><span *ngIf="!p.externalUrl">{{ p.title || 'Post' }}</span></td>
+              <td class="small">{{ fmt(p.publishedAt, false) }}</td>
+              <td *ngFor="let k of metricKeys" [class.na]="p.metrics[k].value === null" [title]="p.metrics[k].reason || (p.metrics[k].collectedAt ? 'Collected ' + fmt(p.metrics[k].collectedAt) + ' via ' + p.metrics[k].source : '')">{{ metricValue(p.metrics[k]) }}</td>
+            </tr>
+            <tr *ngIf="!analytics.posts.length"><td [attr.colspan]="metricKeys.length + 2" class="empty-state">No provider-confirmed posts in this range.</td></tr>
+          </table>
+        </div>
+      </div>
+    </ng-container>
+  </div>
+
+  <!-- ===================== ENGAGEMENT INBOX ===================== -->
+  <div *ngIf="section === 'inbox'" class="section">
+    <details class="card" [open]="!threads.length">
+      <summary><strong>What the inbox can do for each account</strong></summary>
+      <table class="data-table compact">
+        <thead><tr><th>Account</th><th>Read comments</th><th>Reply to comments</th><th>Direct messages</th></tr></thead>
+        <tr *ngFor="let c of inboxCapabilities()">
+          <td>{{ c.name }} <span class="small muted">({{ c.type }})</span></td>
+          <td><span class="cap" [ngClass]="capabilityClass(c.read?.status)" [title]="c.read?.note || ''">{{ capabilityText(c.read?.status) }}</span></td>
+          <td><span class="cap" [ngClass]="capabilityClass(c.reply?.status)" [title]="c.reply?.note || ''">{{ capabilityText(c.reply?.status) }}</span></td>
+          <td><span class="cap" [ngClass]="capabilityClass(c.messages?.status)" [title]="c.messages?.note || ''">{{ capabilityText(c.messages?.status) }}</span></td>
+        </tr>
+        <tr *ngIf="!inboxCapabilities().length"><td colspan="4" class="empty-state">Connect an account to receive comments.</td></tr>
+      </table>
+      <div class="small muted">AI suggests replies; a person always reviews and sends them. Automatic replies are not enabled in this release.</div>
+    </details>
+
+    <div class="toolbar">
+      <div class="filter-row">
+        <select class="hud-input" [(ngModel)]="inboxFilters.status" (change)="loadThreads()"><option value="open">Open</option><option value="resolved">Resolved</option><option value="all">All</option></select>
+        <select class="hud-input" [(ngModel)]="inboxFilters.category" (change)="loadThreads()"><option value="all">All categories</option><option *ngFor="let c of ['enquiry','lead','complaint','feedback','other']" [value]="c">{{ c }}</option></select>
+        <select class="hud-input" [(ngModel)]="inboxFilters.accountId" (change)="loadThreads()"><option value="">All accounts</option><option *ngFor="let a of accounts" [value]="a.id">{{ a.displayName }}</option></select>
+      </div>
+      <button class="btn btn-secondary btn-sm" (click)="syncInbox()">Sync comments</button>
+    </div>
+
+    <div class="inbox">
+      <div class="thread-list">
+        <div *ngFor="let t of threads" class="thread-item clickable" [class.active]="activeThread?.thread.id === t.id" (click)="openThread(t)">
+          <div class="row-line"><strong>{{ t.authorName || 'Someone' }}</strong><span class="cat" *ngIf="t.aiCategory" [ngClass]="'cat-' + t.aiCategory">{{ t.aiCategory }}</span></div>
+          <div class="small caption-clip">{{ t.preview }}</div>
+          <div class="small muted">{{ t.accountName }} · {{ fmt(t.lastMessageAt) }}</div>
+        </div>
+        <div *ngIf="!threads.length" class="empty-box">No conversations.</div>
+      </div>
+
+      <div class="thread-view empty-box" *ngIf="!activeThread">Select a conversation to read it, classify it and reply.</div>
+      <div class="thread-view" *ngIf="activeThread">
+        <div class="row-line">
+          <strong>{{ activeThread.thread.authorName }} on {{ activeThread.thread.accountName }}</strong>
+          <span class="status-pill">{{ activeThread.thread.status }}</span>
+        </div>
+        <div class="small" *ngIf="activeThread.thread.aiSummary">🧠 {{ activeThread.thread.aiSummary }}</div>
+        <div class="messages">
+          <div *ngFor="let m of activeThread.messages" class="message" [class.out]="m.direction === 'out'" [class.draft]="m.status === 'draft_reply'">
+            <div class="small muted">{{ m.author_name || (m.direction === 'out' ? 'Your team' : 'Customer') }} · {{ fmt(m.provider_created_at || m.created_at) }} <span *ngIf="m.status !== 'received' && m.status !== 'sent'">· {{ m.status.replace('_', ' ') }}</span></div>
+            <div>{{ m.body_text }}</div>
+            <div class="small warn-text" *ngIf="m.error_message">{{ m.error_message }}</div>
+          </div>
+        </div>
+        <div *ngIf="activeThread.canReply; else noReply">
+          <textarea class="hud-textarea" rows="3" [(ngModel)]="replyText" placeholder="Write a reply, or ask Roger for a suggestion…"></textarea>
+          <div class="button-row">
+            <button class="btn btn-secondary btn-sm" (click)="suggestReply()" [disabled]="busy">🧠 Suggest reply</button>
+            <button class="btn btn-primary btn-sm" (click)="sendReply()" [disabled]="busy || !replyText.trim()">Approve &amp; send</button>
+          </div>
+        </div>
+        <ng-template #noReply><div class="small warn-text">Replying is not available for this account (permission missing or not supported).</div></ng-template>
+        <div class="button-row">
+          <button class="btn btn-secondary btn-sm" (click)="analyzeThread()">Classify</button>
+          <button class="btn btn-secondary btn-sm" *ngIf="activeThread.thread.status === 'open'" (click)="setThreadStatus('resolved')">Mark resolved</button>
+          <button class="btn btn-secondary btn-sm" *ngIf="activeThread.thread.status === 'resolved'" (click)="setThreadStatus('open')">Reopen</button>
+          <select class="hud-input small-select" (change)="assignThread($any($event.target).value)">
+            <option value="">Assign to…</option>
+            <option *ngFor="let m of members" [value]="m.id" [selected]="m.id === activeThread.thread.assignedUserId">{{ m.displayName }}</option>
+          </select>
+        </div>
+        <div class="card inset" *ngIf="!activeThread.thread.leadId">
+          <div class="small">Create a lead from this enquiry</div>
+          <div class="quick-row">
+            <input class="hud-input" [(ngModel)]="leadForm.email" placeholder="Email (if shared)" />
+            <input class="hud-input" [(ngModel)]="leadForm.phone" placeholder="Phone (if shared)" />
+            <button class="btn btn-secondary btn-sm" (click)="createLead()">Create lead</button>
+          </div>
+        </div>
+        <div class="small ok-text" *ngIf="activeThread.thread.leadId">Linked to lead #{{ activeThread.thread.leadId }}</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== STRATEGIST ===================== -->
+  <div *ngIf="section === 'strategist'" class="section">
+    <div class="card">
+      <h3>ASK ROGER ABOUT YOUR REAL PERFORMANCE</h3>
+      <div class="button-row">
+        <button *ngFor="let p of examplePrompts" class="chip" (click)="askRoger(p)">{{ p }}</button>
+      </div>
+      <div class="quick-row">
+        <input class="hud-input" [(ngModel)]="question" (keyup.enter)="askRoger()" placeholder="e.g. Which posts performed best this month?" />
+        <button class="btn btn-primary" (click)="askRoger()" [disabled]="isAsking">{{ isAsking ? 'Thinking…' : 'Ask' }}</button>
+      </div>
+      <div class="small muted">Roger answers only from metrics stored in your workspace and says when data is unavailable.</div>
+    </div>
+    <div class="card" *ngIf="strategistAnswer">
+      <div class="answer">{{ strategistAnswer.answer }}</div>
+      <div class="small muted">{{ strategistAnswer.provider ? 'Model: ' + strategistAnswer.provider : 'No AI model used' }}<span *ngIf="!strategistAnswer.hasMetrics"> · No collected metrics yet</span></div>
+      <details><summary class="small">Data Roger used</summary><pre class="data-used">{{ strategistAnswer.dataUsed }}</pre></details>
+    </div>
+  </div>
+
+  <!-- ===================== SETTINGS ===================== -->
+  <div *ngIf="section === 'settings' && settingsForm" class="section">
+    <div class="two-col">
+      <div class="card">
+        <h3>PUBLISHING</h3>
+        <label>Workspace time zone
+          <select class="hud-input" [(ngModel)]="settingsForm.timezone"><option *ngFor="let tz of timezones" [value]="tz">{{ tz }}</option></select>
+        </label>
+        <label class="check"><input type="checkbox" [(ngModel)]="settingsForm.requireApproval" /> Require approval before scheduling or publishing (recommended)</label>
+        <label>Default hashtags<input class="hud-input" [(ngModel)]="settingsForm.defaultHashtags" placeholder="#yourbrand" /></label>
+        <label class="check muted"><input type="checkbox" [checked]="false" disabled /> Automatic AI replies — not available in this release (human approval is always required)</label>
+      </div>
+      <div class="card">
+        <h3>SYNC &amp; COST CONTROL</h3>
+        <label>Analytics sync every (minutes)<input type="number" min="60" max="1440" class="hud-input" [(ngModel)]="settingsForm.analyticsPollMinutes" /></label>
+        <label>Comment sync every (minutes)<input type="number" min="15" max="1440" class="hud-input" [(ngModel)]="settingsForm.inboxPollMinutes" /></label>
+        <div *ngIf="usage" class="small">AI requests this month: <strong>{{ usage.aiRequestsThisMonth }}</strong> of {{ usage.aiMonthlyLimit }} (hard limit)</div>
+        <div class="small muted">Longer intervals reduce provider API usage and stay within rate limits.</div>
+      </div>
+    </div>
+    <div class="button-row"><button class="btn btn-primary" (click)="saveSettings()">Save settings</button></div>
+
+    <div class="card" *ngIf="auditEvents.length">
+      <h3>AUDIT LOG (EXTERNAL ACTIONS)</h3>
+      <div class="table-container full-table">
+        <table class="data-table compact">
+          <thead><tr><th>When</th><th>Action</th><th>Actor</th><th>Resource</th></tr></thead>
+          <tr *ngFor="let e of auditEvents">
+            <td class="small">{{ fmt(e.created_at) }}</td><td>{{ e.action }}</td>
+            <td class="small">{{ e.actor_type }}{{ e.actor_user_id ? ' #' + e.actor_user_id : '' }}</td>
+            <td class="small">{{ e.resource_type }} {{ e.resource_id }}</td>
+          </tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== EDITOR DRAWER ===================== -->
+  <div *ngIf="editor" class="drawer-backdrop" (click)="closeEditor()">
+    <aside class="drawer" (click)="$event.stopPropagation()" role="dialog" aria-label="Content editor">
+      <div class="row-line">
+        <h3>{{ editor.id ? 'EDIT POST' : 'NEW POST' }} <span *ngIf="editor.id" class="muted">v{{ editor.version }}</span></h3>
+        <div class="button-row">
+          <span *ngIf="editor.status" class="status-pill" [ngClass]="statusClass(editor.status)">{{ editor.status }}</span>
+          <button class="btn btn-secondary btn-sm" (click)="closeEditor()">✕</button>
+        </div>
+      </div>
+      <div class="banner bad" *ngIf="editor.lastError">{{ editor.lastError }}</div>
+      <div class="small warn-text" *ngFor="let a of editor.assumptions">⚠️ {{ a }}</div>
+
+      <div class="drawer-grid">
+        <div class="drawer-main">
+          <div class="form-grid">
+            <label>Platform<select class="hud-input" [(ngModel)]="editorDraft.platformKey" [disabled]="!canEdit(editor)"><option *ngFor="let p of platforms" [value]="p.key">{{ p.icon }} {{ p.label }}</option></select></label>
+            <label>Account<select class="hud-input" [(ngModel)]="editorDraft.socialAccountId" [disabled]="!canEdit(editor)"><option [ngValue]="null">— choose later —</option><option *ngFor="let a of accountsFor(editorDraft.platformKey)" [ngValue]="a.id">{{ a.displayName }}</option></select></label>
+            <label class="span-2">Title (internal)<input class="hud-input" [(ngModel)]="editorDraft.title" [disabled]="!canEdit(editor)" /></label>
+            <label class="span-2">Caption
+              <textarea class="hud-textarea" rows="6" [(ngModel)]="editorDraft.caption" [disabled]="!canEdit(editor)"></textarea>
+              <span class="small" [class.warn-text]="captionLimit() && previewText().length > captionLimit()!">{{ previewText().length }}{{ captionLimit() ? ' / ' + captionLimit() : '' }} characters</span>
+            </label>
+            <label class="span-2">Hashtags<input class="hud-input" [(ngModel)]="editorDraft.hashtagsText" [disabled]="!canEdit(editor)" placeholder="#one #two" /></label>
+            <label>Call to action<input class="hud-input" [(ngModel)]="editorDraft.callToAction" [disabled]="!canEdit(editor)" /></label>
+            <label>Link<input class="hud-input" [(ngModel)]="editorDraft.linkUrl" [disabled]="!canEdit(editor)" placeholder="https://…" /></label>
+            <label>Campaign<select class="hud-input" [(ngModel)]="editorDraft.campaignId" [disabled]="!canEdit(editor)"><option [ngValue]="null">— none —</option><option *ngFor="let c of campaigns" [ngValue]="c.id">{{ c.name }}</option></select></label>
+            <label class="span-2">Image prompt<textarea class="hud-textarea" rows="2" [(ngModel)]="editorDraft.imagePrompt" [disabled]="!canEdit(editor)"></textarea>
+              <span class="small muted">Image generation: setup required (no image provider configured). Attach your own image below.</span></label>
+            <label class="span-2" *ngIf="editorDraft.videoScript || editorDraft.platformKey === 'youtube'">Video script / creative brief<textarea class="hud-textarea" rows="3" [(ngModel)]="editorDraft.videoScript" [disabled]="!canEdit(editor)"></textarea></label>
+          </div>
+
+          <div class="field-block">
+            <div class="small">Media ({{ editorDraft.mediaAssetIds.length }} attached)</div>
+            <div class="asset-row">
+              <div *ngFor="let a of assets" class="asset" [class.on]="editorDraft.mediaAssetIds.includes(a.id)" (click)="canEdit(editor) && toggleAsset(a.id)" [title]="a.url">
+                <img *ngIf="a.assetType === 'image'" [src]="a.url" alt="" referrerpolicy="no-referrer" />
+                <span *ngIf="a.assetType === 'video'">🎬</span>
+              </div>
+            </div>
+            <div class="quick-row" *ngIf="canEdit(editor)">
+              <select class="hud-input small-select" [(ngModel)]="newAssetType"><option value="image">Image</option><option value="video">Video</option></select>
+              <input class="hud-input" [(ngModel)]="newAssetUrl" placeholder="Public HTTPS media URL" />
+              <button class="btn btn-secondary btn-sm" (click)="addAsset()">Add</button>
+            </div>
+          </div>
+
+          <div class="button-row" *ngIf="canEdit(editor)">
+            <button class="btn btn-primary" (click)="saveEditor()" [disabled]="busy">{{ editor.id ? 'Save new version' : 'Create draft' }}</button>
+            <button class="btn btn-secondary btn-sm" *ngIf="editor.id" (click)="duplicate()">Duplicate</button>
+            <button class="btn btn-danger btn-sm" *ngIf="editor.id && ['draft','rejected','failed','cancelled'].includes(editor.status)" (click)="deleteItem()">Delete</button>
+          </div>
+
+          <details class="field-block" *ngIf="editor.id && canEdit(editor)">
+            <summary class="small">🧠 Regenerate with Roger</summary>
+            <div class="button-row">
+              <label *ngFor="let f of ['caption','hashtags','title','call_to_action','image_prompt']" class="check-pill" [class.on]="regenForm.fields[f]"><input type="checkbox" [(ngModel)]="regenForm.fields[f]" /> {{ f.replace('_', ' ') }}</label>
+            </div>
+            <input class="hud-input" [(ngModel)]="regenForm.instruction" placeholder="e.g. shorter, more conversational, focus on offline ordering" />
+            <button class="btn btn-secondary btn-sm" (click)="regenerate()" [disabled]="busy">Regenerate selected</button>
+          </details>
+        </div>
+
+        <div class="drawer-side">
+          <div class="preview" [ngClass]="'pv-' + editorDraft.platformKey">
+            <div class="small muted">{{ platformIcon(editorDraft.platformKey) }} {{ platformLabel(editorDraft.platformKey) }} preview</div>
+            <img *ngIf="editorDraft.mediaAssetIds.length && assetById(editorDraft.mediaAssetIds[0])?.assetType === 'image'" [src]="assetById(editorDraft.mediaAssetIds[0])?.url" alt="" class="preview-img" referrerpolicy="no-referrer" />
+            <div class="preview-text">{{ previewText() || 'Your post text appears here.' }}</div>
+            <div class="small link-preview" *ngIf="editorDraft.linkUrl">🔗 {{ editorDraft.linkUrl }}</div>
+            <button *ngIf="editorDraft.platformKey === 'x'" class="btn btn-secondary btn-sm" (click)="copyForManualPosting()">Copy for manual posting</button>
+          </div>
+
+          <ng-container *ngIf="editor.id">
+            <div class="card inset">
+              <h3>APPROVAL</h3>
+              <ng-container *ngIf="['draft','rejected','failed'].includes(editor.status)">
+                <select class="hud-input" [(ngModel)]="approverId"><option [ngValue]="null">Any approver</option><option *ngFor="let m of members" [ngValue]="m.id" [disabled]="!m.canApprove">{{ m.displayName }}{{ m.canApprove ? '' : ' (cannot approve)' }}</option></select>
+                <button class="btn btn-secondary btn-sm" (click)="submitForApproval()" [disabled]="busy">Submit for approval</button>
+              </ng-container>
+              <ng-container *ngIf="['review','draft'].includes(editor.status)">
+                <button class="btn btn-primary btn-sm" (click)="approve()" [disabled]="busy">✓ Approve v{{ editor.version }}</button>
+              </ng-container>
+              <ng-container *ngIf="editor.status === 'review'">
+                <input class="hud-input" [(ngModel)]="rejectNote" placeholder="Reason for rejection" />
+                <button class="btn btn-danger btn-sm" (click)="reject()" [disabled]="busy">Reject</button>
+              </ng-container>
+              <div class="small muted" *ngFor="let a of editorDetail?.approvals">{{ a.status }} · v{{ a.resource_version }} · {{ fmt(a.decided_at || a.created_at) }}<span *ngIf="a.decision_note"> — {{ a.decision_note }}</span></div>
+            </div>
+
+            <div class="card inset" *ngIf="editorDraft.platformKey !== 'x'">
+              <h3>SCHEDULE &amp; PUBLISH</h3>
+              <ng-container *ngIf="['approved','scheduled','failed'].includes(editor.status) || (!settings.requireApproval && editor.status === 'draft'); else needApproval">
+                <label>Account<select class="hud-input" [(ngModel)]="scheduleForm.accountId"><option [ngValue]="null">— choose —</option><option *ngFor="let a of accountsFor(editorDraft.platformKey)" [ngValue]="a.id">{{ a.displayName }}</option></select></label>
+                <div *ngIf="!accountsFor(editorDraft.platformKey).length" class="small warn-text">No connected {{ platformLabel(editorDraft.platformKey) }} account.</div>
+                <label>Date &amp; time<input type="datetime-local" class="hud-input" [(ngModel)]="scheduleForm.localDateTime" /></label>
+                <label>Time zone<select class="hud-input" [(ngModel)]="scheduleForm.timezone"><option *ngFor="let tz of timezones" [value]="tz">{{ tz }}</option></select></label>
+                <div class="button-row">
+                  <button class="btn btn-primary btn-sm" (click)="schedule()" [disabled]="busy || !scheduleForm.accountId">{{ editor.status === 'scheduled' ? 'Reschedule' : 'Schedule' }}</button>
+                  <button class="btn btn-secondary btn-sm" (click)="publishNow()" [disabled]="busy || !scheduleForm.accountId">Publish now</button>
+                  <button class="btn btn-secondary btn-sm" *ngIf="editor.status === 'scheduled'" (click)="unschedule()">Unschedule</button>
+                </div>
+              </ng-container>
+              <ng-template #needApproval><div class="small muted">Approve this version to schedule it.</div></ng-template>
+              <div class="small" *ngIf="editor.scheduledAt">Scheduled: {{ fmt(editor.scheduledAt) }} ({{ editor.scheduleTimezone }})</div>
+              <div class="small ok-text" *ngIf="editor.status === 'published'">Published {{ fmt(editor.publishedAt) }} <a *ngIf="editor.externalUrl" [href]="editor.externalUrl" target="_blank" rel="noopener">View ↗</a></div>
+            </div>
+
+            <div class="card inset" *ngIf="editorDetail?.publishingJobs?.length">
+              <h3>PUBLICATION HISTORY</h3>
+              <div class="small" *ngFor="let j of editorDetail.publishingJobs">
+                <span class="status-pill" [ngClass]="'job-' + j.status">{{ j.status }}</span> v{{ j.content_version }} · {{ fmt(j.scheduled_for) }} · attempts {{ j.attempt_count }}
+                <span class="warn-text" *ngIf="j.last_error"> — {{ j.last_error }}</span>
+              </div>
+            </div>
+            <details class="small" *ngIf="editorDetail?.versions?.length">
+              <summary>Version history ({{ editorDetail.versions.length }})</summary>
+              <div *ngFor="let v of editorDetail.versions">v{{ v.version_number }} · {{ v.change_note }} · {{ fmt(v.created_at) }}</div>
+            </details>
+            <button class="btn btn-danger btn-sm" *ngIf="!['published','publishing','cancelled'].includes(editor.status)" (click)="cancelItem()">Cancel post</button>
+          </ng-container>
+        </div>
+      </div>
+    </aside>
+  </div>
+</section>

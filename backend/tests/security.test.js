@@ -45,8 +45,8 @@ test('removed shell-command endpoints no longer exist', async () => {
 });
 
 test('single-tenant legacy modules are closed to other workspaces', async () => {
-  // Leads CRM is workspace-aware now; Mail Drafts is still a workspace-1-only legacy module.
-  const res = await h.api('GET', '/api/v1/drafts', { token: B.token });
+  // Leads, Products and Mail are workspace-aware now; Appointments is still a workspace-1-only legacy module.
+  const res = await h.api('GET', '/api/v1/crm/appointments', { token: B.token });
   assert.equal(res.status, 403);
   assert.equal(res.data.code, 'MODULE_NOT_TENANT_AWARE');
 });

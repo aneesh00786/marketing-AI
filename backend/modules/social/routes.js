@@ -377,7 +377,7 @@ router.post('/queue/:id/cancel', requireCapability('content.publish'), wrap(asyn
   res.json({ success: true, job: await publishingService.cancelJob(req, idParam(req)) });
 }));
 
-// ---- Analytics & Roger strategist ----
+// ---- Analytics & Mark strategist ----
 router.get('/analytics/summary', requireCapability('analytics.view'), wrap(async (req, res) => {
   res.json({ success: true, analytics: await analyticsService.getSummary(ws(req), req.query) });
 }));

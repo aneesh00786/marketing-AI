@@ -1,4 +1,5 @@
 import { Injectable } from '@angular/core';
+import { apiRoot } from '../core/api-base';
 import { Conversation } from '@elevenlabs/client';
 
 @Injectable({
@@ -129,9 +130,11 @@ export class SpeechService {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 2200);
 
-      const res = await fetch('/api/v1/telnyx/synthesize', {
+      let token: string | null = null;
+      try { token = localStorage.getItem('tradesage_token'); } catch { token = null; }
+      const res = await fetch(`${apiRoot()}/api/v1/telnyx/synthesize`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({
           text: clean,
           voice: voiceId || 'Telnyx.Ultra.f786b574-daa5-4673-aa0c-cbe3e8534c02'

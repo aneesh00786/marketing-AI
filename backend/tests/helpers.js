@@ -17,6 +17,8 @@ process.env.SOCIAL_TOKEN_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString('base64')
 // Deterministic AI routing in tests: only the mocked Groq endpoint is "configured".
 for (const k of ['TELNYX_API_KEY', 'OPENAI_API_KEY', 'OPENROUTER_API_KEY', 'GEMINI_API_KEY']) process.env[k] = '';
 process.env.GROQ_API_KEY = 'test-groq-key';
+// Tests never send real email: no server mailbox credentials, and SMTP/IMAP only to hosts tests choose.
+for (const k of ['ZEPTOMAIL_TOKEN', 'SMTP_PASS', 'IMAP_PASS', 'MAIL_ALLOW_PRIVATE_HOSTS']) process.env[k] = '';
 process.env.APP_BASE_URL = 'http://localhost:8000';
 process.env.FRONTEND_URL = 'http://localhost:4200';
 

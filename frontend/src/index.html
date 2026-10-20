@@ -5,6 +5,16 @@
   <title>TradeSage AI — Enterprise Workforce SaaS</title>
   <base href="/">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f4f6fb">
+  <script>
+    (function () {
+      var t = 'light';
+      try { t = localStorage.getItem('tradesage_theme') || 'light'; } catch (e) {}
+      document.documentElement.setAttribute('data-theme', t === 'dark' ? 'dark' : 'light');
+    })();
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="icon" type="image/x-icon" href="favicon.ico">
 </head>
 <body>

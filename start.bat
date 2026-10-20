@@ -17,8 +17,17 @@ if not exist node_modules (
 )
 
 echo.
-echo [2/3] Verifying database schema and foundational records...
+echo [2/3] Verifying database schema, foundational records and migrations...
 call node seed.js
+call node db\migrate.js
+if errorlevel 1 (
+    echo Migration failed - fix the error above before starting.
+    pause
+    exit /b 1
+)
+
+echo Starting the social publishing worker in a separate window...
+start "Roger Social Worker" cmd /k node workers\socialWorker.js
 
 echo.
 echo [3/3] Opening browser at http://localhost:8000 ...

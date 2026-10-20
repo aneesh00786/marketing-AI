@@ -6,7 +6,8 @@ const { run, get } = require('../db/database');
  */
 const AI_MONTHLY_REQUEST_LIMIT = parseInt(process.env.SOCIAL_AI_MONTHLY_REQUEST_LIMIT || '500', 10);
 
-const FALLBACK_PROVIDERS = new Set(['TradeSage Conversational AI', 'TradeSage Core']);
+// Old TradeSage labels kept so usage rows recorded before the rename still count as fallbacks.
+const FALLBACK_PROVIDERS = new Set(['Marketech.ai Conversational AI', 'Marketech.ai Core', 'TradeSage Conversational AI', 'TradeSage Core']);
 
 function isRealAiProvider(provider) {
   return !!provider && !FALLBACK_PROVIDERS.has(provider);

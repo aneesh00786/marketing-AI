@@ -62,7 +62,7 @@ async function extractFromUrl(url) {
     const resp = await safeFetchText(targetUrl, {
       timeoutMs: 8000,
       headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; TradeSageBot/1.0; +website-import)',
+        'User-Agent': 'Mozilla/5.0 (compatible; MarketechBot/1.0; +website-import)',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
       }
     });

@@ -114,7 +114,7 @@ const MANUAL_PLATFORMS = {
   x: {
     label: 'X (Twitter)',
     limits: { captionMax: 280 },
-    note: 'The X API requires a paid plan and is not integrated. Drafts can be copied and posted manually; they are never marked published by TradeSage.'
+    note: 'The X API requires a paid plan and is not integrated. Drafts can be copied and posted manually; they are never marked published by Marketech.ai.'
   }
 };
 

@@ -54,7 +54,7 @@ test('mail draft with no product selected is generic and says so', async () => {
   assert.equal(bare.data.draft.recipient_name, '');
   assert.match(bare.data.draft.body_text, /Hi there,/);
   assert.match(bare.data.draft.body_text, /\[Add the purpose of this email\]/);
-  assert.deepEqual(bare.data.missing_context.sort(), ['goal', 'product']);
+  assert.deepEqual(bare.data.missing_context.sort(), ['goal', 'product', 'recipient email']);
 });
 
 test('malformed and unknown product ids are rejected before anything is saved', async () => {

@@ -4,7 +4,7 @@ const analyticsService = require('./analyticsService');
 const accountService = require('./accountService');
 
 /**
- * Roger AI Strategist: answers marketing questions from retrieved workspace data only.
+ * Mark AI Strategist: answers marketing questions from retrieved workspace data only.
  * The model sees a compact, factual data pack; it cannot query anything itself.
  */
 
@@ -44,7 +44,7 @@ async function buildDataPack(workspaceId, question) {
   const lines = [];
   lines.push(`Period: ${range.label} (${summary.range.from.slice(0, 10)} to ${summary.range.to.slice(0, 10)}).`);
   lines.push(`Connected accounts: ${accounts.length ? accounts.map(a => `${a.displayName} (${a.accountTypeLabel}, ${a.status})`).join('; ') : 'none'}.`);
-  lines.push(`Posts published through TradeSage in the period (provider-confirmed): ${summary.publishedCount}.`);
+  lines.push(`Posts published through Marketech.ai in the period (provider-confirmed): ${summary.publishedCount}.`);
   lines.push(`Content library by status: ${contentCounts.map(r => `${r.status}=${r.c}`).join(', ') || 'empty'}.`);
   lines.push(`Totals: ${Object.entries(summary.totals).map(([k, v]) => `${k}=${metricText(v)}`).join(', ')}.`);
   for (const [platform, p] of Object.entries(summary.byPlatform)) {
@@ -89,7 +89,7 @@ Answer rules:
 - If there is too little data to answer, say what data is missing and how to get it (e.g. connect an account, publish posts, wait for analytics sync).
 - Recommendations must be tied to specific observations from the data, and labelled as recommendations.
 - Keep it concise: at most ~180 words, short paragraphs or bullets.`,
-      system: 'You are Roger, a data-grounded social media marketing strategist.',
+      system: 'You are Mark, a data-grounded social media marketing strategist.',
       referenceType: 'strategist',
       maxTokens: 700
     });
@@ -98,7 +98,7 @@ Answer rules:
     if (!(err instanceof AiUnavailableError) && err.code !== 'QUOTA_EXCEEDED') throw err;
     // Without a model, return the facts rather than an invented analysis.
     return {
-      answer: `${err.code === 'QUOTA_EXCEEDED' ? 'The monthly AI limit has been reached' : 'No AI model is configured'}, so here is the data Roger would use:\n\n${pack.text}`,
+      answer: `${err.code === 'QUOTA_EXCEEDED' ? 'The monthly AI limit has been reached' : 'No AI model is configured'}, so here is the data Mark would use:\n\n${pack.text}`,
       provider: null,
       grounded: true,
       dataUsed: pack.text,
@@ -108,7 +108,7 @@ Answer rules:
   }
 }
 
-/** Heuristic used by the legacy Roger chat to route social-performance questions here. */
+/** Heuristic used by the legacy Mark chat to route social-performance questions here. */
 function isSocialAnalyticsQuestion(message) {
   const m = String(message || '').toLowerCase();
   return /(post|posts|campaign|engagement|reach|impression|follower|likes|clicks|social|instagram|facebook|linkedin|youtube)/.test(m)

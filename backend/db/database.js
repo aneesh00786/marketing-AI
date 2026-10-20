@@ -395,7 +395,7 @@ async function initDatabase() {
       phone_number TEXT UNIQUE NOT NULL,
       telnyx_id TEXT,
       label TEXT,
-      assigned_agent_name TEXT DEFAULT 'TradeSage Marketing AI',
+      assigned_agent_name TEXT DEFAULT 'Marketech.ai Marketing AI',
       status TEXT DEFAULT 'Active',
       created_at TEXT,
       FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
@@ -571,7 +571,7 @@ async function initDatabase() {
       imap_tls INTEGER DEFAULT 1,
       imap_user TEXT,
       imap_pass TEXT,
-      sender_name TEXT DEFAULT 'Roger Executive Team',
+      sender_name TEXT DEFAULT 'Mark Executive Team',
       sender_email TEXT,
       status TEXT DEFAULT 'Not Configured',
       last_synced_at TEXT,
@@ -586,7 +586,7 @@ async function initDatabase() {
     const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
     const wsResult = await run(
       `INSERT INTO workspaces (name, slug, owner_email, plan, status, created_at)
-       VALUES ('TradeSage Enterprise', 'tradesage-enterprise', 'founder@tradesage.ai', 'Business', 'Active', ?)`,
+       VALUES ('Marketech.ai Enterprise', 'tradesage-enterprise', 'founder@tradesage.ai', 'Business', 'Active', ?)`,
       [now]
     );
     const workspaceId = wsResult.lastID || 1;
@@ -646,7 +646,7 @@ async function initDatabase() {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         workspaceId,
-        'TradeSage B2B Software Enterprise',
+        'Marketech.ai B2B Software Enterprise',
         'Enterprise B2B Software & Distribution Solutions',
         'https://tradesage.ai',
         'Enterprise software company powering Traivo B2B Sales & Distribution Platform, School Bus Fleet Management, and Custom Engineering.',
@@ -673,7 +673,7 @@ async function initDatabase() {
         ?, ?, 'post',
         'Is Your School Bus Fleet Still Running on Guesswork?',
         'Parents deserve to know their children arrived safely. Our School Bus Management System gives parents live GPS tracking on their phones and notifies them the exact second their child scans onto the bus. Schedule your free 15-minute school walkthrough today.',
-        '#SchoolSafety #EdTech #SchoolBusTracking #FleetManagement #TradeSage',
+        '#SchoolSafety #EdTech #SchoolBusTracking #FleetManagement #MarketechAI',
         'Book a 15-Minute School Demo',
         'LinkedIn', 'Approved', ?
       )`,
@@ -687,7 +687,7 @@ async function initDatabase() {
         ?, ?, 'post',
         'Stop Losing 20% of Your School Transportation Budget to Inefficient Bus Routes',
         'Smart route optimization can instantly streamline your morning and afternoon pick-ups while slashing diesel waste. See how schools cut operating costs in week one.',
-        '#FleetOptimization #SchoolLogistics #CleanMobility #TradeSageAI',
+        '#FleetOptimization #SchoolLogistics #CleanMobility #MarketechAI',
         'Get a Fleet Cost Audit',
         'Facebook', 'Draft', ?
       )`,
@@ -697,7 +697,7 @@ async function initDatabase() {
     // Seed phone number
     await run(
       `INSERT INTO phone_numbers (workspace_id, phone_number, telnyx_id, label, assigned_agent_name, status, created_at)
-       VALUES (?, '+1 (800) 555-SAGE', 'tlnx_prod_01', 'Primary Inbound Sales Line', 'TradeSage Voice Agent', 'Active', ?)`,
+       VALUES (?, '+1 (800) 555-SAGE', 'tlnx_prod_01', 'Primary Inbound Sales Line', 'Marketech.ai Voice Agent', 'Active', ?)`,
       [workspaceId, now]
     );
 
@@ -889,7 +889,7 @@ async function initDatabase() {
       `INSERT INTO email_campaigns (workspace_id, name, product_key, subject, template_body, target_audience, sent_count, reply_count, status, created_at)
        VALUES (1, 'Traivo B2B Wholesale Acceleration Campaign', 'traivo',
        'Automate Field Sales & Wholesale Order Booking with Traivo',
-       'Hi {{contact_name}},\n\nManaging field sales and van orders on paper or outdated spreadsheets slows down delivery and creates costly fulfillment errors.\n\nTraivo gives your field sales reps a lightning-fast mobile order app with real-time wholesale catalog access, customer-specific pricing, and instant invoice generation.\n\nWould you have 10 minutes this week for a quick live walkthrough for {{company_name}}?\n\nBest regards,\nRoger\nExecutive Team, TradeSage B2B',
+       'Hi {{contact_name}},\n\nManaging field sales and van orders on paper or outdated spreadsheets slows down delivery and creates costly fulfillment errors.\n\nTraivo gives your field sales reps a lightning-fast mobile order app with real-time wholesale catalog access, customer-specific pricing, and instant invoice generation.\n\nWould you have 10 minutes this week for a quick live walkthrough for {{company_name}}?\n\nBest regards,\nMark\nExecutive Team, Marketech.ai',
        'Wholesale Distributors, FMCG & Van Sales Fleets', 48, 6, 'Active', ?)`,
       [now]
     );
@@ -898,7 +898,7 @@ async function initDatabase() {
       `INSERT INTO email_campaigns (workspace_id, name, product_key, subject, template_body, target_audience, sent_count, reply_count, status, created_at)
        VALUES (1, 'Q4 School Bus Fleet Safety & Parent App Drive', 'school_bus',
        'Provide Parents Live GPS Bus Tracking & Student Boarding Alerts',
-       'Dear {{contact_name}},\n\nStudent safety during daily commutes is a top priority for parents. Our School Bus Management System delivers instant RFID boarding SMS alerts and a parent mobile app with real-time arrival countdowns.\n\nWe would love to share a 15-minute school safety demonstration.\n\nSincerely,\nRoger\nTradeSage Safety Team',
+       'Dear {{contact_name}},\n\nStudent safety during daily commutes is a top priority for parents. Our School Bus Management System delivers instant RFID boarding SMS alerts and a parent mobile app with real-time arrival countdowns.\n\nWe would love to share a 15-minute school safety demonstration.\n\nSincerely,\nMark\nMarketech.ai Safety Team',
        'Academy Administrators & School Fleet Directors', 35, 4, 'Active', ?)`,
       [now]
     );
@@ -1070,7 +1070,7 @@ async function initDatabase() {
         ]
       },
       {
-        name: 'TradeSage AI Marketing & Executive Voice OS',
+        name: 'Marketech.ai Marketing & Executive Voice OS',
         url: 'https://tradesage.ai',
         tagline: 'Autonomous AI Telephony, Lead Qualification, Visual Email Outreach & Campaign Engine',
         description: 'Executive AI operating system combining Telnyx inbound voice receptionists, intelligent lead qualification scoring, visual HTML outreach emails, and human-in-the-loop approved draft automations.',
@@ -1168,14 +1168,14 @@ async function initDatabase() {
       process.env.IMAP_TLS === 'false' ? 0 : 1,
       process.env.IMAP_USER || process.env.SMTP_USER || '',
       process.env.IMAP_PASS || process.env.SMTP_PASS || '',
-      process.env.MAIL_FROM_NAME || 'Roger Executive Team',
+      process.env.MAIL_FROM_NAME || 'Mark Executive Team',
       process.env.MAIL_FROM_ADDRESS || process.env.SMTP_USER || 'executive@thrivewoo.com',
       (process.env.SMTP_USER && process.env.SMTP_PASS) ? 'Connected' : 'Not Configured',
       now, now
     ]);
   }
 
-  console.log('TradeSage B2B Assistant Database initialized and seeded successfully.');
+  console.log('Marketech.ai Database initialized and seeded successfully.');
 }
 
 // MySQL Live Integration Helper for Traivo (thrivewoo)
