@@ -420,13 +420,20 @@ async function syncIncomingEmails(workspaceId = 1) {
     };
   } catch (err) {
     console.error('IMAP sync error:', err.message);
+    const fullErr = (err.response || err.responseText || err.message || '').toString();
+    const isImapDisabled = fullErr.includes('enable IMAP') || fullErr.includes('contact your administrator');
     const isAuthErr = err.authenticationFailed || 
       err.serverResponseCode === 'AUTHENTICATIONFAILED' ||
-      (err.message && (err.message.includes('AUTHENTICATIONFAILED') || err.message.includes('Invalid credentials') || err.message.includes('Command failed')));
+      fullErr.includes('AUTHENTICATIONFAILED') || fullErr.includes('Invalid credentials');
 
-    const friendlyError = isAuthErr
-      ? 'Zoho Mail authentication failed. Please enter your valid Zoho Mail App Password in Mail Auth Settings.'
-      : `IMAP connection error (${config.imap_host}): ${err.message}`;
+    let friendlyError;
+    if (isImapDisabled) {
+      friendlyError = 'Zoho Mail notice: IMAP Access is disabled in your Zoho account. In Zoho Mail, go to Settings > Mail Accounts > IMAP Access and enable it.';
+    } else if (isAuthErr) {
+      friendlyError = 'Zoho Mail authentication failed. Please check your Zoho Mail App Password in Mail Auth Settings.';
+    } else {
+      friendlyError = `IMAP connection error (${config.imap_host}): ${err.message}`;
+    }
 
     return {
       success: false,
