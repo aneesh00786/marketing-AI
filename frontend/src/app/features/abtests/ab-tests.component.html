@@ -1,0 +1,147 @@
+<section class="cc">
+  <div *ngIf="error" class="alert" role="alert">{{ error }} <button class="link-btn" (click)="error = ''">Dismiss</button></div>
+
+  <!-- ============================== LIST ============================== -->
+  <ng-container *ngIf="view === 'list'">
+    <div class="head">
+      <div>
+        <h2>A/B tests</h2>
+        <p class="muted">Test an email's subject and body, or two variants of a social post. Choose the success metric and the minimum sample before the test starts; a winner is only declared when real results show a statistically significant difference.</p>
+      </div>
+      <button class="btn btn-primary" (click)="startNew()">＋ New A/B test</button>
+    </div>
+    <div *ngIf="!tests.length" class="empty">No A/B tests yet.</div>
+    <div class="table-wrap" *ngIf="tests.length">
+      <table class="tbl">
+        <thead><tr><th>Test</th><th>Type</th><th>Metric</th><th>Status</th><th>Result</th></tr></thead>
+        <tbody>
+          <tr *ngFor="let t of tests" class="clickable" (click)="open(t.id)">
+            <td><strong>{{ t.name }}</strong><div class="muted small" *ngIf="t.hypothesis">{{ t.hypothesis }}</div></td>
+            <td>{{ t.kind === 'email' ? 'Email · step ' + t.stepOrder : 'Social post' }}</td>
+            <td>{{ t.metricLabel }} <span class="muted small">({{ t.direction }} is better)</span></td>
+            <td><span class="badge" [attr.data-s]="t.status">{{ statusLabel(t.status) }}</span></td>
+            <td>{{ t.status === 'concluded' ? (t.winner ? 'Winner: ' + t.winner : 'No winner') : recLabel(t.recommendation) }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </ng-container>
+
+  <!-- ============================== NEW ============================== -->
+  <ng-container *ngIf="view === 'new'">
+    <div class="head"><div><button class="link-btn" (click)="back()">← A/B tests</button><h2>New A/B test</h2></div></div>
+    <div class="card grid2">
+      <div class="field span2"><span>What to test</span>
+        <div class="chips">
+          <button type="button" class="chip" [class.on]="form.kind === 'email'" (click)="setKind('email')">✉ Email subject/body</button>
+          <button type="button" class="chip" [class.on]="form.kind === 'social'" (click)="setKind('social')">📣 Social post variants</button>
+        </div>
+      </div>
+      <label class="field"><span>Test name</span><input class="hud-input" [(ngModel)]="form.name" maxlength="255" placeholder="e.g. Question vs. benefit subject" /></label>
+      <label class="field"><span>Hypothesis (optional)</span><input class="hud-input" [(ngModel)]="form.hypothesis" maxlength="1000" placeholder="e.g. A question subject gets more replies" /></label>
+
+      <ng-container *ngIf="form.kind === 'email'">
+        <label class="field"><span>Email sequence (drafts only, nothing sent yet)</span>
+          <select class="hud-input" [(ngModel)]="form.emailCampaignId"><option [ngValue]="null">Choose…</option><option *ngFor="let c of emailCampaigns" [ngValue]="c.id">{{ c.name }}</option></select>
+        </label>
+        <label class="field"><span>Email to test</span>
+          <select class="hud-input" [(ngModel)]="form.stepOrder"><option *ngFor="let n of [1,2,3,4,5]" [ngValue]="n">Email {{ n }}</option></select>
+        </label>
+        <label class="field"><span>Success metric</span>
+          <select class="hud-input" [(ngModel)]="form.metric"><option *ngFor="let k of objectKeys(meta.emailMetrics)" [value]="k">{{ meta.emailMetrics[k].label }} ({{ meta.emailMetrics[k].direction }} is better)</option></select>
+        </label>
+        <label class="field"><span>Minimum recipients per variant</span><input class="hud-input" type="number" min="30" max="10000" [(ngModel)]="form.minSamplePerVariant" /></label>
+        <label class="field"><span>Wait before counting (days)</span><input class="hud-input" type="number" min="0" max="30" [(ngModel)]="form.waitDays" /></label>
+        <label class="field"><span>Significance level</span><select class="hud-input" [(ngModel)]="form.alpha"><option *ngFor="let a of meta.alphas" [ngValue]="a">p &lt; {{ a }}</option></select></label>
+        <label class="field span2"><span>Variant B subject (or write it with AI after creating the test)</span><input class="hud-input" [(ngModel)]="form.variantSubject" maxlength="200" /></label>
+        <label class="field span2"><span>Variant B body</span><textarea class="hud-textarea" rows="5" [(ngModel)]="form.variantBody" maxlength="5000" placeholder="Hi {{ '{{first_name}}' }}, …"></textarea></label>
+        <p class="muted small span2">Opens and clicks are not tracked, so tests use replies or unsubscribes. Replies are detected from your mailbox sync (IMAP). The test locks and recipients are split evenly when you approve the sequence.</p>
+        <div *ngIf="!emailCampaigns.length" class="note small span2">No draft email sequences. Create one under Email sequences first.</div>
+      </ng-container>
+
+      <ng-container *ngIf="form.kind === 'social'">
+        <label class="field"><span>Social campaign</span>
+          <select class="hud-input" [(ngModel)]="form.socialCampaignId" (ngModelChange)="loadGroups()"><option [ngValue]="null">Choose…</option><option *ngFor="let c of socialCampaigns" [ngValue]="c.id">{{ c.name }}</option></select>
+        </label>
+        <label class="field"><span>Post with A/B variants</span>
+          <select class="hud-input" [(ngModel)]="form.variantGroup" [disabled]="!groups.length">
+            <option value="">{{ form.socialCampaignId ? (groups.length ? 'Choose…' : 'No A/B variants in this campaign') : 'Choose a campaign first' }}</option>
+            <option *ngFor="let g of groups" [value]="g.variantGroup" [disabled]="!g.testable">{{ g.title || g.variantGroup }} · {{ g.platform }} · {{ g.labels.join('/') }}{{ g.testable ? '' : ' (already published)' }}</option>
+          </select>
+        </label>
+        <label class="field"><span>Success metric</span>
+          <select class="hud-input" [(ngModel)]="form.metric"><option *ngFor="let k of objectKeys(meta.socialMetrics)" [value]="k">{{ meta.socialMetrics[k].label }}</option></select>
+        </label>
+        <label class="field"><span>Minimum impressions per variant</span><input class="hud-input" type="number" min="100" [(ngModel)]="form.minSamplePerVariant" /></label>
+        <label class="field"><span>Significance level</span><select class="hud-input" [(ngModel)]="form.alpha"><option *ngFor="let a of meta.alphas" [ngValue]="a">p &lt; {{ a }}</option></select></label>
+        <p class="muted small span2">Variants come from Social Media Marketing's AI (A/B per post). Each variant is still reviewed, approved and published there. Results use platform-reported impressions, engagements and clicks only.</p>
+      </ng-container>
+    </div>
+    <div class="actions"><button class="btn btn-secondary" (click)="back()">Cancel</button><button class="btn btn-primary" (click)="create()" [disabled]="busy === 'create'">{{ busy === 'create' ? 'Creating…' : 'Create test (locks metric & sample)' }}</button></div>
+  </ng-container>
+
+  <!-- ============================== DETAIL ============================== -->
+  <ng-container *ngIf="view === 'detail' && test">
+    <div class="head">
+      <div>
+        <button class="link-btn" (click)="back()">← A/B tests</button>
+        <h2>{{ test.name }} <span class="badge" [attr.data-s]="test.status">{{ statusLabel(test.status) }}</span></h2>
+        <p class="muted small">{{ test.kind === 'email' ? 'Email ' + test.stepOrder + ' of the sequence' : 'Social post variants' }} · {{ test.metricLabel }} ({{ test.direction }} is better) ·
+          min {{ test.minSamplePerVariant | number }} {{ test.kind === 'email' ? 'recipients' : 'impressions' }} per variant · p &lt; {{ test.alpha }}{{ test.kind === 'email' ? ' · counted after ' + test.waitDays + ' day(s)' : '' }}</p>
+        <p *ngIf="test.hypothesis" class="small">Hypothesis: {{ test.hypothesis }}</p>
+      </div>
+      <div class="row">
+        <button *ngIf="test.kind === 'email' && test.emailCampaignId" class="btn btn-secondary" (click)="openEmailCampaign.emit(test.emailCampaignId)">Open sequence</button>
+        <button *ngIf="test.kind === 'social' && test.socialCampaignId" class="btn btn-secondary" (click)="openSocialCampaign.emit(test.socialCampaignId)">Open in Social</button>
+        <button *ngIf="['draft', 'running'].includes(test.status)" class="btn btn-secondary" (click)="cancel()">Cancel test</button>
+      </div>
+    </div>
+
+    <div class="variants">
+      <div class="variant" *ngFor="let l of ['A', 'B']">
+        <h3>Variant {{ l }} <span class="muted small" *ngIf="l === 'A' && test.kind === 'email'">(original)</span></h3>
+        <ng-container *ngIf="test.kind === 'email'">
+          <ng-container *ngIf="l === 'A'"><p><b>{{ test.content?.A?.subject || '—' }}</b></p><pre>{{ test.content?.A?.body }}</pre></ng-container>
+          <ng-container *ngIf="l === 'B'">
+            <ng-container *ngIf="test.status === 'draft'; else lockedB">
+              <input class="hud-input" [(ngModel)]="variantEdit.subject" maxlength="200" placeholder="Variant B subject" />
+              <textarea class="hud-textarea" rows="6" [(ngModel)]="variantEdit.body" maxlength="5000" placeholder="Variant B body"></textarea>
+              <div class="flags" *ngIf="test.content?.B?.needsVerification?.length">⚠️ Not in your facts: {{ test.content.B.needsVerification.join(', ') }}</div>
+              <div class="row">
+                <button class="btn btn-secondary" (click)="generateVariant()" [disabled]="busy === 'generate'">{{ busy === 'generate' ? 'Writing…' : '⚡ Write with AI' }}</button>
+                <button class="btn btn-primary" (click)="saveVariant()" [disabled]="busy === 'variant'">Save variant B</button>
+              </div>
+            </ng-container>
+            <ng-template #lockedB><p><b>{{ test.content?.B?.subject || '—' }}</b></p><pre>{{ test.content?.B?.body }}</pre></ng-template>
+          </ng-container>
+        </ng-container>
+        <ng-container *ngIf="test.kind === 'social'">
+          <p class="muted small">{{ test.content?.[l]?.status || 'missing' }}</p>
+          <p><b>{{ test.content?.[l]?.title }}</b></p><pre>{{ test.content?.[l]?.caption }}</pre>
+        </ng-container>
+
+        <div class="vstats" *ngIf="test.result?.variants?.[l] as v">
+          <div><span>{{ test.kind === 'email' ? 'Counted' : 'Impressions' }}</span><b>{{ v.n | number }}</b></div>
+          <div><span>{{ test.kind === 'email' ? (test.metric === 'reply_rate' ? 'Replies' : 'Unsubscribes') : (test.metric === 'click_rate' ? 'Clicks' : 'Engagements') }}</span><b>{{ v.events | number }}</b></div>
+          <div><span>Rate</span><b>{{ pct(v.rate) }}</b></div>
+          <div *ngIf="test.kind === 'email'"><span>Emailed / assigned</span><b>{{ v.emailed }} / {{ v.assigned }}</b></div>
+          <p class="muted small span-all" *ngIf="v.unavailable">{{ v.unavailable }}</p>
+          <p class="muted small span-all" *ngIf="v.capped">Platform counted more actions than impressions; capped at impressions for the test.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="decision" *ngIf="test.result?.decision as d" [attr.data-r]="d.recommendation">
+      <h3>{{ test.status === 'concluded' ? (test.winner ? 'Concluded: variant ' + test.winner + ' won' : 'Concluded without a winner') : recLabel(d.recommendation) }}</h3>
+      <p *ngIf="d.recommendation === 'winner' && test.status !== 'concluded'">Variant <b>{{ d.leader }}</b> performs better and the difference is statistically significant (p = {{ d.pValue | number:'1.3-3' }} &lt; {{ d.alpha }}).</p>
+      <p *ngIf="d.pValue !== null && d.pValue !== undefined && d.recommendation !== 'winner'" class="small">Current p-value: {{ d.pValue | number:'1.3-3' }} (needs &lt; {{ d.alpha }}).<span *ngIf="d.observedLeader"> {{ d.observedLeader }} is ahead, but that may be chance.</span></p>
+      <p *ngFor="let r of d.reasons" class="small">{{ r }}</p>
+      <p class="muted small">Two-proportion z-test on the real counts above. No conversions or confidence are estimated.</p>
+      <div class="actions" *ngIf="test.status === 'running'">
+        <button class="btn btn-secondary" (click)="conclude('no_winner')" [disabled]="busy === 'conclude'">End without winner</button>
+        <button class="btn btn-primary" (click)="conclude('winner')" [disabled]="d.recommendation !== 'winner' || busy === 'conclude'">Declare variant {{ d.leader || '…' }} the winner</button>
+      </div>
+    </div>
+    <div class="note small" *ngIf="test.status === 'draft'">The test starts when the email sequence is approved (Email sequences → Review & launch). Variant B goes through the same claim checks.</div>
+  </ng-container>
+</section>

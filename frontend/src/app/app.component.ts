@@ -9,13 +9,14 @@ import { AuthStateService } from './core/auth-state.service';
 import { ThemeService } from './core/theme.service';
 import { LoginComponent } from './core/login.component';
 import { SocialHubComponent } from './features/social/social-hub.component';
+import { CommandCenterComponent } from './features/command/command-center.component';
 import { IconComponent } from './shared/icon.component';
 import { DashboardComponent, DashboardNavigation } from './features/dashboard/dashboard.component';
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [CommonModule, FormsModule, LoginComponent, SocialHubComponent, IconComponent, DashboardComponent],
+  imports: [CommonModule, FormsModule, LoginComponent, SocialHubComponent, CommandCenterComponent, IconComponent, DashboardComponent],
   templateUrl: './app.component.html',
   styleUrls: ['./app.component.css']
 })
@@ -50,7 +51,7 @@ export class AppComponent implements OnInit, OnDestroy {
       label: 'Market',
       items: [
         { route: 'social', label: 'Social Media Marketing', icon: 'social', subtitle: 'Accounts, campaigns, publishing and real analytics' },
-        { route: 'businesses', label: 'AI Campaigns', icon: 'campaigns', subtitle: 'Business playbooks and AI campaign ideas' }
+        { route: 'businesses', label: 'AI Campaigns', icon: 'campaigns', subtitle: 'Campaign Command Center: AI strategy, audience, email and social' }
       ]
     },
     {
@@ -78,7 +79,6 @@ export class AppComponent implements OnInit, OnDestroy {
       leads: this.leadTotal || this.leads.length,
       emails: this.emails.length,
       drafts: this.drafts.length,
-      businesses: this.connectedBusinesses.length,
       appointments: this.appointments.length
     };
     return route in counts ? counts[route] : null;
@@ -89,6 +89,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.socialSection = null;
     this.socialCampaignId = null;
     this.socialLibraryStatus = null;
+    this.showPlaybooks = false;
     this.currentRoute = route;
     this.mobileNavOpen = false;
     this.openMenu = null;
@@ -148,6 +149,8 @@ export class AppComponent implements OnInit, OnDestroy {
 
   // Company Mail Authorization State (SMTP & IMAP)
   showMailConfigModal: boolean = false;
+  // AI Campaigns opens on email campaigns; the older idea playbooks are one click away.
+  showPlaybooks = false;
   mailConfig: any = {
     provider: 'custom_smtp',
     smtp_host: 'smtp.gmail.com',

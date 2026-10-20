@@ -1,0 +1,19 @@
+.wf { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 14px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.steps-list { margin: 0; padding-left: 18px; line-height: 1.6; }
+.step-card { border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-elev); padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.step-head { display: flex; align-items: center; gap: 8px; }
+.step-head b { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--accent-soft); color: var(--accent-text); font-size: 0.75rem; }
+.icon { background: var(--surface-2); border: 1px solid var(--border); color: var(--text); border-radius: 6px; width: 28px; height: 28px; cursor: pointer; flex-shrink: 0; }
+.icon:disabled { opacity: 0.4; cursor: not-allowed; }
+.cond { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 2fr) auto; gap: 8px; align-items: center; margin-bottom: 6px; }
+.hud-input.sm { width: auto; }
+.hud-input.xs { width: 90px; }
+code { background: var(--surface-2); padding: 1px 5px; border-radius: 4px; font-size: 0.8rem; }
+.tl { display: inline-block; font-size: 0.72rem; padding: 2px 7px; border-radius: 6px; margin: 0 4px 4px 0; background: var(--surface-2); }
+.tl[data-s='done'] { background: var(--success-soft); color: var(--success-text); }
+.tl[data-s='failed'], .tl[data-s='needs_review'], .tl[data-s='retry'] { background: var(--warning-soft); color: var(--warning-text); }
+.badge[data-s='active'], .badge[data-s='completed'] { background: var(--success-soft); color: var(--success-text); }
+.badge[data-s='waiting'], .badge[data-s='running'] { background: var(--info-soft); color: var(--info-text); }
+.badge[data-s='failed'], .badge[data-s='needs_review'] { background: var(--warning-soft); color: var(--warning-text); }
+.badge[data-s='paused'], .badge[data-s='exited'], .badge[data-s='skipped'] { background: var(--surface-2); color: var(--text-muted); }
+@media (max-width: 760px) { .cond { grid-template-columns: 1fr; } }

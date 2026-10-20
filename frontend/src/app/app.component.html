@@ -559,7 +559,10 @@
   <!-- =================================================================== -->
   <!-- TAB 5: AI CAMPAIGNS & MULTI-BUSINESS PLAYBOOKS -->
   <!-- =================================================================== -->
-  <section *ngIf="currentRoute === 'businesses'" class="hud-panel full-width-panel">
+  <app-command-center *ngIf="currentRoute === 'businesses' && !showPlaybooks" (toast)="showToast($event)" (openPlaybooks)="showPlaybooks = true"
+                      (openMailSettings)="showMailConfigModal = true" (openSocialCampaign)="onDashboardNavigate({ route: 'social', section: 'campaigns', campaignId: $event })"></app-command-center>
+  <section *ngIf="currentRoute === 'businesses' && showPlaybooks" class="hud-panel full-width-panel">
+    <button class="btn btn-secondary btn-sm" style="align-self: flex-start; margin-bottom: 10px;" (click)="showPlaybooks = false">← AI Campaigns</button>
     <div class="panel-header">
       <div>
         <h2>AI campaign playbooks</h2>

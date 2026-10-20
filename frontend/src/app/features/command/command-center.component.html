@@ -1,0 +1,287 @@
+<section class="cc">
+  <div class="area-tabs" role="tablist" aria-label="AI Campaigns">
+    <button role="tab" [class.on]="area === 'campaigns'" (click)="showArea('campaigns')">🧭 Campaign Command Center</button>
+    <button role="tab" [class.on]="area === 'email'" (click)="showArea('email')">✉ Email sequences</button>
+    <button role="tab" [class.on]="area === 'abtests'" (click)="showArea('abtests')">⚖ A/B tests</button>
+    <button role="tab" [class.on]="area === 'automations'" (click)="showArea('automations')">⚙ Automations</button>
+    <button role="tab" [class.on]="area === 'analytics'" (click)="showArea('analytics')">📊 Analytics</button>
+    <span class="spacer"></span>
+    <button class="link-btn" (click)="openPlaybooks.emit()">Idea playbooks</button>
+  </div>
+
+  <!-- Existing email campaign engine, unchanged -->
+  <app-outreach *ngIf="area === 'email'" [playbooksAvailable]="false" [initialCampaignId]="emailCampaignToOpen"
+                (toast)="toast.emit($event)" (openMailSettings)="openMailSettings.emit()"></app-outreach>
+
+  <app-ab-tests *ngIf="area === 'abtests'" (toast)="toast.emit($event)" (openEmailCampaign)="showArea('email', $event)" (openSocialCampaign)="openSocialCampaign.emit($event)"></app-ab-tests>
+
+  <app-automations *ngIf="area === 'automations'" (toast)="toast.emit($event)"></app-automations>
+  <app-campaign-analytics *ngIf="area === 'analytics'"></app-campaign-analytics>
+
+  <ng-container *ngIf="area === 'campaigns'">
+    <div *ngIf="error" class="alert" role="alert">{{ error }} <button class="link-btn" (click)="error = ''">Dismiss</button></div>
+
+    <!-- ============================== LIST ============================== -->
+    <ng-container *ngIf="view === 'list'">
+      <div class="head">
+        <div>
+          <h2>Campaign Command Center</h2>
+          <p class="muted">Plan a campaign with AI from your verified product facts and real CRM data, pick the audience, then build coordinated email and social content. Nothing is sent or published until you approve it.</p>
+        </div>
+        <button class="btn btn-primary" (click)="startNew()">＋ New campaign</button>
+      </div>
+      <div class="flow">
+        <div><b>1</b> Strategist<small>AI brief, KPIs</small></div>
+        <div><b>2</b> Audience<small>Real CRM leads</small></div>
+        <div><b>3</b> Builder<small>Email + social</small></div>
+        <div><b>4</b> Overview<small>Approvals, results</small></div>
+      </div>
+      <div *ngIf="!programs.length" class="empty">No campaigns yet. Create your first one.</div>
+      <div class="cards" *ngIf="programs.length">
+        <button class="pcard" *ngFor="let p of programs" (click)="open(p.id)">
+          <div class="pcard-top"><strong>{{ p.name }}</strong><span class="badge" [attr.data-s]="p.status">{{ statusLabel(p.status) }}</span></div>
+          <div class="muted small">{{ productName(p.productId) }}</div>
+          <div class="chips"><span class="chip on" *ngFor="let c of p.channels">{{ channelLabels[c] || c }}</span></div>
+          <div class="small muted" *ngIf="p.summary.email || p.summary.social">
+            <span *ngIf="p.summary.email">Email: {{ p.summary.email }}</span>
+            <span *ngIf="p.summary.email && p.summary.social"> · </span>
+            <span *ngIf="p.summary.social">Social: {{ p.summary.social }}</span>
+          </div>
+        </button>
+      </div>
+    </ng-container>
+
+    <!-- ============================== NEW ============================== -->
+    <ng-container *ngIf="view === 'new'">
+      <div class="head"><div><button class="link-btn" (click)="back()">← Campaigns</button><h2>New campaign</h2></div></div>
+      <div class="card grid2">
+        <label class="field span2"><span>Campaign name</span><input class="hud-input" [(ngModel)]="form.name" maxlength="255" placeholder="e.g. RouteKit Q1 launch" /></label>
+        <label class="field"><span>Product (the only facts AI may use)</span>
+          <select class="hud-input" [(ngModel)]="form.productId">
+            <option [ngValue]="null">No product (goal only)</option>
+            <option *ngFor="let p of products" [ngValue]="p.id">{{ p.name }}</option>
+          </select>
+        </label>
+        <label class="field"><span>Tone</span><select class="hud-input" [(ngModel)]="form.tone"><option *ngFor="let t of tones" [value]="t">{{ t }}</option></select></label>
+        <label class="field span2"><span>Campaign goal</span><textarea class="hud-textarea" rows="2" [(ngModel)]="form.goal" maxlength="2000" placeholder="e.g. Book 20-minute intro calls with logistics teams"></textarea></label>
+        <label class="field span2"><span>Target audience</span><input class="hud-input" [(ngModel)]="form.targetAudience" maxlength="2000" placeholder="e.g. Operations managers at courier companies" /></label>
+        <div class="field span2"><span>Channels</span>
+          <div class="chips"><button type="button" *ngFor="let c of channelKeys" class="chip" [class.on]="form.channels.includes(c)" (click)="toggleChannel(c)">{{ channelLabels[c] }}</button></div>
+        </div>
+        <div class="field"><span>Budget (optional)</span>
+          <div class="row"><input class="hud-input" type="number" min="0" [(ngModel)]="form.budgetAmount" placeholder="Amount" /><select class="hud-input cur" [(ngModel)]="form.budgetCurrency"><option *ngFor="let c of currencies" [value]="c">{{ c }}</option></select></div>
+        </div>
+        <label class="field"><span>Budget note</span><input class="hud-input" [(ngModel)]="form.budgetNote" maxlength="500" placeholder="e.g. Organic only, no paid ads" /></label>
+        <label class="field"><span>Start date</span><input class="hud-input" type="date" [(ngModel)]="form.startDate" /></label>
+        <label class="field"><span>End date</span><input class="hud-input" type="date" [(ngModel)]="form.endDate" /></label>
+      </div>
+      <div class="actions"><button class="btn btn-secondary" (click)="back()">Cancel</button><button class="btn btn-primary" (click)="create()" [disabled]="busy === 'create'">{{ busy === 'create' ? 'Creating…' : 'Create and plan →' }}</button></div>
+    </ng-container>
+
+    <!-- ============================== DETAIL ============================== -->
+    <ng-container *ngIf="view === 'detail' && program">
+      <div class="head">
+        <div>
+          <button class="link-btn" (click)="back()">← Campaigns</button>
+          <h2>{{ program.name }} <span class="badge" [attr.data-s]="program.status">{{ statusLabel(program.status) }}</span></h2>
+          <p class="muted small">{{ program.product?.name || (program.productMissing ? 'Product removed' : 'No product') }} · {{ program.tone }} ·
+            <span *ngFor="let c of program.channels; let last = last">{{ channelLabels[c] || c }}{{ last ? '' : ', ' }}</span>
+            <span *ngIf="program.budget"> · Budget {{ program.budget.amount !== null ? (program.budget.amount | number) + ' ' + program.budget.currency : '' }} {{ program.budget.note || '' }}</span>
+            <span *ngIf="program.startDate"> · {{ program.startDate }} → {{ program.endDate || 'open' }}</span>
+          </p>
+        </div>
+        <div class="row">
+          <button *ngIf="program.status !== 'archived'" class="btn btn-secondary" (click)="archive()">Archive</button>
+          <button *ngIf="!program.emailCampaignId && !program.socialCampaignId" class="btn btn-secondary" (click)="remove()">Delete</button>
+        </div>
+      </div>
+
+      <div class="steps" role="tablist">
+        <button role="tab" [class.on]="step === 'strategist'" [class.done]="stepDone('strategist')" (click)="setStep('strategist')"><b>1</b> Strategist</button>
+        <button role="tab" [class.on]="step === 'audience'" [class.done]="stepDone('audience')" (click)="setStep('audience')"><b>2</b> Audience <span class="muted">({{ program.leadIds.length }})</span></button>
+        <button role="tab" [class.on]="step === 'build'" [class.done]="stepDone('build')" (click)="setStep('build')"><b>3</b> Builder</button>
+        <button role="tab" [class.on]="step === 'overview'" (click)="setStep('overview')"><b>4</b> Overview</button>
+      </div>
+
+      <!-- -------- Strategist -------- -->
+      <div *ngIf="step === 'strategist'" class="panel">
+        <div class="row">
+          <button *ngIf="!briefLocked" class="btn btn-primary" (click)="generateBrief()" [disabled]="busy === 'brief'">{{ busy === 'brief' ? 'Writing brief with AI…' : (program.brief ? '↻ Regenerate brief' : '⚡ Generate strategy brief') }}</button>
+          <span class="muted small">Uses only your product facts, your inputs and real CRM counts. KPI targets stay empty unless your goal states one.</span>
+        </div>
+        <div *ngIf="!program.brief" class="empty">No brief yet.</div>
+
+        <ng-container *ngIf="program.brief && !editingBrief">
+          <div class="brief">
+            <section><h3>Objectives</h3><ul><li *ngFor="let o of program.brief.objectives">{{ o }}</li></ul></section>
+            <section><h3>Audience</h3><p>{{ program.brief.audience.summary }}</p><div class="chips"><span class="chip" *ngFor="let s of program.brief.audience.segments">{{ s }}</span></div></section>
+            <section class="span2"><h3>Messaging</h3>
+              <p><b>Value proposition:</b> {{ program.brief.messaging.value_proposition }}</p>
+              <ul><li *ngFor="let m of program.brief.messaging.key_messages">{{ m }}</li></ul>
+              <p *ngIf="program.brief.messaging.proof_points?.length"><b>Proof points (from your facts):</b> {{ program.brief.messaging.proof_points.join(' · ') }}</p>
+              <p *ngIf="program.brief.messaging.call_to_action"><b>Call to action:</b> {{ program.brief.messaging.call_to_action }}</p>
+            </section>
+            <section><h3>Content plan</h3>
+              <table class="tbl"><tbody><tr *ngFor="let c of program.brief.content_plan"><td><span class="chip on">{{ channelLabels[c.channel] || c.channel }}</span></td><td>{{ c.count }} × {{ c.format }}<div class="muted small">{{ c.purpose }}</div></td></tr></tbody></table>
+            </section>
+            <section><h3>KPIs</h3>
+              <table class="tbl"><tbody><tr *ngFor="let k of program.brief.kpis"><td><b>{{ k.name }}</b><div class="muted small">{{ kpiMetrics[k.metric] }}</div></td><td class="right">{{ k.target || 'No target set' }}</td></tr></tbody></table>
+            </section>
+            <section class="span2"><h3>Timeline</h3>
+              <div class="timeline">
+                <div class="tl-row" *ngFor="let ph of program.brief.timeline">
+                  <span class="tl-label">{{ ph.phase }} <span class="muted small">day {{ ph.start_day }}–{{ ph.end_day }}</span></span>
+                  <div class="tl-track"><div class="tl-bar" [style.left.%]="phaseOffset(ph)" [style.width.%]="phaseWidth(ph)"></div></div>
+                  <div class="muted small tl-acts">{{ ph.activities.join(' · ') }}</div>
+                </div>
+              </div>
+            </section>
+            <section class="span2" *ngIf="program.brief.gaps?.length"><h3>Missing information</h3><ul><li *ngFor="let g of program.brief.gaps">{{ g }}</li></ul></section>
+          </div>
+          <div class="flags" *ngIf="program.briefFlags.length">⚠️ Not in your facts, verify or edit: <b>{{ program.briefFlags.join(', ') }}</b>
+            <label class="inline" *ngIf="!briefLocked"><input type="checkbox" [(ngModel)]="acknowledgeFlags" /> I have verified these</label>
+          </div>
+          <div class="actions" *ngIf="!briefLocked">
+            <button class="btn btn-secondary" (click)="startEditBrief()">Edit brief</button>
+            <button class="btn btn-primary" (click)="approveBrief()" [disabled]="busy === 'approve' || (program.briefFlags.length && !acknowledgeFlags)">✓ Approve brief</button>
+          </div>
+          <div class="note small" *ngIf="briefLocked">Brief approved {{ program.briefApprovedAt | date:'medium' }}.</div>
+        </ng-container>
+
+        <ng-container *ngIf="editingBrief && briefEdit">
+          <div class="grid2">
+            <label class="field"><span>Objectives (one per line)</span><textarea class="hud-textarea" rows="4" [(ngModel)]="briefEdit.objectives"></textarea></label>
+            <label class="field"><span>Audience summary</span><textarea class="hud-textarea" rows="4" [(ngModel)]="briefEdit.audienceSummary"></textarea></label>
+            <label class="field span2"><span>Value proposition</span><textarea class="hud-textarea" rows="2" [(ngModel)]="briefEdit.valueProposition"></textarea></label>
+            <label class="field"><span>Key messages (one per line)</span><textarea class="hud-textarea" rows="4" [(ngModel)]="briefEdit.keyMessages"></textarea></label>
+            <label class="field"><span>Proof points from your facts (one per line)</span><textarea class="hud-textarea" rows="4" [(ngModel)]="briefEdit.proofPoints"></textarea></label>
+            <label class="field span2"><span>Call to action</span><input class="hud-input" [(ngModel)]="briefEdit.cta" /></label>
+            <div class="field span2"><span>KPI targets (leave empty if you have none)</span>
+              <div class="kpi-edit" *ngFor="let k of briefEdit.kpis"><span>{{ k.name }}</span><input class="hud-input" [(ngModel)]="k.target" maxlength="100" placeholder="no target" /></div>
+            </div>
+          </div>
+          <div class="actions"><button class="btn btn-secondary" (click)="editingBrief = false">Cancel</button><button class="btn btn-primary" (click)="saveBrief()" [disabled]="busy === 'saveBrief'">Save brief</button></div>
+        </ng-container>
+      </div>
+
+      <!-- -------- Audience -------- -->
+      <div *ngIf="step === 'audience'" class="panel">
+        <div class="filters">
+          <div class="field"><span>Lead status</span>
+            <div class="chips"><button type="button" *ngFor="let s of leadStatuses" class="chip" [class.on]="audienceFilter.statuses.includes(s)" (click)="toggleStatus(s)">{{ s }}</button></div>
+          </div>
+          <label class="field"><span>Min. lead score</span><input class="hud-input" type="number" min="0" max="100" [(ngModel)]="audienceFilter.minScore" placeholder="any" /></label>
+          <label class="inline" *ngIf="program.productId"><input type="checkbox" [(ngModel)]="audienceFilter.anyProduct" /> Include leads not linked to {{ program.product?.name || 'this product' }}</label>
+          <button class="btn btn-secondary" (click)="previewAudience()" [disabled]="busy === 'audience'">{{ busy === 'audience' ? 'Finding…' : 'Find leads' }}</button>
+        </div>
+        <p class="muted small">Unsubscribed, bounced and suppressed contacts and invalid or placeholder emails are excluded automatically.</p>
+        <div *ngIf="audienceLoaded && !audience.length" class="empty">No CRM leads match. Try fewer filters{{ program.productId ? ' or include leads not linked to the product' : '' }}.</div>
+        <div class="table-wrap" *ngIf="audience.length">
+          <table class="tbl">
+            <thead><tr><th></th><th>Lead</th><th>Email</th><th>Score</th><th>Why they match</th></tr></thead>
+            <tbody>
+              <tr *ngFor="let a of audience" [class.dim]="!a.eligible">
+                <td><input type="checkbox" [disabled]="!a.eligible || briefLocked && program.status === 'built'" [checked]="audienceSelected.has(a.leadId)" (change)="toggleLead(a.leadId)" [attr.aria-label]="'Select ' + a.name" /></td>
+                <td>{{ a.name }}<div class="muted small">{{ a.company || '' }} {{ a.status ? '· ' + a.status : '' }}</div></td>
+                <td>{{ a.email || '—' }}</td>
+                <td>{{ a.score }} <span class="muted small">{{ a.category }}</span></td>
+                <td class="small"><span *ngIf="!a.eligible" class="warn-text">Excluded: {{ a.reason }}</span><span *ngIf="a.eligible">{{ a.reasons.join(' · ') || 'In your CRM' }}</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="actions" *ngIf="audience.length && program.status !== 'built' && program.status !== 'archived'">
+          <span class="muted small">{{ audienceSelected.size }} selected · {{ program.leadIds.length }} saved</span>
+          <button class="btn btn-primary" (click)="saveAudience()" [disabled]="busy === 'saveAudience'">Save audience</button>
+        </div>
+        <div class="note small" *ngIf="program.status === 'built'">The campaign is built: add or remove recipients in the email sequence.</div>
+      </div>
+
+      <!-- -------- Builder -------- -->
+      <div *ngIf="step === 'build'" class="panel">
+        <div *ngIf="!['approved', 'built'].includes(program.status)" class="note">Approve the brief first (step 1).</div>
+        <ng-container *ngIf="['approved', 'built'].includes(program.status)">
+          <div class="build-grid">
+            <div class="build-card" *ngIf="hasEmail">
+              <h3>✉ Email sequence</h3>
+              <p class="muted small">Creates a draft sequence in Email sequences for {{ program.leadIds.length }} saved lead(s); AI writes the emails from the approved brief. You approve sending there.</p>
+              <div *ngIf="program.emailCampaignId" class="ok-text small">Created · <button class="link-btn" (click)="showArea('email', program.emailCampaignId)">Open email sequence →</button></div>
+              <div *ngIf="buildResult?.email?.error" class="alert small">Email: {{ buildResult.email.error }}</div>
+            </div>
+            <div class="build-card" *ngIf="socialChannels.length">
+              <h3>📣 Social posts</h3>
+              <p class="muted small">Creates a campaign in Social Media Marketing for {{ socialChannels.length }} channel(s) and queues AI post writing (the background worker writes them). You review, approve and schedule there.</p>
+              <div *ngIf="program.socialCampaignId" class="ok-text small">Created · <button class="link-btn" (click)="openSocialCampaign.emit(program.socialCampaignId)">Open in Social Media Marketing →</button></div>
+              <div *ngIf="buildResult?.social?.error" class="alert small">Social: {{ buildResult.social.error }}</div>
+            </div>
+          </div>
+          <div *ngIf="hasEmail && !program.leadIds.length" class="flags">No audience saved: the email sequence is created without recipients (you can add them later).</div>
+          <div *ngIf="program.lastError" class="alert small">Last build: {{ program.lastError }}</div>
+          <div class="actions">
+            <button class="btn btn-primary" (click)="build()" [disabled]="busy === 'build'">
+              {{ busy === 'build' ? 'Building with AI…' : (program.status === 'built' ? (program.lastError ? '↻ Retry failed parts' : '↻ Re-run builder') : '⚙ Build campaign') }}
+            </button>
+          </div>
+        </ng-container>
+      </div>
+
+      <!-- -------- Overview -------- -->
+      <div *ngIf="step === 'overview'" class="panel">
+        <div *ngIf="!overview" class="muted">Loading…</div>
+        <ng-container *ngIf="overview">
+          <div class="ov-grid">
+            <div class="ov-card">
+              <h3>Status</h3>
+              <p>Brief: <b>{{ statusLabel(program.status) }}</b></p>
+              <p *ngIf="overview.email">Email: <b>{{ overview.email.missing ? 'removed' : overview.email.status }}</b> <span class="muted small" *ngIf="!overview.email.missing">· {{ overview.email.steps }} emails · {{ overview.email.stats.recipients }} recipients</span></p>
+              <p *ngIf="overview.social">Social: <b>{{ overview.social.missing ? 'removed' : overview.social.status }}</b> <span class="muted small" *ngIf="!overview.social.missing">· content {{ overview.social.generationStatus }}</span></p>
+              <p *ngIf="!overview.email && !overview.social" class="muted">Not built yet.</p>
+            </div>
+            <div class="ov-card">
+              <h3>Pending approvals <span class="count">{{ overview.approvals.length }}</span></h3>
+              <div *ngIf="!overview.approvals.length" class="muted small">Nothing waiting.</div>
+              <div class="item" *ngFor="let a of overview.approvals">
+                <span>{{ a.label }}</span>
+                <div *ngFor="let p of a.problems || []" class="muted small">· {{ p }}</div>
+                <button class="link-btn" (click)="goApproval(a)">Open →</button>
+              </div>
+            </div>
+            <div class="ov-card">
+              <h3>Scheduled</h3>
+              <div *ngIf="!overview.scheduled.length" class="muted small">Nothing scheduled.</div>
+              <div class="item" *ngFor="let s of overview.scheduled"><span class="chip on">{{ s.kind }}</span> {{ s.at | date:'MMM d, HH:mm' }}<div class="small">{{ s.label }}</div></div>
+            </div>
+            <div class="ov-card">
+              <h3>Failures <span class="count warn" *ngIf="overview.failures.length">{{ overview.failures.length }}</span></h3>
+              <div *ngIf="!overview.failures.length" class="muted small">No failures.</div>
+              <div class="item warn-text" *ngFor="let f of overview.failures"><span class="chip">{{ f.kind }}</span> {{ f.label }}</div>
+            </div>
+          </div>
+
+          <h3 class="sub">KPIs · actual results</h3>
+          <div class="table-wrap">
+            <table class="tbl">
+              <thead><tr><th>KPI</th><th>Measured as</th><th>Target</th><th class="right">Actual</th></tr></thead>
+              <tbody>
+                <tr *ngFor="let k of overview.kpis"><td><b>{{ k.name }}</b></td><td class="muted small">{{ k.definition }}</td><td>{{ k.target || '—' }}</td><td class="right"><b>{{ fmtMetric(k.actual, k.unit) }}</b></td></tr>
+                <tr *ngIf="!overview.kpis.length"><td colspan="4" class="muted">No KPIs in the brief.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="muted small">Actuals come only from real sends, CRM statuses and platform-reported metrics; "—" means not available yet. Opens and clicks are not tracked.</p>
+
+          <h3 class="sub">A/B tests</h3>
+          <div *ngIf="!overview.abTests?.length" class="muted small">No A/B tests on this campaign. <button class="link-btn" (click)="showArea('abtests')">Set one up →</button></div>
+          <div class="table-wrap" *ngIf="overview.abTests?.length">
+            <table class="tbl">
+              <thead><tr><th>Test</th><th>Metric</th><th>Status</th><th>Result</th></tr></thead>
+              <tbody><tr *ngFor="let t of overview.abTests"><td>{{ t.name }} <span class="muted small">({{ t.kind }})</span></td><td>{{ t.metricLabel }}</td><td>{{ t.status }}</td>
+                <td>{{ t.status === 'concluded' ? (t.winner ? 'Winner: ' + t.winner : 'No winner') : (t.recommendation === 'winner' ? 'Winner supported by data' : t.recommendation === 'no_difference' ? 'No significant difference' : 'Not enough data yet') }}</td></tr></tbody>
+            </table>
+          </div>
+          <div class="actions"><button class="btn btn-secondary" (click)="loadOverview()">↻ Refresh</button></div>
+        </ng-container>
+      </div>
+    </ng-container>
+  </ng-container>
+</section>

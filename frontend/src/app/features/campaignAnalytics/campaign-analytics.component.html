@@ -1,0 +1,175 @@
+<section class="cc">
+  <div class="head">
+    <div>
+      <h2>Campaign analytics</h2>
+      <p class="muted">Real email, social and CRM results. Hover any number to see how it was measured.</p>
+    </div>
+    <div class="row">
+      <select class="hud-input sm" [(ngModel)]="range" (ngModelChange)="load()" aria-label="Period">
+        <option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="365">Last 12 months</option>
+      </select>
+      <select class="hud-input sm" [(ngModel)]="conversionStatus" (ngModelChange)="load()" aria-label="Conversion stage">
+        <option *ngFor="let s of ['Qualified', 'Demo Scheduled', 'Proposal', 'Won']" [value]="s">Conversion = {{ s }}</option>
+      </select>
+      <button class="btn btn-secondary" (click)="load()" [disabled]="loading">↻</button>
+    </div>
+  </div>
+
+  <div class="legend small">
+    <span><b>123</b> real value (0 is a real zero)</span>
+    <span><b>—</b> not available (hover for why)</span>
+    <span><span class="tag partial">partial</span> only some posts reported it</span>
+    <span><span class="tag estimate">estimate</span> attribution, an association not proof</span>
+  </div>
+
+  <div *ngIf="error" class="alert" role="alert">{{ error }}</div>
+  <div *ngIf="loading && !data" class="muted">Loading…</div>
+
+  <ng-container *ngIf="data">
+    <div class="quality" *ngIf="!data.dataQuality.replyTracking.on || data.dataQuality.demoSources.length">
+      <div *ngIf="!data.dataQuality.replyTracking.on" class="note small">✉ {{ data.dataQuality.replyTracking.reason }}</div>
+      <div *ngIf="data.dataQuality.demoSources.length" class="flags">⚠️ Some social metrics come from non-live sources ({{ data.dataQuality.demoSources.join(', ') }}); treat them as samples.</div>
+    </div>
+
+    <!-- Channels -->
+    <div class="channels">
+      <div class="ch">
+        <h3>✉ Email sequences</h3>
+        <div class="kv"><span>Emails sent</span><b [title]="tip(data.channels.email.emailsSent)">{{ fmt(data.channels.email.emailsSent) }}</b></div>
+        <div class="kv"><span>Recipients emailed</span><b [title]="tip(data.channels.email.recipientsEmailed)">{{ fmt(data.channels.email.recipientsEmailed) }}</b></div>
+        <div class="kv"><span>Reply rate</span><b [title]="tip(data.channels.email.replyRate)">{{ fmt(data.channels.email.replyRate, 'rate') }}</b></div>
+        <div class="kv"><span>Bounce rate</span><b [title]="tip(data.channels.email.bounceRate)">{{ fmt(data.channels.email.bounceRate, 'rate') }}</b></div>
+        <div class="kv"><span>Unsubscribe rate</span><b [title]="tip(data.channels.email.unsubscribeRate)">{{ fmt(data.channels.email.unsubscribeRate, 'rate') }}</b></div>
+        <div class="kv"><span>Failed sends</span><b>{{ fmt(data.channels.email.emailsFailed) }}</b></div>
+        <div class="kv muted"><span>Opens / clicks</span><b title="Email opens and clicks are not tracked.">— / —</b></div>
+      </div>
+      <div class="ch">
+        <h3>📣 Social</h3>
+        <div class="kv"><span>Posts published</span><b>{{ fmt(data.channels.social.postsPublished) }}</b></div>
+        <div class="kv"><span>Impressions</span><b [title]="tip(data.channels.social.impressions)">{{ fmt(data.channels.social.impressions) }} <span *ngIf="data.channels.social.impressions.status === 'partial'" class="tag partial">partial</span></b></div>
+        <div class="kv"><span>Reach</span><b [title]="tip(data.channels.social.reach)">{{ fmt(data.channels.social.reach) }} <span *ngIf="data.channels.social.reach.status === 'partial'" class="tag partial">partial</span></b></div>
+        <div class="kv"><span>Engagements</span><b [title]="tip(data.channels.social.engagements)">{{ fmt(data.channels.social.engagements) }} <span *ngIf="data.channels.social.engagements.status === 'partial'" class="tag partial">partial</span></b></div>
+        <div class="kv"><span>Engagement rate</span><b [title]="tip(data.channels.social.engagementRate)">{{ fmt(data.channels.social.engagementRate, 'rate') }} <span *ngIf="data.channels.social.engagementRate.status === 'partial'" class="tag partial">partial</span></b></div>
+        <div class="kv"><span>Clicks</span><b [title]="tip(data.channels.social.clicks)">{{ fmt(data.channels.social.clicks) }}</b></div>
+      </div>
+      <div class="ch">
+        <h3>👥 CRM outcomes</h3>
+        <div class="kv"><span>Leads created</span><b>{{ fmt(data.channels.crm.leadsCreated) }}</b></div>
+        <div class="kv"><span>Conversions ({{ data.settings.conversionStatus }})</span><b [title]="tip(data.channels.crm.conversions)">{{ fmt(data.channels.crm.conversions) }}</b></div>
+        <div class="kv muted"><span>Revenue</span><b [title]="data.attribution.revenue.reason">—</b></div>
+        <div class="kv muted"><span>ROI</span><b [title]="data.attribution.roi.reason">—</b></div>
+        <div class="status-snap small"><span *ngFor="let e of statusEntries()" class="chip">{{ e[0] }}: {{ e[1] }}</span></div>
+        <div class="muted small">Status counts are current totals, not limited to the period.</div>
+      </div>
+    </div>
+
+    <!-- Trends -->
+    <div class="panel">
+      <div class="row">
+        <h3 class="sub">Trend</h3>
+        <div class="chips"><button *ngFor="let o of trendOptions" type="button" class="chip" [class.on]="trendKey === o.key" (click)="trendKey = o.key">{{ o.label }}</button></div>
+      </div>
+      <div *ngIf="trendUnavailable" class="empty">{{ trendUnavailable }}</div>
+      <app-line-chart *ngIf="!trendUnavailable" [points]="trendPoints" [seriesLabel]="trendKey" [height]="220" [ariaLabel]="'Daily ' + trendKey"></app-line-chart>
+      <p class="muted small" *ngIf="trendKey === 'engagements'">{{ data.trends.notes.engagements }}</p>
+    </div>
+
+    <!-- Email comparison -->
+    <div class="panel">
+      <h3 class="sub">Email sequences compared</h3>
+      <div *ngIf="!data.comparisons.email.length" class="empty">No email activity in this period.</div>
+      <div class="table-wrap" *ngIf="data.comparisons.email.length">
+        <table class="tbl">
+          <thead><tr><th>Sequence</th><th class="right">Sent</th><th class="right">Emailed</th><th class="right">Reply rate</th><th class="right">Bounce</th><th class="right">Unsub.</th><th class="right">Conversions <span class="tag estimate">estimate</span></th></tr></thead>
+          <tbody>
+            <tr *ngFor="let c of data.comparisons.email">
+              <td><b>{{ c.name }}</b><div class="muted small">{{ c.status }}</div></td>
+              <td class="right">{{ fmt(c.emailsSent) }}</td>
+              <td class="right">{{ fmt(c.recipientsEmailed) }}</td>
+              <td class="right" [title]="tip(c.replyRate)">{{ fmt(c.replyRate, 'rate') }}<span *ngIf="c.replyRate.smallSample" class="muted small"> (small)</span></td>
+              <td class="right" [title]="tip(c.bounceRate)">{{ fmt(c.bounceRate, 'rate') }}</td>
+              <td class="right" [title]="tip(c.unsubscribeRate)">{{ fmt(c.unsubscribeRate, 'rate') }}</td>
+              <td class="right" [title]="tip(c.attributedConversions)">{{ fmt(c.attributedConversions) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Social comparison -->
+    <div class="panel">
+      <h3 class="sub">Social campaigns compared</h3>
+      <div *ngIf="!data.comparisons.social.length" class="empty">No posts published in this period.</div>
+      <div class="table-wrap" *ngIf="data.comparisons.social.length">
+        <table class="tbl">
+          <thead><tr><th>Campaign</th><th class="right">Posts</th><th class="right">Impressions</th><th class="right">Engagements</th><th class="right">Eng. rate</th><th class="right">Clicks</th></tr></thead>
+          <tbody>
+            <tr *ngFor="let c of data.comparisons.social">
+              <td><b>{{ c.name }}</b></td>
+              <td class="right">{{ fmt(c.postsPublished) }}</td>
+              <td class="right" [title]="tip(c.impressions)">{{ fmt(c.impressions) }}<span *ngIf="c.impressions.status === 'partial'" class="tag partial">partial</span></td>
+              <td class="right" [title]="tip(c.engagements)">{{ fmt(c.engagements) }}<span *ngIf="c.engagements.status === 'partial'" class="tag partial">partial</span></td>
+              <td class="right" [title]="tip(c.engagementRate)">{{ fmt(c.engagementRate, 'rate') }}</td>
+              <td class="right" [title]="tip(c.clicks)">{{ fmt(c.clicks) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Programs -->
+    <div class="panel" *ngIf="data.comparisons.programs.length">
+      <h3 class="sub">Command Center campaigns</h3>
+      <div class="table-wrap">
+        <table class="tbl">
+          <thead><tr><th>Campaign</th><th class="right">Emails sent</th><th class="right">Reply rate</th><th class="right">Posts</th><th class="right">Engagements</th><th class="right">Conversions <span class="tag estimate">estimate</span></th><th class="right">Planned budget</th><th class="right">ROI</th></tr></thead>
+          <tbody>
+            <tr *ngFor="let p of data.comparisons.programs">
+              <td><b>{{ p.name }}</b><div class="muted small">{{ p.status }}</div></td>
+              <td class="right">{{ p.email?.emailsSent ? fmt(p.email.emailsSent) : '—' }}</td>
+              <td class="right" [title]="p.email?.replyRate ? tip(p.email.replyRate) : (p.email?.note || 'No email sequence')">{{ p.email?.replyRate ? fmt(p.email.replyRate, 'rate') : '—' }}</td>
+              <td class="right">{{ p.social?.postsPublished ? fmt(p.social.postsPublished) : '—' }}</td>
+              <td class="right" [title]="p.social?.engagements ? tip(p.social.engagements) : (p.social?.note || 'No social campaign')">{{ p.social?.engagements ? fmt(p.social.engagements) : '—' }}</td>
+              <td class="right" [title]="tip(p.attributedConversions)">{{ fmt(p.attributedConversions) }}</td>
+              <td class="right" [title]="p.plannedBudget?.note || ''">{{ p.plannedBudget ? (p.plannedBudget.value | number) + ' ' + p.plannedBudget.currency : '—' }}</td>
+              <td class="right" [title]="p.roi.reason">—</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Attribution -->
+    <div class="panel">
+      <h3 class="sub">Conversion attribution <span class="tag estimate">estimate</span></h3>
+      <p class="small">{{ data.attribution.method }}</p>
+      <div class="row small">
+        <span>Unattributed conversions: <b>{{ fmt(data.attribution.unattributed) }}</b></span>
+        <span class="muted">Social: {{ data.attribution.social.reason }}</span>
+      </div>
+      <p class="muted small">{{ data.attribution.revenue.reason }} {{ data.attribution.roi.reason }}</p>
+    </div>
+
+    <!-- Insights + AI recommendations -->
+    <div class="panel">
+      <h3 class="sub">Insights from your data</h3>
+      <div *ngIf="!data.insights.length" class="muted small">No notable patterns in this period.</div>
+      <div class="insight" *ngFor="let i of data.insights" [attr.data-s]="i.severity">
+        <b>{{ i.title }}</b>
+        <p class="small">{{ i.detail }}</p>
+      </div>
+      <div class="actions"><button class="btn btn-primary" (click)="recommend()" [disabled]="recsBusy">{{ recsBusy ? 'Analysing…' : '⚡ AI recommendations' }}</button></div>
+      <div *ngIf="recsError" class="alert small">{{ recsError }}</div>
+      <ng-container *ngIf="recs">
+        <div *ngIf="recs.note" class="muted small">{{ recs.note }}</div>
+        <div *ngIf="!recs.note && !recs.recommendations.length" class="muted small">The AI did not return recommendations backed by your data.</div>
+        <div class="rec" *ngFor="let r of recs.recommendations">
+          <b>{{ r.title }}</b> <span *ngIf="r.confidence" class="chip">{{ r.confidence }} confidence</span>
+          <p class="small">{{ r.action }}</p>
+          <details class="small"><summary>Evidence ({{ r.evidence.length }})</summary><pre>{{ r.evidenceDetail | json }}</pre></details>
+        </div>
+        <p class="muted small" *ngIf="recs.dropped">{{ recs.dropped }} suggestion(s) were discarded because they did not cite real data.</p>
+      </ng-container>
+    </div>
+  </ng-container>
+</section>

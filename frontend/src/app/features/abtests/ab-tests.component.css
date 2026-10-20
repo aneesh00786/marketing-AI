@@ -1,0 +1,21 @@
+.variants { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.variant { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 14px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.variant h3 { margin: 0; font-size: 0.95rem; }
+.variant p { margin: 0; }
+.variant pre { white-space: pre-wrap; word-break: break-word; font-family: var(--font); font-size: 0.86rem; margin: 0; color: var(--text-muted); max-height: 220px; overflow-y: auto; }
+.vstats { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; border-top: 1px solid var(--border); padding-top: 10px; }
+.vstats div { display: flex; flex-direction: column; gap: 2px; }
+.vstats span { font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.vstats b { font-size: 1.1rem; }
+.span-all { grid-column: 1 / -1; }
+.decision { border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 14px; background: var(--surface); display: flex; flex-direction: column; gap: 6px; }
+.decision h3 { margin: 0; font-size: 1rem; }
+.decision p { margin: 0; line-height: 1.5; }
+.decision[data-r='winner'] { border-color: var(--success); background: var(--success-soft); }
+.decision[data-r='no_difference'] { border-color: var(--warning); }
+.tbl tr.clickable { cursor: pointer; }
+.tbl tr.clickable:hover td { background: var(--surface-hover); }
+.badge[data-s='running'] { background: var(--info-soft); color: var(--info-text); }
+.badge[data-s='concluded'] { background: var(--success-soft); color: var(--success-text); }
+.badge[data-s='cancelled'] { background: var(--danger-soft); color: var(--danger-text); }
+@media (max-width: 760px) { .variants { grid-template-columns: 1fr; } }

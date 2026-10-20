@@ -1,0 +1,269 @@
+<section class="outreach">
+  <!-- Engine / mailbox status -->
+  <div class="status-strip" *ngIf="status">
+    <span class="pill" [class.ok]="status.mailConfigured" [class.warn]="!status.mailConfigured">
+      ✉ {{ status.mailConfigured ? 'Sending from ' + status.senderEmail : 'Mailbox not set up' }}
+    </span>
+    <span class="pill" [class.ok]="status.engineOnline" [class.warn]="!status.engineOnline"
+          [title]="status.engineOnline ? 'The background worker is running' : 'Start the worker (start.bat starts it, or npm run worker in backend/)'">
+      ⚙ {{ status.engineOnline ? 'Sending engine online' : 'Sending engine offline' }}
+    </span>
+    <span class="pill" title="Unsubscribed or bounced addresses are never emailed again">⛔ {{ status.suppressed }} suppressed</span>
+    <button *ngIf="!status.mailConfigured" class="link-btn" (click)="openMailSettings.emit()">Set up mailbox →</button>
+  </div>
+
+  <div *ngIf="error" class="alert" role="alert">{{ error }} <button class="link-btn" (click)="error = ''">Dismiss</button></div>
+
+  <!-- ============================== LIST ============================== -->
+  <ng-container *ngIf="view === 'list'">
+    <div class="head">
+      <div>
+        <h2>AI email campaigns</h2>
+        <p class="muted">AI writes a multi-step email sequence from your verified product facts. You choose the leads and approve once; emails then go out from your mailbox inside your sending window. Replies and unsubscribes stop the sequence automatically.</p>
+      </div>
+      <div class="head-actions">
+        <button class="btn btn-secondary" *ngIf="playbooksAvailable" (click)="openPlaybooks.emit()">Idea playbooks</button>
+        <button class="btn btn-primary" (click)="startNew()">＋ New campaign</button>
+      </div>
+    </div>
+
+    <div class="how" *ngIf="!campaigns.length && !loading">
+      <div class="how-step"><b>1</b><span>Pick a product and goal</span></div>
+      <div class="how-step"><b>2</b><span>AI writes 1–5 emails</span></div>
+      <div class="how-step"><b>3</b><span>Choose leads from your CRM</span></div>
+      <div class="how-step"><b>4</b><span>Approve once, sending runs on schedule</span></div>
+      <div class="how-step"><b>5</b><span>Track sent, replies, bounces</span></div>
+    </div>
+
+    <div *ngIf="loading" class="muted">Loading campaigns…</div>
+    <div *ngIf="!loading && !campaigns.length" class="empty">No campaigns yet. Create your first one.</div>
+
+    <div class="table-wrap" *ngIf="campaigns.length">
+      <table class="tbl">
+        <thead><tr><th>Campaign</th><th>Status</th><th>Recipients</th><th>Emails sent</th><th>Replied</th><th>Bounced</th><th>Unsubscribed</th><th></th></tr></thead>
+        <tbody>
+          <tr *ngFor="let c of campaigns" (click)="openCampaign(c.id, c.status === 'draft' ? 'sequence' : 'results')" class="clickable">
+            <td><strong>{{ c.name }}</strong><div class="muted small">{{ productName(c.productId) }} · {{ windowLabel(c) }}</div></td>
+            <td><span class="badge" [attr.data-status]="c.status">{{ statusLabel(c.status) }}</span><div *ngIf="c.lastError" class="small warn-text">{{ c.lastError }}</div></td>
+            <td>{{ c.stats.recipients }}</td>
+            <td>{{ c.stats.emailsSent }}<span class="muted small" *ngIf="c.stats.emailsFailed"> · {{ c.stats.emailsFailed }} failed</span></td>
+            <td>{{ c.stats.replied }} <span class="muted small">{{ rate(c.stats.replied, c.stats.recipients) }}</span></td>
+            <td>{{ c.stats.bounced }}</td>
+            <td>{{ c.stats.unsubscribed }}</td>
+            <td class="right"><span class="muted">Open →</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </ng-container>
+
+  <!-- ============================== NEW ============================== -->
+  <ng-container *ngIf="view === 'new'">
+    <div class="head">
+      <div><button class="link-btn" (click)="backToList()">← Campaigns</button><h2>New email campaign</h2></div>
+    </div>
+    <div class="card form-grid">
+      <label class="field span2"><span>Campaign name</span><input class="hud-input" [(ngModel)]="form.name" maxlength="255" placeholder="e.g. RouteKit intro – logistics managers" /></label>
+      <label class="field"><span>Product (facts the AI may use)</span>
+        <select class="hud-input" [(ngModel)]="form.productId">
+          <option [ngValue]="null">No product (goal only, no product claims)</option>
+          <option *ngFor="let p of products" [ngValue]="p.id">{{ p.name }}</option>
+        </select>
+      </label>
+      <label class="field"><span>Tone</span>
+        <select class="hud-input" [(ngModel)]="form.tone"><option *ngFor="let t of tones" [value]="t">{{ t }}</option></select>
+      </label>
+      <label class="field span2"><span>Goal</span><input class="hud-input" [(ngModel)]="form.goal" maxlength="2000" placeholder="e.g. Book a 20-minute intro call" /></label>
+      <label class="field span2"><span>Who is it for? (optional)</span><input class="hud-input" [(ngModel)]="form.audienceNote" maxlength="500" placeholder="e.g. Operations managers at courier companies" /></label>
+      <div class="field span2">
+        <span>Sending days</span>
+        <div class="days">
+          <button type="button" *ngFor="let d of dayNames; let i = index" class="day" [class.on]="form.sendDays.includes(i + 1)" (click)="form.sendDays = toggleDay(form.sendDays, i + 1)">{{ d }}</button>
+        </div>
+      </div>
+      <label class="field"><span>From</span><select class="hud-input" [(ngModel)]="form.sendStartHour"><option *ngFor="let h of hours.slice(0, 24)" [ngValue]="h">{{ h }}:00</option></select></label>
+      <label class="field"><span>Until</span><select class="hud-input" [(ngModel)]="form.sendEndHour"><option *ngFor="let h of hours.slice(1)" [ngValue]="h">{{ h }}:00</option></select></label>
+      <label class="field"><span>Daily limit</span><input class="hud-input" type="number" min="1" max="500" [(ngModel)]="form.dailyLimit" /></label>
+      <label class="field"><span>Time zone (blank = workspace)</span><input class="hud-input" [(ngModel)]="form.timezone" placeholder="e.g. Asia/Kolkata" /></label>
+    </div>
+    <div class="actions"><button class="btn btn-secondary" (click)="backToList()">Cancel</button><button class="btn btn-primary" (click)="createCampaign()" [disabled]="busy === 'create'">{{ busy === 'create' ? 'Creating…' : 'Create and write emails →' }}</button></div>
+  </ng-container>
+
+  <!-- ============================== DETAIL ============================== -->
+  <ng-container *ngIf="view === 'detail' && campaign">
+    <div class="head">
+      <div>
+        <button class="link-btn" (click)="backToList()">← Campaigns</button>
+        <h2>{{ campaign.name }} <span class="badge" [attr.data-status]="campaign.status">{{ statusLabel(campaign.status) }}</span></h2>
+        <p class="muted small">{{ campaign.product?.name || (campaign.productMissing ? 'Product removed' : 'No product') }} · {{ windowLabel(campaign) }} · up to {{ campaign.dailyLimit }}/day</p>
+        <p *ngIf="campaign.lastError" class="warn-text small">Paused automatically: {{ campaign.lastError }}</p>
+      </div>
+      <div class="head-actions">
+        <button *ngIf="campaign.status === 'running'" class="btn btn-secondary" (click)="pause()">⏸ Pause</button>
+        <button *ngIf="campaign.status === 'paused'" class="btn btn-primary" (click)="setTab('launch')">▶ Resume…</button>
+        <button *ngIf="['running', 'paused', 'draft'].includes(campaign.status) && campaign.stats.emailsSent" class="btn btn-secondary" (click)="stop()">■ Stop</button>
+        <button *ngIf="!campaign.stats.emailsSent && campaign.status !== 'running'" class="btn btn-secondary" (click)="deleteCampaign()">Delete</button>
+      </div>
+    </div>
+
+    <div class="kpis">
+      <div class="kpi"><span>Recipients</span><b>{{ campaign.stats.recipients }}</b></div>
+      <div class="kpi"><span>Emails sent</span><b>{{ campaign.stats.emailsSent }}</b><small *ngIf="campaign.stats.emailsFailed">{{ campaign.stats.emailsFailed }} failed</small></div>
+      <div class="kpi"><span>Replied</span><b>{{ campaign.stats.replied }}</b><small>{{ rate(campaign.stats.replied, campaign.stats.recipients) }}</small></div>
+      <div class="kpi"><span>In sequence</span><b>{{ campaign.stats.active }}</b></div>
+      <div class="kpi"><span>Bounced</span><b>{{ campaign.stats.bounced }}</b></div>
+      <div class="kpi"><span>Unsubscribed</span><b>{{ campaign.stats.unsubscribed }}</b></div>
+    </div>
+    <p class="muted small">Counts are real outcomes only. Opens and clicks are not tracked. Replies are detected from your mailbox sync (IMAP).</p>
+
+    <div class="tabs" role="tablist">
+      <button role="tab" [class.on]="tab === 'sequence'" (click)="setTab('sequence')">1 · Emails <span class="muted">({{ campaign.steps.length }})</span></button>
+      <button role="tab" [class.on]="tab === 'audience'" (click)="setTab('audience')">2 · Audience <span class="muted">({{ campaign.stats.recipients }})</span></button>
+      <button role="tab" [class.on]="tab === 'launch'" (click)="setTab('launch')">3 · Review & launch</button>
+      <button role="tab" [class.on]="tab === 'results'" (click)="setTab('results')">Results</button>
+    </div>
+
+    <!-- -------- Sequence -------- -->
+    <div *ngIf="tab === 'sequence'" class="panel">
+      <div class="row" *ngIf="campaign.status === 'draft'">
+        <label class="inline">Emails in sequence
+          <select class="hud-input sm" [(ngModel)]="stepCount"><option *ngFor="let n of [1,2,3,4,5]" [ngValue]="n">{{ n }}</option></select>
+        </label>
+        <button class="btn btn-primary" (click)="generate()" [disabled]="busy === 'generate'">{{ busy === 'generate' ? 'Writing with AI…' : (steps.length ? '↻ Rewrite with AI' : '⚡ Write emails with AI') }}</button>
+        <span class="muted small">Uses only your product facts and goal. Placeholders: <code>{{ '{{first_name}}' }}</code>, <code>{{ '{{company}}' }}</code>.</span>
+      </div>
+      <div *ngIf="campaign.status === 'paused'" class="note small">Editing a paused campaign means it must be approved again before sending resumes.</div>
+      <div *ngIf="!editable" class="note small">This campaign is {{ statusLabel(campaign.status).toLowerCase() }}; its emails can't be edited{{ campaign.status === 'running' ? ' (pause it first)' : '' }}.</div>
+
+      <div *ngIf="!steps.length" class="empty">No emails yet. {{ campaign.status === 'draft' ? 'Let AI write them, or add one manually.' : '' }}</div>
+
+      <div class="step" *ngFor="let s of steps; let i = index">
+        <div class="step-head">
+          <strong>Email {{ i + 1 }}</strong>
+          <span class="muted small" *ngIf="i === 0">sent when the campaign starts</span>
+          <span class="muted small" *ngIf="i > 0">
+            <input class="hud-input xs" type="number" min="1" max="60" [(ngModel)]="s.delayDays" (ngModelChange)="markDirty()" [disabled]="!editable" /> days after email {{ i }} (day {{ dayOffset(i) }})
+          </span>
+          <span class="spacer"></span>
+          <ng-container *ngIf="editable">
+            <button class="icon" (click)="moveStep(i, -1)" [disabled]="i === 0" aria-label="Move up">↑</button>
+            <button class="icon" (click)="moveStep(i, 1)" [disabled]="i === steps.length - 1" aria-label="Move down">↓</button>
+            <button class="icon" (click)="removeStep(i)" aria-label="Remove email">✕</button>
+          </ng-container>
+        </div>
+        <input class="hud-input" [(ngModel)]="s.subject" (ngModelChange)="markDirty()" [disabled]="!editable" maxlength="200" placeholder="Subject" />
+        <textarea class="hud-textarea" rows="7" [(ngModel)]="s.body" (ngModelChange)="markDirty()" [disabled]="!editable" maxlength="5000"></textarea>
+        <div class="flags" *ngIf="s.needsVerification?.length">⚠️ Not in your product facts, verify or remove: {{ s.needsVerification!.join(', ') }}</div>
+        <div class="flags" *ngIf="hasPlaceholder(s.subject + ' ' + s.body)">✏️ Fill in the [bracketed] placeholders before launching.</div>
+      </div>
+      <p class="muted small" *ngIf="steps.length">A footer is added to every email: who it is from and how to unsubscribe (reply "unsubscribe"{{ status?.unsubscribeLinks === 'link' ? ' or one-click link' : '' }}).</p>
+
+      <div class="actions" *ngIf="editable">
+        <button class="btn btn-secondary" (click)="addStep()" [disabled]="steps.length >= 5">＋ Add email</button>
+        <button class="btn btn-primary" (click)="saveSteps()" [disabled]="!stepsDirty || busy === 'steps'">{{ busy === 'steps' ? 'Saving…' : 'Save emails' }}</button>
+      </div>
+    </div>
+
+    <!-- -------- Audience -------- -->
+    <div *ngIf="tab === 'audience'" class="panel">
+      <ng-container *ngIf="editable">
+        <div class="filters">
+          <div class="field">
+            <span>Lead status</span>
+            <div class="chips">
+              <button type="button" *ngFor="let s of leadStatuses" class="chip" [class.on]="audienceFilter.statuses.includes(s)" (click)="toggleStatus(s)">{{ s }}</button>
+            </div>
+          </div>
+          <label class="field"><span>Interested in product</span>
+            <select class="hud-input" [(ngModel)]="audienceFilter.productId"><option [ngValue]="null">Any</option><option *ngFor="let p of products" [ngValue]="p.id">{{ p.name }}</option></select>
+          </label>
+          <label class="field"><span>Min. lead score</span><input class="hud-input" type="number" min="0" max="100" [(ngModel)]="audienceFilter.minScore" placeholder="any" /></label>
+          <button class="btn btn-secondary" (click)="previewAudience()" [disabled]="busy === 'audience'">{{ busy === 'audience' ? 'Finding…' : 'Find leads' }}</button>
+        </div>
+
+        <div class="table-wrap" *ngIf="audience.length">
+          <table class="tbl">
+            <thead><tr><th></th><th>Lead</th><th>Email</th><th>Status</th><th>Score</th><th>Note</th></tr></thead>
+            <tbody>
+              <tr *ngFor="let a of audience" [class.dim]="!a.eligible || a.inCampaign">
+                <td><input type="checkbox" [disabled]="!a.eligible || a.inCampaign" [checked]="audienceSelected.has(a.leadId)" (change)="toggleLead(a.leadId)" [attr.aria-label]="'Select ' + a.name" /></td>
+                <td>{{ a.name }}<div class="muted small">{{ a.company || '' }}</div></td>
+                <td>{{ a.email || '—' }}</td>
+                <td>{{ a.status || '—' }}</td>
+                <td>{{ a.score ?? '—' }}</td>
+                <td class="small">{{ a.inCampaign ? 'Already added' : (a.reason || '') }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div *ngIf="audienceLoaded && !audience.length" class="empty">No leads match these filters.</div>
+        <div class="actions" *ngIf="audience.length">
+          <span class="muted small">{{ audienceSelected.size }} selected</span>
+          <button class="btn btn-primary" (click)="addSelected()" [disabled]="!audienceSelected.size || busy === 'add'">{{ busy === 'add' ? 'Adding…' : 'Add ' + audienceSelected.size + ' to campaign' }}</button>
+        </div>
+      </ng-container>
+
+      <h3 class="sub">In this campaign ({{ recipients.length }})</h3>
+      <div *ngIf="!recipients.length" class="empty">No recipients yet.</div>
+      <div class="table-wrap" *ngIf="recipients.length">
+        <table class="tbl">
+          <thead><tr><th>Recipient</th><th>Status</th><th></th></tr></thead>
+          <tbody>
+            <tr *ngFor="let r of recipients">
+              <td>{{ r.name || r.email }}<div class="muted small">{{ r.email }}</div></td>
+              <td><span class="badge" [attr.data-r]="r.status">{{ recipientLabel(r.status) }}</span></td>
+              <td class="right"><button *ngIf="r.status === 'pending' && editable" class="link-btn" (click)="removeRecipient(r)">Remove</button></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- -------- Launch -------- -->
+    <div *ngIf="tab === 'launch'" class="panel">
+      <ng-container *ngIf="readiness">
+        <ul class="checklist">
+          <li [class.ok]="readiness.steps > 0">{{ readiness.steps }} email(s) in the sequence</li>
+          <li [class.ok]="readiness.recipients > 0">{{ readiness.recipients }} recipient(s) waiting</li>
+          <li [class.ok]="!!readiness.sender">Sending from {{ readiness.sender || '— (set up your mailbox)' }}</li>
+          <li class="ok">Window: {{ windowLabel(campaign) }}, up to {{ campaign.dailyLimit }} per day</li>
+          <li [class.ok]="status?.engineOnline">{{ status?.engineOnline ? 'Sending engine is online' : 'Sending engine is offline: emails wait until the worker runs' }}</li>
+        </ul>
+        <div *ngFor="let p of readiness.problems" class="alert">{{ p }}</div>
+        <div *ngIf="readiness.flags.length" class="flags">
+          ⚠️ These claims are not in your product facts: <b>{{ readiness.flags.join(', ') }}</b>
+          <label class="inline"><input type="checkbox" [(ngModel)]="acknowledgeFlags" /> I have verified these claims are true</label>
+        </div>
+        <div class="launch-box" *ngIf="editable">
+          <p>Approving starts automatic sending. Each recipient gets email 1 in the next sending window, then the follow-ups on schedule, until they reply, unsubscribe or the sequence ends. You can pause or stop at any time.</p>
+          <button class="btn btn-primary" (click)="approve()" [disabled]="!readiness.ready || (readiness.flags.length && !acknowledgeFlags) || busy === 'approve'">
+            {{ busy === 'approve' ? 'Starting…' : (campaign.status === 'paused' ? '▶ Approve & resume sending' : '✓ Approve & start sending') }}
+          </button>
+        </div>
+        <div *ngIf="!editable" class="note">This campaign is {{ statusLabel(campaign.status).toLowerCase() }}.</div>
+      </ng-container>
+    </div>
+
+    <!-- -------- Results -------- -->
+    <div *ngIf="tab === 'results'" class="panel">
+      <div *ngIf="!recipients.length" class="empty">No recipients yet.</div>
+      <div class="table-wrap" *ngIf="recipients.length">
+        <table class="tbl">
+          <thead><tr><th>Recipient</th><th>Status</th><th>Timeline</th><th>Next</th><th></th></tr></thead>
+          <tbody>
+            <tr *ngFor="let r of recipients">
+              <td>{{ r.name || r.email }}<div class="muted small">{{ r.email }}</div></td>
+              <td><span class="badge" [attr.data-r]="r.status">{{ recipientLabel(r.status) }}</span><div class="small warn-text" *ngIf="r.lastError">{{ r.lastError }}</div></td>
+              <td>
+                <span *ngFor="let t of r.timeline" class="tl" [attr.data-s]="t.status" [title]="(t.error || t.status) + (t.at ? ' · ' + (t.at | date:'medium') : '')">#{{ t.step }} {{ t.status }}</span>
+                <span *ngIf="!r.timeline.length" class="muted small">—</span>
+              </td>
+              <td class="small">{{ r.status === 'active' && r.nextSendAt ? ('Email ' + r.nextStep + ' · ' + (r.nextSendAt | date:'MMM d, HH:mm')) : '—' }}</td>
+              <td class="right"><button *ngIf="r.status === 'failed'" class="link-btn" (click)="retry(r)">Retry</button></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </ng-container>
+</section>

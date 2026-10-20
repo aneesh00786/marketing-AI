@@ -1,0 +1,158 @@
+<section class="cc">
+  <div *ngIf="error" class="alert" role="alert">{{ error }} <button class="link-btn" (click)="error = ''">Dismiss</button></div>
+
+  <!-- ============================== LIST ============================== -->
+  <ng-container *ngIf="view === 'list'">
+    <div class="head">
+      <div>
+        <h2>Automations</h2>
+        <p class="muted">When something happens (a new lead, a reply, a status change, a published post), check conditions, wait, then act with your existing modules. Activating a workflow is an approval; emails are only sent through approved sequences, and drafts and posts still need their normal approval.</p>
+      </div>
+      <button class="btn btn-primary" (click)="startNew()">＋ New workflow</button>
+    </div>
+    <div *ngIf="!workflows.length" class="empty">No workflows yet.</div>
+    <div class="cards" *ngIf="workflows.length">
+      <div class="wf" *ngFor="let w of workflows">
+        <div class="pcard-top"><strong>{{ w.name }}</strong><span class="badge" [attr.data-s]="w.status">{{ w.status }}</span></div>
+        <div class="small"><b>When</b> {{ w.trigger.label }}<span class="muted" *ngIf="w.trigger.config && keys(w.trigger.config).length"> ({{ w.trigger.config | json }})</span></div>
+        <div class="small" *ngIf="w.conditions.length"><b>If</b> {{ w.conditions.length }} condition(s)</div>
+        <ol class="small steps-list"><li *ngFor="let s of w.steps">{{ stepLabel(s) }}</li></ol>
+        <div class="small muted" *ngIf="w.outboundActions.length">Outbound: {{ w.outboundActions.join(', ') }}</div>
+        <div class="small muted">Runs: {{ totalRuns(w) }}<span *ngFor="let k of runKeys(w)"> · {{ k }} {{ w.runs[k] }}</span></div>
+        <div class="row">
+          <button *ngIf="w.status !== 'active'" class="btn btn-primary" (click)="activate(w)">✓ Activate</button>
+          <button *ngIf="w.status === 'active'" class="btn btn-secondary" (click)="pause(w)">⏸ Pause</button>
+          <button class="btn btn-secondary" (click)="edit(w)">Edit</button>
+          <button class="btn btn-secondary" (click)="openRuns(w)">Runs</button>
+          <button *ngIf="!totalRuns(w)" class="link-btn" (click)="del(w)">Delete</button>
+        </div>
+      </div>
+    </div>
+  </ng-container>
+
+  <!-- ============================== EDITOR ============================== -->
+  <ng-container *ngIf="view === 'edit'">
+    <div class="head"><div><button class="link-btn" (click)="view = 'list'">← Automations</button><h2>{{ form.id ? 'Edit workflow' : 'New workflow' }}</h2>
+      <p class="muted small" *ngIf="form.id">Saving returns the workflow to draft; activate it again to approve the change. Waiting runs of the old version stop.</p></div></div>
+
+    <div class="card grid2">
+      <label class="field"><span>Name</span><input class="hud-input" [(ngModel)]="form.name" maxlength="255" placeholder="e.g. Welcome new RouteKit leads" /></label>
+      <label class="field"><span>Description</span><input class="hud-input" [(ngModel)]="form.description" maxlength="1000" /></label>
+    </div>
+
+    <div class="panel">
+      <h3 class="sub">1 · When (trigger)</h3>
+      <div class="grid2">
+        <label class="field"><span>Event</span>
+          <select class="hud-input" [(ngModel)]="form.triggerType" (ngModelChange)="onTriggerChange()"><option *ngFor="let t of keys(meta.triggers)" [value]="t">{{ meta.triggers[t].label }}</option></select>
+        </label>
+        <ng-container *ngFor="let k of triggerOptions()">
+          <label class="field" *ngIf="k === 'productId'"><span>Only for product</span><select class="hud-input" [(ngModel)]="form.triggerConfig.productId"><option [ngValue]="null">Any</option><option *ngFor="let p of products" [ngValue]="p.id">{{ p.name }}</option></select></label>
+          <label class="field" *ngIf="k === 'toStatus'"><span>New status</span><select class="hud-input" [(ngModel)]="form.triggerConfig.toStatus"><option [ngValue]="null">Any</option><option *ngFor="let s of leadStatuses" [value]="s">{{ s }}</option></select></label>
+          <label class="field" *ngIf="k === 'emailCampaignId'"><span>Only for sequence</span><select class="hud-input" [(ngModel)]="form.triggerConfig.emailCampaignId"><option [ngValue]="null">Any</option><option *ngFor="let c of emailSequences" [ngValue]="c.id">{{ c.name }}</option></select></label>
+          <label class="field" *ngIf="k === 'socialCampaignId'"><span>Only for social campaign</span><select class="hud-input" [(ngModel)]="form.triggerConfig.socialCampaignId"><option [ngValue]="null">Any</option><option *ngFor="let c of socialCampaigns" [ngValue]="c.id">{{ c.name }}</option></select></label>
+        </ng-container>
+      </div>
+    </div>
+
+    <div class="panel" *ngIf="leadTrigger">
+      <h3 class="sub">2 · Only if (conditions, all must be true)</h3>
+      <ng-container *ngTemplateOutlet="conditionsTpl; context: { $implicit: form.conditions }"></ng-container>
+      <label class="inline"><input type="checkbox" [(ngModel)]="form.exitOnReply" /> Stop a run as soon as the lead replies to any email</label>
+    </div>
+
+    <div class="panel">
+      <h3 class="sub">3 · Then (steps)</h3>
+      <div class="step-card" *ngFor="let s of form.steps; let i = index">
+        <div class="step-head">
+          <b>{{ i + 1 }}</b>
+          <span class="chip on">{{ s.type }}</span>
+          <span class="spacer"></span>
+          <button class="icon" (click)="move(i, -1)" [disabled]="i === 0" aria-label="Move up">↑</button>
+          <button class="icon" (click)="move(i, 1)" [disabled]="i === form.steps.length - 1" aria-label="Move down">↓</button>
+          <button class="icon" (click)="remove(i)" aria-label="Remove step">✕</button>
+        </div>
+        <div *ngIf="s.type === 'wait'" class="row"><span>Wait</span><input class="hud-input xs" type="number" min="0.25" step="0.25" [(ngModel)]="s.hours" /><span>hours</span></div>
+        <ng-container *ngIf="s.type === 'check'"><span class="muted small">Re-checks the lead now (after any waits); the run stops if not true.</span>
+          <ng-container *ngTemplateOutlet="conditionsTpl; context: { $implicit: s.conditions }"></ng-container></ng-container>
+        <ng-container *ngIf="s.type === 'action'">
+          <select class="hud-input" [(ngModel)]="s.action" (ngModelChange)="onActionChange(s)">
+            <option *ngFor="let a of actionsForTrigger()" [value]="a">{{ meta.actions[a].label }}{{ meta.actions[a].outbound ? ' (outbound)' : '' }}</option>
+          </select>
+          <ng-container [ngSwitch]="s.action">
+            <select *ngSwitchCase="'update_lead_status'" class="hud-input" [(ngModel)]="s.params.status"><option *ngFor="let st of leadStatuses" [value]="st">{{ st }}</option></select>
+            <textarea *ngSwitchCase="'add_lead_note'" class="hud-textarea" rows="2" [(ngModel)]="s.params.text" maxlength="1000" placeholder="Note text"></textarea>
+            <ng-container *ngSwitchCase="'enroll_in_sequence'">
+              <select class="hud-input" [(ngModel)]="s.params.emailCampaignId"><option [ngValue]="null">Choose a sequence…</option><option *ngFor="let c of emailSequences" [ngValue]="c.id">{{ c.name }} ({{ c.status }})</option></select>
+              <span class="muted small">A running (approved) sequence emails the lead in its window; a draft or paused one keeps them pending until approved. Unsubscribed, bounced and invalid emails are skipped.</span>
+            </ng-container>
+            <select *ngSwitchCase="'stop_sequences'" class="hud-input" [(ngModel)]="s.params.emailCampaignId"><option [ngValue]="null">All of the lead's sequences</option><option *ngFor="let c of emailSequences" [ngValue]="c.id">{{ c.name }}</option></select>
+            <ng-container *ngSwitchCase="'create_email_draft'">
+              <input class="hud-input" [(ngModel)]="s.params.subject" maxlength="200" placeholder="Subject" />
+              <textarea class="hud-textarea" rows="4" [(ngModel)]="s.params.body" maxlength="5000"></textarea>
+              <span class="muted small">Creates a Mail Draft; someone must approve and confirm it before it is sent.</span>
+            </ng-container>
+            <ng-container *ngSwitchCase="'create_social_draft'">
+              <div class="row">
+                <select class="hud-input" [(ngModel)]="s.params.platformKey"><option *ngFor="let p of ['linkedin','facebook','instagram','x','youtube']" [value]="p">{{ p }}</option></select>
+                <select class="hud-input" [(ngModel)]="s.params.socialCampaignId"><option [ngValue]="null">{{ leadTrigger ? 'No campaign' : "The published post's campaign" }}</option><option *ngFor="let c of socialCampaigns" [ngValue]="c.id">{{ c.name }}</option></select>
+              </div>
+              <textarea class="hud-textarea" rows="3" [(ngModel)]="s.params.caption" maxlength="5000" placeholder="Caption"></textarea>
+              <span class="muted small">Creates a draft post; it still needs review, approval and scheduling in Social Media Marketing.</span>
+            </ng-container>
+          </ng-container>
+        </ng-container>
+      </div>
+      <div class="row">
+        <button class="btn btn-secondary" (click)="addStep('wait')">＋ Wait</button>
+        <button class="btn btn-secondary" *ngIf="leadTrigger" (click)="addStep('check')">＋ Check</button>
+        <button class="btn btn-secondary" (click)="addStep('action')">＋ Action</button>
+      </div>
+      <p class="muted small">Placeholders: <span *ngFor="let t of meta.tokens"><code>{{ '{{' + t + '}}' }}</code> </span></p>
+    </div>
+
+    <div class="card grid2">
+      <label class="field"><span>Max runs per day (usage limit)</span><input class="hud-input" type="number" min="1" max="5000" [(ngModel)]="form.maxRunsPerDay" /></label>
+    </div>
+    <div class="actions"><button class="btn btn-secondary" (click)="view = 'list'">Cancel</button><button class="btn btn-primary" (click)="save()" [disabled]="busy === 'save'">Save as draft</button></div>
+
+    <ng-template #conditionsTpl let-list>
+      <div class="cond" *ngFor="let c of list; let ci = index">
+        <select class="hud-input" [(ngModel)]="c.field" (ngModelChange)="onConditionField(c)"><option *ngFor="let f of keys(meta.conditionFields)" [value]="f">{{ meta.conditionFields[f].label }}</option></select>
+        <select class="hud-input sm" [(ngModel)]="c.op"><option *ngFor="let o of meta.conditionFields[c.field]?.ops" [value]="o">{{ o }}</option></select>
+        <ng-container [ngSwitch]="meta.conditionFields[c.field]?.type">
+          <select *ngSwitchCase="'boolean'" class="hud-input sm" [(ngModel)]="c.value"><option [ngValue]="true">true</option><option [ngValue]="false">false</option></select>
+          <select *ngSwitchCase="'id'" class="hud-input" [(ngModel)]="c.value"><option *ngFor="let p of products" [ngValue]="p.id">{{ p.name }}</option></select>
+          <input *ngSwitchCase="'number'" class="hud-input sm" type="number" [(ngModel)]="c.value" />
+          <ng-container *ngSwitchDefault>
+            <select *ngIf="c.op !== 'in'" class="hud-input" [(ngModel)]="c.value"><option *ngFor="let s of leadStatuses" [value]="s">{{ s }}</option></select>
+            <input *ngIf="c.op === 'in'" class="hud-input" [(ngModel)]="c.value" placeholder="New, Contacted" />
+          </ng-container>
+        </ng-container>
+        <button class="icon" (click)="list.splice(ci, 1)" aria-label="Remove condition">✕</button>
+      </div>
+      <button class="link-btn" (click)="addCondition(list)">＋ Add condition</button>
+    </ng-template>
+  </ng-container>
+
+  <!-- ============================== RUNS ============================== -->
+  <ng-container *ngIf="view === 'runs' && current">
+    <div class="head"><div><button class="link-btn" (click)="view = 'list'; load()">← Automations</button><h2>Runs · {{ current.name }}</h2></div>
+      <button class="btn btn-secondary" (click)="openRuns(current)">↻ Refresh</button></div>
+    <div *ngIf="!runs.length" class="empty">No runs yet. Runs start for events after activation.</div>
+    <div class="table-wrap" *ngIf="runs.length">
+      <table class="tbl">
+        <thead><tr><th>Run</th><th>For</th><th>Status</th><th>Steps</th><th>Note</th></tr></thead>
+        <tbody>
+          <tr *ngFor="let r of runs">
+            <td>#{{ r.id }}<div class="muted small">{{ r.createdAt | date:'MMM d, HH:mm' }} · v{{ r.workflowVersion }}</div></td>
+            <td>{{ r.subjectType }} #{{ r.subjectId }}</td>
+            <td><span class="badge" [attr.data-s]="r.status">{{ r.status }}</span><div class="muted small" *ngIf="r.status === 'waiting'">next {{ r.nextRunAt | date:'MMM d, HH:mm' }}</div></td>
+            <td><span *ngFor="let s of r.steps" class="tl" [attr.data-s]="s.status" [title]="(s.error || (s.result | json))">{{ s.index + 1 }}·{{ s.status }}{{ s.attempts > 1 ? ' ×' + s.attempts : '' }}</span></td>
+            <td class="small">{{ r.exitReason || r.lastError || '' }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </ng-container>
+</section>
