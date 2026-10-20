@@ -466,13 +466,14 @@ Respond in valid JSON ONLY with this exact structure:
   if (headings.length > 0) {
     dynamicFeatures = headings.slice(0, 6).map(h => h.replace(/^[0-9.\-–—\s]+/, '').trim()).filter(h => h.length > 5);
   }
+  // Fall back to bullets, then sentences, only when they give more than what was already found.
   if (dynamicFeatures.length < 3 && bulletPoints.length > 0) {
-    dynamicFeatures = bulletPoints.slice(0, 6).map(b => b.replace(/^[0-9.\-–—\s]+/, '').trim()).filter(b => b.length > 5);
+    const fromBullets = bulletPoints.slice(0, 6).map(b => b.replace(/^[0-9.\-–—\s]+/, '').trim()).filter(b => b.length > 5);
+    if (fromBullets.length > dynamicFeatures.length) dynamicFeatures = fromBullets;
   }
   if (dynamicFeatures.length < 3 && textContent) {
-    // Extract key sentences
-    const sentences = textContent.split(/[.\n]/).map(s => s.trim()).filter(s => s.length > 20 && s.length < 120);
-    dynamicFeatures = sentences.slice(0, 5);
+    const sentences = textContent.split(/[.\n]/).map(s => s.trim()).filter(s => s.length > 20 && s.length < 120).slice(0, 5);
+    if (sentences.length > dynamicFeatures.length) dynamicFeatures = sentences;
   }
 
   const capitalizedName = domain ? domain.split('.')[0].charAt(0).toUpperCase() + domain.split('.')[0].slice(1) : 'Digital Product';
@@ -617,6 +618,10 @@ Respond in JSON ONLY with:
     ai_priority: priority,
     ai_replies: []
   };
+}
+
+function escapeHtml(v) {
+  return String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
 /** Only facts stored on the product record; nothing is filled in when a field is empty. */

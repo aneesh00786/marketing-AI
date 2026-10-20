@@ -230,7 +230,7 @@ ${digitalProductsList.map(p => `  * [PRODUCT] ${p.name} (URL: ${p.url}):
     Features: ${p.features_json}`).join('\n')}
 - Connected Businesses:
 ${connectedBiz.map(b => `  * ${b.business_type === 'owner' ? '[MY BUSINESS]' : '[CLIENT BUSINESS]'} ${b.name} (${b.industry}): ${b.description}`).join('\n')}
-- Flagship Traivo Database: MySQL 'thrivewoo' with ${traivoStats.totalProducts} catalog products and ${traivoStats.totalOrders} sales orders.
+- Traivo Database: ${traivoStats.connected ? `MySQL 'thrivewoo' with ${traivoStats.totalProducts} catalog products and ${traivoStats.totalOrders} sales orders.` : 'not connected (no figures available).'}
 - Recent Client Inquiries (${clients.length} total): ${clients.map(c => `${c.company_name} (Contact: ${c.contact_name}, Interest: ${c.product_interest}, Status: ${c.status})`).join('; ')}
 - Recent Client Email Replies (${replies.length} total): ${replies.map(r => `${r.customer_name} from ${r.company_name}: "${r.reply_text}" [Sentiment: ${r.sentiment}]`).join('; ')}`;
 
@@ -429,7 +429,9 @@ ${connectedBiz.map(b => `  * ${b.business_type === 'owner' ? '[MY BUSINESS]' : '
       // No canned strategies: answered by the AI below from the saved products and businesses in contextSnippet.
       fastReply = null;
     } else if (lower.includes('traivo') && (lower.includes('database') || lower.includes('product') || lower.includes('sku') || lower.includes('catalog'))) {
-      fastReply = `Your Traivo B2B database is connected live to MySQL database 'thrivewoo'. It currently has ${traivoStats.totalProducts} active wholesale products and ${traivoStats.totalOrders} processed sales orders.`;
+      fastReply = traivoStats.connected
+        ? `Your Traivo B2B database is connected live to MySQL database 'thrivewoo'. It currently has ${traivoStats.totalProducts} products and ${traivoStats.totalOrders} sales orders.`
+        : `Sir, the Traivo database is not reachable right now${traivoStats.error ? ` (${traivoStats.error})` : ''}, so I have no product or order counts to report.`;
     }
     // 9. Digital Product Details & Live Features Seeing ("can the ai see this details", "what are the features of thrivewoo", etc.)
     else if (
@@ -501,7 +503,7 @@ Core Rules:
 - If asked about client inquiries or leads, cite the exact real companies, contacts, and statuses from the live context.
 - If asked about client email replies, quote the real customer replies and sentiments from the live context.
 - If asked for marketing ideas or business growth for Traivo or any product, provide high-ROI, actionable B2B strategies based on their real platform modules.
-- If asked about Traivo database metrics, state the exact ${traivoStats.totalProducts} products and ${traivoStats.totalOrders} orders from the live MySQL database.
+- If asked about Traivo database metrics, ${traivoStats.connected ? `state the exact ${traivoStats.totalProducts} products and ${traivoStats.totalOrders} orders from the live MySQL database` : 'say the Traivo database is not connected and give no figures'}.
 - Keep spoken answers concise (1 to 3 spoken sentences) unless the user asks for a comprehensive breakdown.
 - Do not repeat boilerplate greetings or loop.`;
 
@@ -717,7 +719,7 @@ app.get(['/api/v1/b2b/statistics', '/api/b2b/statistics'], async (req, res) => {
         demoRequested: repliedCount?.c || 0,
         totalCampaigns: campaignsCount?.c || 0,
         totalReplies: repliesCount?.c || 0,
-        pipelineValue: '$88,500',
+        pipelineValue: null, // not tracked; never a placeholder figure
         traivoDatabase: {
           connected: traivoStats.connected,
           databaseName: 'thrivewoo',

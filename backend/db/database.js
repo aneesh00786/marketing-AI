@@ -1204,15 +1204,16 @@ function getTraivoPool() {
 async function queryTraivoMySQL() {
   try {
     const pool = getTraivoPool();
-    if (!pool) return { connected: false, message: 'MySQL driver unavailable', totalProducts: 181, totalOrders: 57 };
+    // Counts are reported only when the Traivo database answers; never placeholder numbers.
+    if (!pool) return { connected: false, message: 'MySQL driver unavailable', totalProducts: null, totalOrders: null, sampleProducts: [] };
     const [productsCount] = await pool.query('SELECT count(*) as count FROM products');
     const [ordersCount] = await pool.query('SELECT count(*) as count FROM sales_orders');
     const [sampleProducts] = await pool.query('SELECT id, name, category_id, base_sell_price FROM products LIMIT 6');
     return {
       connected: true,
       database: 'thrivewoo',
-      totalProducts: productsCount[0]?.count || 181,
-      totalOrders: ordersCount[0]?.count || 57,
+      totalProducts: Number(productsCount[0]?.count || 0),
+      totalOrders: Number(ordersCount[0]?.count || 0),
       sampleProducts: sampleProducts || []
     };
   } catch (err) {
@@ -1220,12 +1221,9 @@ async function queryTraivoMySQL() {
       connected: false,
       database: 'thrivewoo',
       error: err.message,
-      totalProducts: 181,
-      totalOrders: 57,
-      sampleProducts: [
-        { id: 1, name: 'Traivo Wholesale B2B SKU #101', base_sell_price: '45.00' },
-        { id: 2, name: 'Traivo Bulk Distribution Case #204', base_sell_price: '120.00' }
-      ]
+      totalProducts: null,
+      totalOrders: null,
+      sampleProducts: []
     };
   }
 }
@@ -1253,6 +1251,7 @@ async function withTransaction(fn) {
 }
 
 async function closeDatabase() {
+  if (traivoPool) { await traivoPool.end().catch(() => {}); traivoPool = null; }
   if (mysqlPool) await mysqlPool.end();
   if (sqliteDb) sqliteDb.close();
 }
