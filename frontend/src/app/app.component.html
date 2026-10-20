@@ -704,7 +704,7 @@
       <div class="transcript-box">
         <div class="transcript-header">LIVE CONVERSATION TRANSCRIPT</div>
         <div class="transcript-content">
-          <div *ngFor="let msg of dialogueTranscript" class="msg" [class.user-msg]="msg.role === 'user'" [class.jarvis-msg]="msg.role === 'agent'">
+          <div *ngFor="let msg of dialogueTranscript" class="msg" [class.user-msg]="msg.role === 'user'" [class.roger-msg]="msg.role === 'agent'">
             <span class="sender">{{ msg.sender }}:</span> {{ msg.text }}
           </div>
         </div>

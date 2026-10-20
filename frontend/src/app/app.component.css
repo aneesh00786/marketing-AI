@@ -464,7 +464,7 @@ h2 {
   color: #e0f2fe;
 }
 
-.msg.jarvis-msg {
+.msg.roger-msg {
   background: rgba(34, 197, 94, 0.1);
   color: #dcfce7;
 }
@@ -475,7 +475,7 @@ h2 {
   margin-right: 6px;
 }
 
-.jarvis-msg .sender {
+.roger-msg .sender {
   color: #22c55e;
 }
 

@@ -1893,7 +1893,6 @@ app.get(['/api/v1/usage/summary', '/api/usage/summary'], async (req, res) => {
 // ==========================================
 
 const ANGULAR_DIST_DIR = path.resolve(__dirname, '../frontend/dist/frontend/browser');
-const LEGACY_STATIC_DIR = path.resolve(__dirname, '../static');
 
 if (require('fs').existsSync(ANGULAR_DIST_DIR)) {
   console.log('Serving Angular frontend from:', ANGULAR_DIST_DIR);
@@ -1902,9 +1901,18 @@ if (require('fs').existsSync(ANGULAR_DIST_DIR)) {
     if (req.path.startsWith('/api')) return next();
     res.sendFile(path.join(ANGULAR_DIST_DIR, 'index.html'));
   });
-} else if (require('fs').existsSync(LEGACY_STATIC_DIR)) {
-  console.log('Serving fallback UI from:', LEGACY_STATIC_DIR);
-  app.use(express.static(LEGACY_STATIC_DIR));
+} else {
+  console.warn('⚠️ Angular production build not found at:', ANGULAR_DIST_DIR);
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api')) return next();
+    res.status(503).send(`
+      <div style="font-family: system-ui, sans-serif; text-align: center; padding: 60px 20px; background: #0b1120; color: #e2e8f0; min-height: 100vh;">
+        <h1 style="color: #00f0ff;">Roger // Marketing AI Platform</h1>
+        <p style="font-size: 1.1rem; color: #94a3b8;">Frontend distribution bundle not found.</p>
+        <p style="color: #64748b;">Please build the frontend by running: <code style="color: #38bdf8; background: #1e293b; padding: 4px 8px; border-radius: 4px;">npm run build</code> inside the <code style="color: #38bdf8;">frontend/</code> folder.</p>
+      </div>
+    `);
+  });
 }
 
 // Start Server & Initialize Database

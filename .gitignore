@@ -1,4 +1,4 @@
-﻿# Dependencies
+# Dependencies
 node_modules/
 **/node_modules/
 
@@ -7,9 +7,6 @@ OpenJarvis/
 
 # Angular build artifacts
 .angular/
-**/dist/
-dist/
-frontend/dist/
 frontend/tmp/
 frontend/.angular/
 
