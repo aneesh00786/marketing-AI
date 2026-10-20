@@ -679,7 +679,7 @@ app.get(['/api/v1/integrations/traivo', '/api/integrations/traivo'], async (req,
   }
 });
 
-// 8. Executive Briefing (Python Jarvis Parity)
+// 8. Executive Spoken Briefing
 app.get(['/api/v1/executive/briefing', '/api/executive/briefing'], async (req, res) => {
   try {
     const clients = await all('SELECT * FROM b2b_clients ORDER BY id DESC LIMIT 5');
