@@ -45,20 +45,20 @@ async function getRawMailConfig(workspaceId = 1) {
   if (!row) {
     row = {
       workspace_id: workspaceId,
-      provider: 'zeptomail',
-      smtp_host: process.env.SMTP_HOST || 'smtp.zeptomail.com',
-      smtp_port: parseInt(process.env.SMTP_PORT || '587', 10),
+      provider: 'custom_smtp',
+      smtp_host: 'smtp.gmail.com',
+      smtp_port: 587,
       smtp_secure: 0,
-      smtp_user: process.env.SMTP_USER || 'emailapikey',
-      smtp_pass: process.env.SMTP_PASS || ZEPTO_DEFAULT_TOKEN,
-      imap_host: process.env.IMAP_HOST || 'imap.zoho.com',
-      imap_port: parseInt(process.env.IMAP_PORT || '993', 10),
+      smtp_user: '',
+      smtp_pass: '',
+      imap_host: 'imap.gmail.com',
+      imap_port: 993,
       imap_tls: 1,
-      imap_user: process.env.IMAP_USER || 'support@thrivewoo.com',
-      imap_pass: process.env.IMAP_PASS || '',
-      sender_name: process.env.MAIL_FROM_NAME || 'ThriveWoo Support',
-      sender_email: process.env.MAIL_FROM_ADDRESS || 'support@thrivewoo.com',
-      status: 'Connected'
+      imap_user: '',
+      imap_pass: '',
+      sender_name: '',
+      sender_email: '',
+      status: 'Not Configured'
     };
   }
   return row;
@@ -76,42 +76,56 @@ async function getSafeMailConfig(workspaceId = 1) {
 }
 
 async function saveMailConfig(workspaceId = 1, config = {}) {
-  const existing = await getRawMailConfig(workspaceId);
+  const existing = await get('SELECT * FROM mail_configurations WHERE workspace_id = ? LIMIT 1', [workspaceId]);
   const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
 
   // Preserve existing password if placeholder '••••••••' was submitted
   const smtpPass = (config.smtp_pass && config.smtp_pass !== '••••••••') 
     ? config.smtp_pass 
-    : (existing.smtp_pass || '');
+    : (existing ? existing.smtp_pass : '');
 
   const imapPass = (config.imap_pass && config.imap_pass !== '••••••••') 
     ? config.imap_pass 
-    : (existing.imap_pass || '');
+    : (existing ? existing.imap_pass : '');
 
-  const provider = config.provider || existing.provider || 'custom_smtp';
-  const smtpHost = config.smtp_host || existing.smtp_host || 'smtp.gmail.com';
-  const smtpPort = parseInt(config.smtp_port || existing.smtp_port || '587', 10);
+  const provider = config.provider || (existing ? existing.provider : 'custom_smtp');
+  const smtpHost = config.smtp_host || (existing ? existing.smtp_host : 'smtp.gmail.com');
+  const smtpPort = parseInt(config.smtp_port || (existing ? existing.smtp_port : '587'), 10);
   const smtpSecure = config.smtp_secure ? 1 : 0;
-  const smtpUser = (config.smtp_user !== undefined) ? config.smtp_user : existing.smtp_user;
-  const imapHost = config.imap_host || existing.imap_host || 'imap.gmail.com';
-  const imapPort = parseInt(config.imap_port || existing.imap_port || '993', 10);
+  const smtpUser = (config.smtp_user !== undefined) ? config.smtp_user : (existing ? existing.smtp_user : '');
+  const imapHost = config.imap_host || (existing ? existing.imap_host : 'imap.gmail.com');
+  const imapPort = parseInt(config.imap_port || (existing ? existing.imap_port : '993'), 10);
   const imapTls = config.imap_tls ? 1 : 0;
-  const imapUser = (config.imap_user !== undefined) ? config.imap_user : (config.smtp_user || existing.imap_user);
-  const senderName = config.sender_name || existing.sender_name || 'Roger Executive Team';
-  const senderEmail = config.sender_email || config.smtp_user || existing.sender_email || 'executive@thrivewoo.com';
+  const imapUser = (config.imap_user !== undefined) ? config.imap_user : (config.smtp_user || (existing ? existing.imap_user : ''));
+  const senderName = config.sender_name || (existing ? existing.sender_name : '');
+  const senderEmail = config.sender_email || config.smtp_user || (existing ? existing.sender_email : '');
   const status = (smtpUser && smtpPass) ? 'Configured' : 'Not Configured';
 
-  await run(`
-    UPDATE mail_configurations
-    SET provider = ?, smtp_host = ?, smtp_port = ?, smtp_secure = ?, smtp_user = ?, smtp_pass = ?,
-        imap_host = ?, imap_port = ?, imap_tls = ?, imap_user = ?, imap_pass = ?,
-        sender_name = ?, sender_email = ?, status = ?, updated_at = ?
-    WHERE workspace_id = ?
-  `, [
-    provider, smtpHost, smtpPort, smtpSecure, smtpUser, smtpPass,
-    imapHost, imapPort, imapTls, imapUser, imapPass,
-    senderName, senderEmail, status, now, workspaceId
-  ]);
+  if (existing) {
+    await run(`
+      UPDATE mail_configurations
+      SET provider = ?, smtp_host = ?, smtp_port = ?, smtp_secure = ?, smtp_user = ?, smtp_pass = ?,
+          imap_host = ?, imap_port = ?, imap_tls = ?, imap_user = ?, imap_pass = ?,
+          sender_name = ?, sender_email = ?, status = ?, updated_at = ?
+      WHERE workspace_id = ?
+    `, [
+      provider, smtpHost, smtpPort, smtpSecure, smtpUser, smtpPass,
+      imapHost, imapPort, imapTls, imapUser, imapPass,
+      senderName, senderEmail, status, now, workspaceId
+    ]);
+  } else {
+    await run(`
+      INSERT INTO mail_configurations (
+        workspace_id, provider, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass,
+        imap_host, imap_port, imap_tls, imap_user, imap_pass,
+        sender_name, sender_email, status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+      workspaceId, provider, smtpHost, smtpPort, smtpSecure, smtpUser, smtpPass,
+      imapHost, imapPort, imapTls, imapUser, imapPass,
+      senderName, senderEmail, status, now, now
+    ]);
+  }
 
   return await getSafeMailConfig(workspaceId);
 }
@@ -142,8 +156,8 @@ async function verifySmtpConnection(workspaceId = 1, testConfig = null) {
   try {
     const config = testConfig || await getRawMailConfig(workspaceId);
 
-    // If ZeptoMail provider or support@thrivewoo.com
-    if (config.provider === 'zeptomail' || (config.sender_email && config.sender_email.includes('thrivewoo.com'))) {
+    // If provider is explicitly zeptomail
+    if (config.provider === 'zeptomail') {
       await run("UPDATE mail_configurations SET status = 'Connected' WHERE workspace_id = ?", [workspaceId]);
       return {
         success: true,
@@ -207,8 +221,8 @@ async function sendRealEmail(workspaceId = 1, {
   let isRealSmtp = false;
   let deliveryDetails = null;
 
-  // 1. Try ZeptoMail directly (from busskit-webstore configuration)
-  if (config.provider === 'zeptomail' || (config.sender_email && config.sender_email.includes('thrivewoo.com'))) {
+  // 1. Try ZeptoMail directly if provider is zeptomail
+  if (config.provider === 'zeptomail') {
     try {
       const zeptoResult = await sendZeptoMail({
         to,
@@ -367,7 +381,10 @@ async function syncIncomingEmails(workspaceId = 1) {
 
           // Auto-run AI Analysis on received email!
           const analysis = await aiEngine.analyzeEmail(subject, textBody);
-          const isUrgent = analysis.priority === 'Urgent' ? 1 : 0;
+          const priority = analysis.ai_priority || analysis.priority || 'Normal';
+          const isUrgent = priority === 'Urgent' ? 1 : 0;
+          const summary = analysis.ai_summary || analysis.summary || snippet;
+          const replies = analysis.ai_replies || analysis.suggested_replies || [];
 
           await run(`
             INSERT INTO emails (
@@ -381,17 +398,17 @@ async function syncIncomingEmails(workspaceId = 1) {
             )
           `, [
             workspaceId,
-            fromName,
-            fromAddr,
-            config.imap_user,
-            config.sender_name,
-            subject,
-            textBody,
-            htmlBody,
-            snippet,
-            analysis.summary,
-            analysis.priority,
-            JSON.stringify(analysis.suggested_replies || []),
+            fromName || 'Unknown Sender',
+            fromAddr || 'unknown@example.com',
+            config.imap_user || 'support@thrivewoo.com',
+            config.sender_name || 'ThriveWoo Support',
+            subject || '(No Subject)',
+            textBody || '',
+            htmlBody || '',
+            snippet || '',
+            summary,
+            priority,
+            JSON.stringify(replies),
             isUrgent,
             messageId,
             receivedAt

@@ -1,4 +1,140 @@
-<div class="hud-container">
+<!-- =================================================================== -->
+<!-- ROGER EXECUTIVE ACCESS PORTAL (LOGIN & SIGNUP) -->
+<!-- =================================================================== -->
+<div *ngIf="!isAuthenticated" class="auth-wrapper">
+  <div class="auth-card">
+    <div class="auth-header">
+      <div class="auth-logo-orb"></div>
+      <h2>ROGER <span class="accent-text">// EXECUTIVE ACCESS</span></h2>
+      <p class="auth-sub">AI Marketing &amp; Executive Voice OS &bull; Powered by ThriveWoo</p>
+    </div>
+
+    <!-- Mode Switcher Tabs -->
+    <div class="auth-tabs">
+      <button type="button" class="auth-tab-btn" [class.active]="authMode === 'login'" (click)="toggleAuthMode('login')">
+        🔐 Sign In
+      </button>
+      <button type="button" class="auth-tab-btn" [class.active]="authMode === 'signup'" (click)="toggleAuthMode('signup')">
+        ✨ Create Account (Sign Up)
+      </button>
+    </div>
+
+    <!-- Feedback Alerts -->
+    <div *ngIf="authError" class="auth-alert error">
+      ⚠️ {{ authError }}
+    </div>
+    <div *ngIf="authSuccess" class="auth-alert success">
+      ✓ {{ authSuccess }}
+    </div>
+
+    <!-- ==================== SIGN IN ==================== -->
+    <form *ngIf="authMode === 'login'" (ngSubmit)="submitLogin()" class="auth-form">
+      <div class="form-group">
+        <label>Executive Email</label>
+        <div class="input-icon-wrap">
+          <span class="input-icon">✉️</span>
+          <input type="email" class="hud-input auth-input" [(ngModel)]="loginForm.email" name="loginEmail" placeholder="admin@thrivewoo.com" required autocomplete="username" />
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Password</label>
+        <div class="input-icon-wrap">
+          <span class="input-icon">🔒</span>
+          <input type="password" class="hud-input auth-input" [(ngModel)]="loginForm.password" name="loginPassword" placeholder="••••••••" required autocomplete="current-password" />
+        </div>
+      </div>
+
+      <div class="auth-extras-row">
+        <label class="checkbox-label">
+          <input type="checkbox" [(ngModel)]="loginForm.rememberMe" name="rememberMe" />
+          <span>Remember workstation</span>
+        </label>
+        <button type="button" class="btn-link" (click)="fillDemoAdmin()">⚡ Fill Demo Admin</button>
+      </div>
+
+      <button type="submit" class="btn btn-primary auth-submit-btn" [disabled]="isSubmittingAuth">
+        {{ isSubmittingAuth ? 'Verifying Credentials...' : 'Sign In to Roger OS ➔' }}
+      </button>
+
+      <div class="auth-footer-text">
+        <span>Need a dedicated workspace for your products?</span>
+        <button type="button" class="btn-link strong" (click)="toggleAuthMode('signup')">Create new account</button>
+      </div>
+    </form>
+
+    <!-- ==================== SIGN UP ==================== -->
+    <form *ngIf="authMode === 'signup'" (ngSubmit)="submitSignup()" class="auth-form">
+      <div class="form-row-grid">
+        <div class="form-group">
+          <label>Your Full Name</label>
+          <div class="input-icon-wrap">
+            <span class="input-icon">👤</span>
+            <input type="text" class="hud-input auth-input" [(ngModel)]="signupForm.displayName" name="displayName" placeholder="e.g. Rakesh / Alex" required />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Work Email</label>
+          <div class="input-icon-wrap">
+            <span class="input-icon">✉️</span>
+            <input type="email" class="hud-input auth-input" [(ngModel)]="signupForm.email" name="signupEmail" placeholder="founder@yourcompany.com" required autocomplete="email" />
+          </div>
+        </div>
+      </div>
+
+      <div class="form-row-grid">
+        <div class="form-group">
+          <label>Business / Workspace Name</label>
+          <div class="input-icon-wrap">
+            <span class="input-icon">🏢</span>
+            <input type="text" class="hud-input auth-input" [(ngModel)]="signupForm.workspaceName" name="workspaceName" placeholder="e.g. ThriveWoo Marketing" required />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Industry</label>
+          <div class="input-icon-wrap">
+            <span class="input-icon">🌐</span>
+            <input type="text" class="hud-input auth-input" [(ngModel)]="signupForm.industry" name="industry" placeholder="Software, B2B, Digital Web/App" />
+          </div>
+        </div>
+      </div>
+
+      <div class="form-row-grid">
+        <div class="form-group">
+          <label>Create Password</label>
+          <div class="input-icon-wrap">
+            <span class="input-icon">🔒</span>
+            <input type="password" class="hud-input auth-input" [(ngModel)]="signupForm.password" name="signupPassword" placeholder="Min 6 characters" required autocomplete="new-password" />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Confirm Password</label>
+          <div class="input-icon-wrap">
+            <span class="input-icon">🔑</span>
+            <input type="password" class="hud-input auth-input" [(ngModel)]="signupForm.confirmPassword" name="confirmPassword" placeholder="Repeat password" required autocomplete="new-password" />
+          </div>
+        </div>
+      </div>
+
+      <button type="submit" class="btn btn-primary auth-submit-btn" [disabled]="isSubmittingAuth">
+        {{ isSubmittingAuth ? 'Provisioning Workspace...' : '✨ Create Executive Account & Workspace' }}
+      </button>
+
+      <div class="auth-footer-text">
+        <span>Already have an active account?</span>
+        <button type="button" class="btn-link strong" (click)="toggleAuthMode('login')">Sign in here</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- =================================================================== -->
+<!-- AUTHENTICATED PLATFORM HUD -->
+<!-- =================================================================== -->
+<div *ngIf="isAuthenticated" class="hud-container">
   <!-- Top Banner for One-Click Voice Permission -->
   <div class="mic-banner" (click)="toggleElevenLabsCall()">
     🎙️ <strong>CLICK HERE TO CONNECT ROGER // HANDS-FREE FULL-DUPLEX ELEVENLABS VOICE AI</strong>
@@ -14,6 +150,18 @@
       </div>
     </div>
     <div class="hud-status">
+      <!-- User Profile Badge & Logout -->
+      <div class="user-pill" *ngIf="currentUser">
+        <span class="user-avatar">👤</span>
+        <div class="user-meta">
+          <span class="user-name">{{ currentUser.displayName || currentUser.email }}</span>
+          <span class="user-workspace">{{ currentWorkspace?.name || 'Workspace' }}</span>
+        </div>
+        <button type="button" class="btn btn-sm btn-logout" (click)="logout()" title="Sign Out of Roger OS">
+          🚪 Sign Out
+        </button>
+      </div>
+
       <span class="chip" [class.active]="!isElevenLabsConnected" [class.calling]="isElevenLabsConnected">
         {{ isElevenLabsConnected ? '🔴 ROGER ACTIVE' : '🟢 ROGER READY' }}
       </span>
@@ -285,7 +433,7 @@
             <span class="chip" [class.calling]="em.ai_priority === 'Urgent' || em.is_urgent === 1" [class.active]="em.status === 'Sent'">
               {{ (em.ai_priority || (em.is_urgent === 1 ? 'Urgent' : 'Normal')).toUpperCase() }}
             </span>
-            <span class="email-sender">From: <strong>{{ em.sender || 'TradeSage Executive' }}</strong> &rarr; To: <strong>{{ em.recipient_name || em.recipient_email }}</strong></span>
+            <span class="email-sender">From: <strong>{{ em.sender || 'Roger Executive' }}</strong> &rarr; To: <strong>{{ em.recipient_name || em.recipient_email }}</strong></span>
           </div>
           <span class="email-date">{{ em.sent_at || em.received_at || 'Today' }}</span>
         </div>
@@ -1183,7 +1331,7 @@
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
           <div class="form-group">
             <label>Mail Provider Profile</label>
-            <select class="hud-input" [(ngModel)]="mailConfig.provider">
+            <select class="hud-input" [(ngModel)]="mailConfig.provider" (ngModelChange)="onMailProviderChange()">
               <option value="custom_smtp">Custom Company SMTP / IMAP</option>
               <option value="gmail">Google Workspace / Gmail</option>
               <option value="office365">Microsoft 365 / Outlook</option>
@@ -1202,13 +1350,20 @@
           <input type="email" class="hud-input" [(ngModel)]="mailConfig.sender_email" placeholder="e.g. info@thrivewoo.com" />
         </div>
 
-        <!-- ZeptoMail Active Banner -->
-        <div *ngIf="mailConfig.provider === 'zeptomail' || mailConfig.sender_email?.includes('thrivewoo.com')" 
+        <!-- Status Banner -->
+        <div *ngIf="mailConfig.status === 'Connected'" 
              style="background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 8px; padding: 10px 14px; margin-top: 10px; display: flex; align-items: center; justify-content: space-between;">
           <div style="font-size: 0.82rem; color: #a7f3d0;">
-            <strong style="color: #34d399;">✓ ZeptoMail Outbound Connected:</strong> Dispatches all live emails from <strong>{{ mailConfig.sender_email || 'support@thrivewoo.com' }}</strong>.
+            <strong style="color: #34d399;">✓ Outbound SMTP Connected:</strong> Verified and ready to send from <strong>{{ mailConfig.sender_email }}</strong>.
           </div>
-          <span class="chip active" style="margin: 0; background: #059669; color: white;">READY TO SEND</span>
+          <span class="chip active" style="margin: 0; background: #059669; color: white;">ACTIVE</span>
+        </div>
+        <div *ngIf="mailConfig.status === 'Not Configured'" 
+             style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 8px; padding: 10px 14px; margin-top: 10px; display: flex; align-items: center; justify-content: space-between;">
+          <div style="font-size: 0.82rem; color: #fde68a;">
+            <strong>ℹ️ Mail Authorization Pending:</strong> Enter your SMTP and IMAP credentials below to enable live sending & inbox sync for this workspace.
+          </div>
+          <span class="chip" style="margin: 0; background: rgba(245, 158, 11, 0.2); color: #f59e0b;">NOT CONFIGURED</span>
         </div>
 
         <!-- Section 1: SMTP Outbound (Sending) -->
@@ -1240,7 +1395,7 @@
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px;">
             <div class="form-group" style="margin: 0;">
               <label style="font-size: 0.8rem; color: #94a3b8;">SMTP Username / Email</label>
-              <input type="text" class="hud-input" [(ngModel)]="mailConfig.smtp_user" placeholder="e.g. info@thrivewoo.com" />
+              <input type="text" class="hud-input" [(ngModel)]="mailConfig.smtp_user" placeholder="e.g. info@yourcompany.com" />
             </div>
             <div class="form-group" style="margin: 0;">
               <label style="font-size: 0.8rem; color: #94a3b8;">SMTP Password / App Password</label>
@@ -1258,7 +1413,7 @@
             </button>
           </div>
           <p style="font-size: 0.78rem; color: #94a3b8; margin: 0 0 10px 0;">
-            ℹ️ <em>ZeptoMail is strictly an outbound delivery engine. To pull incoming customer replies from your Zoho inbox into this Hub, enter your Zoho Mail App Password below. (Outbound sending works independently).</em>
+            ℹ️ <em>Enter your IMAP Host and App Password to automatically synchronize customer replies into your Hub.</em>
           </p>
 
           <div style="display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 12px;">
@@ -1299,9 +1454,9 @@
       </div>
     </div>
   </div>
+</div>
 
-  <!-- Floating Toast Notification -->
-  <div *ngIf="toastMessage" class="toast-popup">
-    ⚡ {{ toastMessage }}
-  </div>
+<!-- Floating Toast Notification -->
+<div *ngIf="toastMessage" class="toast-popup">
+  ⚡ {{ toastMessage }}
 </div>

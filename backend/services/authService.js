@@ -93,10 +93,21 @@ async function registerUser(email, password, displayName, workspaceName = 'My Wo
 
   // 5. Create default Subscription
   const starterPlan = await get('SELECT id FROM plans WHERE plan_key = ?', ['starter']);
+  const periodEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().replace('T', ' ').substring(0, 19);
   await run(
     `INSERT INTO subscriptions (workspace_id, plan_id, status, current_period_start, current_period_end, created_at)
-     VALUES (?, ?, 'Active', ?, date(?, '+30 days'), ?)`,
-    [workspaceId, starterPlan?.id || 1, now, now, now]
+     VALUES (?, ?, 'Active', ?, ?, ?)`,
+    [workspaceId, starterPlan?.id || 1, now, periodEnd, now]
+  );
+
+  // 6. Provision dedicated clean Mail Configuration for this workspace
+  await run(
+    `INSERT INTO mail_configurations (
+      workspace_id, provider, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass,
+      imap_host, imap_port, imap_tls, imap_user, imap_pass,
+      sender_name, sender_email, status, created_at, updated_at
+    ) VALUES (?, 'custom_smtp', 'smtp.gmail.com', 587, 0, '', '', 'imap.gmail.com', 993, 1, '', '', ?, ?, 'Not Configured', ?, ?)`,
+    [workspaceId, displayName || cleanEmail.split('@')[0], cleanEmail, now, now]
   );
 
   const token = createToken({ userId, email: cleanEmail, workspaceId, role: 'Workspace Owner' });
@@ -134,7 +145,7 @@ async function loginUser(email, password) {
   return {
     token,
     user: { id: user.id, email: user.email, displayName: user.display_name },
-    workspace: workspace || { id: 1, name: 'TradeSage Enterprise', plan: 'Starter' }
+    workspace: workspace || { id: 1, name: 'Roger Marketing Workspace', plan: 'Starter' }
   };
 }
 

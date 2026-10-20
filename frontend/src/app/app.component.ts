@@ -174,6 +174,30 @@ export class AppComponent implements OnInit, OnDestroy {
     notes: 'Walkthrough of mobile field sales order booking, wholesale tiers, and live inventory sync.'
   };
 
+  // Authentication & Access Portal State
+  isAuthenticated: boolean = false;
+  currentUser: any = null;
+  currentWorkspace: any = null;
+  authMode: 'login' | 'signup' = 'login';
+  isSubmittingAuth: boolean = false;
+  authError: string = '';
+  authSuccess: string = '';
+
+  loginForm = {
+    email: '',
+    password: '',
+    rememberMe: true
+  };
+
+  signupForm = {
+    displayName: '',
+    email: '',
+    password: '',
+    confirmPassword: '',
+    workspaceName: 'ThriveWoo Marketing',
+    industry: 'Software / SaaS / B2B Wholesale'
+  };
+
   // Executive Briefing Cache & Toast
   executiveBriefing: any = null;
   toastMessage: string = '';
@@ -186,6 +210,24 @@ export class AppComponent implements OnInit, OnDestroy {
   ) {}
 
   ngOnInit(): void {
+    this.checkAuthSession();
+  }
+
+  checkAuthSession(): void {
+    if (this.apiService.isLoggedIn()) {
+      this.currentUser = this.apiService.getCurrentUser() || { displayName: 'Executive Admin', email: 'admin@thrivewoo.com' };
+      this.currentWorkspace = this.apiService.getCurrentWorkspace() || { name: 'Executive HQ' };
+      this.isAuthenticated = true;
+      this.loadAllWorkspaceData();
+    } else {
+      this.isAuthenticated = false;
+      // Pre-fill demo admin for fast testing
+      this.loginForm.email = 'admin@thrivewoo.com';
+      this.loginForm.password = 'admin123';
+    }
+  }
+
+  loadAllWorkspaceData(): void {
     this.loadStatus();
     this.loadDigitalProducts();
     this.loadLeads();
@@ -195,6 +237,111 @@ export class AppComponent implements OnInit, OnDestroy {
     this.loadMailConfig();
     this.loadConnectedBusinesses();
     this.loadAppointments();
+  }
+
+  toggleAuthMode(mode: 'login' | 'signup'): void {
+    this.authMode = mode;
+    this.authError = '';
+    this.authSuccess = '';
+  }
+
+  submitLogin(): void {
+    this.authError = '';
+    this.authSuccess = '';
+    if (!this.loginForm.email || !this.loginForm.password) {
+      this.authError = 'Please enter both your email address and password.';
+      return;
+    }
+
+    this.isSubmittingAuth = true;
+    this.apiService.login({
+      email: this.loginForm.email,
+      password: this.loginForm.password
+    }).subscribe({
+      next: (res: any) => {
+        this.isSubmittingAuth = false;
+        if (res.token) {
+          this.apiService.saveSession(res.token, res.user, res.workspace);
+          this.currentUser = res.user;
+          this.currentWorkspace = res.workspace;
+          this.isAuthenticated = true;
+          this.showToast(`Welcome back, ${res.user?.displayName || 'Executive'}! Access granted.`);
+          this.loadAllWorkspaceData();
+        } else {
+          this.authError = 'Login failed. Invalid response from server.';
+        }
+      },
+      error: (err: any) => {
+        this.isSubmittingAuth = false;
+        this.authError = err.error?.error || 'Authentication failed. Please check your credentials.';
+      }
+    });
+  }
+
+  submitSignup(): void {
+    this.authError = '';
+    this.authSuccess = '';
+
+    if (!this.signupForm.email || !this.signupForm.password) {
+      this.authError = 'Email and password are required.';
+      return;
+    }
+    if (this.signupForm.password.length < 6) {
+      this.authError = 'Password must be at least 6 characters.';
+      return;
+    }
+    if (this.signupForm.password !== this.signupForm.confirmPassword) {
+      this.authError = 'Passwords do not match.';
+      return;
+    }
+
+    this.isSubmittingAuth = true;
+    this.apiService.register({
+      email: this.signupForm.email,
+      password: this.signupForm.password,
+      displayName: this.signupForm.displayName || this.signupForm.email.split('@')[0],
+      workspaceName: this.signupForm.workspaceName || 'My Workspace',
+      industry: this.signupForm.industry || 'Software'
+    }).subscribe({
+      next: (res: any) => {
+        this.isSubmittingAuth = false;
+        if (res.token) {
+          this.apiService.saveSession(res.token, res.user, res.workspace);
+          this.currentUser = res.user;
+          this.currentWorkspace = res.workspace;
+          this.isAuthenticated = true;
+          this.showToast(`Account created! Welcome to Roger OS, ${res.user?.displayName || 'Executive'}!`);
+          this.loadAllWorkspaceData();
+        } else {
+          this.authSuccess = 'Account registered successfully! Please sign in.';
+          this.authMode = 'login';
+        }
+      },
+      error: (err: any) => {
+        this.isSubmittingAuth = false;
+        this.authError = err.error?.error || 'Registration failed. Please verify your details.';
+      }
+    });
+  }
+
+  logout(): void {
+    this.apiService.logout();
+    this.isAuthenticated = false;
+    this.currentUser = null;
+    this.currentWorkspace = null;
+    this.stopCallTimer();
+    this.speechService.stopElevenLabsSession();
+    this.isElevenLabsConnected = false;
+    this.authMode = 'login';
+    this.loginForm.email = '';
+    this.loginForm.password = '';
+    this.showToast('You have been signed out.');
+  }
+
+  fillDemoAdmin(): void {
+    this.loginForm.email = 'admin@thrivewoo.com';
+    this.loginForm.password = 'admin123';
+    this.authError = '';
   }
 
   ngOnDestroy(): void {
@@ -261,6 +408,13 @@ export class AppComponent implements OnInit, OnDestroy {
         },
         onModeChange: (mode) => {
           this.elevenLabsMode = mode;
+        },
+        onToolExecuted: (toolName) => {
+          if (toolName === 'emails') this.loadEmails();
+          else if (toolName === 'leads') this.loadLeads();
+          else if (toolName === 'appointments') this.loadAppointments();
+          else if (toolName === 'drafts') this.loadDrafts();
+          else if (toolName === 'products') this.loadDigitalProducts();
         }
       });
     } catch (err: any) {
@@ -1001,6 +1155,31 @@ export class AppComponent implements OnInit, OnDestroy {
       },
       error: (err) => console.warn('Error loading mail config:', err)
     });
+  }
+
+  onMailProviderChange(): void {
+    if (this.mailConfig.provider === 'gmail') {
+      this.mailConfig.smtp_host = 'smtp.gmail.com';
+      this.mailConfig.smtp_port = 587;
+      this.mailConfig.smtp_secure = false;
+      this.mailConfig.imap_host = 'imap.gmail.com';
+      this.mailConfig.imap_port = 993;
+      this.mailConfig.imap_tls = true;
+    } else if (this.mailConfig.provider === 'zoho') {
+      this.mailConfig.smtp_host = 'smtppro.zoho.com';
+      this.mailConfig.smtp_port = 465;
+      this.mailConfig.smtp_secure = true;
+      this.mailConfig.imap_host = 'imappro.zoho.com';
+      this.mailConfig.imap_port = 993;
+      this.mailConfig.imap_tls = true;
+    } else if (this.mailConfig.provider === 'office365') {
+      this.mailConfig.smtp_host = 'smtp.office365.com';
+      this.mailConfig.smtp_port = 587;
+      this.mailConfig.smtp_secure = false;
+      this.mailConfig.imap_host = 'outlook.office365.com';
+      this.mailConfig.imap_port = 993;
+      this.mailConfig.imap_tls = true;
+    }
   }
 
   saveMailConfig(): void {

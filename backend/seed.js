@@ -11,7 +11,7 @@ const DB_HOST = process.env.DB_HOST || '127.0.0.1';
 const DB_PORT = parseInt(process.env.DB_PORT || '3306', 10);
 const DB_USER = process.env.DB_USER || 'root';
 const DB_PASSWORD = process.env.DB_PASSWORD || '';
-const DB_NAME = process.env.DB_NAME || 'tradesage';
+const DB_NAME = process.env.DB_NAME || 'marketing-ai';
 
 async function seedMySQL() {
   console.log('====================================================');
@@ -609,7 +609,7 @@ async function seedMySQL() {
   await seedIfEmpty(
     'users',
     'INSERT INTO users (id, email, password_hash, display_name, status, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-    [[1, 'admin@tradesage.ai', '$2a$10$hashedPasswordPlaceholderForLocalDevOnly', 'Executive Admin', 'Active', now]]
+    [[1, 'admin@thrivewoo.com', '251256d1ea733bece69deaf4b177610d:6460ee5c17b39ef1b3df7218ba4ed9fab738b152cb5adc869452bec5348868bb777157487d9fad7437673476bca510c02c78822cfaa6679cf65fae5ea5a3dc93', 'Executive Admin', 'Active', now]]
   );
 
   // 3. Workspace Members
@@ -896,23 +896,23 @@ async function seedMySQL() {
     ]
   );
 
-  // 13. Mail Configuration (ZeptoMail from busskit-webstore)
+  // 13. Mail Configuration (Zoho Workplace / Pro settings for support@thrivewoo.com)
   await seedIfEmpty(
     'mail_configurations',
     'INSERT INTO mail_configurations (workspace_id, provider, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, imap_host, imap_port, imap_tls, imap_user, imap_pass, sender_name, sender_email, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     [[
       1,
-      'zeptomail',
-      'smtp.zeptomail.com',
-      587,
-      0,
-      'emailapikey',
-      'Zoho-enczapikey wSsVR61//UbyX/wryDaudrhsmgsAVF31Rk9721WiuHeqGvGQocc6kRfGBg+mTvQaRW5gF2RH8LkonBgE0TMG2o8lzlsBXCiF9mqRe1U4J3x17qnvhDzKXWlYkxaMJYMOxAtsm2djFs8l+g==',
-      'imap.zoho.com',
+      'zoho',
+      'smtppro.zoho.com',
+      465,
+      1,
+      'support@thrivewoo.com',
+      'DZNwM0GMjMmM',
+      'imappro.zoho.com',
       993,
       1,
       'support@thrivewoo.com',
-      '',
+      'DZNwM0GMjMmM',
       'ThriveWoo Support',
       'support@thrivewoo.com',
       'Connected',

@@ -11,12 +11,12 @@ if (DB_CLIENT === 'mysql') {
     port: parseInt(process.env.DB_PORT || '3306', 10),
     user: process.env.DB_USER || 'root',
     password: process.env.DB_PASSWORD || '',
-    database: process.env.DB_NAME || 'tradesage',
+    database: process.env.DB_NAME || 'marketing-ai',
     waitForConnections: true,
     connectionLimit: 10,
     queueLimit: 0
   });
-  console.log(`[DB] Configured for MySQL at ${process.env.DB_HOST || '127.0.0.1'}:${process.env.DB_PORT || '3306'} (Database: ${process.env.DB_NAME || 'tradesage'})`);
+  console.log(`[DB] Configured for MySQL at ${process.env.DB_HOST || '127.0.0.1'}:${process.env.DB_PORT || '3306'} (Database: ${process.env.DB_NAME || 'marketing-ai'})`);
 } else {
   const sqlite3 = require('sqlite3').verbose();
   const DB_PATH = path.resolve(__dirname, '../../tradesage.db');
@@ -29,16 +29,22 @@ if (DB_CLIENT === 'mysql') {
   });
 }
 
+function sanitizeParams(params) {
+  if (!Array.isArray(params)) return params;
+  return params.map(p => (p === undefined ? null : p));
+}
+
 // Universal query helpers
 function run(sql, params = []) {
+  const cleanParams = sanitizeParams(params);
   if (DB_CLIENT === 'mysql') {
-    return mysqlPool.execute(sql, params).then(([result]) => ({
+    return mysqlPool.execute(sql, cleanParams).then(([result]) => ({
       lastID: result.insertId,
       changes: result.affectedRows
     }));
   }
   return new Promise((resolve, reject) => {
-    sqliteDb.run(sql, params, function (err) {
+    sqliteDb.run(sql, cleanParams, function (err) {
       if (err) reject(err);
       else resolve({ lastID: this.lastID, changes: this.changes });
     });
@@ -46,11 +52,12 @@ function run(sql, params = []) {
 }
 
 function get(sql, params = []) {
+  const cleanParams = sanitizeParams(params);
   if (DB_CLIENT === 'mysql') {
-    return mysqlPool.execute(sql, params).then(([rows]) => rows[0] || null);
+    return mysqlPool.execute(sql, cleanParams).then(([rows]) => rows[0] || null);
   }
   return new Promise((resolve, reject) => {
-    sqliteDb.get(sql, params, (err, row) => {
+    sqliteDb.get(sql, cleanParams, (err, row) => {
       if (err) reject(err);
       else resolve(row);
     });
@@ -58,11 +65,12 @@ function get(sql, params = []) {
 }
 
 function all(sql, params = []) {
+  const cleanParams = sanitizeParams(params);
   if (DB_CLIENT === 'mysql') {
-    return mysqlPool.execute(sql, params).then(([rows]) => rows || []);
+    return mysqlPool.execute(sql, cleanParams).then(([rows]) => rows || []);
   }
   return new Promise((resolve, reject) => {
-    sqliteDb.all(sql, params, (err, rows) => {
+    sqliteDb.all(sql, cleanParams, (err, rows) => {
       if (err) reject(err);
       else resolve(rows || []);
     });
@@ -1147,26 +1155,11 @@ async function initDatabase() {
         imap_host, imap_port, imap_tls, imap_user, imap_pass,
         sender_name, sender_email, status, created_at, updated_at
       ) VALUES (
-        1, 'custom_smtp', ?, ?, ?, ?, ?,
-        ?, ?, ?, ?, ?,
-        ?, ?, ?, ?, ?
+        1, 'custom_smtp', 'smtp.gmail.com', 587, 0, '', '',
+        'imap.gmail.com', 993, 1, '', '',
+        'Executive Team', 'info@example.com', 'Not Configured', ?, ?
       )
-    `, [
-      process.env.SMTP_HOST || 'smtp.gmail.com',
-      parseInt(process.env.SMTP_PORT || '587', 10),
-      process.env.SMTP_SECURE === 'true' ? 1 : 0,
-      process.env.SMTP_USER || '',
-      process.env.SMTP_PASS || '',
-      process.env.IMAP_HOST || 'imap.gmail.com',
-      parseInt(process.env.IMAP_PORT || '993', 10),
-      process.env.IMAP_TLS === 'false' ? 0 : 1,
-      process.env.IMAP_USER || process.env.SMTP_USER || '',
-      process.env.IMAP_PASS || process.env.SMTP_PASS || '',
-      process.env.MAIL_FROM_NAME || 'Roger Executive Team',
-      process.env.MAIL_FROM_ADDRESS || process.env.SMTP_USER || 'executive@thrivewoo.com',
-      (process.env.SMTP_USER && process.env.SMTP_PASS) ? 'Connected' : 'Not Configured',
-      now, now
-    ]);
+    `, [now, now]);
   }
 
   console.log('TradeSage B2B Assistant Database initialized and seeded successfully.');

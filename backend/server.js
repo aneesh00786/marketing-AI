@@ -43,6 +43,17 @@ function getLocalIp() {
   return '127.0.0.1';
 }
 
+function getWorkspaceId(req) {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const payload = authService.verifyToken(authHeader.split(' ')[1]);
+    if (payload && payload.workspaceId) {
+      return payload.workspaceId;
+    }
+  }
+  return 1;
+}
+
 // ==========================================
 // 1. AUTHENTICATION & WORKSPACE (SRS FR-01)
 // ==========================================
@@ -98,14 +109,15 @@ app.post(['/api/v1/auth/logout', '/api/auth/logout'], (req, res) => {
 
 app.get(['/api/v1/dashboard/summary', '/api/dashboard/summary'], async (req, res) => {
   try {
-    const tasksCount = await get('SELECT count(*) as count FROM tasks WHERE workspace_id = 1');
-    const campaignsCount = await get('SELECT count(*) as count FROM campaigns WHERE workspace_id = 1');
-    const contentDrafts = await get("SELECT count(*) as count FROM content_items WHERE workspace_id = 1 AND status = 'Draft'");
-    const contentApproved = await get("SELECT count(*) as count FROM content_items WHERE workspace_id = 1 AND status = 'Approved'");
-    const videoJobsCount = await get('SELECT count(*) as count FROM video_jobs WHERE workspace_id = 1');
-    const leadsCount = await get('SELECT count(*) as count FROM leads WHERE workspace_id = 1');
-    const agents = await all('SELECT * FROM agents WHERE workspace_id = 1 OR workspace_id IS NULL');
-    const recentTasks = await all('SELECT * FROM tasks WHERE workspace_id = 1 ORDER BY id DESC LIMIT 5');
+    const wsId = getWorkspaceId(req);
+    const tasksCount = await get('SELECT count(*) as count FROM tasks WHERE workspace_id = ?', [wsId]);
+    const campaignsCount = await get('SELECT count(*) as count FROM campaigns WHERE workspace_id = ?', [wsId]);
+    const contentDrafts = await get("SELECT count(*) as count FROM content_items WHERE workspace_id = ? AND status = 'Draft'", [wsId]);
+    const contentApproved = await get("SELECT count(*) as count FROM content_items WHERE workspace_id = ? AND status = 'Approved'", [wsId]);
+    const videoJobsCount = await get('SELECT count(*) as count FROM video_jobs WHERE workspace_id = ?', [wsId]);
+    const leadsCount = await get('SELECT count(*) as count FROM leads WHERE workspace_id = ?', [wsId]);
+    const agents = await all('SELECT * FROM agents WHERE workspace_id = ? OR workspace_id IS NULL', [wsId]);
+    const recentTasks = await all('SELECT * FROM tasks WHERE workspace_id = ? ORDER BY id DESC LIMIT 5', [wsId]);
 
     res.json({
       metrics: {
@@ -130,7 +142,8 @@ app.get(['/api/v1/dashboard/summary', '/api/dashboard/summary'], async (req, res
 
 app.get(['/api/v1/agents', '/api/agents'], async (req, res) => {
   try {
-    const agents = await all('SELECT * FROM agents WHERE workspace_id = 1 OR workspace_id IS NULL ORDER BY id ASC');
+    const wsId = getWorkspaceId(req);
+    const agents = await all('SELECT * FROM agents WHERE workspace_id = ? OR workspace_id IS NULL ORDER BY id ASC', [wsId]);
     res.json({ agents });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -139,21 +152,22 @@ app.get(['/api/v1/agents', '/api/agents'], async (req, res) => {
 
 app.post(['/api/v1/assistant/chat', '/api/assistant/chat'], async (req, res) => {
   try {
+    const wsId = getWorkspaceId(req);
     const { agentKey, message, conversationId } = req.body;
     const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
 
-    const agent = await get('SELECT * FROM agents WHERE agent_key = ? LIMIT 1', [agentKey || 'executive_assistant']);
+    const agent = await get('SELECT * FROM agents WHERE (workspace_id = ? OR workspace_id IS NULL) AND agent_key = ? LIMIT 1', [wsId, agentKey || 'executive_assistant']);
     const cleanMsg = (message || '').trim();
     const lower = cleanMsg.toLowerCase();
 
     // Fetch live B2B context from database
-    const clients = await all('SELECT * FROM b2b_clients ORDER BY id DESC LIMIT 5');
-    const replies = await all('SELECT * FROM client_replies ORDER BY id DESC LIMIT 5');
-    const connectedBiz = await all('SELECT * FROM connected_businesses ORDER BY id ASC');
+    const clients = await all('SELECT * FROM b2b_clients WHERE workspace_id = ? ORDER BY id DESC LIMIT 5', [wsId]);
+    const replies = await all('SELECT * FROM client_replies WHERE workspace_id = ? ORDER BY id DESC LIMIT 5', [wsId]);
+    const connectedBiz = await all('SELECT * FROM connected_businesses WHERE workspace_id = ? ORDER BY id ASC', [wsId]);
     const traivoStats = await queryTraivoMySQL();
-    const urgentEmails = await all("SELECT * FROM emails WHERE is_urgent = 1 AND is_read = 0 ORDER BY id DESC LIMIT 5");
-    const allLeads = await all("SELECT * FROM leads ORDER BY id DESC LIMIT 5");
-    const digitalProductsList = await all('SELECT * FROM digital_products ORDER BY id ASC');
+    const urgentEmails = await all("SELECT * FROM emails WHERE workspace_id = ? AND is_urgent = 1 AND is_read = 0 ORDER BY id DESC LIMIT 5", [wsId]);
+    const allLeads = await all("SELECT * FROM leads WHERE workspace_id = ? ORDER BY id DESC LIMIT 5", [wsId]);
+    const digitalProductsList = await all('SELECT * FROM digital_products WHERE workspace_id = ? ORDER BY id ASC', [wsId]);
 
     let contextSnippet = `Live Business Context:
 - Active Digital Products for Marketing (${digitalProductsList.length} total):
@@ -173,7 +187,7 @@ ${connectedBiz.map(b => `  * ${b.business_type === 'owner' ? '[MY BUSINESS]' : '
 
     // 1. Sync Company Email on command
     if (lower.includes('sync') && (lower.includes('mail') || lower.includes('email') || lower.includes('inbox'))) {
-      const syncRes = await emailService.syncIncomingEmails(1);
+      const syncRes = await emailService.syncIncomingEmails(wsId);
       if (syncRes.success) {
         fastReply = `Sir, I have synchronized your company mailbox. ${syncRes.fetchedCount > 0 ? `Fetched ${syncRes.fetchedCount} new emails and completed AI urgency screening.` : 'All emails are up to date, with no new unread incoming messages.'}`;
       } else {
@@ -261,8 +275,9 @@ ${connectedBiz.map(b => `  * ${b.business_type === 'owner' ? '[MY BUSINESS]' : '
 
       await run(
         `INSERT INTO email_drafts (workspace_id, product_id, product_name, recipient_email, recipient_name, subject, body_html, body_text, tone, status, created_at, updated_at)
-         VALUES (1, ?, ?, ?, ?, ?, ?, ?, 'Professional', 'Draft', ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Professional', 'Draft', ?, ?)`,
         [
+          wsId,
           targetProduct?.id || 1,
           targetProduct?.name || 'ThriveWoo B2B Platform',
           targetEmail,
@@ -286,7 +301,7 @@ ${connectedBiz.map(b => `  * ${b.business_type === 'owner' ? '[MY BUSINESS]' : '
       let productKey = 'thrivewoo';
       if (lower.includes('school bus') || lower.includes('safetrack')) productKey = 'school_bus';
 
-      const postRes = await marketingService.generateAiSocialPost(1, {
+      const postRes = await marketingService.generateAiSocialPost(wsId, {
         productKey,
         platform,
         customTopic: cleanMsg
@@ -301,7 +316,7 @@ ${connectedBiz.map(b => `  * ${b.business_type === 'owner' ? '[MY BUSINESS]' : '
       const subject = cleanMsg.includes('subject') ? 'Follow-up from Roger (Executive Team)' : 'Product Information & Demonstration Follow-up';
       const body = emailMatch ? emailMatch[2].trim() : 'Thank you for connecting. We have attached the requested executive overview and product documentation.';
       
-      const sendRes = await emailService.sendRealEmail(1, {
+      const sendRes = await emailService.sendRealEmail(wsId, {
         to: recipient,
         recipientName: recipient,
         subject,
@@ -316,10 +331,10 @@ ${connectedBiz.map(b => `  * ${b.business_type === 'owner' ? '[MY BUSINESS]' : '
       const topReplies = replies.slice(0, 2).map(r => `"${r.customer_name} from ${r.company_name} replied: '${r.reply_text}'"`).join(' Also, ');
       fastReply = `Sir, you have ${replies.length} recent client replies. ${topReplies}. Apex Wholesale requested a live walkthrough for their 14 sales reps, and Metro Academy approved funding for 22 buses.`;
     }
-    // 6. Email queries (inbox, unread, urgent, read latest)
-    else if (lower.includes('urgent') || lower.includes('inbox') || (lower.includes('email') && !lower.includes('send') && !lower.includes('draft')) || (lower.includes('mail') && !lower.includes('send') && !lower.includes('draft'))) {
-      const allEmails = await all("SELECT * FROM emails ORDER BY id DESC LIMIT 5");
-      const unreadCountRow = await get("SELECT count(*) as count FROM emails WHERE is_read = 0");
+    // 6. Email queries (inbox, unread, urgent, read latest, retrieve)
+    else if (lower.includes('urgent') || lower.includes('inbox') || (lower.includes('email') && !lower.includes('send') && !lower.includes('draft')) || (lower.includes('mail') && !lower.includes('send') && !lower.includes('draft')) || lower.includes('retrieve')) {
+      const allEmails = await all("SELECT * FROM emails WHERE workspace_id = ? ORDER BY id DESC LIMIT 5", [wsId]);
+      const unreadCountRow = await get("SELECT count(*) as count FROM emails WHERE workspace_id = ? AND is_read = 0", [wsId]);
       const unreadCount = unreadCountRow?.count || 0;
 
       if (urgentEmails.length > 0) {
@@ -334,7 +349,7 @@ ${connectedBiz.map(b => `  * ${b.business_type === 'owner' ? '[MY BUSINESS]' : '
     }
     // 7. Lead queries & CRM Intelligence
     else if (lower.includes('lead') || lower.includes('client') || lower.includes('prospect') || lower.includes('crm') || lower.includes('inquir')) {
-      const topLeadRows = await all("SELECT * FROM leads ORDER BY ai_score DESC, id DESC LIMIT 3");
+      const topLeadRows = await all("SELECT * FROM leads WHERE workspace_id = ? ORDER BY ai_score DESC, id DESC LIMIT 3", [wsId]);
       if (topLeadRows.length > 0) {
         const leadSummaries = topLeadRows.map((l, i) => `${i + 1}) ${l.name || l.contact_name} from ${l.company_name} (AI Score: ${l.ai_score || 85}/100 🔥 ${l.ai_category || 'Hot'} - ${l.ai_suggestion || 'Follow up with demo'})`).join('. ');
         fastReply = `Sir, you currently have ${allLeads.length} leads in your CRM. Your highest qualified leads are: ${leadSummaries}. All prospects are qualified for immediate multi-channel follow-up. Would you like me to draft an outreach email to any of them?`;
@@ -424,8 +439,9 @@ Core Rules:
     // Save task record in ledger
     const taskRes = await run(
       `INSERT INTO tasks (workspace_id, agent_name, task_type, title, status, priority, input_json, result_json, steps_json, started_at, completed_at, created_at)
-       VALUES (1, 'Roger (Executive Assistant)', 'ai_delegation', ?, 'Completed', 'High', ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, 'Roger (Executive Assistant)', 'ai_delegation', ?, 'Completed', 'High', ?, ?, ?, ?, ?, ?)`,
       [
+        wsId,
         taskTitle,
         JSON.stringify({ message: cleanMsg }),
         JSON.stringify({ reply, provider }),
@@ -481,7 +497,8 @@ app.get(['/api/v1/voice/signed-url', '/api/signed-url', '/api/voice/signed-url']
 // 2. B2B Purchasing Clients / Inquiries
 app.get(['/api/v1/b2b/clients', '/api/b2b/clients'], async (req, res) => {
   try {
-    const clients = await all('SELECT * FROM b2b_clients ORDER BY id DESC');
+    const wsId = getWorkspaceId(req);
+    const clients = await all('SELECT * FROM b2b_clients WHERE workspace_id = ? ORDER BY id DESC', [wsId]);
     res.json({ success: true, clients });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -490,6 +507,7 @@ app.get(['/api/v1/b2b/clients', '/api/b2b/clients'], async (req, res) => {
 
 app.post(['/api/v1/b2b/clients', '/api/b2b/clients'], async (req, res) => {
   try {
+    const wsId = getWorkspaceId(req);
     const { companyName, contactName, email, phone, productInterest, inquiryDetails, dealValue } = req.body;
     if (!companyName || !email) {
       return res.status(400).json({ error: 'Company name and email are required' });
@@ -497,8 +515,9 @@ app.post(['/api/v1/b2b/clients', '/api/b2b/clients'], async (req, res) => {
     const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
     const result = await run(
       `INSERT INTO b2b_clients (workspace_id, company_name, contact_name, email, phone, product_interest, inquiry_details, estimated_deal_value, status, created_at)
-       VALUES (1, ?, ?, ?, ?, ?, ?, ?, 'New Inquiry', ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'New Inquiry', ?)`,
       [
+        wsId,
         companyName,
         contactName || 'Corporate Buyer',
         email,
@@ -513,12 +532,13 @@ app.post(['/api/v1/b2b/clients', '/api/b2b/clients'], async (req, res) => {
     // Auto-create initial welcome email in emails log
     await run(
       `INSERT INTO emails (workspace_id, client_id, recipient_email, recipient_name, subject, snippet, is_urgent, status, sent_at)
-       VALUES (1, ?, ?, ?, ?, ?, 0, 'Sent', ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, 0, 'Sent', ?)`,
       [
+        wsId,
         result.lastID,
         email,
         contactName || companyName,
-        `Welcome to TradeSage: Information regarding ${productInterest || 'Traivo B2B'}`,
+        `Information regarding ${productInterest || 'Traivo B2B'}`,
         `Thank you for inquiring about ${productInterest || 'Traivo B2B'}. We have prepared our executive overview...`,
         now
       ]
@@ -533,7 +553,8 @@ app.post(['/api/v1/b2b/clients', '/api/b2b/clients'], async (req, res) => {
 // 3. Email Campaigns & Automated Dispatch
 app.get(['/api/v1/b2b/campaigns', '/api/b2b/campaigns'], async (req, res) => {
   try {
-    const campaigns = await all('SELECT * FROM email_campaigns ORDER BY id DESC');
+    const wsId = getWorkspaceId(req);
+    const campaigns = await all('SELECT * FROM email_campaigns WHERE workspace_id = ? ORDER BY id DESC', [wsId]);
     res.json({ success: true, campaigns });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -542,12 +563,13 @@ app.get(['/api/v1/b2b/campaigns', '/api/b2b/campaigns'], async (req, res) => {
 
 app.post(['/api/v1/b2b/campaigns', '/api/b2b/campaigns'], async (req, res) => {
   try {
+    const wsId = getWorkspaceId(req);
     const { name, productKey, subject, templateBody, targetAudience } = req.body;
     const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
     const result = await run(
       `INSERT INTO email_campaigns (workspace_id, name, product_key, subject, template_body, target_audience, sent_count, reply_count, status, created_at)
-       VALUES (1, ?, ?, ?, ?, ?, 0, 0, 'Active', ?)`,
-      [name, productKey || 'traivo', subject, templateBody, targetAudience || 'Corporate Buyers', now]
+       VALUES (?, ?, ?, ?, ?, ?, 0, 0, 'Active', ?)`,
+      [wsId, name, productKey || 'traivo', subject, templateBody, targetAudience || 'Corporate Buyers', now]
     );
     res.json({ success: true, campaignId: result.lastID });
   } catch (err) {
@@ -786,7 +808,8 @@ app.post(['/api/v1/products/extract-url', '/api/products/extract-url'], async (r
 // 2. Get all digital products
 app.get(['/api/v1/products', '/api/products'], async (req, res) => {
   try {
-    const list = await all('SELECT * FROM digital_products ORDER BY id ASC');
+    const wsId = getWorkspaceId(req);
+    const list = await all('SELECT * FROM digital_products WHERE workspace_id = ? ORDER BY id ASC', [wsId]);
     const parsed = list.map(p => ({
       ...p,
       features: p.features_json ? JSON.parse(p.features_json) : [],
@@ -801,14 +824,16 @@ app.get(['/api/v1/products', '/api/products'], async (req, res) => {
 // 3. Create a digital product
 app.post(['/api/v1/products', '/api/products'], async (req, res) => {
   try {
+    const wsId = getWorkspaceId(req);
     const { name, url, tagline, description, features, target_audience, pricing } = req.body;
     if (!name) return res.status(400).json({ error: 'Product name is required' });
 
     const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
     const result = await run(
       `INSERT INTO digital_products (workspace_id, name, url, tagline, description, features_json, target_audience, pricing_tiers_json, status, created_at)
-       VALUES (1, ?, ?, ?, ?, ?, ?, ?, 'Active', ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Active', ?)`,
       [
+        wsId,
         name,
         url || '',
         tagline || '',
@@ -833,7 +858,8 @@ app.post(['/api/v1/products', '/api/products'], async (req, res) => {
 // 4. Delete digital product
 app.delete(['/api/v1/products/:id', '/api/products/:id'], async (req, res) => {
   try {
-    await run('DELETE FROM digital_products WHERE id = ?', [req.params.id]);
+    const wsId = getWorkspaceId(req);
+    await run('DELETE FROM digital_products WHERE id = ? AND workspace_id = ?', [req.params.id, wsId]);
     res.json({ success: true, message: 'Digital product deleted' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -847,7 +873,8 @@ app.delete(['/api/v1/products/:id', '/api/products/:id'], async (req, res) => {
 // 1. Get all email drafts
 app.get(['/api/v1/drafts', '/api/drafts'], async (req, res) => {
   try {
-    const drafts = await all('SELECT * FROM email_drafts ORDER BY id DESC');
+    const wsId = getWorkspaceId(req);
+    const drafts = await all('SELECT * FROM email_drafts WHERE workspace_id = ? ORDER BY id DESC', [wsId]);
     res.json({ success: true, drafts });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -857,6 +884,7 @@ app.get(['/api/v1/drafts', '/api/drafts'], async (req, res) => {
 // 2. Generate a new email draft with AI
 app.post(['/api/v1/drafts/generate', '/api/drafts/generate'], async (req, res) => {
   try {
+    const wsId = getWorkspaceId(req);
     const { productId, recipientName, recipientEmail, goal, tone } = req.body;
 
     let product = null;
@@ -864,7 +892,7 @@ app.post(['/api/v1/drafts/generate', '/api/drafts/generate'], async (req, res) =
       product = await get('SELECT * FROM digital_products WHERE id = ?', [productId]);
     }
     if (!product) {
-      product = await get('SELECT * FROM digital_products WHERE status = "Active" ORDER BY id ASC LIMIT 1');
+      product = await get('SELECT * FROM digital_products WHERE workspace_id = ? AND status = "Active" ORDER BY id ASC LIMIT 1', [wsId]);
     }
 
     const recipient = { name: recipientName, email: recipientEmail };
@@ -873,8 +901,9 @@ app.post(['/api/v1/drafts/generate', '/api/drafts/generate'], async (req, res) =
     const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
     const result = await run(
       `INSERT INTO email_drafts (workspace_id, product_id, product_name, recipient_email, recipient_name, subject, body_html, body_text, tone, status, created_at, updated_at)
-       VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, 'Draft', ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Draft', ?, ?)`,
       [
+        wsId,
         product?.id || 1,
         product?.name || 'ThriveWoo B2B Platform',
         recipientEmail || '',
@@ -935,13 +964,14 @@ app.put(['/api/v1/drafts/:id/approve', '/api/drafts/:id/approve'], async (req, r
 // 5. Send approved draft (Dispatches visual HTML email via Company SMTP)
 app.post(['/api/v1/drafts/:id/send', '/api/drafts/:id/send'], async (req, res) => {
   try {
+    const wsId = getWorkspaceId(req);
     const draft = await get('SELECT * FROM email_drafts WHERE id = ?', [req.params.id]);
     if (!draft) return res.status(404).json({ error: 'Draft not found' });
 
     const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
 
     // Dispatch via real company SMTP
-    const sendResult = await emailService.sendRealEmail(1, {
+    const sendResult = await emailService.sendRealEmail(wsId, {
       to: draft.recipient_email || 'client@example.com',
       recipientName: draft.recipient_name || 'Valued Partner',
       subject: draft.subject,
@@ -979,7 +1009,8 @@ app.delete(['/api/v1/drafts/:id', '/api/drafts/:id'], async (req, res) => {
 // 1. Get all connected businesses
 app.get(['/api/v1/businesses/connected', '/api/businesses/connected'], async (req, res) => {
   try {
-    const list = await all("SELECT * FROM connected_businesses ORDER BY CASE WHEN business_type = 'owner' THEN 0 ELSE 1 END, id ASC");
+    const wsId = getWorkspaceId(req);
+    const list = await all("SELECT * FROM connected_businesses WHERE workspace_id = ? ORDER BY CASE WHEN business_type = 'owner' THEN 0 ELSE 1 END, id ASC", [wsId]);
     const parsed = list.map(b => ({
       ...b,
       products: b.products_json ? JSON.parse(b.products_json) : []
@@ -993,6 +1024,7 @@ app.get(['/api/v1/businesses/connected', '/api/businesses/connected'], async (re
 // 2. Connect a new client business
 app.post(['/api/v1/businesses/connected', '/api/businesses/connected'], async (req, res) => {
   try {
+    const wsId = getWorkspaceId(req);
     const { name, industry, website, description, products, target_audience, business_type } = req.body;
     if (!name || !industry) {
       return res.status(400).json({ error: 'Business name and industry are required' });
@@ -1000,8 +1032,9 @@ app.post(['/api/v1/businesses/connected', '/api/businesses/connected'], async (r
     const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
     const result = await run(
       `INSERT INTO connected_businesses (workspace_id, business_type, name, industry, website, description, products_json, target_audience, status, created_at)
-       VALUES (1, ?, ?, ?, ?, ?, ?, ?, 'Connected', ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Connected', ?)`,
       [
+        wsId,
         business_type || 'client',
         name,
         industry,
@@ -1135,15 +1168,16 @@ app.post(['/api/v1/marketing/generate-ideas', '/api/marketing/generate-ideas'], 
 // 4. Dispatch Campaign Email to Leads
 app.post(['/api/v1/marketing/dispatch-campaign', '/api/marketing/dispatch-campaign'], async (req, res) => {
   try {
+    const wsId = getWorkspaceId(req);
     const { businessId, subject, body, leadIds } = req.body;
     const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
 
     let targetLeads = [];
     if (leadIds && leadIds.length > 0) {
       const placeholders = leadIds.map(() => '?').join(',');
-      targetLeads = await all(`SELECT * FROM leads WHERE id IN (${placeholders})`, leadIds);
+      targetLeads = await all(`SELECT * FROM leads WHERE workspace_id = ? AND id IN (${placeholders})`, [wsId, ...leadIds]);
     } else {
-      targetLeads = await all('SELECT * FROM leads ORDER BY id DESC LIMIT 5');
+      targetLeads = await all('SELECT * FROM leads WHERE workspace_id = ? ORDER BY id DESC LIMIT 5', [wsId]);
     }
 
     let sentCount = 0;
@@ -1151,8 +1185,9 @@ app.post(['/api/v1/marketing/dispatch-campaign', '/api/marketing/dispatch-campai
       if (lead.email) {
         await run(
           `INSERT INTO emails (workspace_id, recipient_email, recipient_name, subject, body, snippet, is_urgent, is_read, status, sent_at, received_at)
-           VALUES (1, ?, ?, ?, ?, ?, 0, 1, 'Sent', ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, 0, 1, 'Sent', ?, ?)`,
           [
+            wsId,
             lead.email,
             lead.name,
             subject || 'Exclusive Business Partnership & Demonstration',
@@ -1182,7 +1217,8 @@ app.post(['/api/v1/marketing/dispatch-campaign', '/api/marketing/dispatch-campai
 // Get all emails (Inbox + Sent)
 app.get(['/api/v1/emails', '/api/emails'], async (req, res) => {
   try {
-    const emails = await all('SELECT * FROM emails ORDER BY is_urgent DESC, id DESC LIMIT 50');
+    const wsId = getWorkspaceId(req);
+    const emails = await all('SELECT * FROM emails WHERE workspace_id = ? ORDER BY is_urgent DESC, id DESC LIMIT 50', [wsId]);
     const parsed = emails.map(e => ({
       ...e,
       ai_replies: e.ai_replies_json ? JSON.parse(e.ai_replies_json) : []
@@ -1196,12 +1232,13 @@ app.get(['/api/v1/emails', '/api/emails'], async (req, res) => {
 // Send an outbound email (Text or HTML via Company SMTP)
 app.post(['/api/v1/emails/send', '/api/emails/send', '/api/tools/send_email', '/api/send_email'], async (req, res) => {
   try {
+    const wsId = getWorkspaceId(req);
     const { recipient_email, recipient_name, subject, body, html_body } = req.body;
     if (!recipient_email || !subject) {
       return res.status(400).json({ error: 'recipient_email and subject are required' });
     }
 
-    const sendRes = await emailService.sendRealEmail(1, {
+    const sendRes = await emailService.sendRealEmail(wsId, {
       to: recipient_email,
       recipientName: recipient_name || recipient_email,
       subject,
@@ -1224,12 +1261,13 @@ app.post(['/api/v1/emails/send', '/api/emails/send', '/api/tools/send_email', '/
 // Send visual HTML email explicitly via Company SMTP
 app.post(['/api/v1/emails/send-html', '/api/emails/send-html'], async (req, res) => {
   try {
+    const wsId = getWorkspaceId(req);
     const { recipient_email, recipient_name, subject, html_body, body_text } = req.body;
     if (!recipient_email || !subject || !html_body) {
       return res.status(400).json({ error: 'recipient_email, subject, and html_body are required' });
     }
 
-    const sendRes = await emailService.sendRealEmail(1, {
+    const sendRes = await emailService.sendRealEmail(wsId, {
       to: recipient_email,
       recipientName: recipient_name || recipient_email,
       subject,
@@ -1278,14 +1316,18 @@ app.post(['/api/v1/emails/:id/ai-analyze', '/api/emails/:id/ai-analyze'], async 
 // Tool: Get emails summary (spoken format)
 app.all(['/api/tools/get_emails', '/api/get_emails'], async (req, res) => {
   try {
-    const emails = await all('SELECT * FROM emails ORDER BY is_urgent DESC, id DESC LIMIT 20');
+    const wsId = getWorkspaceId(req);
+    const emails = await all('SELECT * FROM emails WHERE workspace_id = ? ORDER BY is_urgent DESC, id DESC LIMIT 20', [wsId]);
     const urgentEmails = emails.filter(e => e.is_urgent === 1 && (e.is_read === 0 || e.status === 'Unread'));
     let speechText = '';
     if (urgentEmails.length > 0) {
       const details = urgentEmails.map(e => `${e.sender || e.recipient_name} regarding '${e.subject}'`).join('; ');
       speechText = `Sir, you have ${urgentEmails.length} urgent emails requiring your attention: ${details}.`;
+    } else if (emails.length > 0) {
+      const details = emails.slice(0, 3).map(e => `${e.sender || e.recipient_name} regarding '${e.subject}'`).join('; ');
+      speechText = `Sir, you have ${emails.length} total emails in your records. Latest correspondence includes: ${details}.`;
     } else {
-      speechText = `Sir, you have ${emails.length} total emails in your records, and none are marked urgent.`;
+      speechText = `Sir, you have no incoming emails in your inbox at this time.`;
     }
     res.json({
       success: true,
@@ -1304,27 +1346,30 @@ app.all(['/api/tools/get_emails', '/api/get_emails'], async (req, res) => {
 // ==========================================
 
 // Leads list & capture
-app.get(['/api/v1/crm/leads', '/api/leads'], async (req, res) => {
+app.get(['/api/v1/crm/leads', '/api/v1/leads', '/api/leads'], async (req, res) => {
   try {
-    const leads = await all('SELECT * FROM leads ORDER BY id DESC LIMIT 50');
+    const wsId = getWorkspaceId(req);
+    const leads = await all('SELECT * FROM leads WHERE workspace_id = ? ORDER BY id DESC LIMIT 100', [wsId]);
     res.json({ success: true, leads });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-app.post(['/api/v1/crm/leads', '/api/leads', '/api/tools/track_lead', '/api/track_lead'], async (req, res) => {
+app.post(['/api/v1/crm/leads', '/api/v1/leads', '/api/leads', '/api/tools/track_lead', '/api/track_lead'], async (req, res) => {
   try {
+    const wsId = getWorkspaceId(req);
     const { name, phone, email, interest, company_name, estimated_budget } = req.body;
     if (!name) return res.status(400).json({ error: 'Lead name is required' });
     const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
-    const activeProduct = await get('SELECT * FROM digital_products WHERE status = "Active" ORDER BY id ASC LIMIT 1');
+    const activeProduct = await get('SELECT * FROM digital_products WHERE workspace_id = ? AND status = "Active" ORDER BY id ASC LIMIT 1', [wsId]);
     const qualification = await aiEngine.qualifyLead({ name, phone, email, product_interest: interest, company_name, estimated_budget }, activeProduct);
 
     const result = await run(
       `INSERT INTO leads (workspace_id, name, phone, email, product_interest, company_name, estimated_budget, ai_score, ai_category, ai_suggestion, status, created_at)
-       VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'New', ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'New', ?)`,
       [
+        wsId,
         name,
         phone || '',
         email || '',
@@ -1351,12 +1396,13 @@ app.post(['/api/v1/crm/leads', '/api/leads', '/api/tools/track_lead', '/api/trac
 // Bulk Import Leads (From Excel / CSV)
 app.post(['/api/v1/leads/import-bulk', '/api/leads/import-bulk'], async (req, res) => {
   try {
+    const wsId = getWorkspaceId(req);
     const { leads: incomingLeads } = req.body;
     if (!Array.isArray(incomingLeads) || incomingLeads.length === 0) {
       return res.status(400).json({ error: 'No leads provided in array' });
     }
 
-    const activeProduct = await get('SELECT * FROM digital_products WHERE status = "Active" ORDER BY id ASC LIMIT 1');
+    const activeProduct = await get('SELECT * FROM digital_products WHERE workspace_id = ? AND status = "Active" ORDER BY id ASC LIMIT 1', [wsId]);
     const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
     let importedCount = 0;
 
@@ -1374,13 +1420,13 @@ app.post(['/api/v1/leads/import-bulk', '/api/leads/import-bulk'], async (req, re
 
       await run(
         `INSERT INTO leads (workspace_id, name, phone, email, product_interest, company_name, estimated_budget, notes, ai_score, ai_category, ai_suggestion, status, created_at)
-         VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Imported', ?)`,
-        [name, phone, email, interest, company, budget, notes, qual.ai_score, qual.ai_category, qual.ai_suggestion, now]
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Imported', ?)`,
+        [wsId, name, phone, email, interest, company, budget, notes, qual.ai_score, qual.ai_category, qual.ai_suggestion, now]
       );
       importedCount++;
     }
 
-    const updatedLeads = await all('SELECT * FROM leads ORDER BY id DESC LIMIT 50');
+    const updatedLeads = await all('SELECT * FROM leads WHERE workspace_id = ? ORDER BY id DESC LIMIT 50', [wsId]);
     res.json({
       success: true,
       count: importedCount,
@@ -1395,10 +1441,11 @@ app.post(['/api/v1/leads/import-bulk', '/api/leads/import-bulk'], async (req, re
 // Single Lead AI Qualify
 app.post(['/api/v1/leads/:id/ai-qualify', '/api/leads/:id/ai-qualify'], async (req, res) => {
   try {
-    const lead = await get('SELECT * FROM leads WHERE id = ?', [req.params.id]);
+    const wsId = getWorkspaceId(req);
+    const lead = await get('SELECT * FROM leads WHERE id = ? AND workspace_id = ?', [req.params.id, wsId]);
     if (!lead) return res.status(404).json({ error: 'Lead not found' });
 
-    const activeProduct = await get('SELECT * FROM digital_products WHERE status = "Active" ORDER BY id ASC LIMIT 1');
+    const activeProduct = await get('SELECT * FROM digital_products WHERE workspace_id = ? AND status = "Active" ORDER BY id ASC LIMIT 1', [wsId]);
     const qual = await aiEngine.qualifyLead(lead, activeProduct);
 
     await run(
@@ -1416,8 +1463,9 @@ app.post(['/api/v1/leads/:id/ai-qualify', '/api/leads/:id/ai-qualify'], async (r
 // Qualify All Leads
 app.post(['/api/v1/leads/ai-qualify-all', '/api/leads/ai-qualify-all'], async (req, res) => {
   try {
-    const leads = await all('SELECT * FROM leads');
-    const activeProduct = await get('SELECT * FROM digital_products WHERE status = "Active" ORDER BY id ASC LIMIT 1');
+    const wsId = getWorkspaceId(req);
+    const leads = await all('SELECT * FROM leads WHERE workspace_id = ?', [wsId]);
+    const activeProduct = await get('SELECT * FROM digital_products WHERE workspace_id = ? AND status = "Active" ORDER BY id ASC LIMIT 1', [wsId]);
 
     for (const lead of leads) {
       const qual = await aiEngine.qualifyLead(lead, activeProduct);
@@ -1427,7 +1475,7 @@ app.post(['/api/v1/leads/ai-qualify-all', '/api/leads/ai-qualify-all'], async (r
       );
     }
 
-    const updatedLeads = await all('SELECT * FROM leads ORDER BY ai_score DESC, id DESC LIMIT 50');
+    const updatedLeads = await all('SELECT * FROM leads WHERE workspace_id = ? ORDER BY ai_score DESC, id DESC LIMIT 50', [wsId]);
     res.json({
       success: true,
       message: `Qualified ${leads.length} leads with AI.`,
@@ -1441,7 +1489,8 @@ app.post(['/api/v1/leads/ai-qualify-all', '/api/leads/ai-qualify-all'], async (r
 // Appointments list & booking
 app.get(['/api/v1/crm/appointments', '/api/appointments'], async (req, res) => {
   try {
-    const appointments = await all('SELECT * FROM appointments ORDER BY id DESC LIMIT 50');
+    const wsId = getWorkspaceId(req);
+    const appointments = await all('SELECT * FROM appointments WHERE workspace_id = ? ORDER BY id DESC LIMIT 50', [wsId]);
     res.json({ success: true, appointments });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1450,11 +1499,12 @@ app.get(['/api/v1/crm/appointments', '/api/appointments'], async (req, res) => {
 
 app.post(['/api/v1/crm/appointments', '/api/appointments', '/api/tools/book_appointment', '/api/book_appointment'], async (req, res) => {
   try {
+    const wsId = getWorkspaceId(req);
     const { customer_name, service, date, time, notes } = req.body;
     if (!customer_name || !date || !time) {
       return res.status(400).json({ error: 'Customer name, date, and time are required' });
     }
-    const existing = await get('SELECT id FROM appointments WHERE date = ? AND time = ?', [date, time]);
+    const existing = await get('SELECT id FROM appointments WHERE workspace_id = ? AND date = ? AND time = ?', [wsId, date, time]);
     if (existing) {
       return res.json({
         success: false,
@@ -1464,8 +1514,8 @@ app.post(['/api/v1/crm/appointments', '/api/appointments', '/api/tools/book_appo
     const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
     const result = await run(
       `INSERT INTO appointments (workspace_id, customer_name, service, date, time, status, notes, created_at)
-       VALUES (1, ?, ?, ?, ?, 'Confirmed', ?, ?)`,
-      [customer_name, service || 'Product Demonstration', date, time, notes || '', now]
+       VALUES (?, ?, ?, ?, ?, 'Confirmed', ?, ?)`,
+      [wsId, customer_name, service || 'Product Demonstration', date, time, notes || '', now]
     );
     res.json({
       success: true,
@@ -1560,7 +1610,8 @@ app.get(['/api/status'], (req, res) => {
 
 app.get(['/api/v1/tasks', '/api/tasks'], async (req, res) => {
   try {
-    const tasks = await all('SELECT * FROM tasks WHERE workspace_id = 1 ORDER BY id DESC LIMIT 50');
+    const wsId = getWorkspaceId(req);
+    const tasks = await all('SELECT * FROM tasks WHERE workspace_id = ? ORDER BY id DESC LIMIT 50', [wsId]);
     const parsed = tasks.map(t => ({
       ...t,
       steps: t.steps_json ? JSON.parse(t.steps_json) : []
@@ -1577,7 +1628,8 @@ app.get(['/api/v1/tasks', '/api/tasks'], async (req, res) => {
 
 app.get(['/api/v1/marketing/campaigns', '/api/marketing/campaigns'], async (req, res) => {
   try {
-    const campaigns = await marketingService.getCampaigns(1);
+    const wsId = getWorkspaceId(req);
+    const campaigns = await marketingService.getCampaigns(wsId);
     res.json({ campaigns });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1586,7 +1638,8 @@ app.get(['/api/v1/marketing/campaigns', '/api/marketing/campaigns'], async (req,
 
 app.post(['/api/v1/marketing/campaigns', '/api/marketing/campaigns'], async (req, res) => {
   try {
-    const campaign = await marketingService.createCampaign(1, req.body);
+    const wsId = getWorkspaceId(req);
+    const campaign = await marketingService.createCampaign(wsId, req.body);
     res.json({ success: true, campaign });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1595,8 +1648,9 @@ app.post(['/api/v1/marketing/campaigns', '/api/marketing/campaigns'], async (req
 
 app.get(['/api/v1/content', '/api/content', '/api/marketing/content'], async (req, res) => {
   try {
+    const wsId = getWorkspaceId(req);
     const status = req.query.status || 'all';
-    const items = await marketingService.getContentItems(1, status);
+    const items = await marketingService.getContentItems(wsId, status);
     res.json({ contentItems: items });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1605,8 +1659,9 @@ app.get(['/api/v1/content', '/api/content', '/api/marketing/content'], async (re
 
 app.post(['/api/v1/marketing/generate-post', '/api/marketing/generate-post'], async (req, res) => {
   try {
+    const wsId = getWorkspaceId(req);
     const { campaignId, productKey } = req.body;
-    const post = await marketingService.generateProductPost(1, campaignId || 1, productKey || 'school_bus');
+    const post = await marketingService.generateProductPost(wsId, campaignId || 1, productKey || 'school_bus');
     res.json({ success: true, post });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1615,8 +1670,9 @@ app.post(['/api/v1/marketing/generate-post', '/api/marketing/generate-post'], as
 
 app.post(['/api/v1/content/:id/status', '/api/content/:id/status', '/api/marketing/content/:id/status'], async (req, res) => {
   try {
+    const wsId = getWorkspaceId(req);
     const { status } = req.body;
-    const item = await marketingService.updateContentStatus(req.params.id, status, 1);
+    const item = await marketingService.updateContentStatus(req.params.id, status, wsId);
     res.json({ success: true, item });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1625,7 +1681,8 @@ app.post(['/api/v1/content/:id/status', '/api/content/:id/status', '/api/marketi
 
 app.post(['/api/v1/marketing/generate-social-post', '/api/marketing/generate-social-post'], async (req, res) => {
   try {
-    const post = await marketingService.generateAiSocialPost(1, req.body);
+    const wsId = getWorkspaceId(req);
+    const post = await marketingService.generateAiSocialPost(wsId, req.body);
     res.json({ success: true, post });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1634,7 +1691,8 @@ app.post(['/api/v1/marketing/generate-social-post', '/api/marketing/generate-soc
 
 app.delete(['/api/v1/content/:id', '/api/content/:id'], async (req, res) => {
   try {
-    const result = await marketingService.deleteContentItem(req.params.id, 1);
+    const wsId = getWorkspaceId(req);
+    const result = await marketingService.deleteContentItem(req.params.id, wsId);
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1647,7 +1705,8 @@ app.delete(['/api/v1/content/:id', '/api/content/:id'], async (req, res) => {
 
 app.get(['/api/v1/mail/config', '/api/mail/config'], async (req, res) => {
   try {
-    const config = await emailService.getSafeMailConfig(1);
+    const wsId = getWorkspaceId(req);
+    const config = await emailService.getSafeMailConfig(wsId);
     res.json({ success: true, config });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1656,7 +1715,8 @@ app.get(['/api/v1/mail/config', '/api/mail/config'], async (req, res) => {
 
 app.post(['/api/v1/mail/config', '/api/mail/config'], async (req, res) => {
   try {
-    const config = await emailService.saveMailConfig(1, req.body);
+    const wsId = getWorkspaceId(req);
+    const config = await emailService.saveMailConfig(wsId, req.body);
     res.json({ success: true, config, message: 'Company mail authorization settings saved successfully.' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1665,7 +1725,8 @@ app.post(['/api/v1/mail/config', '/api/mail/config'], async (req, res) => {
 
 app.post(['/api/v1/mail/test-smtp', '/api/mail/test-smtp'], async (req, res) => {
   try {
-    const result = await emailService.verifySmtpConnection(1, req.body.config || null);
+    const wsId = getWorkspaceId(req);
+    const result = await emailService.verifySmtpConnection(wsId, req.body.config || null);
     res.json(result);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -1674,7 +1735,8 @@ app.post(['/api/v1/mail/test-smtp', '/api/mail/test-smtp'], async (req, res) => 
 
 app.post(['/api/v1/mail/sync', '/api/mail/sync'], async (req, res) => {
   try {
-    const result = await emailService.syncIncomingEmails(1);
+    const wsId = getWorkspaceId(req);
+    const result = await emailService.syncIncomingEmails(wsId);
     res.json(result);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -1687,7 +1749,8 @@ app.post(['/api/v1/mail/sync', '/api/mail/sync'], async (req, res) => {
 
 app.get(['/api/v1/videos', '/api/videos'], async (req, res) => {
   try {
-    const jobs = await videoService.getVideoJobs(1);
+    const wsId = getWorkspaceId(req);
+    const jobs = await videoService.getVideoJobs(wsId);
     res.json({ videoJobs: jobs });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1820,15 +1883,6 @@ app.put(['/api/v1/business-profile', '/api/business-profile'], async (req, res) 
   }
 });
 
-app.get(['/api/v1/leads', '/api/leads'], async (req, res) => {
-  try {
-    const leads = await all('SELECT * FROM leads ORDER BY id DESC LIMIT 100');
-    res.json({ leads });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 // ==========================================
 // 9. BILLING & SUBSCRIPTIONS (SRS 4 - /app/billing)
 // ==========================================
@@ -1921,10 +1975,10 @@ async function startServer() {
     await initDatabase();
     app.listen(PORT, '0.0.0.0', () => {
       console.log(`====================================================`);
-      console.log(`TradeSage AI Enterprise Workforce Platform`);
+      console.log(`ROGER // Executive AI Voice & Marketing Platform`);
       console.log(`Running on: http://localhost:${PORT}`);
       console.log(`LAN Access: http://${getLocalIp()}:${PORT}`);
-      console.log(`Telephony Engine: Telnyx All-In-One Voice AI`);
+      console.log(`Voice Engine: ElevenLabs Real-Time Conversational AI`);
       console.log(`====================================================`);
     });
   } catch (err) {

@@ -318,6 +318,7 @@ export class SpeechService {
       onMessage?: (msg: { text: string; role: 'user' | 'agent' }) => void;
       onModeChange?: (mode: 'listening' | 'speaking') => void;
       onStatusChange?: (status: string) => void;
+      onToolExecuted?: (toolName: string) => void;
     }
   ): Promise<any> {
     await this.stopElevenLabsSession();
@@ -326,8 +327,188 @@ export class SpeechService {
       this.isElevenLabsActive = true;
       this.elevenLabsStatus = 'connecting';
 
+      const getAuthHeader = (): Record<string, string> => {
+        const token = (typeof localStorage !== 'undefined')
+          ? (localStorage.getItem('roger_token') || localStorage.getItem('tradesage_token'))
+          : null;
+        const headers: Record<string, string> = {};
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+        return headers;
+      };
+
+      const clientTools: Record<string, (params: any) => Promise<string>> = {
+        get_emails: async (params?: any) => {
+          try {
+            const res = await fetch('http://localhost:8000/api/tools/get_emails', {
+              headers: { ...getAuthHeader() }
+            });
+            const data = await res.json();
+            if (callbacks.onToolExecuted) callbacks.onToolExecuted('emails');
+            return data.spoken_summary || `Sir, you have ${data.total_emails || 0} emails in your records.`;
+          } catch (e: any) {
+            console.error('get_emails client tool error:', e);
+            return 'Sir, I could not connect to your email inbox at this moment.';
+          }
+        },
+
+        get_leads: async (params?: any) => {
+          try {
+            const res = await fetch('http://localhost:8000/api/v1/leads', {
+              headers: { ...getAuthHeader() }
+            });
+            const data = await res.json();
+            const leads = data.leads || [];
+            if (callbacks.onToolExecuted) callbacks.onToolExecuted('leads');
+            if (leads.length === 0) {
+              return 'You currently have no leads in your CRM, sir. You can import leads from Excel or add a new prospect anytime.';
+            }
+            const top = leads.slice(0, 3).map((l: any, i: number) => 
+              `${i + 1}) ${l.name} from ${l.company_name || 'Enterprise'} (AI Score: ${l.ai_score || 85}/100, Interest: ${l.product_interest || 'B2B platform'})`
+            ).join('. ');
+            return `Sir, you have ${leads.length} active leads in your CRM. Your top prospects: ${top}.`;
+          } catch (e: any) {
+            console.error('get_leads client tool error:', e);
+            return 'Sir, I was unable to retrieve your CRM leads.';
+          }
+        },
+
+        get_appointments: async (params?: any) => {
+          try {
+            const res = await fetch('http://localhost:8000/api/appointments', {
+              headers: { ...getAuthHeader() }
+            });
+            const data = await res.json();
+            const apps = data.appointments || [];
+            if (callbacks.onToolExecuted) callbacks.onToolExecuted('appointments');
+            if (apps.length === 0) {
+              return 'You have no appointments or demonstrations scheduled on your calendar at this time, sir.';
+            }
+            const details = apps.slice(0, 3).map((a: any) => `${a.customer_name} for ${a.service} on ${a.date} at ${a.time}`).join('; ');
+            return `Sir, you have ${apps.length} upcoming appointments: ${details}.`;
+          } catch (e: any) {
+            console.error('get_appointments client tool error:', e);
+            return 'Sir, I was unable to access your appointments calendar.';
+          }
+        },
+
+        sync_mailbox: async (params?: any) => {
+          try {
+            const res = await fetch('http://localhost:8000/api/mail/sync', {
+              method: 'POST',
+              headers: { ...getAuthHeader() }
+            });
+            const data = await res.json();
+            if (callbacks.onToolExecuted) callbacks.onToolExecuted('emails');
+            if (data.success) {
+              return `Sir, I have synchronized your mailbox. ${data.fetchedCount > 0 ? `Fetched ${data.fetchedCount} new emails.` : 'All emails are up to date with no new unread messages.'}`;
+            }
+            return `Mailbox sync reported: ${data.error || 'Please verify your IMAP credentials in Mail Auth Settings.'}`;
+          } catch (e: any) {
+            return `Could not synchronize mailbox: ${e.message}`;
+          }
+        },
+
+        get_digital_products: async (params?: any) => {
+          try {
+            const res = await fetch('http://localhost:8000/api/products', {
+              headers: { ...getAuthHeader() }
+            });
+            const data = await res.json();
+            const prods = data.products || [];
+            if (callbacks.onToolExecuted) callbacks.onToolExecuted('products');
+            if (prods.length === 0) {
+              return 'You currently have no products saved in your Digital Products Hub, sir.';
+            }
+            const summaries = prods.map((p: any) => `${p.name}: ${p.tagline || p.description || ''}`).join('. ');
+            return `Sir, you have ${prods.length} registered digital products: ${summaries}.`;
+          } catch (e: any) {
+            return 'Could not retrieve digital products.';
+          }
+        },
+
+        draft_email: async (params: { recipient_name: string; recipient_email?: string; topic?: string }) => {
+          try {
+            const res = await fetch('http://localhost:8000/api/drafts/generate', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                ...getAuthHeader()
+              },
+              body: JSON.stringify({
+                recipientName: params.recipient_name,
+                recipientEmail: params.recipient_email || `${params.recipient_name.toLowerCase().replace(/[^a-z0-9]/g, '')}@example.com`,
+                goal: params.topic || 'ThriveWoo B2B Platform Demonstration',
+                tone: 'Professional'
+              })
+            });
+            const data = await res.json();
+            if (callbacks.onToolExecuted) callbacks.onToolExecuted('drafts');
+            if (data.success && data.draft) {
+              return `Sir, I have drafted the email to ${data.draft.recipient_name} regarding "${data.draft.subject}". It is saved in your Mail Drafts tab ready for your approval and one-click dispatch.`;
+            }
+            return `Email draft created for ${params.recipient_name}.`;
+          } catch (e: any) {
+            return `Could not generate email draft: ${e.message}`;
+          }
+        },
+
+        launch_app: async (params: { app_name: string }) => {
+          try {
+            const res = await fetch('http://localhost:8000/api/tools/launch_app', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+              body: JSON.stringify({ app_name: params.app_name })
+            });
+            const data = await res.json();
+            return data.message || `Launched ${params.app_name} for you, sir.`;
+          } catch (e: any) {
+            return `Could not launch ${params.app_name}: ${e.message}`;
+          }
+        },
+
+        system_control: async (params: { action: string }) => {
+          try {
+            const res = await fetch('http://localhost:8000/api/tools/system_control', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+              body: JSON.stringify({ action: params.action })
+            });
+            const data = await res.json();
+            return data.message || `System action ${params.action} completed.`;
+          } catch (e: any) {
+            return `Could not execute system control: ${e.message}`;
+          }
+        },
+
+        get_system_stats: async (params?: any) => {
+          try {
+            const res = await fetch('http://localhost:8000/api/tools/system_stats', {
+              headers: { ...getAuthHeader() }
+            });
+            const data = await res.json();
+            return `System statistics: CPU usage is at ${data.cpu_usage || '15%'}, RAM utilization is at ${data.ram_usage || '45%'}, and battery is ${data.battery || 'normal'}.`;
+          } catch (e: any) {
+            return 'System statistics currently unavailable.';
+          }
+        },
+
+        open_website: async (params: { query_or_url: string }) => {
+          try {
+            const target = params.query_or_url;
+            if (typeof window !== 'undefined' && target) {
+              const url = target.startsWith('http') ? target : `https://www.google.com/search?q=${encodeURIComponent(target)}`;
+              window.open(url, '_blank');
+            }
+            return `Opened ${params.query_or_url} in your browser, sir.`;
+          } catch (e: any) {
+            return `Could not open ${params.query_or_url}: ${e.message}`;
+          }
+        }
+      };
+
       this.elevenConversation = await Conversation.startSession({
         signedUrl,
+        clientTools,
         onConnect: ({ conversationId }) => {
           this.isElevenLabsActive = true;
           this.elevenLabsStatus = 'connected';
