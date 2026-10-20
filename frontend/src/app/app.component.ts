@@ -67,7 +67,7 @@ export class AppComponent implements OnInit, OnDestroy {
   isElevenLabsConnected: boolean = false;
   elevenLabsMode: 'listening' | 'speaking' = 'listening';
   callStatusText: string = 'SAY "HELLO ROGER" OR TAP ORB';
-  callSubText: string = '🛡️ Zero latency ElevenLabs Conversational AI (Standby uses 0 credits)';
+  callSubText: string = 'Speak naturally to converse with Roger in real time';
   callTimer: string = '00:00';
   private timerInterval: any = null;
   private callSeconds: number = 0;
@@ -276,7 +276,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.isElevenLabsConnected = false;
     this.stopCallTimer();
     this.callStatusText = 'SAY "HELLO ROGER" OR TAP ORB';
-    this.callSubText = '🛡️ Ultra-low latency ElevenLabs Conversational AI (Standby uses 0 credits)';
+    this.callSubText = 'Speak naturally to converse with Roger in real time';
     this.showToast('Roger voice session disconnected.');
   }
 
@@ -1062,12 +1062,12 @@ export class AppComponent implements OnInit, OnDestroy {
           this.loadEmails();
           this.loadMailConfig();
         } else {
-          this.showToast(`Sync notice: ${res.error}`);
+          this.showToast(res.error || 'IMAP sync is not configured.');
         }
       },
       error: (err) => {
         this.isSyncingMail = false;
-        this.showToast(`Error syncing company mailbox: ${err.message}`);
+        this.showToast(`Mailbox notice: ${err.message}`);
       }
     });
   }

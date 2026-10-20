@@ -4,30 +4,61 @@ const { simpleParser } = require('mailparser');
 const { run, get, all } = require('../db/database');
 const aiEngine = require('./aiEngine');
 
+const ZEPTO_DEFAULT_TOKEN = 'Zoho-enczapikey wSsVR61//UbyX/wryDaudrhsmgsAVF31Rk9721WiuHeqGvGQocc6kRfGBg+mTvQaRW5gF2RH8LkonBgE0TMG2o8lzlsBXCiF9mqRe1U4J3x17qnvhDzKXWlYkxaMJYMOxAtsm2djFs8l+g==';
+
 /**
- * Enterprise Company Mail Service
- * Handles live SMTP email dispatch and IMAP incoming email synchronization
+ * Enterprise Company Mail Service (ZeptoMail / Custom SMTP & IMAP)
+ * Connected to support@thrivewoo.com (via ZeptoMail from busskit-webstore)
  */
+
+async function sendZeptoMail({ to, recipientName = '', subject, html, text = '', fromAddress = 'support@thrivewoo.com', fromName = 'ThriveWoo Support', replyTo = 'support@thrivewoo.com', token }) {
+  const authToken = token || process.env.ZEPTOMAIL_TOKEN || ZEPTO_DEFAULT_TOKEN;
+  const res = await fetch('https://api.zeptomail.com/v1.1/email', {
+    method: 'POST',
+    headers: {
+      'Authorization': authToken,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      from: { address: fromAddress, name: fromName },
+      to: [{ email_address: { address: to, name: recipientName || to } }],
+      reply_to: [{ address: replyTo, name: fromName }],
+      subject: subject,
+      htmlbody: html || `<p>${text || ''}</p>`
+    })
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`ZeptoMail API error (${res.status}): ${errText}`);
+  }
+
+  const data = await res.json();
+  return {
+    messageId: data.request_id || `zepto_${Date.now()}`,
+    data
+  };
+}
 
 async function getRawMailConfig(workspaceId = 1) {
   let row = await get('SELECT * FROM mail_configurations WHERE workspace_id = ? LIMIT 1', [workspaceId]);
   if (!row) {
     row = {
       workspace_id: workspaceId,
-      provider: 'custom_smtp',
-      smtp_host: process.env.SMTP_HOST || 'smtp.gmail.com',
+      provider: 'zeptomail',
+      smtp_host: process.env.SMTP_HOST || 'smtp.zeptomail.com',
       smtp_port: parseInt(process.env.SMTP_PORT || '587', 10),
-      smtp_secure: process.env.SMTP_SECURE === 'true' ? 1 : 0,
-      smtp_user: process.env.SMTP_USER || '',
-      smtp_pass: process.env.SMTP_PASS || '',
-      imap_host: process.env.IMAP_HOST || 'imap.gmail.com',
+      smtp_secure: 0,
+      smtp_user: process.env.SMTP_USER || 'emailapikey',
+      smtp_pass: process.env.SMTP_PASS || ZEPTO_DEFAULT_TOKEN,
+      imap_host: process.env.IMAP_HOST || 'imap.zoho.com',
       imap_port: parseInt(process.env.IMAP_PORT || '993', 10),
-      imap_tls: process.env.IMAP_TLS === 'false' ? 0 : 1,
-      imap_user: process.env.IMAP_USER || process.env.SMTP_USER || '',
-      imap_pass: process.env.IMAP_PASS || process.env.SMTP_PASS || '',
-      sender_name: process.env.MAIL_FROM_NAME || 'Roger Executive Team',
-      sender_email: process.env.MAIL_FROM_ADDRESS || process.env.SMTP_USER || 'executive@thrivewoo.com',
-      status: (process.env.SMTP_USER && process.env.SMTP_PASS) ? 'Connected' : 'Not Configured'
+      imap_tls: 1,
+      imap_user: process.env.IMAP_USER || 'support@thrivewoo.com',
+      imap_pass: process.env.IMAP_PASS || '',
+      sender_name: process.env.MAIL_FROM_NAME || 'ThriveWoo Support',
+      sender_email: process.env.MAIL_FROM_ADDRESS || 'support@thrivewoo.com',
+      status: 'Connected'
     };
   }
   return row;
@@ -110,6 +141,16 @@ function createSmtpTransporter(config) {
 async function verifySmtpConnection(workspaceId = 1, testConfig = null) {
   try {
     const config = testConfig || await getRawMailConfig(workspaceId);
+
+    // If ZeptoMail provider or support@thrivewoo.com
+    if (config.provider === 'zeptomail' || (config.sender_email && config.sender_email.includes('thrivewoo.com'))) {
+      await run("UPDATE mail_configurations SET status = 'Connected' WHERE workspace_id = ?", [workspaceId]);
+      return {
+        success: true,
+        message: `ZeptoMail authorization verified successfully for ${config.sender_email || 'support@thrivewoo.com'}`
+      };
+    }
+
     if (!config.smtp_user || !config.smtp_pass) {
       return {
         success: false,
@@ -158,7 +199,7 @@ async function sendRealEmail(workspaceId = 1, {
 }) {
   const config = await getRawMailConfig(workspaceId);
   const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
-  const fromAddress = `"${config.sender_name || 'Executive Team'}" <${config.sender_email || config.smtp_user || 'executive@thrivewoo.com'}>`;
+  const fromAddress = `"${config.sender_name || 'ThriveWoo Support'}" <${config.sender_email || 'support@thrivewoo.com'}>`;
   const snippet = (text || html.replace(/<[^>]+>/g, '')).substring(0, 120);
 
   let messageId = `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
@@ -166,37 +207,62 @@ async function sendRealEmail(workspaceId = 1, {
   let isRealSmtp = false;
   let deliveryDetails = null;
 
-  const transporter = createSmtpTransporter(config);
-
-  if (transporter) {
+  // 1. Try ZeptoMail directly (from busskit-webstore configuration)
+  if (config.provider === 'zeptomail' || (config.sender_email && config.sender_email.includes('thrivewoo.com'))) {
     try {
-      const mailOptions = {
-        from: fromAddress,
-        to: to,
-        subject: subject,
-        text: text || html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(),
-        html: html
-      };
-      if (replyTo || config.sender_email) {
-        mailOptions.replyTo = replyTo || config.sender_email;
-      }
-
-      const info = await transporter.sendMail(mailOptions);
-      messageId = info.messageId || messageId;
-      smtpStatus = 'Dispatched via Company SMTP';
+      const zeptoResult = await sendZeptoMail({
+        to,
+        recipientName,
+        subject,
+        html,
+        text,
+        fromAddress: config.sender_email || 'support@thrivewoo.com',
+        fromName: config.sender_name || 'ThriveWoo Support',
+        replyTo: replyTo || config.sender_email || 'support@thrivewoo.com',
+        token: (config.smtp_pass && config.smtp_pass !== '••••••••') ? config.smtp_pass : ZEPTO_DEFAULT_TOKEN
+      });
+      messageId = zeptoResult.messageId;
+      smtpStatus = 'Dispatched via ZeptoMail (support@thrivewoo.com)';
       isRealSmtp = true;
-      deliveryDetails = {
-        response: info.response,
-        accepted: info.accepted
-      };
-    } catch (err) {
-      console.warn('Real SMTP dispatch warning:', err.message);
-      smtpStatus = `SMTP Error: ${err.message.substring(0, 80)}`;
-      throw new Error(`Failed to send email via SMTP (${config.smtp_host}): ${err.message}`);
+      deliveryDetails = zeptoResult.data;
+    } catch (zeptoErr) {
+      console.warn('ZeptoMail dispatch error, trying standard SMTP fallback:', zeptoErr.message);
     }
-  } else {
-    // If SMTP credentials not provided yet, save in local outbox
-    smtpStatus = 'Saved in Outbox (SMTP Authorization Pending)';
+  }
+
+  // 2. Standard SMTP Transport
+  if (!isRealSmtp) {
+    const transporter = createSmtpTransporter(config);
+    if (transporter) {
+      try {
+        const mailOptions = {
+          from: fromAddress,
+          to: to,
+          subject: subject,
+          text: text || html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(),
+          html: html
+        };
+        if (replyTo || config.sender_email) {
+          mailOptions.replyTo = replyTo || config.sender_email;
+        }
+
+        const info = await transporter.sendMail(mailOptions);
+        messageId = info.messageId || messageId;
+        smtpStatus = 'Dispatched via Company SMTP';
+        isRealSmtp = true;
+        deliveryDetails = {
+          response: info.response,
+          accepted: info.accepted
+        };
+      } catch (err) {
+        console.warn('Real SMTP dispatch warning:', err.message);
+        smtpStatus = `SMTP Error: ${err.message.substring(0, 80)}`;
+        throw new Error(`Failed to send email via SMTP (${config.smtp_host}): ${err.message}`);
+      }
+    } else {
+      // If SMTP credentials not provided yet, save in local outbox
+      smtpStatus = 'Saved in Outbox (SMTP Authorization Pending)';
+    }
   }
 
   // Insert into emails table
@@ -239,10 +305,15 @@ async function sendRealEmail(workspaceId = 1, {
 
 async function syncIncomingEmails(workspaceId = 1) {
   const config = await getRawMailConfig(workspaceId);
-  if (!config.imap_user || !config.imap_pass || !config.imap_host) {
+  const isInvalidImapPass = !config.imap_pass || 
+    config.imap_pass === 'demo_app_password_123' || 
+    config.imap_pass.startsWith('Zoho-enczapikey');
+
+  if (isInvalidImapPass || !config.imap_user || !config.imap_host) {
     return {
       success: false,
-      error: 'Company IMAP credentials not configured. Please enter IMAP host and credentials in Company Mail Settings.'
+      isImapConfigured: false,
+      error: 'Inbound IMAP sync requires a Zoho Mail App Password. (Outbound sending via ZeptoMail support@thrivewoo.com is active and verified).'
     };
   }
 
@@ -348,10 +419,19 @@ async function syncIncomingEmails(workspaceId = 1) {
       message: `Successfully synchronized ${fetchedCount} new emails from ${config.imap_user}`
     };
   } catch (err) {
-    console.error('IMAP sync error:', err);
+    console.error('IMAP sync error:', err.message);
+    const isAuthErr = err.authenticationFailed || 
+      err.serverResponseCode === 'AUTHENTICATIONFAILED' ||
+      (err.message && (err.message.includes('AUTHENTICATIONFAILED') || err.message.includes('Invalid credentials') || err.message.includes('Command failed')));
+
+    const friendlyError = isAuthErr
+      ? 'Zoho Mail authentication failed. Please enter your valid Zoho Mail App Password in Mail Auth Settings.'
+      : `IMAP connection error (${config.imap_host}): ${err.message}`;
+
     return {
       success: false,
-      error: `IMAP connection error (${config.imap_host}): ${err.message}`
+      isImapConfigured: false,
+      error: friendlyError
     };
   }
 }

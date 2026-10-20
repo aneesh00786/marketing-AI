@@ -393,8 +393,8 @@ ${connectedBiz.map(b => `  * ${b.business_type === 'owner' ? '[MY BUSINESS]' : '
 
     if (!reply) {
       // Construct agent system persona prompt
-      const systemInstruction = `You are Roger, an elite English personal AI executive business assistant to the founder at TradeSage AI.
-Specialty: Corporate B2B sales automation, email campaign outreach, client inquiry management, and business scaling.
+      const systemInstruction = `You are Roger, an elite personal AI executive business assistant and marketing strategist to the founder.
+Specialty: B2B digital product sales (ThriveWoo, custom apps, SaaS), email campaign outreach, client inquiry management, and business scaling.
 ${contextSnippet}
 
 Core Rules:

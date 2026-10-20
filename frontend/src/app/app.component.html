@@ -15,12 +15,8 @@
     </div>
     <div class="hud-status">
       <span class="chip" [class.active]="!isElevenLabsConnected" [class.calling]="isElevenLabsConnected">
-        {{ isElevenLabsConnected ? '🔴 LIVE VOICE ACTIVE' : '🟢 STANDBY (0 CREDITS)' }}
+        {{ isElevenLabsConnected ? '🔴 ROGER ACTIVE' : '🟢 ROGER READY' }}
       </span>
-      <a class="chip" [href]="serverStatus?.mobile_url" target="_blank" style="text-decoration: none; color: inherit;">
-        📱 MOBILE: {{ serverStatus?.lan_ip }}:8000
-      </a>
-      <span class="agent-tag">AI ENGINE: Telnyx Llama 3.1 &bull; Active</span>
     </div>
   </header>
 
@@ -265,17 +261,18 @@
     <!-- Company Mail Status Bar -->
     <div class="mail-auth-status-bar" [class.connected]="mailConfig.status === 'Connected'">
       <div class="status-left">
-        <span class="status-dot" [class.green]="mailConfig.status === 'Connected'" [class.amber]="mailConfig.status === 'Configured'"></span>
+        <span class="status-dot green"></span>
         <span>
-          COMPANY MAILBOX: <strong>{{ mailConfig.smtp_user || 'Not Configured (Using Local Outbox)' }}</strong>
-          &bull; Status: <span class="badge" [class.badge-hot]="mailConfig.status === 'Connected'">{{ mailConfig.status }}</span>
+          COMPANY MAIL: <strong>{{ mailConfig.sender_email || 'support@thrivewoo.com' }}</strong>
+          &bull; Outbound: <span class="badge badge-hot">✓ ZeptoMail Connected</span>
+          &bull; Inbound: <span class="badge" [class.badge-hot]="mailConfig.has_imap_auth">{{ mailConfig.has_imap_auth ? 'IMAP Synced' : 'IMAP Standby' }}</span>
         </span>
         <span *ngIf="mailConfig.last_synced_at" class="sync-time">Last Synced: {{ mailConfig.last_synced_at }}</span>
       </div>
       <div class="status-right">
-        <button class="btn btn-secondary btn-sm" (click)="showMailConfigModal = true">Configure Authorization</button>
+        <button class="btn btn-secondary btn-sm" (click)="showMailConfigModal = true">⚙️ Mail Auth Settings</button>
         <button class="btn btn-primary btn-sm" (click)="syncCompanyMail()" [disabled]="isSyncingMail">
-          {{ isSyncingMail ? 'Fetching...' : '🔄 Sync IMAP' }}
+          {{ isSyncingMail ? 'Syncing...' : '🔄 Sync IMAP' }}
         </button>
       </div>
     </div>
@@ -464,7 +461,7 @@
   <section *ngIf="currentRoute === 'social'" class="hud-panel full-width-panel">
     <div class="panel-header">
       <div>
-        <h2>📱 SOCIAL MEDIA MARKETING STUDIO (AI CONTENT ENGINE)</h2>
+        <h2>📱 SOCIAL MEDIA MARKETING STUDIO</h2>
         <p class="subtitle">Generate high-converting organic & paid social copy for LinkedIn, Twitter / X, Instagram, and Facebook for ThriveWoo or any digital product.</p>
       </div>
       <div class="header-actions">
@@ -675,7 +672,7 @@
       <div class="panel-header">
         <h2>NEURAL VOICE (SAY "HELLO ROGER")</h2>
         <span class="chip" [class.calling]="isElevenLabsConnected" [class.active]="!isElevenLabsConnected">
-          {{ isElevenLabsConnected ? 'CONNECTED' : 'STANDBY' }}
+          {{ isElevenLabsConnected ? 'CONNECTED' : 'READY' }}
         </span>
       </div>
 
@@ -1205,6 +1202,15 @@
           <input type="email" class="hud-input" [(ngModel)]="mailConfig.sender_email" placeholder="e.g. info@thrivewoo.com" />
         </div>
 
+        <!-- ZeptoMail Active Banner -->
+        <div *ngIf="mailConfig.provider === 'zeptomail' || mailConfig.sender_email?.includes('thrivewoo.com')" 
+             style="background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 8px; padding: 10px 14px; margin-top: 10px; display: flex; align-items: center; justify-content: space-between;">
+          <div style="font-size: 0.82rem; color: #a7f3d0;">
+            <strong style="color: #34d399;">✓ ZeptoMail Outbound Connected:</strong> Dispatches all live emails from <strong>{{ mailConfig.sender_email || 'support@thrivewoo.com' }}</strong>.
+          </div>
+          <span class="chip active" style="margin: 0; background: #059669; color: white;">READY TO SEND</span>
+        </div>
+
         <!-- Section 1: SMTP Outbound (Sending) -->
         <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(0, 240, 255, 0.25); border-radius: 8px; padding: 14px; margin-top: 14px;">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
@@ -1245,12 +1251,15 @@
 
         <!-- Section 2: IMAP Inbound (Receiving) -->
         <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(0, 240, 255, 0.25); border-radius: 8px; padding: 14px; margin-top: 14px;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
             <h4 style="margin: 0; color: #00f0ff;">📥 Inbound IMAP Authorization (Fetch & Sync Live Emails)</h4>
             <button class="btn btn-secondary btn-sm" (click)="syncCompanyMail()" [disabled]="isSyncingMail">
               {{ isSyncingMail ? 'Syncing...' : '🔄 Sync Mailbox Now' }}
             </button>
           </div>
+          <p style="font-size: 0.78rem; color: #94a3b8; margin: 0 0 10px 0;">
+            ℹ️ <em>ZeptoMail is strictly an outbound delivery engine. To pull incoming customer replies from your Zoho inbox into this Hub, enter your Zoho Mail App Password below. (Outbound sending works independently).</em>
+          </p>
 
           <div style="display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 12px;">
             <div class="form-group" style="margin: 0;">

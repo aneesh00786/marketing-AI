@@ -865,26 +865,26 @@ async function seedMySQL() {
     ]
   );
 
-  // 13. Mail Configuration
+  // 13. Mail Configuration (ZeptoMail from busskit-webstore)
   await seedIfEmpty(
     'mail_configurations',
     'INSERT INTO mail_configurations (workspace_id, provider, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, imap_host, imap_port, imap_tls, imap_user, imap_pass, sender_name, sender_email, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     [[
       1,
-      'custom_smtp',
-      'smtp.gmail.com',
+      'zeptomail',
+      'smtp.zeptomail.com',
       587,
       0,
-      'executive@company.com',
-      'demo_app_password_here',
-      'imap.gmail.com',
+      'emailapikey',
+      'Zoho-enczapikey wSsVR61//UbyX/wryDaudrhsmgsAVF31Rk9721WiuHeqGvGQocc6kRfGBg+mTvQaRW5gF2RH8LkonBgE0TMG2o8lzlsBXCiF9mqRe1U4J3x17qnvhDzKXWlYkxaMJYMOxAtsm2djFs8l+g==',
+      'imap.zoho.com',
       993,
       1,
-      'executive@company.com',
-      'demo_app_password_here',
-      'TradeSage Executive Team',
-      'executive@company.com',
-      'Active',
+      'support@thrivewoo.com',
+      '',
+      'ThriveWoo Support',
+      'support@thrivewoo.com',
+      'Connected',
       now
     ]]
   );

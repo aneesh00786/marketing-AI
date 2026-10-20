@@ -19,7 +19,7 @@ async function generateAiResponse(prompt, systemInstruction = '', workspaceId = 
     try {
       const isDraft = /\b(draft|write|compose|campaign|email|article|full plan)\b/i.test(query);
       const telnyxSys = systemInstruction || 
-        'You are an intelligent executive AI voice assistant at TradeSage AI. You converse naturally and warmly like a real human. Keep spoken replies concise (1-2 natural sentences) unless asked to draft a full article. Never dump repetitive bullet templates. If asked something unethical or out of scope, politely state that you do not have permission or capability to do that.';
+        'You are Roger, personal executive AI assistant, B2B marketing strategist, and strategic business advisor to the founder. You converse naturally and warmly like a real human. Keep spoken replies concise (1-2 natural sentences) unless asked to draft a full article. Never dump repetitive bullet templates. If asked something unethical or out of scope, politely state that you do not have permission or capability to do that.';
       
       const telnyxRes = await fetch('https://api.telnyx.com/v2/ai/chat/completions', {
         method: 'POST',
@@ -88,7 +88,7 @@ async function generateAiResponse(prompt, systemInstruction = '', workspaceId = 
         body: JSON.stringify({
           model: 'llama-3.1-8b-instant',
           messages: [
-            { role: 'system', content: systemInstruction || 'You are an executive enterprise AI workforce specialist at TradeSage AI.' },
+            { role: 'system', content: systemInstruction || 'You are Roger, personal executive AI assistant and strategic business advisor to the founder.' },
             { role: 'user', content: query }
           ],
           temperature: 0.7,
@@ -117,7 +117,7 @@ async function generateAiResponse(prompt, systemInstruction = '', workspaceId = 
         body: JSON.stringify({
           model: 'gpt-4o-mini',
           messages: [
-            { role: 'system', content: systemInstruction || 'You are an executive enterprise AI workforce specialist at TradeSage AI.' },
+            { role: 'system', content: systemInstruction || 'You are Roger, personal executive AI assistant and strategic business advisor to the founder.' },
             { role: 'user', content: query }
           ],
           temperature: 0.7,
@@ -146,7 +146,7 @@ async function generateAiResponse(prompt, systemInstruction = '', workspaceId = 
         body: JSON.stringify({
           model: 'meta-llama/llama-3.1-8b-instruct:free',
           messages: [
-            { role: 'system', content: systemInstruction || 'You are an executive enterprise AI workforce specialist at TradeSage AI.' },
+            { role: 'system', content: systemInstruction || 'You are Roger, personal executive AI assistant and strategic business advisor to the founder.' },
             { role: 'user', content: query }
           ]
         })
@@ -203,14 +203,14 @@ function generateDynamicContextualReply(userQuery, systemRole = '') {
   }
 
   // 2. Greetings & Pleasantries ("Hi", "Hello", "Good morning")
-  const isPureGreeting = /^(hi|hello|hey|good morning|good afternoon|good evening|greetings|howdy)( there| assistant| tradesage)?[\s,!.?]*$/i.test(lower);
+  const isPureGreeting = /^(hi|hello|hey|good morning|good afternoon|good evening|greetings|howdy)( there| assistant| roger| tradesage)?[\s,!.?]*$/i.test(lower);
   if (isPureGreeting) {
-    return `Hello! TradeSage AI is online and ready. How can I assist you with your business, software products, or marketing today?`;
+    return `Hello, sir! Roger is online and ready. How can I assist you with your business, ThriveWoo, or marketing today?`;
   }
 
   // 3. Identity, Role & Capabilities ("Who are you?", "What can you do?")
   if (lower.includes('who are you') || lower.includes('what can you do') || lower.includes('what are you') || lower.includes('what is tradesage') || lower.includes('your capability') || lower.includes('your skills') || lower.includes('help me')) {
-    return `I am TradeSage AI, an executive autonomous workforce assistant. I can help you formulate marketing campaigns, draft high-converting copy, produce 9:16 vertical video reels, manage School Bus GPS/RFID fleet tracking, and coordinate custom mobile app projects. What would you like to accomplish?`;
+    return `I am Roger, your personal executive business assistant and marketing strategist. I can help you formulate marketing campaigns, manage your B2B leads, draft high-converting emails, and scale your digital products like ThriveWoo. What would you like to accomplish, sir?`;
   }
 
   // 4. Out of scope / Permission limitations
@@ -395,14 +395,14 @@ All platform infrastructure is optimized to run reliably under a lean monthly cl
   }
 
   // 10. General Comprehensive Conversational Reply
-  return `Thank you for your inquiry regarding "${query}". 
+  return `Thank you for your inquiry, sir. 
 
-As your TradeSage AI workforce specialist, I have processed your request. Here are the immediate actionable steps we can take:
-1. Execute Strategy: I can draft custom direct-response copy, social media campaigns, or customer email sequences addressing this topic.
-2. Video & Visuals: We can compose a 9:16 vertical video reel emphasizing these exact points for your social channels.
-3. Product Integration: If this relates to your School Bus SaaS, custom Flutter application development, or B2B sales automation, I can stage corresponding tasks in your workflow ledger.
+As Roger, your personal executive business assistant, I have analyzed your request. Here are the immediate actionable steps we can take:
+1. Execute Strategy: I can draft custom direct-response copy, marketing campaigns, or cold email sequences for ThriveWoo and your digital applications.
+2. Social & Outreach: We can generate targeted LinkedIn or Twitter posts highlighting your software's core features.
+3. Lead Follow-Up: I can qualify incoming leads in your CRM and prepare approved drafts for your review.
 
-How would you like me to proceed with this task?`;
+How would you like me to proceed, sir?`;
 }
 
 /**
