@@ -87,5 +87,6 @@ module.exports = {
   toDbDateTime,
   nowDb,
   zonedLocalToUtc,
-  utcToZonedLocal
+  utcToZonedLocal,
+  partsInZone
 };

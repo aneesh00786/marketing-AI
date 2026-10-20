@@ -18,6 +18,7 @@ const analyticsService = require('../modules/social/analyticsService');
 const inboxService = require('../modules/social/inboxService');
 const accountService = require('../modules/social/accountService');
 const outreachSender = require('../modules/outreach/outreachSender');
+const automationEngine = require('../modules/automation/automationEngine');
 
 const WORKER_ID = `${os.hostname()}:${process.pid}`;
 const POLL_MS = parseInt(process.env.SOCIAL_WORKER_POLL_MS || '5000', 10);
@@ -84,6 +85,16 @@ async function processOutreach() {
   }
 }
 
+/** Automation workflows: match recorded events to active workflows, then run due steps. */
+async function processAutomation() {
+  try {
+    return await automationEngine.processAutomation(WORKER_ID);
+  } catch (err) {
+    log('automation error:', err.message);
+    return 0;
+  }
+}
+
 /** Enqueues periodic syncs per account, using time buckets as idempotency keys. */
 async function scheduleRecurring() {
   const accounts = await all(
@@ -114,7 +125,7 @@ async function loop() {
         await scheduleRecurring();
         lastSchedule = Date.now();
       }
-      const worked = (await processPublishing()) + (await processBackground()) + (await processOutreach());
+      const worked = (await processPublishing()) + (await processBackground()) + (await processOutreach()) + (await processAutomation());
       if (worked > 0) continue;
     } catch (err) {
       log('loop error:', err.message);
@@ -137,4 +148,4 @@ if (require.main === module) {
   loop().then(() => process.exit(0));
 }
 
-module.exports = { processPublishing, processBackground, processOutreach, scheduleRecurring, HANDLERS };
+module.exports = { processPublishing, processBackground, processOutreach, processAutomation, scheduleRecurring, HANDLERS };

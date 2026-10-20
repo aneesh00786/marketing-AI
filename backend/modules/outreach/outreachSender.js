@@ -2,6 +2,11 @@ const { run, get, all } = require('../../db/database');
 const { partsInZone, zonedLocalToUtc, isValidTimeZone } = require('../../lib/time');
 const emailService = require('../../services/emailService');
 const { suppress } = require('./outreachService');
+const automationEvents = require('../../lib/automationEvents');
+
+const emitRecipient = (recipient, type) => recipient.lead_id && automationEvents.emit(recipient.workspace_id, type, {
+  subjectType: 'lead', subjectId: recipient.lead_id, payload: { emailCampaignId: recipient.campaign_id, recipientId: recipient.id }, key: `${type}:${recipient.id}`
+});
 
 /**
  * Sends due outreach emails. Run by the worker every few seconds; safe to restart.
@@ -115,9 +120,10 @@ async function finishCampaignIfDone(campaign) {
 
 async function sendOne(campaign, recipient, workerId) {
   const state = await replyState(recipient);
-  if (state === 'unsubscribed') { await suppress(recipient.workspace_id, recipient.email, 'unsubscribed', 'reply'); return 'unsubscribed'; }
+  if (state === 'unsubscribed') { await suppress(recipient.workspace_id, recipient.email, 'unsubscribed', 'reply'); await emitRecipient(recipient, 'email.unsubscribed'); return 'unsubscribed'; }
   if (state === 'replied') {
     await run("UPDATE outreach_recipients SET status = 'replied', next_send_at = NULL, updated_at = UTC_TIMESTAMP() WHERE id = ?", [recipient.id]);
+    await emitRecipient(recipient, 'email.replied');
     return 'replied';
   }
   const suppressed = await get('SELECT reason FROM email_suppressions WHERE workspace_id = ? AND email = ?', [recipient.workspace_id, String(recipient.email).toLowerCase()]);
@@ -129,14 +135,30 @@ async function sendOne(campaign, recipient, workerId) {
   const step = steps.find(s => s.step_order === recipient.next_step_order);
   if (!step) {
     await run("UPDATE outreach_recipients SET status = 'completed', next_send_at = NULL, updated_at = UTC_TIMESTAMP() WHERE id = ?", [recipient.id]);
+    await emitRecipient(recipient, 'email.sequence_completed');
     return 'completed';
   }
   const sendId = await claim(recipient, step, workerId);
   if (!sendId) return 'skipped';
 
+  // A/B test: the tested step uses the recipient's variant while the test runs, the declared
+  // winner after it concludes, and the original (A) otherwise. The send records the variant.
+  let content = step;
+  let variantLabel = null;
+  const test = await get("SELECT status, step_order, winner_label FROM ab_tests WHERE workspace_id = ? AND outreach_campaign_id = ? AND kind = 'email' AND status IN ('running', 'concluded') ORDER BY id DESC LIMIT 1", [recipient.workspace_id, campaign.id]);
+  if (test && test.step_order === step.step_order) {
+    variantLabel = test.status === 'running' ? (recipient.variant_label || 'A') : (test.winner_label || 'A');
+    if (variantLabel === 'B') {
+      const b = await get("SELECT subject, body_text FROM outreach_step_variants WHERE campaign_id = ? AND step_order = ? AND label = 'B'", [campaign.id, step.step_order]);
+      if (b) content = { ...step, subject: b.subject, body_text: b.body_text };
+      else variantLabel = 'A';
+    }
+    await run('UPDATE outreach_sends SET variant_label = ? WHERE id = ?', [variantLabel, sendId]);
+  }
+
   const cfg = await emailService.getRawMailConfig(recipient.workspace_id);
   const sender = cfg.sender_email || cfg.smtp_user || 'our team';
-  const msg = render(step, recipient, campaign, sender);
+  const msg = render(content, recipient, campaign, sender);
   try {
     const res = await emailService.sendRealEmail(recipient.workspace_id, { to: recipient.email, recipientName: recipient.name || '', subject: msg.subject, html: msg.html, text: msg.text, campaignId: null });
     await run("UPDATE outreach_sends SET status = 'sent', email_id = ?, provider_message_id = ?, sent_at = UTC_TIMESTAMP() WHERE id = ?", [res.emailId, String(res.messageId || '').slice(0, 255), sendId]);
@@ -146,6 +168,7 @@ async function sendOne(campaign, recipient, workerId) {
       `UPDATE outreach_recipients SET status = ?, next_step_order = ?, next_send_at = ?, first_sent_at = COALESCE(first_sent_at, UTC_TIMESTAMP()), last_sent_at = UTC_TIMESTAMP(), last_error = NULL, updated_at = UTC_TIMESTAMP() WHERE id = ?`,
       [next ? 'active' : 'completed', step.step_order + 1, nextAt, recipient.id]
     );
+    if (!next) await emitRecipient(recipient, 'email.sequence_completed');
     return 'sent';
   } catch (err) {
     const message = String(err.message || 'Send failed').slice(0, 500);

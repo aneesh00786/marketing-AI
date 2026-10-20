@@ -356,6 +356,7 @@ async function executeJob(job, workerId) {
       );
     });
     await finishAttempt(attempt.lastID, { outcome: 'succeeded', response: result.raw });
+    await require('../../lib/automationEvents').emit(job.workspace_id, 'social.post_published', { subjectType: 'content', subjectId: content.id, payload: { socialCampaignId: content.campaign_id || null, platformKey: content.platform_key || null }, key: `social.published:${content.id}:${job.id}` });
     await accountService.recordAccountSuccess(account);
     await audit(workerCtx, 'social.publish.succeeded', {
       resourceType: 'content',

@@ -1,5 +1,6 @@
 const { run, get, all } = require('../../db/database');
 const { audit } = require('../../lib/audit');
+const automationEvents = require('../../lib/automationEvents');
 const { generateText, untrusted, AiUnavailableError } = require('../../lib/aiStructured');
 
 /**
@@ -196,6 +197,7 @@ async function createLead(ctx, input, { withAi = true } = {}) {
       product?.id || null, data.product_interest || product?.name || null, reviewNote, score, category]
   );
   await audit(ctx, 'leads.created', { resourceType: 'lead', resourceId: ins.lastID, metadata: { productId: product?.id || null } });
+  await automationEvents.emit(workspaceId, 'lead.created', { subjectType: 'lead', subjectId: ins.lastID, payload: { productId: product?.id || null, status: data.status || 'New' }, key: `lead.created:${ins.lastID}` });
   let ai = null;
   if (withAi) ai = await generateAdvice(ctx, ins.lastID);
   return { lead: present(await requireLead(workspaceId, ins.lastID)), ai };
@@ -229,6 +231,9 @@ async function updateLead(ctx, id, input) {
   const { score, category } = scoreLead(fresh);
   await run('UPDATE leads SET ai_score = ?, ai_category = ? WHERE workspace_id = ? AND id = ?', [score, category, workspaceId, existing.id]);
   await audit(ctx, 'leads.updated', { resourceType: 'lead', resourceId: existing.id, metadata: { fields: sets.map(s => s.split(' ')[0]) } });
+  if (fresh.status !== existing.status) {
+    await automationEvents.emit(workspaceId, 'lead.status_changed', { subjectType: 'lead', subjectId: existing.id, payload: { from: existing.status, to: fresh.status, cause: ctx.auth?.automation ? { workflowIds: ctx.auth.automation.workflowIds } : null }, key: `lead.status:${existing.id}:${fresh.status}:${Date.now()}` });
+  }
   return { lead: present(await requireLead(workspaceId, existing.id)) };
 }
 
@@ -293,6 +298,7 @@ async function importLeads(ctx, rows) {
     if (data.email) existingEmails.add(data.email.toLowerCase());
     result.imported += 1;
     result.leadIds.push(ins.lastID);
+    await automationEvents.emit(workspaceId, 'lead.created', { subjectType: 'lead', subjectId: ins.lastID, payload: { source: 'import' }, key: `lead.created:${ins.lastID}` });
   }
   await audit(ctx, 'leads.imported', { resourceType: 'lead', metadata: { imported: result.imported, skipped: result.skipped.length, flagged: result.flagged.length, duplicates: result.duplicates.length } });
   return result;

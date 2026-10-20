@@ -23,6 +23,10 @@ const productsRouter = require('./modules/products/routes');
 const mailRoutes = require('./modules/mail/routes');
 const playbooksRouter = require('./modules/playbooks/routes');
 const outreachRouter = require('./modules/outreach/routes');
+const commandRouter = require('./modules/command/routes');
+const abTestsRouter = require('./modules/abtests/routes');
+const automationRouter = require('./modules/automation/routes');
+const campaignAnalyticsRouter = require('./modules/campaignAnalytics/routes');
 const leadService = require('./modules/leads/leadService');
 const strategistService = require('./modules/social/strategistService');
 const crypto = require('crypto');
@@ -108,6 +112,14 @@ app.use(mailRoutes.tools);
 app.use(playbooksRouter);
 // Tenant-aware email outreach campaigns (AI Campaigns page); unsubscribe links are public.
 app.use('/api/v1/outreach', outreachRouter);
+// Tenant-aware Campaign Command Center (strategy brief, audience, builder, overview).
+app.use('/api/v1/command', commandRouter);
+// Tenant-aware A/B tests for email sequences and social variants.
+app.use('/api/v1/ab-tests', abTestsRouter);
+// Tenant-aware automation workflows (rule-based; actions reuse existing modules and approvals).
+app.use('/api/v1/automations', automationRouter);
+// Tenant-aware AI Campaigns analytics (email + social + CRM, honest availability).
+app.use('/api/v1/campaign-analytics', campaignAnalyticsRouter);
 
 // Voice readiness for the login notice (key, agent, remaining ElevenLabs credits). Read-only; never
 // starts a conversation. Answers every workspace, since voice calls only run in the legacy workspace.

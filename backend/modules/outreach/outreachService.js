@@ -216,6 +216,8 @@ async function saveSteps(ctx, c, list) {
 async function replaceSteps(ctx, id, input) {
   const c = await requireCampaign(ctx, id);
   if (!EDITABLE.includes(c.status)) throw httpError(`A ${c.status} campaign cannot be edited.`, 409, 'NOT_EDITABLE');
+  const runningTest = await get("SELECT name FROM ab_tests WHERE workspace_id = ? AND outreach_campaign_id = ? AND status = 'running'", [ws(ctx), c.id]);
+  if (runningTest) throw httpError(`A/B test "${runningTest.name}" is running; conclude or cancel it before editing the emails.`, 409, 'TEST_RUNNING');
   const list = z.array(stepInput).min(1).max(MAX_STEPS).parse(input?.steps);
   await saveSteps(ctx, c, list);
   return getCampaign(ctx, c.id);
@@ -366,7 +368,20 @@ async function readiness(ctx, c) {
   const flags = [...new Set(list.flatMap(x => parse(x.needs_verification_json, [])))];
   const placeholders = list.filter(x => /\[[^\]{}]{2,60}\]/.test(`${x.subject} ${x.body_text}`)).map(x => x.step_order);
   if (placeholders.length) problems.push(`Fill in the [bracketed] placeholders in email ${placeholders.join(', ')} before sending.`);
-  return { ready: problems.length === 0, problems, flags, recipients: s.pending + s.active, steps: list.length, sender };
+  // An A/B test needs its variant B, which is held to the same checks as the main emails.
+  const test = await get("SELECT * FROM ab_tests WHERE workspace_id = ? AND outreach_campaign_id = ? AND kind = 'email' AND status IN ('draft', 'running')", [ws(ctx), c.id]);
+  let abTest = null;
+  if (test) {
+    const variant = await get("SELECT * FROM outreach_step_variants WHERE campaign_id = ? AND workspace_id = ? AND step_order = ? AND label = 'B'", [c.id, ws(ctx), test.step_order]);
+    abTest = { id: test.id, name: test.name, stepOrder: test.step_order, metric: test.metric, minSamplePerVariant: test.min_sample_per_variant, status: test.status };
+    if (!list.some(x => x.step_order === test.step_order)) problems.push(`A/B test "${test.name}" tests email ${test.step_order}, which no longer exists. Cancel or change the test.`);
+    if (!variant) problems.push(`A/B test "${test.name}" has no variant B yet.`);
+    else {
+      flags.push(...parse(variant.needs_verification_json, []).filter(f => !flags.includes(f)));
+      if (/\[[^\]{}]{2,60}\]/.test(`${variant.subject} ${variant.body_text}`)) problems.push(`Fill in the [bracketed] placeholders in variant B of email ${test.step_order}.`);
+    }
+  }
+  return { ready: problems.length === 0, problems, flags, recipients: s.pending + s.active, steps: list.length, sender, abTest };
 }
 
 async function approve(ctx, id, input = {}) {
@@ -381,6 +396,23 @@ async function approve(ctx, id, input = {}) {
   await withTransaction(async tx => {
     await tx.run("UPDATE outreach_campaigns SET status = 'running', approved_by = ?, approved_at = UTC_TIMESTAMP(), last_error = NULL, updated_at = UTC_TIMESTAMP() WHERE id = ? AND workspace_id = ?", [ctx.auth.userId || null, c.id, ws(ctx)]);
     await tx.run("UPDATE outreach_recipients SET status = 'active', next_send_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP() WHERE campaign_id = ? AND workspace_id = ? AND status = 'pending'", [c.id, ws(ctx)]);
+    if (r.abTest) {
+      // The test definition locks now, before the first email; recipients are split evenly at random.
+      await tx.run("UPDATE ab_tests SET status = 'running', locked_at = COALESCE(locked_at, UTC_TIMESTAMP()), updated_at = UTC_TIMESTAMP() WHERE id = ? AND workspace_id = ? AND status IN ('draft', 'running')", [r.abTest.id, ws(ctx)]);
+      const unassigned = await tx.all(
+        `SELECT id FROM outreach_recipients WHERE campaign_id = ? AND workspace_id = ? AND variant_label IS NULL AND status = 'active' AND next_step_order <= ?`,
+        [c.id, ws(ctx), r.abTest.stepOrder]
+      );
+      const counts = await tx.get("SELECT SUM(variant_label = 'A') AS a, SUM(variant_label = 'B') AS b FROM outreach_recipients WHERE campaign_id = ? AND workspace_id = ?", [c.id, ws(ctx)]);
+      let a = Number(counts.a || 0);
+      let b = Number(counts.b || 0);
+      const shuffled = unassigned.map(x => x.id).map(v => ({ v, k: crypto.randomInt(1e9) })).sort((x, y) => x.k - y.k).map(x => x.v);
+      for (const rid of shuffled) {
+        const label = a <= b ? 'A' : 'B';
+        if (label === 'A') a++; else b++;
+        await tx.run('UPDATE outreach_recipients SET variant_label = ? WHERE id = ? AND workspace_id = ?', [label, rid, ws(ctx)]);
+      }
+    }
   });
   await audit(ctx, 'outreach.campaign_approved', { resourceType: 'outreach_campaign', resourceId: c.id, metadata: { recipients: r.recipients, steps: r.steps, acknowledgedFlags: r.flags } });
   return getCampaign(ctx, c.id);
@@ -412,10 +444,57 @@ async function retryRecipient(ctx, id, recipientId, input = {}) {
   const r = await get('SELECT * FROM outreach_recipients WHERE id = ? AND campaign_id = ? AND workspace_id = ?', [Number(recipientId), c.id, ws(ctx)]);
   if (!r) throw httpError('Recipient not found', 404, 'NOT_FOUND');
   if (r.status !== 'failed') throw httpError('Only a failed recipient can be retried.', 409, 'NOT_FAILED');
+  if (c.status === 'stopped') throw httpError('This campaign was stopped; it cannot send again.', 409, 'NOT_RUNNING');
+  // A campaign that finished only because its last recipients failed reopens for the retry.
+  if (c.status === 'completed') await run("UPDATE outreach_campaigns SET status = 'running', completed_at = NULL, updated_at = UTC_TIMESTAMP() WHERE id = ? AND workspace_id = ?", [c.id, ws(ctx)]);
   await run("UPDATE outreach_sends SET status = 'retry' WHERE recipient_id = ? AND workspace_id = ? AND step_order = ? AND status = 'failed'", [r.id, ws(ctx), r.next_step_order]);
   await run("UPDATE outreach_recipients SET status = 'active', next_send_at = UTC_TIMESTAMP(), last_error = NULL, updated_at = UTC_TIMESTAMP() WHERE id = ? AND workspace_id = ?", [r.id, ws(ctx)]);
   await audit(ctx, 'outreach.recipient_retry', { resourceType: 'outreach_recipient', resourceId: r.id });
   return { retried: true };
+}
+
+// ---------------------------------------------------------------------------
+// Automation hooks: enrol one lead, stop a lead's sequences
+// ---------------------------------------------------------------------------
+/**
+ * Adds one lead to a sequence (used by automation workflows). The same audience rules apply
+ * (valid, non-placeholder, not suppressed). A running (approved) sequence emails the lead in
+ * its window; a draft or paused one keeps the lead pending until a person approves it.
+ * Idempotent: a lead already in the sequence is reported, not added twice.
+ */
+async function enrollLead(ctx, campaignId, leadId) {
+  const c = await requireCampaign(ctx, campaignId);
+  if (['stopped', 'completed'].includes(c.status)) throw httpError(`The email sequence is ${c.status}; it no longer accepts recipients.`, 409, 'CAMPAIGN_CLOSED');
+  const [a] = await resolveAudience(ctx, { leadIds: [Number(leadId)] });
+  if (!a.eligible) return { enrolled: false, reason: a.reason };
+  const exists = await get('SELECT id, status FROM outreach_recipients WHERE campaign_id = ? AND workspace_id = ? AND LOWER(email) = ?', [c.id, ws(ctx), a.email.toLowerCase()]);
+  if (exists) return { enrolled: false, reason: 'already in this sequence', recipientId: exists.id };
+  const running = c.status === 'running';
+  let variant = null;
+  const test = await get("SELECT step_order FROM ab_tests WHERE workspace_id = ? AND outreach_campaign_id = ? AND kind = 'email' AND status = 'running'", [ws(ctx), c.id]);
+  if (running && test) {
+    const counts = await get("SELECT SUM(variant_label = 'A') AS a, SUM(variant_label = 'B') AS b FROM outreach_recipients WHERE campaign_id = ? AND workspace_id = ?", [c.id, ws(ctx)]);
+    variant = Number(counts.a || 0) <= Number(counts.b || 0) ? 'A' : 'B';
+  }
+  try {
+    const r = await run(
+      `INSERT INTO outreach_recipients (workspace_id, campaign_id, lead_id, email, name, company, status, next_step_order, next_send_at, variant_label, unsubscribe_token, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+      [ws(ctx), c.id, a.leadId, a.email, a.name || null, a.company || null, running ? 'active' : 'pending', running ? new Date().toISOString().replace('T', ' ').slice(0, 19) : null, variant, crypto.randomBytes(20).toString('hex')]
+    );
+    return { enrolled: true, recipientId: r.lastID, status: running ? 'active' : 'pending' };
+  } catch (err) {
+    if (err.code === 'ER_DUP_ENTRY') return { enrolled: false, reason: 'already in this sequence' };
+    throw err;
+  }
+}
+
+async function stopLeadSequences(ctx, leadId, campaignId = null) {
+  const params = [ws(ctx), Number(leadId)];
+  let extra = '';
+  if (campaignId) { await requireCampaign(ctx, campaignId); extra = ' AND campaign_id = ?'; params.push(Number(campaignId)); }
+  const r = await run(`UPDATE outreach_recipients SET status = 'stopped', next_send_at = NULL, updated_at = UTC_TIMESTAMP() WHERE workspace_id = ? AND lead_id = ? AND status IN ('pending', 'active')${extra}`, params);
+  return { stopped: r.changes };
 }
 
 // ---------------------------------------------------------------------------
@@ -432,6 +511,8 @@ async function unsubscribeByToken(token) {
   const r = await get('SELECT id, workspace_id, email FROM outreach_recipients WHERE unsubscribe_token = ?', [token]);
   if (!r) return null;
   await suppress(r.workspace_id, r.email, 'unsubscribed', 'unsubscribe_link');
+  const full = await get('SELECT id, lead_id, campaign_id FROM outreach_recipients WHERE id = ?', [r.id]);
+  if (full && full.lead_id) await require('../../lib/automationEvents').emit(r.workspace_id, 'email.unsubscribed', { subjectType: 'lead', subjectId: full.lead_id, payload: { emailCampaignId: full.campaign_id, recipientId: full.id }, key: `email.unsubscribed:${full.id}` });
   await run("UPDATE outreach_recipients SET status = 'unsubscribed', next_send_at = NULL, updated_at = UTC_TIMESTAMP() WHERE id = ?", [r.id]);
   return { email: r.email };
 }
@@ -473,6 +554,8 @@ module.exports = {
   resume: approve,
   stop,
   retryRecipient,
+  enrollLead,
+  stopLeadSequences,
   suppress,
   unsubscribeByToken,
   engineStatus
