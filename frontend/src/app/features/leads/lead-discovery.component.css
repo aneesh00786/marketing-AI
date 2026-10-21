@@ -1,0 +1,49 @@
+.discovery { border: 1px solid var(--border); background: var(--surface); border-radius: 12px; padding: 18px; margin: 0 0 18px; }
+.discovery-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.discovery-head h3 { margin: 0 0 4px; font-size: 1.05rem; }
+.muted { color: var(--text-muted); margin: 0; }
+.small { font-size: 12px; }
+.discovery-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin: 16px 0 8px; }
+.discovery-form label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--text-muted); }
+.field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--text-muted); }
+.combo { position: relative; }
+.combo .hud-input { padding-right: 30px; }
+.combo-caret { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: var(--text-muted); pointer-events: none; }
+.combo-list { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; right: 0; max-height: 260px; overflow-y: auto; margin: 0; padding: 4px; list-style: none;
+  background: var(--surface); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25); }
+.combo-list li { display: flex; justify-content: space-between; gap: 10px; padding: 8px 10px; border-radius: 6px; cursor: pointer; color: var(--text); font-size: 13px; }
+.combo-list li.active { background: var(--accent-soft); }
+.combo-list li.selected { font-weight: 600; }
+.combo-list .code { color: var(--text-subtle); font-size: 12px; }
+.combo-list .combo-empty { cursor: default; color: var(--text-muted); }
+.checks { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px 20px; }
+.check { flex-direction: row !important; align-items: center; gap: 8px !important; font-size: 13px; color: var(--text); }
+.form-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.status { display: flex; align-items: center; gap: 10px; margin: 12px 0; color: var(--info-text); }
+.spinner { width: 14px; height: 14px; border: 2px solid var(--info-soft); border-top-color: var(--info); border-radius: 50%; animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.note { border-radius: 8px; padding: 10px 12px; margin: 10px 0; font-size: 13px; background: var(--info-soft); color: var(--text); }
+.note.warn { background: var(--warning-soft); }
+.note.error { background: var(--danger-soft); color: var(--danger-text); }
+.note.ok { background: var(--success-soft); }
+.note ul { margin: 6px 0 0; padding-left: 18px; }
+.summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin: 14px 0 8px; }
+.summary div { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; }
+.summary b { font-size: 1.3rem; }
+.summary span { color: var(--text-muted); font-size: 12px; }
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 12px 0; }
+.grow { flex: 1; }
+.table-wrap { overflow-x: auto; }
+.tbl td { vertical-align: top; }
+.empty-state { text-align: center; color: var(--text-muted); padding: 18px; }
+tr.dim td { opacity: 0.55; }
+.tag { display: inline-block; font-size: 11px; border-radius: 6px; padding: 2px 6px; margin-top: 4px; }
+.tag.dup { background: var(--danger-soft); color: var(--danger-text); }
+.tag.maybe { background: var(--warning-soft); color: var(--warning-text); }
+.tag.closed { background: var(--danger-soft); color: var(--danger-text); }
+.tag.ok { background: var(--success-soft); color: var(--success-text); }
+.pager { display: flex; align-items: center; justify-content: center; gap: 12px; margin: 10px 0; }
+.attribution { font-size: 12px; color: var(--text-muted); margin: 8px 0 0; }
+.attribution .google { font-family: Roboto, Arial, sans-serif; font-weight: 500; color: var(--text); }
+a { color: var(--accent-text); word-break: break-all; }
+@media (max-width: 640px) { .discovery { padding: 14px; } .toolbar .btn-primary { width: 100%; } }

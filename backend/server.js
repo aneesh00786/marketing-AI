@@ -19,6 +19,7 @@ const { resolveSelectedProduct, findProductNamedIn } = require('./lib/productCon
 const websiteExtractor = require('./services/websiteExtractor');
 const socialRouter = require('./modules/social/routes');
 const leadsRouter = require('./modules/leads/routes');
+const leadDiscoveryRouter = require('./modules/leadDiscovery/routes');
 const productsRouter = require('./modules/products/routes');
 const mailRoutes = require('./modules/mail/routes');
 const playbooksRouter = require('./modules/playbooks/routes');
@@ -99,6 +100,8 @@ app.use('/api', apiGate({
 // Tenant-aware social media marketing module.
 app.use('/api/v1/social', socialRouter);
 
+// AI Lead Discovery (Google Places API (New)); mounted before the Leads router so its paths win.
+app.use('/api/v1/leads/discovery', leadDiscoveryRouter);
 // Tenant-aware Leads CRM (legacy paths kept as aliases). The voice agent's track_lead tool
 // creates leads through the same validated, workspace-scoped logic.
 app.use(['/api/v1/leads', '/api/leads', '/api/v1/crm/leads'], leadsRouter);

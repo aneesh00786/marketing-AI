@@ -115,17 +115,32 @@ function present(row) {
     aiSuggestion: row.ai_suggestion || null,
     aiStatus: row.ai_status || null,
     aiSuggestedAt: row.ai_suggested_at || null,
+    // Found through AI Lead Discovery: business details are shown live from Google, not stored.
+    googlePlace: !!row.google_place,
     createdAt: row.created_at,
     updatedAt: row.updated_at || null
   };
 }
 
-const SELECT_LEAD = `SELECT l.*, p.name AS product_name FROM leads l
+// lead_place_refs arrives with migration 013; until then leads are listed without the flag.
+let placeRefs = { exists: false, checkedAt: 0 };
+async function selectLead() {
+  if (!placeRefs.exists && Date.now() - placeRefs.checkedAt > 60000) {
+    placeRefs = { exists: !!(await get("SELECT 1 AS x FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'lead_place_refs'")), checkedAt: Date.now() };
+  }
+  return `SELECT l.*, p.name AS product_name${placeRefs.exists ? ', (SELECT 1 FROM lead_place_refs r WHERE r.lead_id = l.id LIMIT 1) AS google_place' : ''} FROM leads l
   LEFT JOIN digital_products p ON p.workspace_id = l.workspace_id AND p.id = l.product_id`;
+}
 
-async function listLeads(workspaceId, { productId, status, q, page = 1, limit = 50 } = {}) {
+async function listLeads(workspaceId, { productId, status, q, source, page = 1, limit = 50 } = {}) {
   const where = ['l.workspace_id = ?'];
   const params = [workspaceId];
+  // source: 'discovery' = found with AI Lead Discovery (Google Places), 'crm' = all other leads.
+  if (source === 'discovery' || source === 'crm') {
+    await selectLead();
+    if (placeRefs.exists) where.push(`${source === 'crm' ? 'NOT ' : ''}EXISTS (SELECT 1 FROM lead_place_refs r WHERE r.lead_id = l.id)`);
+    else if (source === 'discovery') where.push('1 = 0');
+  }
   if (productId === 'none') where.push('l.product_id IS NULL');
   else if (productId) {
     await requireWorkspaceProduct(workspaceId, productId);
@@ -140,7 +155,7 @@ async function listLeads(workspaceId, { productId, status, q, page = 1, limit = 
   }
   const lim = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 200);
   const pg = Math.max(parseInt(page, 10) || 1, 1);
-  const rows = await all(`${SELECT_LEAD} WHERE ${where.join(' AND ')} ORDER BY l.id DESC LIMIT ${lim} OFFSET ${(pg - 1) * lim}`, params);
+  const rows = await all(`${await selectLead()} WHERE ${where.join(' AND ')} ORDER BY l.id DESC LIMIT ${lim} OFFSET ${(pg - 1) * lim}`, params);
   const total = await get(`SELECT COUNT(*) AS c FROM leads l WHERE ${where.join(' AND ')}`, params);
   return { leads: rows.map(present), total: Number(total?.c || 0), page: pg, limit: lim };
 }
@@ -148,7 +163,7 @@ async function listLeads(workspaceId, { productId, status, q, page = 1, limit = 
 async function requireLead(workspaceId, id) {
   const leadId = Number(id);
   if (!Number.isInteger(leadId) || leadId <= 0) throw httpError(400, 'Invalid lead id.');
-  const row = await get(`${SELECT_LEAD} WHERE l.workspace_id = ? AND l.id = ?`, [workspaceId, leadId]);
+  const row = await get(`${await selectLead()} WHERE l.workspace_id = ? AND l.id = ?`, [workspaceId, leadId]);
   if (!row) throw httpError(404, 'Lead not found.', 'NOT_FOUND');
   return row;
 }

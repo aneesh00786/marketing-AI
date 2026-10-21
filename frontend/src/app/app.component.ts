@@ -12,11 +12,12 @@ import { SocialHubComponent } from './features/social/social-hub.component';
 import { CommandCenterComponent } from './features/command/command-center.component';
 import { IconComponent } from './shared/icon.component';
 import { DashboardComponent, DashboardNavigation } from './features/dashboard/dashboard.component';
+import { LeadDiscoveryComponent } from './features/leads/lead-discovery.component';
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [CommonModule, FormsModule, LoginComponent, SocialHubComponent, CommandCenterComponent, IconComponent, DashboardComponent],
+  imports: [CommonModule, FormsModule, LoginComponent, SocialHubComponent, CommandCenterComponent, IconComponent, DashboardComponent, LeadDiscoveryComponent],
   templateUrl: './app.component.html',
   styleUrls: ['./app.component.css']
 })
@@ -239,6 +240,10 @@ export class AppComponent implements OnInit, OnDestroy {
   leads: any[] = [];
   showNewLeadModal: boolean = false;
   showExcelImportModal: boolean = false;
+  // Leads CRM tabs: all leads, and AI Lead Discovery (search results until the user imports them).
+  leadsTab: 'crm' | 'discovery' = 'crm';
+  // Live Google Places details for a discovered lead (never stored).
+  placeDetails: { lead: any; loading: boolean; error: string; data: any } | null = null;
   excelFileName: string = '';
   excelPreviewRows: any[] = [];
   isImportingLeads: boolean = false;
@@ -857,6 +862,25 @@ export class AppComponent implements OnInit, OnDestroy {
     const last = Math.max(1, Math.ceil(this.leadTotal / this.leadPageSize));
     this.leadPage = Math.min(Math.max(1, this.leadPage + delta), last);
     this.loadLeads();
+  }
+
+  showLeadsTab(tab: 'crm' | 'discovery'): void {
+    this.leadsTab = tab;
+    if (!this.leadProducts.length) this.loadLeadProducts();
+  }
+
+  onDiscoveryImported(count: number): void {
+    this.showToast(`Imported ${count} lead${count === 1 ? '' : 's'} into Leads.`);
+    this.leadPage = 1;
+    this.loadLeads();
+  }
+
+  viewPlaceDetails(ld: any): void {
+    this.placeDetails = { lead: ld, loading: true, error: '', data: null };
+    this.apiService.getLeadPlaceDetails(ld.id).subscribe({
+      next: (res) => { if (this.placeDetails?.lead === ld) this.placeDetails = { lead: ld, loading: false, error: '', data: res }; },
+      error: (e) => { if (this.placeDetails?.lead === ld) this.placeDetails = { lead: ld, loading: false, error: e?.error?.error || 'Could not load details from Google.', data: null }; }
+    });
   }
 
   get leadPageCount(): number {

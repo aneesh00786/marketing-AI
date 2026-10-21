@@ -261,6 +261,11 @@ export class ApiService {
     return this.http.delete(`${this.root}/api/products/${id}`);
   }
 
+  // Live Google Places details for a lead found by AI Lead Discovery (fetched, never stored)
+  getLeadPlaceDetails(leadId: number): Observable<any> {
+    return this.http.get(`${this.baseUrl}/leads/discovery/leads/${leadId}/place`);
+  }
+
   // 22. Bulk Lead Import & AI Qualification
   importLeadsBulk(leads: any[]): Observable<any> {
     return this.http.post(`${this.baseUrl}/leads/import-bulk`, { leads });

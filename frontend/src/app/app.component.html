@@ -238,7 +238,7 @@
         <h2>Leads CRM</h2>
         <p class="subtitle">Leads linked to your products. Lead scores are rule-based (contact details, budget and buying-intent words); follow-up advice comes from AI when a provider is available.</p>
       </div>
-      <div class="header-actions">
+      <div class="header-actions" *ngIf="leadsTab === 'crm'">
         <button class="btn btn-accent" (click)="showExcelImportModal = true; leadImportResult = null">📂 Import Excel / CSV</button>
         <button class="btn btn-secondary" (click)="qualifyAllLeads()" [disabled]="isQualifyingAll" title="Refresh rule-based scores and generate AI advice (up to 50 leads per run)">
           {{ isQualifyingAll ? 'Working…' : '⚡ Rescore & AI advice' }}
@@ -247,6 +247,12 @@
       </div>
     </div>
 
+    <div class="leads-tabs" role="tablist" aria-label="Leads">
+      <button role="tab" [class.on]="leadsTab === 'crm'" [attr.aria-selected]="leadsTab === 'crm'" (click)="showLeadsTab('crm')">👥 Leads <span class="tab-count">{{ leadTotal }}</span></button>
+      <button role="tab" [class.on]="leadsTab === 'discovery'" [attr.aria-selected]="leadsTab === 'discovery'" (click)="showLeadsTab('discovery')">🔎 AI Lead Discovery</button>
+    </div>
+
+    <ng-container *ngIf="leadsTab === 'crm'">
     <div class="lead-filters">
       <select class="hud-input" [(ngModel)]="leadFilters.productId" (change)="applyLeadFilters()" aria-label="Filter by product">
         <option value="">All products</option>
@@ -280,7 +286,9 @@
         </thead>
         <tbody>
           <tr *ngFor="let ld of leads">
-            <td><strong>{{ ld.name }}</strong><div class="lead-sub" *ngIf="ld.notes" [title]="ld.notes">📝 {{ ld.notes | slice:0:50 }}{{ ld.notes.length > 50 ? '…' : '' }}</div></td>
+            <td><strong>{{ ld.name }}</strong>
+              <div *ngIf="ld.googlePlace"><span class="chip" title="Found with AI Lead Discovery. Business details are shown live from Google Maps and not stored.">📍 Google Places</span></div>
+              <div class="lead-sub" *ngIf="ld.notes" [title]="ld.notes">📝 {{ ld.notes | slice:0:50 }}{{ ld.notes.length > 50 ? '…' : '' }}</div></td>
             <td>{{ dash(ld.companyName) }}</td>
             <td>{{ dash(ld.email) }}</td>
             <td>{{ dash(ld.phone) }}</td>
@@ -307,6 +315,7 @@
             <td>
               <div class="button-group">
                 <button class="btn btn-secondary btn-sm" (click)="openEditLead(ld)">Edit</button>
+                <button class="btn btn-secondary btn-sm" *ngIf="ld.googlePlace" (click)="viewPlaceDetails(ld)" title="Show this business's details live from Google Maps">📍 Live details</button>
                 <button class="btn btn-secondary btn-sm" (click)="quickEmailLead(ld)" [disabled]="!ld.hasValidEmail" [title]="ld.hasValidEmail ? 'Draft an email about ' + (ld.productName || 'their needs') : 'No valid email address'">✉️ Email</button>
                 <button class="btn btn-secondary btn-sm" (click)="qualifySingleLead(ld)" title="Refresh the rule-based score and ask AI for advice">⚡ AI advice</button>
                 <button class="btn btn-danger btn-sm" (click)="deleteLead(ld)" aria-label="Delete lead">🗑</button>
@@ -326,6 +335,12 @@
       <button class="btn btn-secondary btn-sm" (click)="changeLeadPage(-1)" [disabled]="leadPage <= 1">‹ Previous</button>
       <span>Page {{ leadPage }} of {{ leadPageCount }}</span>
       <button class="btn btn-secondary btn-sm" (click)="changeLeadPage(1)" [disabled]="leadPage >= leadPageCount">Next ›</button>
+    </div>
+    </ng-container>
+
+    <!-- Kept alive (hidden, not destroyed) so unimported search results survive switching tabs. -->
+    <div [hidden]="leadsTab !== 'discovery'">
+      <app-lead-discovery [products]="leadProducts" (imported)="onDiscoveryImported($event)" (viewLeads)="showLeadsTab('crm')"></app-lead-discovery>
     </div>
   </section>
 
@@ -896,6 +911,34 @@
       </div>
       <div class="modal-footer">
         <button class="btn btn-primary" (click)="dismissVoiceNotice()">OK, got it</button>
+      </div>
+    </div>
+  </div>
+
+  <div *ngIf="placeDetails" class="modal-backdrop" (click)="placeDetails = null">
+    <div class="modal-card" (click)="$event.stopPropagation()" role="dialog" aria-label="Live business details">
+      <div class="modal-header">
+        <h3>📍 Live business details</h3>
+        <button class="close-btn" (click)="placeDetails = null" aria-label="Close">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="helper-text">{{ placeDetails.lead.name }}</p>
+        <p *ngIf="placeDetails.loading">Loading from Google…</p>
+        <p class="lead-warn" *ngIf="placeDetails.error">{{ placeDetails.error }}</p>
+        <ng-container *ngIf="placeDetails.data?.place as pl">
+          <table class="data-table">
+            <tbody>
+              <tr><th>Business</th><td>{{ pl.name || 'Not provided by Google' }}</td></tr>
+              <tr><th>Category</th><td>{{ pl.category || 'Not provided by Google' }}</td></tr>
+              <tr><th>Address</th><td>{{ pl.address || 'Not provided by Google' }}</td></tr>
+              <tr><th>Phone</th><td>{{ pl.phone || 'Not provided by Google' }}</td></tr>
+              <tr><th>Website</th><td><a *ngIf="pl.website" [href]="pl.website" target="_blank" rel="noopener noreferrer">{{ pl.website }}</a><span *ngIf="!pl.website">Not provided by Google</span></td></tr>
+              <tr><th>Status</th><td>{{ pl.businessStatus || 'Not provided by Google' }}</td></tr>
+              <tr *ngIf="pl.googleMapsUri"><th>Map</th><td><a [href]="pl.googleMapsUri" target="_blank" rel="noopener noreferrer">Open in Google Maps</a></td></tr>
+            </tbody>
+          </table>
+          <p class="helper-text">Source: <strong>Google Maps</strong>. Fetched live and not saved. To keep contact details in this lead, verify them with the business and enter them yourself.</p>
+        </ng-container>
       </div>
     </div>
   </div>
