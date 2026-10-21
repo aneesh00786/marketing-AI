@@ -586,14 +586,19 @@ export class AppComponent implements OnInit, OnDestroy {
     } catch (err: any) {
       console.error('Failed to connect ElevenLabs:', err);
       this.voiceConnecting = false;
+      // Prefer the server's reason (e.g. sign-in expired, voice not configured) over the raw HTTP text.
+      const reason = err?.error?.error || err?.message || 'Check ElevenLabs key';
+      // Sign-in, permission or server setup problems do not fix themselves: never retry those.
+      const permanent = [401, 403, 503].includes(err?.status);
       this.callStatusText = 'STANDBY (CLICK TO CONNECT)';
-      this.callSubText = `Connection error: ${err.message || 'Check ElevenLabs key'}`;
-      if (this.voiceAlwaysOn) {
+      this.callSubText = `Connection error: ${reason}`;
+      if (this.voiceAlwaysOn && !permanent) {
         // Autoplay/microphone blocked without a gesture: wait for a click instead of retrying.
         if (err?.name === 'NotAllowedError' && !(navigator as any)?.userActivation?.hasBeenActive) this.waitForVoiceGesture();
         else this.scheduleVoiceReconnect();
       } else {
-        this.showToast('Could not connect to ElevenLabs voice session.');
+        if (this.voiceAlwaysOn) this.voiceReconnectPaused = true;
+        this.showToast(permanent ? `Mark voice unavailable: ${reason}` : 'Could not connect to ElevenLabs voice session.');
       }
     } finally {
       if (!this.isElevenLabsConnected) this.voiceConnecting = false;

@@ -5,7 +5,7 @@ import { HttpClient } from '@angular/common/http';
 import { apiRoot } from '../../core/api-base';
 import { LineChartComponent, LinePoint } from '../../shared/charts/line-chart.component';
 
-interface Metric { value: any; status: 'available' | 'partial' | 'unavailable' | 'estimate'; reason?: string; basis?: string; method?: string; smallSample?: boolean; numerator?: number; denominator?: number; note?: string }
+interface Metric { value: any; status: 'available' | 'partial' | 'unavailable' | 'estimate' | 'non_live'; reason?: string; basis?: string; method?: string; smallSample?: boolean; numerator?: number; denominator?: number; note?: string }
 
 /**
  * AI Campaigns analytics: email, social and CRM results side by side. Every number shows its
@@ -78,6 +78,7 @@ export class CampaignAnalyticsComponent implements OnInit {
     const parts: string[] = [];
     if (m.numerator !== undefined && m.denominator !== undefined) parts.push(`${m.numerator} of ${m.denominator}`);
     if (m.basis) parts.push(m.basis);
+    if (m.status === 'non_live' && m.reason) parts.push(m.reason);
     if (m.smallSample) parts.push('small sample (under 30)');
     if (m.method) parts.push(m.method);
     if (m.note) parts.push(m.note);

@@ -1,6 +1,7 @@
 const express = require('express');
 const { z } = require('zod');
 const { requireCapability } = require('../../middleware/auth');
+const { aiRouteLimit } = require('../../lib/rateLimit');
 const svc = require('./outreachService');
 
 /**
@@ -19,18 +20,25 @@ const wrap = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch
   next(err);
 });
 
-// Public one-click unsubscribe (the token in the email is the proof). Works with GET and POST.
-const page = (title, text) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title></head>
+// Public unsubscribe (the token in the email is the proof). GET only shows a confirmation page,
+// because mail security scanners open links automatically; the unsubscribe happens on POST
+// (the button on that page, or a one-click POST). Repeating it is harmless.
+const page = (title, text, form = '') => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>${title}</title></head>
 <body style="font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; display: grid; place-items: center; min-height: 100vh; margin: 0; padding: 16px;">
-<main style="max-width: 420px; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 28px; text-align: center;"><h1 style="font-size: 1.2rem;">${title}</h1><p>${text}</p></main></body></html>`;
-const unsubscribe = wrap(async (req, res) => {
+<main style="max-width: 420px; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 28px; text-align: center;"><h1 style="font-size: 1.2rem;">${title}</h1><p>${text}</p>${form}</main></body></html>`;
+const invalid = res => res.status(404).type('html').send(page('Link not valid', 'This unsubscribe link is not valid. Reply "unsubscribe" to the email instead.'));
+router.get('/unsubscribe/:token', wrap(async (req, res) => {
+  const r = await svc.findUnsubscribe(req.params.token);
+  if (!r) return invalid(res);
+  if (r.unsubscribed) return res.type('html').send(page('You are unsubscribed', 'You will not receive further emails from this sender.'));
+  res.type('html').send(page('Unsubscribe?', 'Confirm to stop receiving these emails from this sender.',
+    '<form method="post" action=""><button type="submit" style="font: inherit; padding: 10px 18px; border-radius: 8px; border: 0; background: #1e293b; color: #fff; cursor: pointer;">Unsubscribe</button></form>'));
+}));
+router.post('/unsubscribe/:token', wrap(async (req, res) => {
   const done = await svc.unsubscribeByToken(req.params.token);
-  res.status(done ? 200 : 404).type('html').send(done
-    ? page('You are unsubscribed', 'You will not receive further emails from this sender.')
-    : page('Link not valid', 'This unsubscribe link is not valid. Reply "unsubscribe" to the email instead.'));
-});
-router.get('/unsubscribe/:token', unsubscribe);
-router.post('/unsubscribe/:token', unsubscribe);
+  if (!done) return invalid(res);
+  res.type('html').send(page('You are unsubscribed', 'You will not receive further emails from this sender.'));
+}));
 
 router.get('/status', requireCapability('mail.view'), wrap(async (req, res) => res.json({ success: true, status: await svc.engineStatus(req) })));
 
@@ -40,7 +48,7 @@ router.get('/campaigns/:id', requireCapability('mail.view'), wrap(async (req, re
 router.patch('/campaigns/:id', requireCapability('mail.compose'), wrap(async (req, res) => res.json({ success: true, campaign: await svc.updateCampaign(req, req.params.id, req.body) })));
 router.delete('/campaigns/:id', requireCapability('mail.compose'), wrap(async (req, res) => res.json({ success: true, ...(await svc.deleteCampaign(req, req.params.id)) })));
 
-router.post('/campaigns/:id/generate', requireCapability('mail.compose'), wrap(async (req, res) => res.json({ success: true, campaign: await svc.generateSequence(req, req.params.id, req.body || {}) })));
+router.post('/campaigns/:id/generate', requireCapability('mail.compose'), aiRouteLimit('outreach.generate'), wrap(async (req, res) => res.json({ success: true, campaign: await svc.generateSequence(req, req.params.id, req.body || {}) })));
 router.put('/campaigns/:id/steps', requireCapability('mail.compose'), wrap(async (req, res) => res.json({ success: true, campaign: await svc.replaceSteps(req, req.params.id, req.body) })));
 
 router.post('/audience/preview', requireCapability('mail.compose'), wrap(async (req, res) => {

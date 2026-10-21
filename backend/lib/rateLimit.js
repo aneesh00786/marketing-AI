@@ -33,4 +33,17 @@ function rateLimit({ windowMs, max, keyFn, message = 'Too many requests. Please 
   };
 }
 
-module.exports = { rateLimit };
+/**
+ * Per-route limit for AI generation endpoints, counted per workspace member (each route has its
+ * own window). Applied after authentication, on top of the workspace AI usage quota.
+ */
+function aiRouteLimit(name) {
+  return rateLimit({
+    windowMs: parseInt(process.env.AI_ROUTE_RATE_WINDOW_MS || String(10 * 60 * 1000), 10),
+    max: parseInt(process.env.AI_ROUTE_RATE_MAX || '20', 10),
+    keyFn: req => `${name}:${req.auth?.workspaceId || 0}:${req.auth?.userId || req.ip}`,
+    message: 'Too many AI requests for this feature. Please wait a few minutes and try again.'
+  });
+}
+
+module.exports = { rateLimit, aiRouteLimit };

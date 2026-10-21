@@ -1,6 +1,7 @@
 const express = require('express');
 const { z } = require('zod');
 const { requireCapability } = require('../../middleware/auth');
+const { aiRouteLimit } = require('../../lib/rateLimit');
 const svc = require('./abTestService');
 
 /**
@@ -24,7 +25,7 @@ router.post('/email', requireCapability('mail.compose'), wrap(async (req, res) =
 router.post('/social', requireCapability('campaigns.manage'), wrap(async (req, res) => res.json({ success: true, test: await svc.createSocialTest(req, req.body) })));
 router.get('/:id', requireCapability('analytics.view'), wrap(async (req, res) => res.json({ success: true, test: await svc.getTest(req, req.params.id) })));
 router.patch('/:id', requireCapability('mail.compose'), wrap(async (req, res) => res.json({ success: true, test: await svc.updateEmailTest(req, req.params.id, req.body) })));
-router.post('/:id/generate-variant', requireCapability('mail.compose'), wrap(async (req, res) => res.json({ success: true, test: await svc.generateEmailVariant(req, req.params.id) })));
+router.post('/:id/generate-variant', requireCapability('mail.compose'), aiRouteLimit('abtests.variant'), wrap(async (req, res) => res.json({ success: true, test: await svc.generateEmailVariant(req, req.params.id) })));
 router.post('/:id/conclude', requireCapability('analytics.view'), wrap(async (req, res) => res.json({ success: true, test: await svc.conclude(req, req.params.id, req.body || {}) })));
 router.post('/:id/cancel', requireCapability('mail.compose'), wrap(async (req, res) => res.json({ success: true, test: await svc.cancel(req, req.params.id) })));
 

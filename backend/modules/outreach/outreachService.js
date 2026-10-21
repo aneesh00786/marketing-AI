@@ -175,6 +175,8 @@ async function deleteCampaign(ctx, id) {
   const c = await requireCampaign(ctx, id);
   const sent = await get("SELECT COUNT(*) AS n FROM outreach_sends WHERE campaign_id = ? AND workspace_id = ?", [c.id, ws(ctx)]);
   if (Number(sent.n) > 0) throw httpError('This campaign has sent emails; stop it instead of deleting so its history is kept.', 409, 'HAS_HISTORY');
+  const program = await get('SELECT name FROM campaign_programs WHERE outreach_campaign_id = ? AND workspace_id = ?', [c.id, ws(ctx)]);
+  if (program) throw httpError(`This email sequence belongs to the Command Center campaign "${program.name}"; archive that campaign instead.`, 409, 'LINKED_TO_CAMPAIGN');
   await run('DELETE FROM outreach_campaigns WHERE id = ? AND workspace_id = ?', [c.id, ws(ctx)]);
   await audit(ctx, 'outreach.campaign_deleted', { resourceType: 'outreach_campaign', resourceId: c.id });
   return { deleted: true };
@@ -506,6 +508,15 @@ async function suppress(workspaceId, email, reason, source) {
     [reason === 'bounced' ? 'bounced' : 'unsubscribed', workspaceId, String(email).trim().toLowerCase()]);
 }
 
+/** Read-only lookup for the unsubscribe confirmation page. */
+async function findUnsubscribe(token) {
+  if (!/^[a-f0-9]{40}$/.test(String(token || ''))) return null;
+  const r = await get('SELECT workspace_id, email, status FROM outreach_recipients WHERE unsubscribe_token = ?', [token]);
+  if (!r) return null;
+  const s = await get('SELECT reason FROM email_suppressions WHERE workspace_id = ? AND email = ?', [r.workspace_id, String(r.email).trim().toLowerCase()]);
+  return { unsubscribed: r.status === 'unsubscribed' || (s && s.reason === 'unsubscribed') };
+}
+
 async function unsubscribeByToken(token) {
   if (!/^[a-f0-9]{40}$/.test(String(token || ''))) return null;
   const r = await get('SELECT id, workspace_id, email FROM outreach_recipients WHERE unsubscribe_token = ?', [token]);
@@ -558,5 +569,6 @@ module.exports = {
   stopLeadSequences,
   suppress,
   unsubscribeByToken,
+  findUnsubscribe,
   engineStatus
 };

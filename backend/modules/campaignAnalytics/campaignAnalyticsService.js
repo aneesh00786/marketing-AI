@@ -15,6 +15,7 @@ const { resolveRange } = require('../social/dashboardService');
  *   partial     real, but only some items reported it (basis says how many)
  *   unavailable not measurable; `reason` explains why
  *   estimate    a derived association (only attribution), with its method
+ *   non_live    includes social numbers not reported by a live platform API (seeded sample data)
  * Revenue, ROI and spend are never computed: the app records neither deal values nor spend.
  * Opens and clicks on email are not tracked and never shown.
  */
@@ -43,17 +44,27 @@ async function tableExists(name) {
   return !!r;
 }
 
+// Hosts under reserved names (RFC 2606 / 6761) can never be a real mailbox.
+const RESERVED_HOST = /\.(invalid|test|example|localhost)$/i;
+
 /** Replies are measurable only when the workspace mailbox is being synced (IMAP). */
 async function replyTracking(workspaceId) {
-  const cfg = await get('SELECT imap_host, imap_user, imap_pass, last_synced_at FROM mail_configurations WHERE workspace_id = ?', [workspaceId]);
+  const cfg = await get('SELECT imap_host, imap_user, imap_pass, last_synced_at, status FROM mail_configurations WHERE workspace_id = ?', [workspaceId]);
   if (!cfg || !cfg.imap_host || !cfg.imap_user || !cfg.imap_pass) return { on: false, reason: 'Replies are not measured: inbound mail (IMAP) is not set up in Mail Settings.' };
+  // A demo mailbox is never connected: recorded replies are shown, marked as not live.
+  if (cfg.status === 'Demo' || RESERVED_HOST.test(String(cfg.imap_host).trim())) {
+    return { on: true, live: false, reason: 'No live mailbox is connected; replies shown are recorded data, not synced from an inbox.' };
+  }
   if (!cfg.last_synced_at) return { on: false, reason: 'Replies are not measured yet: the mailbox has never synced.' };
-  return { on: true, lastSyncedAt: cfg.last_synced_at };
+  return { on: true, live: true, lastSyncedAt: cfg.last_synced_at };
 }
 
 // ---------------------------------------------------------------------------
 // Email (outreach sequences)
 // ---------------------------------------------------------------------------
+// Reply metrics from a mailbox that is not live are never presented as verified.
+const replyMetric = (metric, tracking) => (tracking.live === false && metric.status !== 'unavailable' ? { ...metric, status: 'non_live', reason: tracking.reason } : metric);
+
 async function emailAnalytics(workspaceId, start, end, tracking) {
   const s = toDbDateTime(start);
   const e = toDbDateTime(end);
@@ -61,9 +72,11 @@ async function emailAnalytics(workspaceId, start, end, tracking) {
   const rows = [];
   const total = { sent: 0, failed: 0, emailed: 0, replied: 0, bounced: 0, unsubscribed: 0 };
   for (const c of campaigns) {
+    // A send rejected because the address bounced is a bounce (counted below), not a failed send.
     const sends = await get(
-      `SELECT SUM(status = 'sent' AND sent_at >= ? AND sent_at <= ?) AS sent, SUM(status = 'failed' AND created_at >= ? AND created_at <= ?) AS failed
-       FROM outreach_sends WHERE workspace_id = ? AND campaign_id = ?`, [s, e, s, e, workspaceId, c.id]);
+      `SELECT SUM(x.status = 'sent' AND x.sent_at >= ? AND x.sent_at <= ?) AS sent,
+              SUM(x.status = 'failed' AND r.status <> 'bounced' AND x.created_at >= ? AND x.created_at <= ?) AS failed
+       FROM outreach_sends x JOIN outreach_recipients r ON r.id = x.recipient_id WHERE x.workspace_id = ? AND x.campaign_id = ?`, [s, e, s, e, workspaceId, c.id]);
     // Cohort: recipients whose first email went out in the period; outcomes are counted for that cohort.
     const cohort = await get(
       `SELECT COUNT(*) AS emailed, SUM(status = 'replied') AS replied, SUM(status = 'bounced') AS bounced, SUM(status = 'unsubscribed') AS unsubscribed
@@ -81,8 +94,8 @@ async function emailAnalytics(workspaceId, start, end, tracking) {
     rows.push({
       id: c.id, name: c.name, status: c.status, productId: c.product_id,
       emailsSent: avail(m.sent), emailsFailed: avail(m.failed), recipientsEmailed: avail(m.emailed),
-      replies: tracking.on ? avail(m.replied) : unavailable(tracking.reason),
-      replyRate: rate(m.replied, m.emailed, tracking.on ? null : tracking.reason),
+      replies: replyMetric(tracking.on ? avail(m.replied) : unavailable(tracking.reason), tracking),
+      replyRate: replyMetric(rate(m.replied, m.emailed, tracking.on ? null : tracking.reason), tracking),
       bounceRate: rate(m.bounced, attempted),
       unsubscribeRate: rate(m.unsubscribed, m.emailed),
       raw: { ...m, attempted }
@@ -93,8 +106,8 @@ async function emailAnalytics(workspaceId, start, end, tracking) {
     campaigns: rows,
     totals: {
       emailsSent: avail(total.sent), emailsFailed: avail(total.failed), recipientsEmailed: avail(total.emailed),
-      replies: tracking.on ? avail(total.replied) : unavailable(tracking.reason),
-      replyRate: rate(total.replied, total.emailed, tracking.on ? null : tracking.reason),
+      replies: replyMetric(tracking.on ? avail(total.replied) : unavailable(tracking.reason), tracking),
+      replyRate: replyMetric(rate(total.replied, total.emailed, tracking.on ? null : tracking.reason), tracking),
       bounceRate: rate(total.bounced, attemptedTotal),
       unsubscribeRate: rate(total.unsubscribed, total.emailed),
       opens: unavailable('Email opens are not tracked.'),
@@ -109,7 +122,19 @@ async function emailAnalytics(workspaceId, start, end, tracking) {
 // ---------------------------------------------------------------------------
 const ENGAGEMENT = ['likes', 'comments', 'shares', 'saves'];
 
+// Live platform numbers are stored with source "<provider>_api"; anything else is not a measurement.
+const isLiveSource = src => /_api$/.test(String(src || ''));
+function markNonLive(metric, posts, keys) {
+  if (metric.status === 'unavailable') return metric;
+  const nonLive = posts.some(p => keys.some(k => p.metrics?.[k]?.value !== null && p.metrics?.[k]?.value !== undefined && !isLiveSource(p.metrics[k].source)));
+  return nonLive ? { ...metric, status: 'non_live', reason: 'Includes numbers that did not come from a live platform API; not a verified result.' } : metric;
+}
+
 function socialMetric(posts, key) {
+  return markNonLive(socialMetricRaw(posts, key), posts, [key]);
+}
+
+function socialMetricRaw(posts, key) {
   const withValue = posts.filter(p => p.metrics?.[key]?.value !== null && p.metrics?.[key]?.value !== undefined);
   if (!posts.length) return unavailable('No posts were published in this period.');
   if (!withValue.length) {
@@ -121,6 +146,10 @@ function socialMetric(posts, key) {
 }
 
 function engagementOf(posts) {
+  return markNonLive(engagementOfRaw(posts), posts, ENGAGEMENT);
+}
+
+function engagementOfRaw(posts) {
   const known = posts.filter(p => p.engagements !== null && p.engagements !== undefined);
   if (!posts.length) return unavailable('No posts were published in this period.');
   if (!known.length) return unavailable('The platforms did not report likes, comments, shares or saves.');
@@ -129,6 +158,10 @@ function engagementOf(posts) {
 }
 
 function engagementRateOf(posts) {
+  return markNonLive(engagementRateOfRaw(posts), posts, [...ENGAGEMENT, 'impressions']);
+}
+
+function engagementRateOfRaw(posts) {
   const both = posts.filter(p => p.engagements !== null && p.engagements !== undefined && p.metrics?.impressions?.value);
   if (!both.length) return unavailable(posts.length ? 'Needs both engagements and impressions from the platform.' : 'No posts were published in this period.');
   const eng = both.reduce((a, p) => a + Number(p.engagements), 0);
@@ -184,12 +217,19 @@ async function crmAnalytics(workspaceId, start, end, conversionStatus) {
   let conversions = null;
   let historyFrom = null;
   if (hasEvents) {
-    const first = await get("SELECT MIN(created_at) AS t FROM automation_events WHERE workspace_id = ? AND event_type = 'lead.status_changed'", [workspaceId]);
+    const first = await get("SELECT MIN(created_at) AS t FROM automation_events WHERE workspace_id = ? AND event_type IN ('lead.status_changed', 'lead.created')", [workspaceId]);
     historyFrom = first?.t || null;
+    // A conversion is the FIRST time a lead reaches the conversion status: a status change to it,
+    // or creation/import with it. Each lead counts once, in the period of that first time, so
+    // Won -> Contacted -> Won is one conversion.
     conversions = await all(
-      `SELECT e.subject_id AS lead_id, e.created_at FROM automation_events e
-       WHERE e.workspace_id = ? AND e.event_type = 'lead.status_changed' AND JSON_UNQUOTE(JSON_EXTRACT(e.payload_json, '$.to')) = ? AND e.created_at >= ? AND e.created_at <= ?`,
-      [workspaceId, conversionStatus, s, e]
+      `SELECT lead_id, MIN(at) AS created_at FROM (
+         SELECT e.subject_id AS lead_id, e.created_at AS at FROM automation_events e
+         WHERE e.workspace_id = ? AND e.subject_type = 'lead' AND (
+           (e.event_type = 'lead.status_changed' AND JSON_UNQUOTE(JSON_EXTRACT(e.payload_json, '$.to')) = ?)
+           OR (e.event_type = 'lead.created' AND JSON_UNQUOTE(JSON_EXTRACT(e.payload_json, '$.status')) = ?))
+       ) x GROUP BY lead_id HAVING MIN(at) >= ? AND MIN(at) <= ?`,
+      [workspaceId, conversionStatus, conversionStatus, s, e]
     );
   }
   const statusHistoryReason = !hasEvents
@@ -217,7 +257,7 @@ async function attribution(workspaceId, conversionRows, lookbackDays, conversion
     const touch = await get(
       `SELECT x.campaign_id, x.sent_at FROM outreach_sends x JOIN outreach_recipients r ON r.id = x.recipient_id
        WHERE r.workspace_id = ? AND r.lead_id = ? AND x.status = 'sent' AND x.sent_at <= ? AND x.sent_at >= DATE_SUB(?, INTERVAL ? DAY)
-       ORDER BY x.sent_at DESC LIMIT 1`,
+       ORDER BY x.sent_at DESC, x.id DESC LIMIT 1`,
       [workspaceId, c.lead_id, c.created_at, c.created_at, lookbackDays]
     );
     if (touch) perCampaign[touch.campaign_id] = (perCampaign[touch.campaign_id] || 0) + 1;
@@ -228,8 +268,8 @@ async function attribution(workspaceId, conversionRows, lookbackDays, conversion
     email: Object.fromEntries(Object.entries(perCampaign).map(([k, v]) => [k, { value: v, status: 'estimate', method }])),
     unattributed: avail(unattributed),
     social: unavailable('Social posts are not linked to individual leads, so conversions cannot be attributed to them.'),
-    revenue: unavailable('Revenue is not tracked: leads have no recorded deal value.'),
-    roi: unavailable('ROI cannot be calculated: neither revenue nor spend is recorded.')
+    revenue: unavailable('Revenue is not attributed automatically. Record won deals per campaign under Budget & ROI.'),
+    roi: unavailable('Workspace-wide ROI is not calculated. Per-campaign ROI appears where actual spend and recorded revenue exist (Budget & ROI).')
   };
 }
 
@@ -289,6 +329,12 @@ async function trends(workspaceId, start, end, tracking, social, crm) {
 // ---------------------------------------------------------------------------
 async function programs(workspaceId, email, social, attr) {
   if (!(await tableExists('campaign_programs'))) return [];
+  const hasBudgets = await tableExists('campaign_budgets');
+  const budgetSummaries = {};
+  if (hasBudgets) {
+    const budgetService = require('../budget/budgetService');
+    for (const b of await all('SELECT * FROM campaign_budgets WHERE workspace_id = ?', [workspaceId])) budgetSummaries[b.program_id] = { currency: b.currency, s: await budgetService.summarize(b) };
+  }
   const rows = await all("SELECT id, name, status, outreach_campaign_id, social_campaign_id, budget_amount, budget_currency FROM campaign_programs WHERE workspace_id = ? AND status <> 'archived' ORDER BY id DESC", [workspaceId]);
   return rows.map(p => {
     const e = email.campaigns.find(c => c.id === p.outreach_campaign_id) || null;
@@ -299,7 +345,14 @@ async function programs(workspaceId, email, social, attr) {
       social: s ? { postsPublished: s.postsPublished, engagements: s.engagements, engagementRate: s.engagementRate } : (p.social_campaign_id ? { note: 'No posts published in this period.' } : null),
       attributedConversions: p.outreach_campaign_id && attr.email[p.outreach_campaign_id] ? attr.email[p.outreach_campaign_id] : { value: 0, status: 'estimate', method: attr.method },
       plannedBudget: p.budget_amount !== null ? { value: Number(p.budget_amount), currency: p.budget_currency, status: 'available', note: 'Planned budget you entered, not recorded spend.' } : null,
-      roi: unavailable('ROI cannot be calculated: neither revenue nor spend is recorded.')
+      ...(budgetSummaries[p.id] ? (() => {
+        const { s, currency } = budgetSummaries[p.id];
+        return {
+          budget: { value: s.budget.value, currency, status: 'available', note: 'Tracking budget. Not spend.' },
+          actualSpend: s.actualSpend.status === 'actual' ? avail(s.actualSpend.value, { currency, note: 'Provider-reported and manually recorded spend.' }) : unavailable('No actual spend recorded yet.'),
+          roi: s.roi.status === 'available' ? avail(s.roi.value, { basis: s.roi.basis }) : unavailable(s.roi.reason)
+        };
+      })() : { actualSpend: unavailable('No budget set up for this campaign, so no spend is tracked.'), roi: unavailable('Set up a budget and record spend and revenue to calculate ROI.') })
     };
   });
 }
@@ -318,7 +371,7 @@ function insights(email, social, crm, tracking, attr) {
     if (c.unsubscribeRate.status === 'available' && c.raw.emailed >= 50 && c.unsubscribeRate.value >= 0.02) {
       add(`unsub_high_${c.id}`, 'warning', `Unsubscribes above 2% in "${c.name}"`, `${c.raw.unsubscribed} of ${c.raw.emailed} recipients unsubscribed. Review targeting and message fit.`, [{ metric: 'unsubscribeRate', campaignId: c.id, numerator: c.raw.unsubscribed, denominator: c.raw.emailed }]);
     }
-    if (c.raw.failed > 0) add(`failed_${c.id}`, 'warning', `Failed sends in "${c.name}"`, `${c.raw.failed} email(s) were not accepted by the mail provider. Check Mail Settings and retry them in the sequence.`, [{ metric: 'emailsFailed', campaignId: c.id, value: c.raw.failed }]);
+    if (c.raw.failed > 0) add(`failed_${c.id}`, 'warning', `Failed sends in "${c.name}"`, `${c.raw.failed} email(s) failed to send for a reason other than a bounced address. Check Mail Settings and retry them in the sequence.`, [{ metric: 'emailsFailed', campaignId: c.id, value: c.raw.failed }]);
   }
   // Pairwise reply-rate comparisons only when both have enough recipients and the difference is significant.
   if (tracking.on) {
@@ -396,6 +449,33 @@ const recSchema = z.object({
   })).max(6)
 });
 
+// Every number in a recommendation's text must be a figure from the evidence it cites (allowing
+// for rounding and rates written as percentages); promised outcomes are never accepted.
+const NUMBER_RE = /[$€£₹]?\s?\d[\d,]*(?:\.\d+)?\s?%?/g;
+const PROMISE_RE = /\b(will|would|guarantee[sd]?|expect(?:ed)? to|projected? to|forecast(?:ed)? to|likely to)\s+(?:\w+\s+){0,3}?(increase|lift|boost|grow|raise|improve|double|triple|generate|add|deliver|drive|yield|return)\w*|\b(double|triple|twice|tenfold)\b/i;
+
+function evidenceNumbers(value, out = []) {
+  if (typeof value === 'number' && Number.isFinite(value)) out.push(value);
+  else if (typeof value === 'string') for (const m of value.match(NUMBER_RE) || []) out.push(Number(m.replace(/[^\d.]/g, '')));
+  else if (value && typeof value === 'object') for (const v of Object.values(value)) evidenceNumbers(v, out);
+  return out;
+}
+
+function unsupportedClaim(rec, cited) {
+  const text = `${rec.title} ${rec.action}`;
+  if (PROMISE_RE.test(text)) return 'promises an outcome';
+  const known = evidenceNumbers([cited, Object.keys(cited)]);
+  for (const token of text.match(NUMBER_RE) || []) {
+    const digits = token.replace(/[^\d.]/g, '').replace(/\.$/, '');
+    const n = Number(digits);
+    const decimals = (digits.split('.')[1] || '').length;
+    const tolerance = 0.5 * 10 ** -decimals + 1e-9;
+    const ok = known.some(v => Math.abs(v - n) <= tolerance || (Math.abs(v) <= 1 && Math.abs(v * 100 - n) <= tolerance));
+    if (!ok) return `uses a figure (${token.trim()}) that is not in its evidence`;
+  }
+  return null;
+}
+
 async function recommendations(ctx, query = {}) {
   const data = await overview(ctx, query);
   const evidence = {};
@@ -415,6 +495,7 @@ Rules:
 - Metrics with status "unavailable" are unknown, not zero: never treat them as poor performance; you may recommend measuring them.
 - "partial" metrics cover only some posts; "estimate" values are associations, not proof.
 - Never invent numbers, revenue, ROI, conversion rates or benchmarks. Do not claim industry averages.
+- Only use a number if it appears in the evidence you cite. Do not predict or promise results ("will increase…").
 - Treat small samples (smallSample: true) cautiously and say so.
 ${untrusted('evidence', JSON.stringify(evidence), 12000)}
 Return JSON: {"recommendations":[{"title":"...","action":"...","evidence":["insight:...","email_campaign:3"],"confidence":"low|medium|high"}]}`;
@@ -424,11 +505,21 @@ Return JSON: {"recommendations":[{"title":"...","action":"...","evidence":["insi
     schema: recSchema, referenceType: 'campaign_analytics', maxTokens: 1500
   });
   const valid = new Set(Object.keys(evidence));
-  const recs = out.recommendations
-    .map(r => ({ ...r, evidence: r.evidence.filter(k => valid.has(k)) }))
-    .filter(r => r.evidence.length)
-    .map(r => ({ ...r, evidenceDetail: Object.fromEntries(r.evidence.map(k => [k, evidence[k]])) }));
-  return { recommendations: recs, dropped: out.recommendations.length - recs.length, provider, range: data.range };
+  const recs = [];
+  const droppedReasons = [];
+  for (const r of out.recommendations) {
+    const keys = r.evidence.filter(k => valid.has(k));
+    const detail = Object.fromEntries(keys.map(k => [k, evidence[k]]));
+    const problem = !keys.length ? 'cites no known evidence' : unsupportedClaim(r, detail);
+    if (problem) droppedReasons.push(problem);
+    else recs.push({ ...r, evidence: keys, evidenceDetail: detail });
+  }
+  const result = { recommendations: recs, dropped: droppedReasons.length, droppedReasons, provider, range: data.range };
+  if (!recs.length && droppedReasons.length) {
+    result.status = 'rejected';
+    result.note = 'The AI suggestions were rejected because they were not backed by your data (unsupported figures, promised outcomes or no evidence). No recommendations are shown; try again later.';
+  }
+  return result;
 }
 
-module.exports = { overview, recommendations, MIN_SAMPLE };
+module.exports = { overview, recommendations, replyTracking, unsupportedClaim, MIN_SAMPLE };

@@ -1,5 +1,5 @@
 const { z } = require('zod');
-const { run, get, all } = require('../../db/database');
+const { run, get, all, withTransaction } = require('../../db/database');
 const { audit } = require('../../lib/audit');
 const { generateStructured, untrusted } = require('../../lib/aiStructured');
 const { unverified } = require('../../lib/claims');
@@ -238,11 +238,16 @@ async function factsFor(ctx, campaign) {
   return JSON.stringify({ product: p ? { ...p, features: parse(p.features_json, []) } : null, goal: campaign.goal, audience: campaign.audience_note });
 }
 
-async function saveEmailVariant(ctx, t, campaign, subject, body) {
+/** Validates variant B and returns its claims needing verification (throws 400 on bad placeholders). */
+async function checkEmailVariant(ctx, campaign, subject, body) {
   const bad = unknownTokens(`${subject} ${body}`);
   if (bad.length) throw httpError(`Unknown placeholder(s): ${bad.map(x => `{{${x}}}`).join(', ')}. Use {{first_name}} or {{company}}.`, 400, 'VALIDATION_ERROR');
-  const flags = unverified(`${subject} ${body}`, await factsFor(ctx, campaign));
-  await run(
+  return unverified(`${subject} ${body}`, await factsFor(ctx, campaign));
+}
+
+async function saveEmailVariant(ctx, t, campaign, subject, body, flags = null, db = { run }) {
+  if (!flags) flags = await checkEmailVariant(ctx, campaign, subject, body);
+  await db.run(
     `INSERT INTO outreach_step_variants (workspace_id, campaign_id, step_order, label, subject, body_text, needs_verification_json, created_at, updated_at)
      VALUES (?, ?, ?, 'B', ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())
      ON DUPLICATE KEY UPDATE subject = VALUES(subject), body_text = VALUES(body_text), needs_verification_json = VALUES(needs_verification_json), updated_at = UTC_TIMESTAMP()`,
@@ -261,14 +266,19 @@ async function createEmailTest(ctx, input) {
   const open = await get("SELECT id FROM ab_tests WHERE workspace_id = ? AND outreach_campaign_id = ? AND status IN ('draft', 'running')", [ws(ctx), campaign.id]);
   if (open) throw httpError('This sequence already has an A/B test. Cancel it to start another.', 409, 'TEST_EXISTS');
   const m = EMAIL_METRICS[v.metric];
-  const r = await run(
-    `INSERT INTO ab_tests (workspace_id, kind, name, hypothesis, outreach_campaign_id, step_order, metric, direction, min_sample_per_variant, wait_days, alpha, status, created_by, created_at, updated_at)
-     VALUES (?, 'email', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
-    [ws(ctx), v.name, v.hypothesis || null, campaign.id, v.stepOrder, v.metric, m.direction, v.minSamplePerVariant ?? 100,
-      v.waitDays ?? (v.metric === 'reply_rate' ? 3 : 1), v.alpha ?? 0.05, ctx.auth.userId || null]
-  );
-  const t = await requireTest(ctx, r.lastID);
-  if (v.variant) await saveEmailVariant(ctx, t, campaign, v.variant.subject, v.variant.body);
+  // Validate everything first, then write the test and its variant together (all or nothing).
+  const flags = v.variant ? await checkEmailVariant(ctx, campaign, v.variant.subject, v.variant.body) : null;
+  const testId = await withTransaction(async tx => {
+    const r = await tx.run(
+      `INSERT INTO ab_tests (workspace_id, kind, name, hypothesis, outreach_campaign_id, step_order, metric, direction, min_sample_per_variant, wait_days, alpha, status, created_by, created_at, updated_at)
+       VALUES (?, 'email', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+      [ws(ctx), v.name, v.hypothesis || null, campaign.id, v.stepOrder, v.metric, m.direction, v.minSamplePerVariant ?? 100,
+        v.waitDays ?? (v.metric === 'reply_rate' ? 3 : 1), v.alpha ?? 0.05, ctx.auth.userId || null]
+    );
+    if (v.variant) await saveEmailVariant(ctx, { step_order: v.stepOrder }, campaign, v.variant.subject, v.variant.body, flags, tx);
+    return r.lastID;
+  });
+  const t = await requireTest(ctx, testId);
   await audit(ctx, 'abtest.created', { resourceType: 'ab_test', resourceId: t.id, metadata: { kind: 'email', metric: v.metric, minSample: t.min_sample_per_variant } });
   return getTest(ctx, t.id);
 }

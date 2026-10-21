@@ -165,6 +165,8 @@ async function updateProgram(ctx, id, input) {
 async function deleteProgram(ctx, id) {
   const p = await requireProgram(ctx, id);
   if (p.outreach_campaign_id || p.social_campaign_id) throw httpError('This campaign has built email or social campaigns; archive it instead so their history stays linked.', 409, 'HAS_CHILDREN');
+  const budget = await get('SELECT id FROM campaign_budgets WHERE program_id = ? AND workspace_id = ?', [p.id, ws(ctx)]);
+  if (budget) throw httpError('This campaign has a budget with its spend and revenue records; archive it instead so the financial history is kept.', 409, 'HAS_BUDGET');
   await run('DELETE FROM campaign_programs WHERE id = ? AND workspace_id = ?', [p.id, ws(ctx)]);
   await audit(ctx, 'command.program_deleted', { resourceType: 'campaign_program', resourceId: p.id });
   return { deleted: true };
@@ -469,6 +471,7 @@ async function overview(ctx, id) {
   const failures = [];
   const scheduled = [];
   const metrics = {};
+  const nonLive = {};
 
   if (!['approved', 'built', 'archived'].includes(p.status)) {
     approvals.push({ kind: 'brief', label: p.status === 'draft' ? 'Generate and approve the campaign brief' : 'Approve the campaign brief', action: 'brief' });
@@ -489,9 +492,13 @@ async function overview(ctx, id) {
       if (c.stats.failed) failures.push({ kind: 'email', label: `${c.stats.failed} recipient(s) with a failed send (retry in the email sequence)` });
       if (c.stats.needsReview) failures.push({ kind: 'email', label: `${c.stats.needsReview} send(s) with unknown delivery (check before continuing)` });
       if (c.lastError) failures.push({ kind: 'email', label: `Paused automatically: ${c.lastError}` });
+      // Replies from a mailbox that is not live (demo) are never shown as an actual result.
+      const tracking = await require('../campaignAnalytics/campaignAnalyticsService').replyTracking(ws(ctx));
+      const replyRate = rate(c.stats.replied, Number(emailed));
+      if (tracking.live === false && replyRate !== null) nonLive.reply_rate = replyRate;
       Object.assign(metrics, {
         emails_sent: c.stats.emailsSent,
-        reply_rate: rate(c.stats.replied, Number(emailed)),
+        reply_rate: tracking.live === false ? null : replyRate,
         bounce_rate: rate(c.stats.bounced, Number(emailed)),
         unsubscribe_rate: rate(c.stats.unsubscribed, Number(emailed))
       });
@@ -521,12 +528,24 @@ async function overview(ctx, id) {
       const since = p.created_at ? new Date(p.created_at) : undefined;
       const summary = await analyticsService.getSummary(ws(ctx), { campaignId: data.campaign.id, from: since ? since.toISOString() : undefined }).catch(() => null);
       metrics.posts_published = summary ? summary.publishedCount : (counts.published || 0);
-      // Only platform-reported numbers; null when no platform reported the metric.
-      const totals = summary?.totals || {};
-      const metricValue = m => (m && m.availableFor > 0 && m.value !== null ? Number(m.value) : null);
-      const parts = ['likes', 'comments', 'shares'].map(k => metricValue(totals[k])).filter(v => v !== null);
-      metrics.engagements = parts.length ? parts.reduce((a, b) => a + b, 0) : null;
-      metrics.impressions = metricValue(totals.impressions);
+      // Only numbers reported by a live platform API (source "<provider>_api"); null otherwise.
+      // Values from other sources (seeded demo data) are returned separately, never as actuals.
+      const sumOf = (keys, live) => {
+        let total = null;
+        for (const post of summary?.posts || []) {
+          for (const k of keys) {
+            const e = post.metrics[k];
+            if (e && e.value !== null && /_api$/.test(String(e.source || '')) === live) total = (total || 0) + Number(e.value);
+          }
+        }
+        return total;
+      };
+      metrics.engagements = sumOf(['likes', 'comments', 'shares'], true);
+      metrics.impressions = sumOf(['impressions'], true);
+      for (const [metric, keys] of [['engagements', ['likes', 'comments', 'shares']], ['impressions', ['impressions']]]) {
+        const v = sumOf(keys, false);
+        if (v !== null) nonLive[metric] = v;
+      }
     } else {
       social = { id: p.social_campaign_id, missing: true };
     }
@@ -538,14 +557,17 @@ async function overview(ctx, id) {
     metrics.leads_won = Number(won.n);
   }
 
-  const kpis = (brief?.kpis || []).map(k => ({ ...k, definition: KPI_METRICS[k.metric], actual: metrics[k.metric] ?? null, unit: /_rate$/.test(k.metric) ? '%' : '' }));
+  const kpis = (brief?.kpis || []).map(k => ({
+    ...k, definition: KPI_METRICS[k.metric], actual: metrics[k.metric] ?? null, unit: /_rate$/.test(k.metric) ? '%' : '',
+    ...(nonLive[k.metric] !== undefined ? { nonLive: { value: nonLive[k.metric], note: k.metric === 'reply_rate' ? 'Replies from a mailbox that is not connected (not live data); excluded from the actual result.' : 'Not live platform data; excluded from the actual result.' } } : {})
+  }));
   scheduled.sort((a, b) => new Date(a.at) - new Date(b.at));
   // A/B tests on this campaign's email sequence and social posts (results computed by the tests module).
   const abTests = [];
   const abTestService = require('../abtests/abTestService');
   if (p.outreach_campaign_id) abTests.push(...await abTestService.listTests(ctx, { emailCampaignId: p.outreach_campaign_id }));
   if (p.social_campaign_id) abTests.push(...await abTestService.listTests(ctx, { socialCampaignId: p.social_campaign_id }));
-  return { program, email, social, approvals, scheduled, failures, metrics, kpis, kpiDefinitions: KPI_METRICS, abTests };
+  return { program, email, social, approvals, scheduled, failures, metrics, nonLiveMetrics: nonLive, kpis, kpiDefinitions: KPI_METRICS, abTests };
 }
 
 module.exports = {

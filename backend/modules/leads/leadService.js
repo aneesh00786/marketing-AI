@@ -298,7 +298,7 @@ async function importLeads(ctx, rows) {
     if (data.email) existingEmails.add(data.email.toLowerCase());
     result.imported += 1;
     result.leadIds.push(ins.lastID);
-    await automationEvents.emit(workspaceId, 'lead.created', { subjectType: 'lead', subjectId: ins.lastID, payload: { source: 'import' }, key: `lead.created:${ins.lastID}` });
+    await automationEvents.emit(workspaceId, 'lead.created', { subjectType: 'lead', subjectId: ins.lastID, payload: { source: 'import', status: data.status || 'Imported' }, key: `lead.created:${ins.lastID}` });
   }
   await audit(ctx, 'leads.imported', { resourceType: 'lead', metadata: { imported: result.imported, skipped: result.skipped.length, flagged: result.flagged.length, duplicates: result.duplicates.length } });
   return result;

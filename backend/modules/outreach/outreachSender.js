@@ -15,10 +15,13 @@ const emitRecipient = (recipient, type) => recipient.lead_id && automationEvents
  *   and is never retried automatically, because the provider may have accepted it.
  * - Sending happens only inside the campaign's window (days + hours in its time zone) and
  *   within its daily limit.
- * - Replies (from the inbox sync) and unsubscribes stop the sequence for that recipient.
+ * - Replies (from the inbox sync) and unsubscribes stop the sequence for that recipient. They are
+ *   checked every tick for emailed recipients, not only when their next email is due, and for
+ *   REPLY_MONITOR_DAYS after the final email.
  */
 const STALE_SENDING_MS = 10 * 60 * 1000;
 const INBOX_SYNC_MS = 15 * 60 * 1000;
+const REPLY_MONITOR_DAYS = 14;
 const lastInboxSync = new Map();
 
 const WEEKDAY = { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 };
@@ -80,19 +83,50 @@ async function recoverStale() {
 async function replyState(recipient) {
   if (!recipient.first_sent_at) return null;
   const reply = await get(
-    `SELECT subject, body FROM emails WHERE workspace_id = ? AND LOWER(sender_email) = LOWER(?) AND smtp_status LIKE 'Received%' AND received_at >= ? ORDER BY id DESC LIMIT 1`,
+    `SELECT subject, body FROM emails WHERE workspace_id = ? AND LOWER(sender_email) = LOWER(?) AND smtp_status LIKE 'Received%' AND received_at > ? ORDER BY id DESC LIMIT 1`,
     [recipient.workspace_id, recipient.email, recipient.first_sent_at]
   );
   if (!reply) return null;
   return /\bunsubscribe\b|\bremove me\b|\bstop emailing\b/i.test(`${reply.subject} ${reply.body}`) ? 'unsubscribed' : 'replied';
 }
 
-async function syncInboxes(campaigns) {
-  for (const wsId of [...new Set(campaigns.map(c => c.workspace_id))]) {
+async function syncInboxes(workspaceIds) {
+  for (const wsId of [...new Set(workspaceIds)]) {
     if (Date.now() - (lastInboxSync.get(wsId) || 0) < INBOX_SYNC_MS) continue;
     lastInboxSync.set(wsId, Date.now());
     try { await emailService.syncIncomingEmails(wsId); } catch (e) { /* IMAP not configured or unreachable: replies are detected once it works */ }
   }
+}
+
+// Recipients whose replies are still monitored: emailed and active, or completed within the window.
+const MONITORED = `r.first_sent_at IS NOT NULL AND c.status IN ('running', 'paused', 'completed')
+  AND (r.status = 'active' OR (r.status = 'completed' AND r.last_sent_at >= UTC_TIMESTAMP() - INTERVAL ${REPLY_MONITOR_DAYS} DAY))`;
+
+/**
+ * Records replies without waiting for the next send. Only recipients with an inbound email
+ * since their first email are loaded, and the status update is conditional, so each reply is
+ * recorded (and its event emitted) once. Replies to a completed sequence count only when they
+ * arrive within REPLY_MONITOR_DAYS of the final email.
+ */
+async function detectReplies({ limit = 200 } = {}) {
+  const candidates = await all(
+    `SELECT r.* FROM outreach_recipients r JOIN outreach_campaigns c ON c.id = r.campaign_id
+     WHERE ${MONITORED}
+       AND EXISTS (SELECT 1 FROM emails e WHERE e.workspace_id = r.workspace_id AND LOWER(e.sender_email) = LOWER(r.email) AND e.smtp_status LIKE 'Received%'
+                   AND e.received_at > r.first_sent_at AND (r.status = 'active' OR e.received_at <= r.last_sent_at + INTERVAL ${REPLY_MONITOR_DAYS} DAY))
+     ORDER BY r.id LIMIT ${limit}`
+  );
+  let recorded = 0;
+  for (const recipient of candidates) {
+    const state = await replyState(recipient);
+    if (!state) continue;
+    const u = await run("UPDATE outreach_recipients SET status = ?, next_send_at = NULL, updated_at = UTC_TIMESTAMP() WHERE id = ? AND status IN ('active', 'completed')", [state, recipient.id]);
+    if (!u.changes) continue;
+    if (state === 'unsubscribed') await suppress(recipient.workspace_id, recipient.email, 'unsubscribed', 'reply');
+    await emitRecipient(recipient, state === 'unsubscribed' ? 'email.unsubscribed' : 'email.replied');
+    recorded++;
+  }
+  return recorded;
 }
 
 async function claim(recipient, step, workerId) {
@@ -193,9 +227,13 @@ async function sendOne(campaign, recipient, workerId) {
 async function processOutreach(workerId, { maxPerTick = 20, now = new Date() } = {}) {
   await heartbeat(workerId);
   await recoverStale();
+  const monitored = await all(`SELECT DISTINCT r.workspace_id FROM outreach_recipients r JOIN outreach_campaigns c ON c.id = r.campaign_id WHERE ${MONITORED}`);
+  if (monitored.length) {
+    await syncInboxes(monitored.map(m => m.workspace_id));
+    await detectReplies();
+  }
   const campaigns = await all("SELECT * FROM outreach_campaigns WHERE status = 'running'");
   if (!campaigns.length) return 0;
-  await syncInboxes(campaigns);
 
   let processed = 0;
   for (const campaign of campaigns) {
@@ -224,4 +262,4 @@ async function processOutreach(workerId, { maxPerTick = 20, now = new Date() } =
   return processed;
 }
 
-module.exports = { processOutreach, inWindow, render, recoverStale };
+module.exports = { processOutreach, inWindow, render, recoverStale, detectReplies, REPLY_MONITOR_DAYS };

@@ -198,7 +198,11 @@ test('replies, unsubscribe replies and unsubscribe links stop the sequence', asy
   const inbound = "INSERT INTO emails (workspace_id, sender, sender_email, recipient_email, recipient_name, subject, body, status, smtp_status, received_at) VALUES (?, 'x', ?, 'hello@a-co.io', 'A', ?, ?, 'Unread', 'Received via IMAP', UTC_TIMESTAMP())";
   await db().run(inbound, [A.workspaceId, 'dana@fleetco.io', 'Re: Routes', 'Sounds good, call me Tuesday']);
   await db().run(inbound, [A.workspaceId, 'lee@fleetco.io', 'Re: Routes', 'Please unsubscribe me']);
-  const link = await h.api('GET', `/api/v1/outreach/unsubscribe/${rKim.unsubscribe_token}`);
+  // Opening the link only shows a confirmation (scanners follow links); the button POSTs.
+  const preview = await h.api('GET', `/api/v1/outreach/unsubscribe/${rKim.unsubscribe_token}`);
+  assert.equal(preview.status, 200);
+  assert.equal((await db().get('SELECT status FROM outreach_recipients WHERE id = ?', [rKim.id])).status, 'active');
+  const link = await h.api('POST', `/api/v1/outreach/unsubscribe/${rKim.unsubscribe_token}`);
   assert.equal(link.status, 200);
   assert.equal((await h.api('GET', '/api/v1/outreach/unsubscribe/' + 'f'.repeat(40))).status, 404);
 

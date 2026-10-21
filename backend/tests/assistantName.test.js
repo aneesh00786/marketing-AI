@@ -122,10 +122,62 @@ test('voice readiness check reports missing credits, bad keys and setup gaps wit
   assert.equal((await h.api('GET', '/api/v1/voice/status')).status, 401);
 });
 
-test('other workspaces get an honest voice notice instead of a silent 403', async () => {
+test('voice works in every workspace: readiness and signed URL for any signed-in member', async () => {
+  // Regression: these routes sat behind the workspace-1-only gate, so other workspaces (e.g. the
+  // demo workspace) got 403 MODULE_NOT_TENANT_AWARE and could never start a voice session.
   const other = await h.createWorkspace({ name: 'Voice elsewhere' });
-  const r = await h.api('GET', '/api/v1/voice/status', { token: other.token });
-  assert.equal(r.status, 200);
-  assert.equal(r.data.voice.available, false);
-  assert.equal(r.data.voice.status, 'workspace_unavailable');
+  const member = await h.addMember(other.workspaceId, 'Member');
+  const voiceStatus = require('../services/voiceStatus');
+  const saved = { key: process.env.ELEVENLABS_API_KEY, agent: process.env.ELEVENLABS_AGENT_ID };
+  process.env.ELEVENLABS_API_KEY = 'test-xi-key';
+  process.env.ELEVENLABS_AGENT_ID = 'agent_test_123';
+  const calls = [];
+  const mock = h.mockFetch([
+    { match: u => u.startsWith('https://api.elevenlabs.io/v1/convai/agents/'), respond: u => { calls.push(u); return h.json(200, { agent_id: 'agent_test_123' }); } },
+    { match: u => u.startsWith('https://api.elevenlabs.io/v1/user/subscription'), respond: u => { calls.push(u); return h.json(200, { tier: 'starter', character_count: 1000, character_limit: 30000 }); } },
+    { match: u => u.startsWith('https://api.elevenlabs.io/v1/convai/conversation/get_signed_url'), respond: u => { calls.push(u); return h.json(200, { signed_url: 'wss://example.invalid/convai?token=abc' }); } }
+  ]);
+  try {
+    voiceStatus.clearVoiceStatusCache();
+    for (const who of [other, member]) {
+      const status = await h.api('GET', '/api/v1/voice/status?fresh=1', { token: who.token });
+      assert.equal(status.status, 200);
+      assert.equal(status.data.voice.available, true);
+      assert.equal(status.data.voice.status, 'ok');
+      const url = await h.api('GET', '/api/v1/voice/signed-url', { token: who.token });
+      assert.equal(url.status, 200, JSON.stringify(url.data));
+      assert.equal(url.data.signed_url, 'wss://example.invalid/convai?token=abc');
+    }
+    assert.equal(calls.filter(u => /get_signed_url\?agent_id=agent_test_123$/.test(u)).length, 2);
+    // Sign-in is still required.
+    assert.equal((await h.api('GET', '/api/v1/voice/signed-url')).status, 401);
+    // Legacy modules stay workspace-1 only.
+    assert.equal((await h.api('GET', '/api/appointments', { token: other.token })).status, 403);
+  } finally {
+    mock.restore();
+    process.env.ELEVENLABS_API_KEY = saved.key;
+    process.env.ELEVENLABS_AGENT_ID = saved.agent;
+    voiceStatus.clearVoiceStatusCache();
+  }
+});
+
+test('missing voice configuration is reported clearly; ElevenLabs is not called with an undefined agent', async () => {
+  const saved = { key: process.env.ELEVENLABS_API_KEY, agent: process.env.ELEVENLABS_AGENT_ID };
+  const calls = [];
+  const mock = h.mockFetch([{ match: u => u.startsWith('https://api.elevenlabs.io/'), respond: u => { calls.push(u); return h.json(200, {}); } }]);
+  try {
+    for (const [key, agent] of [['test-xi-key', ''], ['', 'agent_test_123']]) {
+      process.env.ELEVENLABS_API_KEY = key;
+      process.env.ELEVENLABS_AGENT_ID = agent;
+      const r = await h.api('GET', '/api/v1/voice/signed-url', { token: W1.token });
+      assert.equal(r.status, 503);
+      assert.equal(r.data.code, 'VOICE_NOT_CONFIGURED');
+      assert.match(r.data.error, /ELEVENLABS_API_KEY or ELEVENLABS_AGENT_ID/);
+    }
+  } finally {
+    mock.restore();
+    process.env.ELEVENLABS_API_KEY = saved.key;
+    process.env.ELEVENLABS_AGENT_ID = saved.agent;
+  }
+  assert.equal(calls.length, 0);
 });

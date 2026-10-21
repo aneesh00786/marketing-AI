@@ -19,6 +19,7 @@
     <span><b>123</b> real value (0 is a real zero)</span>
     <span><b>—</b> not available (hover for why)</span>
     <span><span class="tag partial">partial</span> only some posts reported it</span>
+    <span><span class="tag partial">not live</span> not reported by a live platform API</span>
     <span><span class="tag estimate">estimate</span> attribution, an association not proof</span>
   </div>
 
@@ -26,8 +27,8 @@
   <div *ngIf="loading && !data" class="muted">Loading…</div>
 
   <ng-container *ngIf="data">
-    <div class="quality" *ngIf="!data.dataQuality.replyTracking.on || data.dataQuality.demoSources.length">
-      <div *ngIf="!data.dataQuality.replyTracking.on" class="note small">✉ {{ data.dataQuality.replyTracking.reason }}</div>
+    <div class="quality" *ngIf="!data.dataQuality.replyTracking.on || data.dataQuality.replyTracking.live === false || data.dataQuality.demoSources.length">
+      <div *ngIf="!data.dataQuality.replyTracking.on || data.dataQuality.replyTracking.live === false" class="note small">✉ {{ data.dataQuality.replyTracking.reason }}</div>
       <div *ngIf="data.dataQuality.demoSources.length" class="flags">⚠️ Some social metrics come from non-live sources ({{ data.dataQuality.demoSources.join(', ') }}); treat them as samples.</div>
     </div>
 
@@ -37,7 +38,7 @@
         <h3>✉ Email sequences</h3>
         <div class="kv"><span>Emails sent</span><b [title]="tip(data.channels.email.emailsSent)">{{ fmt(data.channels.email.emailsSent) }}</b></div>
         <div class="kv"><span>Recipients emailed</span><b [title]="tip(data.channels.email.recipientsEmailed)">{{ fmt(data.channels.email.recipientsEmailed) }}</b></div>
-        <div class="kv"><span>Reply rate</span><b [title]="tip(data.channels.email.replyRate)">{{ fmt(data.channels.email.replyRate, 'rate') }}</b></div>
+        <div class="kv"><span>Reply rate</span><b [title]="tip(data.channels.email.replyRate)">{{ fmt(data.channels.email.replyRate, 'rate') }} <span *ngIf="data.channels.email.replyRate.status === 'non_live'" class="tag partial">not live</span></b></div>
         <div class="kv"><span>Bounce rate</span><b [title]="tip(data.channels.email.bounceRate)">{{ fmt(data.channels.email.bounceRate, 'rate') }}</b></div>
         <div class="kv"><span>Unsubscribe rate</span><b [title]="tip(data.channels.email.unsubscribeRate)">{{ fmt(data.channels.email.unsubscribeRate, 'rate') }}</b></div>
         <div class="kv"><span>Failed sends</span><b>{{ fmt(data.channels.email.emailsFailed) }}</b></div>
@@ -46,11 +47,11 @@
       <div class="ch">
         <h3>📣 Social</h3>
         <div class="kv"><span>Posts published</span><b>{{ fmt(data.channels.social.postsPublished) }}</b></div>
-        <div class="kv"><span>Impressions</span><b [title]="tip(data.channels.social.impressions)">{{ fmt(data.channels.social.impressions) }} <span *ngIf="data.channels.social.impressions.status === 'partial'" class="tag partial">partial</span></b></div>
-        <div class="kv"><span>Reach</span><b [title]="tip(data.channels.social.reach)">{{ fmt(data.channels.social.reach) }} <span *ngIf="data.channels.social.reach.status === 'partial'" class="tag partial">partial</span></b></div>
-        <div class="kv"><span>Engagements</span><b [title]="tip(data.channels.social.engagements)">{{ fmt(data.channels.social.engagements) }} <span *ngIf="data.channels.social.engagements.status === 'partial'" class="tag partial">partial</span></b></div>
-        <div class="kv"><span>Engagement rate</span><b [title]="tip(data.channels.social.engagementRate)">{{ fmt(data.channels.social.engagementRate, 'rate') }} <span *ngIf="data.channels.social.engagementRate.status === 'partial'" class="tag partial">partial</span></b></div>
-        <div class="kv"><span>Clicks</span><b [title]="tip(data.channels.social.clicks)">{{ fmt(data.channels.social.clicks) }}</b></div>
+        <div class="kv"><span>Impressions</span><b [title]="tip(data.channels.social.impressions)">{{ fmt(data.channels.social.impressions) }} <span *ngIf="data.channels.social.impressions.status === 'partial'" class="tag partial">partial</span><span *ngIf="data.channels.social.impressions.status === 'non_live'" class="tag partial" [title]="data.channels.social.impressions.reason">not live</span></b></div>
+        <div class="kv"><span>Reach</span><b [title]="tip(data.channels.social.reach)">{{ fmt(data.channels.social.reach) }} <span *ngIf="data.channels.social.reach.status === 'partial'" class="tag partial">partial</span><span *ngIf="data.channels.social.reach.status === 'non_live'" class="tag partial" [title]="data.channels.social.reach.reason">not live</span></b></div>
+        <div class="kv"><span>Engagements</span><b [title]="tip(data.channels.social.engagements)">{{ fmt(data.channels.social.engagements) }} <span *ngIf="data.channels.social.engagements.status === 'partial'" class="tag partial">partial</span><span *ngIf="data.channels.social.engagements.status === 'non_live'" class="tag partial" [title]="data.channels.social.engagements.reason">not live</span></b></div>
+        <div class="kv"><span>Engagement rate</span><b [title]="tip(data.channels.social.engagementRate)">{{ fmt(data.channels.social.engagementRate, 'rate') }} <span *ngIf="data.channels.social.engagementRate.status === 'partial'" class="tag partial">partial</span><span *ngIf="data.channels.social.engagementRate.status === 'non_live'" class="tag partial" [title]="data.channels.social.engagementRate.reason">not live</span></b></div>
+        <div class="kv"><span>Clicks</span><b [title]="tip(data.channels.social.clicks)">{{ fmt(data.channels.social.clicks) }} <span *ngIf="data.channels.social.clicks?.status === 'non_live'" class="tag partial" [title]="data.channels.social.clicks.reason">not live</span></b></div>
       </div>
       <div class="ch">
         <h3>👥 CRM outcomes</h3>
@@ -86,7 +87,7 @@
               <td><b>{{ c.name }}</b><div class="muted small">{{ c.status }}</div></td>
               <td class="right">{{ fmt(c.emailsSent) }}</td>
               <td class="right">{{ fmt(c.recipientsEmailed) }}</td>
-              <td class="right" [title]="tip(c.replyRate)">{{ fmt(c.replyRate, 'rate') }}<span *ngIf="c.replyRate.smallSample" class="muted small"> (small)</span></td>
+              <td class="right" [title]="tip(c.replyRate)">{{ fmt(c.replyRate, 'rate') }}<span *ngIf="c.replyRate.smallSample" class="muted small"> (small)</span><span *ngIf="c.replyRate.status === 'non_live'" class="tag partial">not live</span></td>
               <td class="right" [title]="tip(c.bounceRate)">{{ fmt(c.bounceRate, 'rate') }}</td>
               <td class="right" [title]="tip(c.unsubscribeRate)">{{ fmt(c.unsubscribeRate, 'rate') }}</td>
               <td class="right" [title]="tip(c.attributedConversions)">{{ fmt(c.attributedConversions) }}</td>
@@ -107,10 +108,10 @@
             <tr *ngFor="let c of data.comparisons.social">
               <td><b>{{ c.name }}</b></td>
               <td class="right">{{ fmt(c.postsPublished) }}</td>
-              <td class="right" [title]="tip(c.impressions)">{{ fmt(c.impressions) }}<span *ngIf="c.impressions.status === 'partial'" class="tag partial">partial</span></td>
-              <td class="right" [title]="tip(c.engagements)">{{ fmt(c.engagements) }}<span *ngIf="c.engagements.status === 'partial'" class="tag partial">partial</span></td>
-              <td class="right" [title]="tip(c.engagementRate)">{{ fmt(c.engagementRate, 'rate') }}</td>
-              <td class="right" [title]="tip(c.clicks)">{{ fmt(c.clicks) }}</td>
+              <td class="right" [title]="tip(c.impressions)">{{ fmt(c.impressions) }}<span *ngIf="c.impressions.status === 'partial'" class="tag partial">partial</span><span *ngIf="c.impressions.status === 'non_live'" class="tag partial" [title]="c.impressions.reason">not live</span></td>
+              <td class="right" [title]="tip(c.engagements)">{{ fmt(c.engagements) }}<span *ngIf="c.engagements.status === 'partial'" class="tag partial">partial</span><span *ngIf="c.engagements.status === 'non_live'" class="tag partial" [title]="c.engagements.reason">not live</span></td>
+              <td class="right" [title]="tip(c.engagementRate)">{{ fmt(c.engagementRate, 'rate') }}<span *ngIf="c.engagementRate?.status === 'non_live'" class="tag partial" [title]="c.engagementRate.reason">not live</span></td>
+              <td class="right" [title]="tip(c.clicks)">{{ fmt(c.clicks) }}<span *ngIf="c.clicks?.status === 'non_live'" class="tag partial" [title]="c.clicks.reason">not live</span></td>
             </tr>
           </tbody>
         </table>
@@ -122,17 +123,18 @@
       <h3 class="sub">Command Center campaigns</h3>
       <div class="table-wrap">
         <table class="tbl">
-          <thead><tr><th>Campaign</th><th class="right">Emails sent</th><th class="right">Reply rate</th><th class="right">Posts</th><th class="right">Engagements</th><th class="right">Conversions <span class="tag estimate">estimate</span></th><th class="right">Planned budget</th><th class="right">ROI</th></tr></thead>
+          <thead><tr><th>Campaign</th><th class="right">Emails sent</th><th class="right">Reply rate</th><th class="right">Posts</th><th class="right">Engagements</th><th class="right">Conversions <span class="tag estimate">estimate</span></th><th class="right">Planned budget</th><th class="right">Actual spend</th><th class="right">ROI</th></tr></thead>
           <tbody>
             <tr *ngFor="let p of data.comparisons.programs">
               <td><b>{{ p.name }}</b><div class="muted small">{{ p.status }}</div></td>
               <td class="right">{{ p.email?.emailsSent ? fmt(p.email.emailsSent) : '—' }}</td>
-              <td class="right" [title]="p.email?.replyRate ? tip(p.email.replyRate) : (p.email?.note || 'No email sequence')">{{ p.email?.replyRate ? fmt(p.email.replyRate, 'rate') : '—' }}</td>
+              <td class="right" [title]="p.email?.replyRate ? tip(p.email.replyRate) : (p.email?.note || 'No email sequence')">{{ p.email?.replyRate ? fmt(p.email.replyRate, 'rate') : '—' }}<span *ngIf="p.email?.replyRate?.status === 'non_live'" class="tag partial" [title]="p.email?.replyRate.reason">not live</span></td>
               <td class="right">{{ p.social?.postsPublished ? fmt(p.social.postsPublished) : '—' }}</td>
-              <td class="right" [title]="p.social?.engagements ? tip(p.social.engagements) : (p.social?.note || 'No social campaign')">{{ p.social?.engagements ? fmt(p.social.engagements) : '—' }}</td>
+              <td class="right" [title]="p.social?.engagements ? tip(p.social.engagements) : (p.social?.note || 'No social campaign')">{{ p.social?.engagements ? fmt(p.social.engagements) : '—' }}<span *ngIf="p.social?.engagements?.status === 'non_live'" class="tag partial" [title]="p.social?.engagements.reason">not live</span></td>
               <td class="right" [title]="tip(p.attributedConversions)">{{ fmt(p.attributedConversions) }}</td>
               <td class="right" [title]="p.plannedBudget?.note || ''">{{ p.plannedBudget ? (p.plannedBudget.value | number) + ' ' + p.plannedBudget.currency : '—' }}</td>
-              <td class="right" [title]="p.roi.reason">—</td>
+              <td class="right" [title]="p.actualSpend?.reason || p.actualSpend?.note || ''">{{ p.actualSpend?.status === 'available' ? (p.actualSpend.value | number) + ' ' + p.actualSpend.currency : '—' }}</td>
+              <td class="right" [title]="p.roi.reason || p.roi.basis || ''">{{ p.roi.status === 'available' ? (p.roi.value * 100 | number:'1.0-0') + '%' : '—' }}</td>
             </tr>
           </tbody>
         </table>
@@ -168,7 +170,7 @@
           <p class="small">{{ r.action }}</p>
           <details class="small"><summary>Evidence ({{ r.evidence.length }})</summary><pre>{{ r.evidenceDetail | json }}</pre></details>
         </div>
-        <p class="muted small" *ngIf="recs.dropped">{{ recs.dropped }} suggestion(s) were discarded because they did not cite real data.</p>
+        <p class="muted small" *ngIf="recs.dropped">{{ recs.dropped }} suggestion(s) were discarded because they were not backed by your data.</p>
       </ng-container>
     </div>
   </ng-container>

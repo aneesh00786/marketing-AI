@@ -1,0 +1,167 @@
+<section class="cc">
+  <div *ngIf="error" class="alert" role="alert">{{ error }} <button class="link-btn" (click)="error = ''">Dismiss</button></div>
+
+  <div class="legend small">
+    <span><span class="kind budget">Budget</span> what you plan to spend</span>
+    <span><span class="kind actual">Actual</span> spend reported by an ad account or entered with evidence</span>
+    <span><span class="kind plan">Plan</span> even pacing to date</span>
+    <span><span class="kind forecast">Forecast</span> run-rate projection, not spend</span>
+  </div>
+
+  <!-- ============================== LIST ============================== -->
+  <ng-container *ngIf="view === 'list'">
+    <div class="head">
+      <div><h2>Budget &amp; ROI</h2><p class="muted">Track each campaign's budget against actual spend. ROI is shown only where actual spend and recorded revenue exist.</p></div>
+    </div>
+    <div *ngIf="!budgets.length && !withoutBudget.length" class="empty">No Command Center campaigns yet.</div>
+
+    <div class="cards" *ngIf="budgets.length">
+      <button class="pcard" *ngFor="let x of budgets" (click)="open(x.id)">
+        <div class="pcard-top"><strong>{{ x.programName }}</strong><span class="badge warn" *ngIf="x.openAlerts">{{ x.openAlerts }} alert(s)</span></div>
+        <div class="kv"><span><span class="kind budget">Budget</span></span><b>{{ money(x.summary.budget.value, x.currency) }}</b></div>
+        <div class="kv"><span><span class="kind actual">Actual</span></span><b>{{ x.summary.actualSpend.status === 'actual' ? money(x.summary.actualSpend.value, x.currency) : 'None recorded' }}</b></div>
+        <div class="bar" [attr.aria-label]="'Budget used ' + pct(x.summary.percentUsed.value)"><span [style.width.%]="(x.summary.percentUsed.value || 0) * 100 > 100 ? 100 : (x.summary.percentUsed.value || 0) * 100" [class.over]="(x.summary.percentUsed.value || 0) > 1 || x.summary.percentUsed.status === 'over_budget'"></span></div>
+        <div class="small muted">{{ x.summary.percentUsed.status === 'over_budget' ? 'Over a 0 budget · ' : x.summary.actualSpend.status === 'actual' ? pct(x.summary.percentUsed.value) + ' used · ' : '' }}{{ pacingLabel(x.summary.pacing) }}</div>
+        <div class="kv" *ngIf="x.summary.forecast.status === 'forecast'"><span><span class="kind forecast">Forecast</span></span><b>{{ money(x.summary.forecast.value, x.currency) }}</b></div>
+        <div class="kv"><span>ROI</span><b [title]="x.summary.roi.reason || x.summary.roi.basis">{{ x.summary.roi.status === 'available' ? pct(x.summary.roi.value) : '—' }}</b></div>
+      </button>
+    </div>
+
+    <div class="panel" *ngIf="withoutBudget.length">
+      <h3 class="sub">Campaigns without a tracking budget</h3>
+      <div class="row-item" *ngFor="let p of withoutBudget">
+        <span>{{ p.name }} <span class="muted small" *ngIf="p.plannedBudget">· planning budget {{ money(p.plannedBudget.amount, p.plannedBudget.currency) }} (not spend)</span></span>
+        <button class="btn btn-secondary" (click)="startSetup(p)">Set up budget</button>
+      </div>
+    </div>
+
+    <div class="panel" *ngIf="setup">
+      <h3 class="sub">Budget for {{ setup.name }}</h3>
+      <p class="muted small" *ngIf="setup.hint">Pre-filled from the campaign's planning budget. Confirm or change it; it is a budget, not spend.</p>
+      <div class="grid2">
+        <label class="field"><span>Amount</span><input class="hud-input" type="number" min="0" [(ngModel)]="setup.amount" /></label>
+        <label class="field"><span>Currency</span><select class="hud-input" [(ngModel)]="setup.currency"><option *ngFor="let c of currencies" [value]="c">{{ c }}</option></select></label>
+        <label class="field"><span>Period start</span><input class="hud-input" type="date" [(ngModel)]="setup.periodStart" /></label>
+        <label class="field"><span>Period end</span><input class="hud-input" type="date" [(ngModel)]="setup.periodEnd" /></label>
+        <label class="field span2"><span>Alert at % of budget spent</span><input class="hud-input" [(ngModel)]="setup.thresholds" placeholder="50, 80, 100" /></label>
+      </div>
+      <div class="actions"><button class="btn btn-secondary" (click)="setup = null">Cancel</button><button class="btn btn-primary" (click)="saveSetup()" [disabled]="busy === 'setup'">Save budget</button></div>
+    </div>
+  </ng-container>
+
+  <!-- ============================== DETAIL ============================== -->
+  <ng-container *ngIf="view === 'detail' && b">
+    <div class="head">
+      <div><button class="link-btn" (click)="back()">← Budgets</button><h2>{{ b.program?.name }}</h2>
+        <p class="muted small">{{ b.periodStart }} → {{ b.periodEnd }} · day {{ b.summary.period.elapsedDays }} of {{ b.summary.period.totalDays }} · {{ b.currency }} (no currency conversion)</p></div>
+      <button class="btn btn-secondary" (click)="startEdit()">Edit budget</button>
+    </div>
+
+    <div class="panel" *ngIf="editForm">
+      <div class="grid2">
+        <label class="field"><span>Amount ({{ b.currency }})</span><input class="hud-input" type="number" min="0" [(ngModel)]="editForm.amount" /></label>
+        <label class="field"><span>Alert thresholds (%)</span><input class="hud-input" [(ngModel)]="editForm.thresholds" /></label>
+        <label class="field"><span>Period start</span><input class="hud-input" type="date" [(ngModel)]="editForm.periodStart" /></label>
+        <label class="field"><span>Period end</span><input class="hud-input" type="date" [(ngModel)]="editForm.periodEnd" /></label>
+      </div>
+      <div class="actions"><button class="btn btn-secondary" (click)="editForm = null">Cancel</button><button class="btn btn-primary" (click)="saveEdit()">Save</button></div>
+    </div>
+
+    <div class="kpis">
+      <div class="kpi"><span class="kind budget">Budget</span><b>{{ money(b.summary.budget.value, b.currency) }}</b><small>configured, not spend</small></div>
+      <div class="kpi"><span class="kind actual">Actual spend</span><b>{{ b.summary.actualSpend.status === 'actual' ? money(b.summary.actualSpend.value, b.currency) : 'None recorded' }}</b>
+        <small>provider {{ money(b.summary.actualSpend.bySource.provider, b.currency) }} · manual {{ money(b.summary.actualSpend.bySource.manual, b.currency) }}</small>
+        <small *ngIf="b.summary.actualSpend.outOfPeriod?.entries" [title]="b.summary.actualSpend.outOfPeriod.note">+ {{ money(b.summary.actualSpend.outOfPeriod.value, b.currency) }} dated outside the period (not counted)</small></div>
+      <div class="kpi"><span class="kind plan">Plan to date</span><b>{{ money(b.summary.plannedToDate.value, b.currency) }}</b><small>{{ b.summary.plannedToDate.method }}</small></div>
+      <div class="kpi"><span class="kind forecast">{{ b.summary.forecast.status === 'actual' ? 'Final' : 'Forecast' }}</span><b [title]="b.summary.forecast.reason || ''">{{ b.summary.forecast.value !== null ? money(b.summary.forecast.value, b.currency) : '—' }}</b><small>{{ b.summary.forecast.method || b.summary.forecast.reason }}</small></div>
+      <div class="kpi"><span>Remaining</span><b>{{ money(b.summary.remaining.value, b.currency) }}</b><small>{{ b.summary.percentUsed.status === 'over_budget' ? 'Over a 0 budget' : pct(b.summary.percentUsed.value) + ' used' }} · {{ pacingLabel(b.summary.pacing) }}</small></div>
+      <div class="kpi"><span>ROI</span><b [title]="b.summary.roi.reason || b.summary.roi.basis">{{ b.summary.roi.status === 'available' ? pct(b.summary.roi.value) : '—' }}</b><small>{{ b.summary.roi.basis || b.summary.roi.reason }}</small></div>
+    </div>
+
+    <div class="panel" *ngIf="chart() as c">
+      <h3 class="sub">Cumulative spend <span class="muted small">· solid = actual · dashed = even-pacing plan · line = budget</span></h3>
+      <svg [attr.viewBox]="'0 0 ' + c.w + ' ' + c.h" class="chart" role="img" aria-label="Cumulative actual spend versus plan">
+        <line x1="0" [attr.x2]="c.w" [attr.y1]="c.budgetY" [attr.y2]="c.budgetY" class="budget-line"/>
+        <polyline [attr.points]="c.plan" class="plan-line"/>
+        <polyline [attr.points]="c.actual" class="actual-line"/>
+      </svg>
+    </div>
+
+    <div class="panel">
+      <h3 class="sub">Alerts</h3>
+      <div *ngIf="!b.alerts.length" class="muted small">No alerts.</div>
+      <div class="alert-row" *ngFor="let a of b.alerts" [attr.data-s]="a.severity" [class.acked]="a.acknowledgedAt">
+        <span>{{ a.message }} <span class="muted small">· {{ a.createdAt | date:'MMM d, HH:mm' }}</span></span>
+        <button *ngIf="!a.acknowledgedAt" class="link-btn" (click)="ack(a)">Acknowledge</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3 class="sub">Actual spend</h3>
+      <div class="table-wrap" *ngIf="b.spend.length">
+        <table class="tbl">
+          <thead><tr><th>Date</th><th>Source</th><th>Description</th><th>Evidence</th><th class="right">Amount</th><th></th></tr></thead>
+          <tbody>
+            <tr *ngFor="let e of b.spend" [class.dim]="e.voided">
+              <td>{{ e.date }}</td>
+              <td><span class="kind" [class.actual]="true">{{ e.sourceType === 'provider' ? 'Provider' : 'Manual' }}</span></td>
+              <td>{{ e.description }}<div class="small warn-text" *ngIf="e.voided">Voided: {{ e.voidReason }}</div></td>
+              <td class="small">{{ e.evidenceRef || '—' }}</td>
+              <td class="right">{{ money(e.amount, e.currency) }}</td>
+              <td class="right"><button *ngIf="!e.voided && e.sourceType === 'manual'" class="link-btn" (click)="voidEntry('spend', e)">Void</button></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div *ngIf="!b.spend.length" class="empty">No actual spend yet.</div>
+      <div class="entry-form">
+        <input class="hud-input" type="date" [(ngModel)]="spendForm.date" aria-label="Spend date" />
+        <input class="hud-input" type="number" min="0" step="0.01" [(ngModel)]="spendForm.amount" [placeholder]="'Amount (' + b.currency + ')'" />
+        <input class="hud-input" [(ngModel)]="spendForm.description" maxlength="500" placeholder="What was paid (e.g. LinkedIn ads invoice)" />
+        <input class="hud-input" [(ngModel)]="spendForm.evidenceRef" maxlength="255" placeholder="Invoice / receipt no." />
+        <button class="btn btn-primary" (click)="addSpend()">Record actual spend</button>
+      </div>
+      <p class="muted small">Only money already spent. Future plans belong in the budget.</p>
+    </div>
+
+    <div class="panel">
+      <h3 class="sub">Linked ad accounts (actual spend from providers)</h3>
+      <div *ngFor="let s of b.summary.sources" class="row-item">
+        <span>{{ s.provider_key }} · act_{{ s.external_account_id }} · {{ s.last_synced_at ? 'synced ' + (s.last_synced_at | date:'MMM d, HH:mm') : 'never synced' }}
+          <span class="warn-text small" *ngIf="s.last_error"> · {{ s.last_error }}</span><span class="warn-text small" *ngIf="s.stale && !s.last_error"> · stale</span></span>
+        <button class="btn btn-secondary" (click)="sync(s)" [disabled]="busy === 'sync' + s.id">{{ busy === 'sync' + s.id ? 'Syncing…' : 'Sync now' }}</button>
+      </div>
+      <div class="entry-form">
+        <select class="hud-input" [(ngModel)]="sourceForm.socialAccountId"><option [ngValue]="null">Meta connection…</option><option *ngFor="let a of metaAccounts" [ngValue]="a.id">{{ a.displayName }}</option></select>
+        <input class="hud-input" [(ngModel)]="sourceForm.adAccountId" placeholder="Ad account id (act_…)" />
+        <input class="hud-input" [(ngModel)]="sourceForm.campaignIds" placeholder="Meta campaign ids (optional, comma separated)" />
+        <button class="btn btn-secondary" (click)="connectSource()">Link ad account</button>
+      </div>
+      <p class="muted small">Reads daily spend from the Meta Marketing API through your existing Meta connection. It needs the connection to have the <code>ads_read</code> permission; without it no spend is imported. Spend in a different currency is rejected, not converted.</p>
+    </div>
+
+    <div class="panel">
+      <h3 class="sub">Recorded revenue</h3>
+      <div class="table-wrap" *ngIf="b.revenue.length">
+        <table class="tbl">
+          <thead><tr><th>Date</th><th>Description</th><th>Evidence</th><th class="right">Amount</th><th></th></tr></thead>
+          <tbody>
+            <tr *ngFor="let e of b.revenue" [class.dim]="e.voided">
+              <td>{{ e.date }}</td><td>{{ e.description }}<div class="small warn-text" *ngIf="e.voided">Voided: {{ e.voidReason }}</div></td>
+              <td class="small">{{ e.evidenceRef || '—' }}</td><td class="right">{{ money(e.amount, e.currency) }}</td>
+              <td class="right"><button *ngIf="!e.voided" class="link-btn" (click)="voidEntry('revenue', e)">Void</button></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div *ngIf="!b.revenue.length" class="empty">No revenue recorded. ROI stays unavailable until you record won deals or paid invoices from this campaign.</div>
+      <div class="entry-form">
+        <input class="hud-input" type="date" [(ngModel)]="revenueForm.date" aria-label="Revenue date" />
+        <input class="hud-input" type="number" min="0" step="0.01" [(ngModel)]="revenueForm.amount" [placeholder]="'Amount (' + b.currency + ')'" />
+        <input class="hud-input" [(ngModel)]="revenueForm.description" maxlength="500" placeholder="Deal won / invoice paid" />
+        <input class="hud-input" [(ngModel)]="revenueForm.evidenceRef" maxlength="255" placeholder="Invoice / CRM ref" />
+        <button class="btn btn-primary" (click)="addRevenue()">Record revenue</button>
+      </div>
+    </div>
+  </ng-container>
+</section>

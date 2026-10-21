@@ -5,6 +5,7 @@
     <button role="tab" [class.on]="area === 'abtests'" (click)="showArea('abtests')">⚖ A/B tests</button>
     <button role="tab" [class.on]="area === 'automations'" (click)="showArea('automations')">⚙ Automations</button>
     <button role="tab" [class.on]="area === 'analytics'" (click)="showArea('analytics')">📊 Analytics</button>
+    <button role="tab" [class.on]="area === 'budget'" (click)="showArea('budget')">💰 Budget &amp; ROI</button>
     <span class="spacer"></span>
     <button class="link-btn" (click)="openPlaybooks.emit()">Idea playbooks</button>
   </div>
@@ -17,6 +18,7 @@
 
   <app-automations *ngIf="area === 'automations'" (toast)="toast.emit($event)"></app-automations>
   <app-campaign-analytics *ngIf="area === 'analytics'"></app-campaign-analytics>
+  <app-budget *ngIf="area === 'budget'" (toast)="toast.emit($event)"></app-budget>
 
   <ng-container *ngIf="area === 'campaigns'">
     <div *ngIf="error" class="alert" role="alert">{{ error }} <button class="link-btn" (click)="error = ''">Dismiss</button></div>
@@ -263,7 +265,7 @@
             <table class="tbl">
               <thead><tr><th>KPI</th><th>Measured as</th><th>Target</th><th class="right">Actual</th></tr></thead>
               <tbody>
-                <tr *ngFor="let k of overview.kpis"><td><b>{{ k.name }}</b></td><td class="muted small">{{ k.definition }}</td><td>{{ k.target || '—' }}</td><td class="right"><b>{{ fmtMetric(k.actual, k.unit) }}</b></td></tr>
+                <tr *ngFor="let k of overview.kpis"><td><b>{{ k.name }}</b></td><td class="muted small">{{ k.definition }}</td><td>{{ k.target || '—' }}</td><td class="right"><b>{{ fmtMetric(k.actual, k.unit) }}</b><div *ngIf="k.nonLive" class="muted small" [title]="k.nonLive.note">{{ fmtMetric(k.nonLive.value, k.unit) }} not live data</div></td></tr>
                 <tr *ngIf="!overview.kpis.length"><td colspan="4" class="muted">No KPIs in the brief.</td></tr>
               </tbody>
             </table>

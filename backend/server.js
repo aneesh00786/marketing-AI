@@ -13,7 +13,7 @@ const usageService = require('./services/usageService');
 const aiEngine = require('./services/aiEngine');
 const emailService = require('./services/emailService');
 const voiceStatus = require('./services/voiceStatus');
-const { apiGate, legacyWorkspaceOnly, requireCapability, LEGACY_WORKSPACE_ID } = require('./middleware/auth');
+const { apiGate, legacyWorkspaceOnly, requireCapability } = require('./middleware/auth');
 const { rateLimit } = require('./lib/rateLimit');
 const { resolveSelectedProduct, findProductNamedIn } = require('./lib/productContext');
 const websiteExtractor = require('./services/websiteExtractor');
@@ -27,6 +27,7 @@ const commandRouter = require('./modules/command/routes');
 const abTestsRouter = require('./modules/abtests/routes');
 const automationRouter = require('./modules/automation/routes');
 const campaignAnalyticsRouter = require('./modules/campaignAnalytics/routes');
+const budgetRouter = require('./modules/budget/routes');
 const leadService = require('./modules/leads/leadService');
 const strategistService = require('./modules/social/strategistService');
 const crypto = require('crypto');
@@ -120,18 +121,51 @@ app.use('/api/v1/ab-tests', abTestsRouter);
 app.use('/api/v1/automations', automationRouter);
 // Tenant-aware AI Campaigns analytics (email + social + CRM, honest availability).
 app.use('/api/v1/campaign-analytics', campaignAnalyticsRouter);
+// Tenant-aware campaign budgets, actual spend, pacing, alerts and ROI (not subscription billing).
+app.use('/api/v1/budgets', budgetRouter);
 
+// Voice (Mark, ElevenLabs) is available to every workspace: the agent only has client tools, which
+// run in the caller's browser with the caller's own workspace session. Both routes need sign-in and
+// are registered before the legacy (workspace 1 only) gate below.
 // Voice readiness for the login notice (key, agent, remaining ElevenLabs credits). Read-only; never
-// starts a conversation. Answers every workspace, since voice calls only run in the legacy workspace.
+// starts a conversation.
 app.get(['/api/v1/voice/status', '/api/voice/status'], async (req, res, next) => {
   try {
     if (!req.auth) return res.status(401).json({ success: false, error: 'Authentication required.', code: 'UNAUTHENTICATED' });
-    if (req.auth.workspaceId !== LEGACY_WORKSPACE_ID) {
-      return res.json({ success: true, voice: { available: false, status: 'workspace_unavailable', message: 'Voice calls with Mark are not available in this workspace yet.' } });
-    }
     res.json({ success: true, voice: await voiceStatus.getVoiceStatus({ fresh: req.query.fresh === '1' }) });
   } catch (err) {
     next(err);
+  }
+});
+
+// ElevenLabs signed URL for a hands-free real-time voice session.
+app.get(['/api/v1/voice/signed-url', '/api/signed-url', '/api/voice/signed-url'], async (req, res) => {
+  try {
+    if (!req.auth) return res.status(401).json({ success: false, error: 'Authentication required.', code: 'UNAUTHENTICATED' });
+    const apiKey = process.env.ELEVENLABS_API_KEY;
+    const agentId = process.env.ELEVENLABS_AGENT_ID;
+    if (!apiKey || !agentId) {
+      return res.status(503).json({ success: false, code: 'VOICE_NOT_CONFIGURED', error: 'The voice agent is not set up: ELEVENLABS_API_KEY or ELEVENLABS_AGENT_ID is missing on the server.' });
+    }
+
+    const response = await fetch(`https://api.elevenlabs.io/v1/convai/conversation/get_signed_url?agent_id=${encodeURIComponent(agentId)}`, {
+      headers: { 'xi-api-key': apiKey }
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      return res.status(response.status).json({ error: `ElevenLabs API error: ${errText}` });
+    }
+
+    const data = await response.json();
+    res.json({
+      success: true,
+      signed_url: data.signed_url,
+      agentId: agentId
+    });
+  } catch (err) {
+    console.error('Error generating ElevenLabs signed URL:', err);
+    res.status(500).json({ error: err.message });
   }
 });
 app.post(['/api/tools/track_lead', '/api/track_lead'], requireCapability('leads.manage'), async (req, res, next) => {
@@ -591,32 +625,8 @@ Core Rules:
 // B2B PURCHASING CLIENTS, INQUIRIES & CAMPAIGNS
 // ==========================================
 
-// 1. ElevenLabs Signed URL Endpoint for hands-free real-time voice
-app.get(['/api/v1/voice/signed-url', '/api/signed-url', '/api/voice/signed-url'], async (req, res) => {
-  try {
-    const apiKey = process.env.ELEVENLABS_API_KEY;
-    const agentId = process.env.ELEVENLABS_AGENT_ID;
-    
-    const response = await fetch(`https://api.elevenlabs.io/v1/convai/conversation/get_signed_url?agent_id=${agentId}`, {
-      headers: { 'xi-api-key': apiKey }
-    });
-    
-    if (!response.ok) {
-      const errText = await response.text();
-      return res.status(response.status).json({ error: `ElevenLabs API error: ${errText}` });
-    }
-    
-    const data = await response.json();
-    res.json({
-      success: true,
-      signed_url: data.signed_url,
-      agentId: agentId
-    });
-  } catch (err) {
-    console.error('Error generating ElevenLabs signed URL:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
+// 1. The ElevenLabs signed-URL endpoint is registered with the voice status route, before the
+//    legacy workspace gate (voice works in every workspace).
 
 // 2. B2B Purchasing Clients / Inquiries
 app.get(['/api/v1/b2b/clients', '/api/b2b/clients'], async (req, res) => {

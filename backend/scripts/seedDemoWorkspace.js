@@ -1,5 +1,5 @@
 /**
- * Creates (or removes) an isolated DEMO workspace with clearly labelled sample data,
+ * Creates (or removes) an isolated demo workspace ("DEMO · Sample Workspace") with sample data,
  * so the Command Center and Social Media Marketing hub can be explored without real accounts.
  *
  *   npm run seed:demo              create the demo workspace (prints the demo login once)
@@ -12,17 +12,27 @@
  * - Accounts use external ids starting with "demo_": the worker never syncs them and
  *   publishing to them is refused, so no request ever reaches a real provider.
  * - Every metric snapshot has source "demo_seed"; the dashboard shows a demo-data banner.
+ * - Removal covers every workspace-owned table, in one transaction. It refuses (deleting nothing)
+ *   when the demo workspace holds rows in a table it does not know, or in tables that may hold
+ *   real provider/billing resources (phone numbers, subscriptions).
  */
 const path = require('path');
 require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
 const crypto = require('crypto');
-const { run, get, all, closeDatabase } = require('../db/database');
+const { get, all, closeDatabase, withTransaction } = require('../db/database');
 const { hashPassword } = require('../services/authService');
 const secretBox = require('../lib/secretBox');
+const { recordingRun } = require('../lib/demoSeed');
+
+// Every row this script inserts is recorded in demo_seed_records (internal demo marker).
+let workspaceForRecords = null;
+const run = recordingRun('seedDemoWorkspace', () => workspaceForRecords);
 
 const DEMO_SLUG = 'tradesage-demo-workspace';
 const DEMO_EMAIL = 'demo@tradesage.ai';
 const DAY = 86400000;
+const COMPANIES = ['Malabar Fresh Distributors', 'Gulf Star Trading Co.', 'Deccan FMCG Supply', 'Northern Beverages Ltd', 'Accra Wholesale Hub',
+  'Lagos Grocery Supply', 'Lone Star Snacks Distribution', 'Najd Household Goods', 'Coromandel Dairy Logistics', 'Rift Valley Trading'];
 
 // Deterministic pseudo-random numbers so re-seeding gives the same sample data.
 let seed = 20261020;
@@ -37,6 +47,25 @@ async function findDemo() {
   return get('SELECT id FROM workspaces WHERE slug = ?', [DEMO_SLUG]);
 }
 
+// Workspace-owned tables, children first. Rows are deleted only for the demo workspace id.
+const REMOVE_TABLES = [
+  // AI Campaigns sample data (scripts/seedDemoCampaigns.js)
+  'budget_alerts', 'budget_revenue_entries', 'budget_spend_entries', 'budget_spend_sources', 'campaign_budgets',
+  'automation_run_steps', 'automation_runs', 'automation_events', 'automation_workflows',
+  'outreach_step_variants', 'ab_tests', 'outreach_sends', 'outreach_recipients', 'outreach_steps', 'outreach_campaigns',
+  'campaign_programs', 'email_suppressions', 'mail_configurations',
+  // Social hub
+  'engagement_messages', 'engagement_threads', 'social_metric_snapshots', 'publishing_attempts', 'publishing_jobs',
+  'content_versions', 'approval_requests', 'video_jobs', 'content_items', 'assets', 'social_accounts', 'provider_credentials',
+  'provider_apps', 'provider_webhook_events', 'oauth_states', 'background_jobs', 'campaigns',
+  // Mail, CRM, assistant and calls created while using the demo workspace
+  'email_drafts', 'client_replies', 'email_campaigns', 'emails', 'b2b_clients', 'connected_businesses',
+  'conversation_messages', 'conversations', 'tasks', 'appointments', 'call_records', 'agents',
+  'leads', 'digital_products', 'business_profiles', 'social_settings', 'usage_ledger', 'audit_logs', 'demo_seed_records'
+];
+// May hold real provider or billing resources: never deleted by a script.
+const PROTECTED_TABLES = ['phone_numbers', 'subscriptions'];
+
 async function removeDemo() {
   const ws = await findDemo();
   if (!ws) {
@@ -44,23 +73,34 @@ async function removeDemo() {
     return false;
   }
   const id = ws.id;
-  const tables = [
-    'engagement_messages', 'engagement_threads', 'social_metric_snapshots', 'publishing_attempts', 'publishing_jobs',
-    'content_versions', 'approval_requests', 'content_items', 'assets', 'social_accounts', 'provider_credentials',
-    'provider_apps', 'oauth_states', 'background_jobs', 'campaigns', 'leads', 'digital_products', 'business_profiles',
-    'social_settings', 'usage_ledger', 'audit_logs'
-  ];
-  for (const t of tables) {
-    const exists = await get('SELECT 1 AS x FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?', [t]);
-    if (exists) await run(`DELETE FROM \`${t}\` WHERE workspace_id = ?`, [id]);
+  if (id === 1) throw new Error('Refusing to remove workspace 1.');
+  const owned = (await all("SELECT TABLE_NAME AS t FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND COLUMN_NAME = 'workspace_id'")).map(r => r.t);
+  const blocking = [];
+  for (const t of owned.filter(x => !REMOVE_TABLES.includes(x) && x !== 'workspace_members')) {
+    const n = await get(`SELECT COUNT(*) AS n FROM \`${t}\` WHERE workspace_id = ?`, [id]);
+    if (Number(n.n)) blocking.push(`${t} (${n.n})`);
   }
-  const members = await all('SELECT user_id FROM workspace_members WHERE workspace_id = ?', [id]);
-  await run('DELETE FROM workspace_members WHERE workspace_id = ?', [id]);
-  for (const m of members) {
-    const other = await get('SELECT id FROM workspace_members WHERE user_id = ? LIMIT 1', [m.user_id]);
-    if (!other) await run('DELETE FROM users WHERE id = ? AND email = ?', [m.user_id, DEMO_EMAIL]);
+  if (blocking.length) {
+    const why = blocking.some(b => PROTECTED_TABLES.some(p => b.startsWith(`${p} `))) ? 'they may be real provider or billing resources' : 'this script does not know how to remove them safely';
+    throw new Error(`Not removed: the demo workspace has rows in ${blocking.join(', ')} and ${why}. Nothing was deleted.`);
   }
-  await run('DELETE FROM workspaces WHERE id = ? AND slug = ?', [id, DEMO_SLUG]);
+  const removed = await withTransaction(async tx => {
+    // task_steps has no workspace column; its rows belong to the workspace's tasks.
+    if (owned.includes('tasks')) await tx.run('DELETE s FROM task_steps s JOIN tasks t ON t.id = s.task_id WHERE t.workspace_id = ?', [id]);
+    for (const t of REMOVE_TABLES.filter(x => owned.includes(x))) await tx.run(`DELETE FROM \`${t}\` WHERE workspace_id = ?`, [id]);
+    const members = await tx.all('SELECT user_id FROM workspace_members WHERE workspace_id = ?', [id]);
+    await tx.run('DELETE FROM workspace_members WHERE workspace_id = ?', [id]);
+    for (const m of members) {
+      const other = await tx.get('SELECT id FROM workspace_members WHERE user_id = ? LIMIT 1', [m.user_id]);
+      if (!other) {
+        await tx.run('DELETE FROM users WHERE id = ? AND email = ?', [m.user_id, DEMO_EMAIL]);
+        if (owned.includes('demo_seed_records')) await tx.run("DELETE FROM demo_seed_records WHERE table_name = 'users' AND record_id = ?", [m.user_id]);
+      }
+    }
+    if (owned.includes('demo_seed_records')) await tx.run("DELETE FROM demo_seed_records WHERE table_name = 'workspaces' AND record_id = ?", [id]);
+    return tx.run('DELETE FROM workspaces WHERE id = ? AND slug = ?', [id, DEMO_SLUG]);
+  });
+  if (!removed.changes) throw new Error('The demo workspace row was not removed.');
   console.log(`Removed demo workspace #${id}.`);
   return true;
 }
@@ -86,9 +126,10 @@ async function createDemo() {
     [DEMO_SLUG, DEMO_EMAIL]
   );
   const W = ws.lastID;
+  workspaceForRecords = W;
   await run("INSERT INTO workspace_members (workspace_id, user_id, role, status, created_at) VALUES (?, ?, 'Workspace Owner', 'Active', UTC_TIMESTAMP())", [W, user.lastID]);
   await run(
-    "INSERT INTO business_profiles (workspace_id, business_name, industry, website_url, description, products_json, brand_voice, created_at) VALUES (?, 'DEMO · Sample Distributor Tech', 'B2B Software', 'https://thrivewoo.com', 'Sample business profile for the demo workspace.', '[]', 'Professional and practical', UTC_TIMESTAMP())",
+    "INSERT INTO business_profiles (workspace_id, business_name, industry, website_url, description, products_json, brand_voice, created_at) VALUES (?, 'Coastal Distribution Tech', 'B2B Software', 'https://thrivewoo.com', 'B2B software for FMCG distributors and their field sales teams.', '[]', 'Professional and practical', UTC_TIMESTAMP())",
     [W]
   );
   await run("INSERT INTO social_settings (workspace_id, timezone, require_approval, created_at) VALUES (?, 'UTC', 1, UTC_TIMESTAMP())", [W]);
@@ -106,11 +147,11 @@ async function createDemo() {
 
   // Social accounts (demo_ ids: never synced, publishing refused).
   const accountDefs = [
-    { key: 'fb', provider: 'meta', type: 'facebook_page', name: 'DEMO · ThriveWoo Facebook Page', platform: 'facebook', followers: [2310, 2480],
+    { key: 'fb', provider: 'meta', type: 'facebook_page', name: 'ThriveWoo Facebook Page', platform: 'facebook', followers: [2310, 2480],
       scopes: ['pages_show_list', 'pages_read_engagement', 'pages_manage_posts', 'pages_read_user_content', 'pages_manage_engagement', 'read_insights'] },
-    { key: 'ig', provider: 'meta', type: 'instagram_business', name: 'DEMO · thrivewoo.app (Instagram)', platform: 'instagram', followers: [1180, 1342], username: 'thrivewoo.demo',
+    { key: 'ig', provider: 'meta', type: 'instagram_business', name: 'thrivewoo.app (Instagram)', platform: 'instagram', followers: [1180, 1342], username: 'thrivewoo.app',
       scopes: ['instagram_basic', 'instagram_content_publish', 'instagram_manage_comments', 'instagram_manage_insights'] },
-    { key: 'li', provider: 'linkedin', type: 'linkedin_organization', name: 'DEMO · ThriveWoo LinkedIn Page', platform: 'linkedin', followers: [860, 925],
+    { key: 'li', provider: 'linkedin', type: 'linkedin_organization', name: 'ThriveWoo LinkedIn Page', platform: 'linkedin', followers: [860, 925],
       scopes: ['r_organization_social', 'w_organization_social', 'rw_organization_admin'] }
   ];
   const accounts = {};
@@ -138,9 +179,9 @@ async function createDemo() {
 
   // Campaigns
   const campDefs = [
-    { name: 'DEMO · Van Sales Q4 Launch', objective: 'Lead generation', status: 'Active', platforms: ['facebook', 'instagram', 'linkedin'], start: -28, end: 20, product: 0 },
-    { name: 'DEMO · Offline Ordering Awareness', objective: 'Awareness', status: 'Completed', platforms: ['facebook', 'linkedin'], start: -60, end: -31, product: 0 },
-    { name: 'DEMO · Distributor Webinar Invite', objective: 'Demo bookings', status: 'Draft', platforms: ['linkedin'], start: 7, end: 30, product: 1 }
+    { name: 'Van Sales Q4 Launch', objective: 'Lead generation', status: 'Active', platforms: ['facebook', 'instagram', 'linkedin'], start: -28, end: 20, product: 0 },
+    { name: 'Offline Ordering Awareness', objective: 'Awareness', status: 'Completed', platforms: ['facebook', 'linkedin'], start: -60, end: -31, product: 0 },
+    { name: 'Distributor Webinar Invite', objective: 'Demo bookings', status: 'Draft', platforms: ['linkedin'], start: 7, end: 30, product: 1 }
   ];
   const campaigns = [];
   for (const c of campDefs) {
@@ -150,7 +191,7 @@ async function createDemo() {
        VALUES (?, ?, ?, ?, 'social_hub', ?, ?, ?, ?, ?, 'Book orders on the route, even offline.', 'completed', ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
       [W, c.name, c.objective, c.status, JSON.stringify(c.platforms), c.platforms.join(', '), products[c.product]?.id || null,
         db(now + c.start * DAY).slice(0, 10), db(now + c.end * DAY).slice(0, 10),
-        JSON.stringify({ summary: 'Sample campaign brief (demo data).', key_messages: ['Offline order booking', 'Live stock on every route'], missing_information: [], provider: 'demo_seed' })]
+        JSON.stringify({ summary: 'Lead generation with distributors who still take van sales orders on paper.', key_messages: ['Offline order booking', 'Live stock on every route'], missing_information: [], provider: 'demo_seed' })]
     );
     campaigns.push({ id: ins.lastID, ...c });
   }
@@ -178,7 +219,7 @@ async function createDemo() {
          status, version, published_at, scheduled_at, schedule_timezone, external_post_id, last_error, source, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, '#FMCG #VanSales #Distribution', 'Book a demo', ?, 1, ?, ?, ?, ?, ?, 'demo_seed', ?, UTC_TIMESTAMP())`,
       [W, campaign?.id || null, platform, platform, acct.id, caption.slice(0, 48), caption, status, publishedAt, scheduledAt,
-        scheduledAt ? 'UTC' : null, ext, status === 'failed' ? 'Demo: sample failed publication (no real request was made).' : null,
+        scheduledAt ? 'UTC' : null, ext, status === 'failed' ? 'The platform did not respond in time; retry publishing.' : null,
         db(now - (daysAgo ?? 3) * DAY - DAY)]
     );
     return { id: ins.lastID, ext, platform, acct, publishedAt };
@@ -212,7 +253,7 @@ async function createDemo() {
          schedule_timezone, attempt_count, next_attempt_at, external_post_id, last_error_code, last_error, completed_at, created_at, updated_at)
        VALUES (?, ?, ?, 1, ?, ?, ?, 'UTC', ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
       [W, p.id, p.acct.id, `content:${p.id}:v1:account:${p.acct.id}`, jobStatus, when, jobStatus === 'queued' ? 0 : 1, when,
-        p.ext, jobStatus === 'failed' ? 'DEMO' : null, jobStatus === 'failed' ? 'Sample failure for the demo workspace.' : null,
+        p.ext, jobStatus === 'failed' ? 'TIMEOUT' : null, jobStatus === 'failed' ? 'The platform did not respond in time; retry publishing.' : null,
         jobStatus === 'succeeded' ? when : null]
     );
     if (jobStatus === 'queued' || jobStatus === 'succeeded') {
@@ -249,16 +290,16 @@ async function createDemo() {
     const social = i % 3 === 0;
     await run(
       `INSERT INTO leads (workspace_id, name, email, company_name, product_interest, notes, status, ai_score, ai_category, created_at)
-       VALUES (?, ?, ?, ?, ?, 'Demo lead (sample data).', 'New', ?, ?, ?)`,
-      [W, `${name} (demo)`, `${name.split(' ')[0].toLowerCase()}@example.com`, `DEMO Distributor ${i + 1}`,
+       VALUES (?, ?, ?, ?, ?, 'Enquired at the distributor trade fair.', 'New', ?, ?, ?)`,
+      [W, name, `${name.split(' ')[0].toLowerCase()}@example.com`, COMPANIES[i % COMPANIES.length],
         social ? 'Social (meta)' : (products[0]?.name || 'Demo product'), between(35, 92), ['Hot', 'Warm', 'Cold'][i % 3], db(now - daysAgo * DAY)]
     );
   }
 
   // Comments in the engagement inbox.
   const comments = [
-    { platform: 'facebook', author: 'Priya (demo)', text: 'Does this work for 12 vans in Kochi? Who do I talk to?', cat: 'lead', summary: 'Distributor with 12 vans asking who to contact — buying intent.' },
-    { platform: 'instagram', author: 'routeops.demo', text: 'Can drivers use it without mobile data?', cat: 'enquiry', summary: 'Asks whether the app works offline.' },
+    { platform: 'facebook', author: 'Priya', text: 'Does this work for 12 vans in Kochi? Who do I talk to?', cat: 'lead', summary: 'Distributor with 12 vans asking who to contact — buying intent.' },
+    { platform: 'instagram', author: 'routeops.co', text: 'Can drivers use it without mobile data?', cat: 'enquiry', summary: 'Asks whether the app works offline.' },
     { platform: 'linkedin', author: 'LinkedIn member', text: 'We switched last quarter — reconciliation is so much faster now.', cat: 'feedback', summary: 'Positive feedback about reconciliation speed.' }
   ];
   for (const c of comments) {
@@ -275,7 +316,7 @@ async function createDemo() {
     );
   }
 
-  console.log('Demo workspace created (sample data, clearly labelled DEMO).');
+  console.log('Demo workspace created (sample data; the workspace is named "DEMO · Sample Workspace").');
   console.log(`  Sign in with: ${DEMO_EMAIL}`);
   console.log(`  Password:     ${password}`);
   console.log('  (Shown once. Reset it with: npm run set-password -- demo@tradesage.ai)');

@@ -6,8 +6,9 @@ import { OutreachComponent } from '../outreach/outreach.component';
 import { AbTestsComponent } from '../abtests/ab-tests.component';
 import { AutomationsComponent } from '../automation/automations.component';
 import { CampaignAnalyticsComponent } from '../campaignAnalytics/campaign-analytics.component';
+import { BudgetComponent } from '../budget/budget.component';
 
-type Area = 'campaigns' | 'email' | 'abtests' | 'automations' | 'analytics';
+type Area = 'campaigns' | 'email' | 'abtests' | 'automations' | 'analytics' | 'budget';
 type View = 'list' | 'new' | 'detail';
 type Step = 'strategist' | 'audience' | 'build' | 'overview';
 
@@ -22,7 +23,7 @@ const CHANNEL_LABELS: Record<string, string> = { email: 'Email', linkedin: 'Link
 @Component({
   selector: 'app-command-center',
   standalone: true,
-  imports: [CommonModule, FormsModule, OutreachComponent, AbTestsComponent, AutomationsComponent, CampaignAnalyticsComponent],
+  imports: [CommonModule, FormsModule, OutreachComponent, AbTestsComponent, AutomationsComponent, CampaignAnalyticsComponent, BudgetComponent],
   templateUrl: './command-center.component.html',
   styleUrls: ['./command-center.component.css']
 })

@@ -1,6 +1,7 @@
 const express = require('express');
 const { z } = require('zod');
 const { requireCapability } = require('../../middleware/auth');
+const { aiRouteLimit } = require('../../lib/rateLimit');
 const svc = require('./campaignAnalyticsService');
 
 /**
@@ -16,6 +17,6 @@ const wrap = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch
 });
 
 router.get('/overview', requireCapability('analytics.view'), wrap(async (req, res) => res.json({ success: true, ...(await svc.overview(req, req.query)) })));
-router.post('/recommendations', requireCapability('analytics.view'), wrap(async (req, res) => res.json({ success: true, ...(await svc.recommendations(req, req.body || {})) })));
+router.post('/recommendations', requireCapability('analytics.view'), aiRouteLimit('analytics.recommendations'), wrap(async (req, res) => res.json({ success: true, ...(await svc.recommendations(req, req.body || {})) })));
 
 module.exports = router;

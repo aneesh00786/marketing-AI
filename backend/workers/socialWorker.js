@@ -19,6 +19,7 @@ const inboxService = require('../modules/social/inboxService');
 const accountService = require('../modules/social/accountService');
 const outreachSender = require('../modules/outreach/outreachSender');
 const automationEngine = require('../modules/automation/automationEngine');
+const budgetService = require('../modules/budget/budgetService');
 
 const WORKER_ID = `${os.hostname()}:${process.pid}`;
 const POLL_MS = parseInt(process.env.SOCIAL_WORKER_POLL_MS || '5000', 10);
@@ -95,6 +96,15 @@ async function processAutomation() {
   }
 }
 
+/** Campaign budgets: sync provider spend (every 6 hours) and evaluate pacing alerts. */
+async function processBudgets() {
+  try {
+    await budgetService.processBudgets();
+  } catch (err) {
+    log('budget error:', err.message);
+  }
+}
+
 /** Enqueues periodic syncs per account, using time buckets as idempotency keys. */
 async function scheduleRecurring() {
   const accounts = await all(
@@ -123,6 +133,7 @@ async function loop() {
     try {
       if (Date.now() - lastSchedule > SCHEDULER_MS) {
         await scheduleRecurring();
+        await processBudgets();
         lastSchedule = Date.now();
       }
       const worked = (await processPublishing()) + (await processBackground()) + (await processOutreach()) + (await processAutomation());

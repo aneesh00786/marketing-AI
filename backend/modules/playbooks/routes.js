@@ -2,6 +2,7 @@ const express = require('express');
 const { z } = require('zod');
 const { run, get, all } = require('../../db/database');
 const { requireCapability } = require('../../middleware/auth');
+const { aiRouteLimit } = require('../../lib/rateLimit');
 const { audit } = require('../../lib/audit');
 const { generateStructured, untrusted } = require('../../lib/aiStructured');
 const { resolveSelectedProduct } = require('../../lib/productContext');
@@ -99,7 +100,7 @@ const ideaSchema = z.object({
   })).min(1).max(6)
 });
 
-router.post(['/api/v1/marketing/generate-ideas', '/api/marketing/generate-ideas'], requireCapability('campaigns.manage'), body(z.object({
+router.post(['/api/v1/marketing/generate-ideas', '/api/marketing/generate-ideas'], requireCapability('campaigns.manage'), aiRouteLimit('playbooks.ideas'), body(z.object({
   businessId: positiveId,
   productId: z.union([z.number(), z.string(), z.null()]).optional(),
   goal: z.string().trim().max(500).optional().nullable()

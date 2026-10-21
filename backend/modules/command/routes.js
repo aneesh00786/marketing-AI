@@ -1,6 +1,7 @@
 const express = require('express');
 const { z } = require('zod');
 const { requireCapability } = require('../../middleware/auth');
+const { aiRouteLimit } = require('../../lib/rateLimit');
 const svc = require('./commandService');
 
 /**
@@ -26,7 +27,7 @@ router.patch('/programs/:id', requireCapability('campaigns.manage'), wrap(async 
 router.delete('/programs/:id', requireCapability('campaigns.manage'), wrap(async (req, res) => res.json({ success: true, ...(await svc.deleteProgram(req, req.params.id)) })));
 router.post('/programs/:id/archive', requireCapability('campaigns.manage'), wrap(async (req, res) => res.json({ success: true, program: await svc.archiveProgram(req, req.params.id) })));
 
-router.post('/programs/:id/brief', requireCapability('campaigns.manage'), wrap(async (req, res) => res.json({ success: true, program: await svc.generateBrief(req, req.params.id) })));
+router.post('/programs/:id/brief', requireCapability('campaigns.manage'), aiRouteLimit('command.brief'), wrap(async (req, res) => res.json({ success: true, program: await svc.generateBrief(req, req.params.id) })));
 router.put('/programs/:id/brief', requireCapability('campaigns.manage'), wrap(async (req, res) => res.json({ success: true, program: await svc.saveBrief(req, req.params.id, req.body) })));
 router.post('/programs/:id/brief/approve', requireCapability('content.approve'), wrap(async (req, res) => res.json({ success: true, program: await svc.approveBrief(req, req.params.id, req.body || {}) })));
 
