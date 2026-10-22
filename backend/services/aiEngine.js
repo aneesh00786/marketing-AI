@@ -6,6 +6,8 @@ const { get, all } = require('../db/database');
  */
 async function generateAiResponse(prompt, systemInstruction = '', workspaceId = 1, options = {}) {
   const maxTokens = options.maxTokens || null;
+  // Features can opt out of providers, e.g. Leads does not use Telnyx: excludeProviders: ['telnyx'].
+  const excluded = new Set(options.excludeProviders || []);
   const query = (prompt || '').trim();
   if (!query) {
     return {
@@ -16,7 +18,7 @@ async function generateAiResponse(prompt, systemInstruction = '', workspaceId = 
 
   // 1. Try Telnyx AI Inference (Ultra-Fast Real-Time Voice & LLM Engine with Meta-Llama-3.1-8B-Instruct)
   const apiKeyTelnyx = process.env.TELNYX_API_KEY;
-  if (apiKeyTelnyx && apiKeyTelnyx.startsWith('KEY01')) {
+  if (apiKeyTelnyx && apiKeyTelnyx.startsWith('KEY01') && !excluded.has('telnyx')) {
     try {
       const isDraft = /\b(draft|write|compose|campaign|email|article|full plan)\b/i.test(query);
       const telnyxSys = systemInstruction || 

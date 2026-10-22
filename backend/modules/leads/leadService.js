@@ -14,6 +14,8 @@ const INTENT_WORDS = /\b(demo|quote|urgent|pricing|price|trial|pilot|buy|purchas
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const MAX_QUALIFY_BATCH = 50;
 const MAX_IMPORT_ROWS = 2000;
+// Leads AI (follow-up advice, AI Lead Discovery) never uses Telnyx; other providers serve it.
+const LEADS_AI_EXCLUDE = ['telnyx'];
 
 function httpError(status, message, code = 'BAD_REQUEST') {
   const err = new Error(message);
@@ -347,7 +349,8 @@ Give 1–2 concrete next actions to advance this lead. Do not invent prices, dis
       system: 'You are a B2B sales coach. Be concise and practical.',
       referenceType: 'lead',
       referenceId: row.id,
-      maxTokens: 220
+      maxTokens: 220,
+      excludeProviders: LEADS_AI_EXCLUDE
     });
     if (!text) throw new AiUnavailableError('Empty AI response.');
     await run("UPDATE leads SET ai_suggestion = ?, ai_status = 'ok', ai_suggested_at = UTC_TIMESTAMP() WHERE workspace_id = ? AND id = ?", [text.slice(0, 2000), workspaceId, row.id]);
@@ -433,6 +436,7 @@ ${lines.map(l => (l.startsWith('A few things it does:')
 
 module.exports = {
   STATUSES,
+  LEADS_AI_EXCLUDE,
   parseBudget,
   scoreLead,
   isValidEmail,

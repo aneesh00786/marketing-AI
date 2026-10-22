@@ -83,7 +83,11 @@ test('validation: business type and country are required; limits are enforced', 
     [{ businessType: 'D', countryCode: 'IN', productId: prodA }, /business type/i],
     [{ businessType: 'Distributors', countryCode: 'XX', productId: prodA }, /valid country/],
     [{ businessType: 'Distributors', countryCode: 'DD', productId: prodA }, /valid country/],
-    [{ businessType: 'Distributors', countryCode: 'IN', productId: prodA, maxResults: 61 }, /at most 60/],
+    [{ businessType: 'Distributors', countryCode: 'IN', productId: prodA, maxResults: 301 }, /at most 300 unique results/],
+    [{ businessType: 'Distributors', countryCode: 'IN', productId: prodA, maxRequests: 21 }, /at most 20 Google requests/],
+    [{ businessType: 'Distributors', countryCode: 'IN', productId: prodA, scope: 'city' }, /Enter the city/],
+    [{ businessType: 'Distributors', countryCode: 'IN', productId: prodA, scope: 'region' }, /Enter the state or region/],
+    [{ businessType: 'Distributors', countryCode: 'IN', productId: prodA, categories: ['shops in Delhi', '123'] }, /Each category must name a kind of business/],
     [{ businessType: 'Distributors', countryCode: 'IN', productId: prodA, workspaceId: 999 }, /Unrecognized key/]
   ];
   const mock = h.mockFetch([]);
@@ -119,16 +123,18 @@ test('results are parsed and mapped; missing fields stay unavailable; the key st
   assert.equal(p2.eligible, true);
   assert.deepEqual([p3.eligible, p3.ineligibleReason], [false, 'permanently_closed']);
   assert.equal(r.data.results.length, 3, 'a place without an id is dropped');
-  assert.deepEqual(r.data.summary, { found: 3, duplicates: 0, possibleDuplicates: 0, eligible: 2, missingContact: 1, closed: 1, pages: 1, requested: 10 });
+  // Region scope: after the first query, the city seen in Google's results (Kochi) is searched too.
+  assert.deepEqual(r.data.summary, { found: 3, raw: 3, repeatsAcrossQueries: 0, duplicates: 0, possibleDuplicates: 0, eligible: 2, missingContact: 1, closed: 1, requests: 2, queries: 2, requested: 10 });
+  assert.deepEqual(r.data.queries.map(q => q.query), [r.data.run.textQuery, r.data.run.textQuery.replace(' in Kerala, India', ' in Kochi, Kerala, India')]);
   assert.equal(r.data.attribution, 'Google Maps');
-  assert.match(r.data.notice, /at most 60 places per search/);
+  assert.match(r.data.notice, /Each Google query returns at most 60 places/);
 
   const call = calls[0];
   assert.equal(call.url, 'https://places.googleapis.com/v1/places:searchText');
   assert.equal(call.headers['X-Goog-Api-Key'], KEY);
   assert.ok(!call.url.includes(KEY), 'key never in a URL');
   assert.match(call.headers['X-Goog-FieldMask'], /places\.websiteUri/);
-  assert.deepEqual(call.body, { textQuery: r.data.run.textQuery, pageSize: 10, regionCode: 'in', languageCode: 'en' });
+  assert.deepEqual(call.body, { textQuery: r.data.run.textQuery, pageSize: 20, regionCode: 'in', languageCode: 'en' });
   assert.ok(!JSON.stringify(r.data).includes(KEY), 'key never in a response');
 
   // Without contact details the cheaper field mask is used.
@@ -156,7 +162,8 @@ test('pagination follows page tokens and stops at the requested maximum', async 
 
   const few = await searchWith(A, base({ maxResults: 60 }), [{ places: [place(400), place(401)] }]);
   assert.equal(few.r.data.results.length, 2);
-  assert.match(few.r.data.lessThanRequested, /fewer matching places/);
+  assert.equal(few.r.data.coverage.stopReason, 'no_more_queries');
+  assert.match(few.r.data.coverage.explanation, /Found 2 unique business\(es\) of the 60 requested/);
 });
 
 test('quota errors, timeouts, malformed responses and partial results are reported honestly', async () => {
@@ -174,7 +181,8 @@ test('quota errors, timeouts, malformed responses and partial results are report
   assert.equal(partial.r.status, 200);
   assert.equal(partial.r.data.run.status, 'partial');
   assert.equal(partial.r.data.results.length, 20);
-  assert.match(partial.r.data.partial.message, /stopped early.*20 result/);
+  assert.match(partial.r.data.partial.message, /quota or rate limit was reached/);
+  assert.equal(partial.r.data.coverage.stopReason, 'quota');
 
   const malformed = await searchWith(A, base(), [{ status: 200, text: '<html>not json</html>' }]);
   assert.deepEqual([malformed.r.status, malformed.r.data.code], [502, 'PLACES_PROVIDER_ERROR']);
@@ -202,7 +210,9 @@ test('missing API key: clear 503 and nothing sent to Google', async () => {
   } finally { process.env.GOOGLE_PLACES_API_KEY = KEY; }
   const cfg = await api(A, 'GET', '/config');
   assert.equal(cfg.data.config.configured, true);
-  assert.equal(cfg.data.config.maxResults, 60);
+  assert.equal(cfg.data.config.maxResults, 300);
+  assert.equal(cfg.data.config.maxRequests, 20);
+  assert.equal(cfg.data.config.resultsPerRequest, 20);
   assert.ok(!JSON.stringify(cfg.data).includes(KEY));
 });
 
@@ -272,7 +282,7 @@ test('product-aware AI fit is evidence-based, shown for review only, and optiona
   });
   const { r } = await searchWith(A, base({ aiQualify: true }), [{ places: [place(901), place(902)] }], [ai]);
   assert.equal(r.status, 200, JSON.stringify(r.data));
-  assert.deepEqual(r.data.ai, { available: true, assessed: 1 });
+  assert.deepEqual(r.data.ai, { available: true, assessed: 1, limited: null });
   assert.deepEqual(r.data.results[0].fit, { score: 45, confidence: 'low', evidence: 'Category is Wholesaler; no other facts about their sales team.', inference: true });
   assert.equal(r.data.results[1].fit, null, 'no assessment is invented for a business the AI did not cover');
   const stored = await db().get('SELECT COUNT(*) AS n FROM lead_discovery_places WHERE run_id = ?', [r.data.run.id]);

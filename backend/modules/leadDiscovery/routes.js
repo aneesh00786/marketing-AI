@@ -30,7 +30,35 @@ router.use((req, res, next) => {
 });
 
 router.get('/config', requireCapability('leads.view'), wrap(async (req, res) => res.json({ success: true, config: await svc.config(req) })));
-router.post('/search', requireCapability('leads.manage'), aiRouteLimit('leads.discovery'), wrap(async (req, res) => res.json({ success: true, ...(await svc.search(req, req.body)) })));
+router.post('/plan', requireCapability('leads.manage'), aiRouteLimit('leads.discoveryPlan'), wrap(async (req, res) => res.json({ success: true, plan: await svc.plan(req, req.body) })));
+
+/**
+ * Search. With "Accept: application/x-ndjson" the response streams one JSON object per line:
+ * {"type":"progress",...} while queries run, then {"type":"result",...} or {"type":"error",...}.
+ * Validation and limit errors are normal HTTP errors returned before streaming starts. Results pass
+ * straight through to the browser and are not kept on the server. If the browser disconnects, no
+ * further Google requests are made.
+ */
+router.post('/search', requireCapability('leads.manage'), aiRouteLimit('leads.discovery'), wrap(async (req, res) => {
+  const prep = await svc.prepareSearch(req, req.body);
+  if (!String(req.headers.accept || '').includes('application/x-ndjson')) {
+    return res.json({ success: true, ...(await svc.executeSearch(req, prep)) });
+  }
+  const controller = new AbortController();
+  res.on('close', () => { if (!res.writableEnded) controller.abort(); });
+  // X-Accel-Buffering: no lets progress through an nginx proxy without buffering.
+  res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' });
+  const send = obj => { if (!res.writableEnded) res.write(`${JSON.stringify(obj)}\n`); };
+  try {
+    const result = await svc.executeSearch(req, prep, { onProgress: p => send({ type: 'progress', ...p }), signal: controller.signal });
+    if (result) send({ type: 'result', success: true, ...result });
+  } catch (err) {
+    // Only our own errors (with an HTTP status) carry a user-facing message; others are logged.
+    if (!err.status) console.error('Lead discovery search failed:', err);
+    send({ type: 'error', success: false, code: err.status ? err.code : 'SERVER_ERROR', error: err.status ? err.message : 'Search failed. Please try again.' });
+  }
+  res.end();
+}));
 router.post('/runs/:id/import', requireCapability('leads.manage'), wrap(async (req, res) => res.json({ success: true, ...(await svc.importSelected(req, req.params.id, req.body)) })));
 router.get('/leads/:id/place', requireCapability('leads.view'), detailsLimit, wrap(async (req, res) => res.json({ success: true, ...(await svc.liveDetails(req, req.params.id)) })));
 

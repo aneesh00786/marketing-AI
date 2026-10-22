@@ -9,7 +9,8 @@ const { providerRequest, ProviderError } = require('../social/providers/http');
  *   fields and are requested only when contact details are asked for.
  * - Text Search returns at most 20 places per page and 60 per query across pages (Google's limit,
  *   "subject to change"). Results are bounded by Google's coverage and ranking: a query never
- *   returns every business in a country.
+ *   returns every business in a country. Broader coverage comes from running several distinct
+ *   queries (see discoveryService), never from repeating one.
  * - Values Google does not return stay null (unavailable); nothing is inferred or invented.
  */
 const BASE = 'https://places.googleapis.com/v1';
@@ -40,11 +41,20 @@ function countryName(code) {
   }
 }
 
-/** "IT service companies with cloud hosting in Kochi, Kerala, India" — only the user's own inputs. */
+/** "Kochi, Kerala, India" */
+function locationLabel({ city, region, countryCode }) {
+  return [city, region, countryName(countryCode)].filter(Boolean).join(', ');
+}
+
+/** "Wholesale distributors (FMCG) in Kochi, Kerala, India" */
+function buildQuery({ category, keywords, location }) {
+  const what = [category, keywords ? `(${keywords})` : null].filter(Boolean).join(' ');
+  return `${what} in ${location}`.replace(/\s+/g, ' ').trim();
+}
+
+/** The base query, built only from the user's own inputs. */
 function buildTextQuery({ businessType, keywords, city, region, countryCode }) {
-  const what = [businessType, keywords ? `(${keywords})` : null].filter(Boolean).join(' ');
-  const where = [city, region, countryName(countryCode)].filter(Boolean).join(', ');
-  return `${what} in ${where}`.replace(/\s+/g, ' ').trim();
+  return buildQuery({ category: businessType, keywords, location: locationLabel({ city, region, countryCode }) });
 }
 
 function classifyGoogle(status, body) {
@@ -111,47 +121,22 @@ function mapPlace(p) {
 }
 
 /**
- * Runs one Text Search query, following page tokens until maxResults or Google's 60-result cap.
- * A failure after the first page returns the places already received with `partial` set.
+ * One Text Search page. Every page of a query repeats exactly the same parameters with the
+ * nextPageToken from the previous page (Google requirement), so the page size is always 20.
  */
-async function searchText({ textQuery, countryCode, maxResults, includeContacts = true }) {
-  const limit = Math.min(Math.max(parseInt(maxResults, 10) || PAGE_SIZE, 1), GOOGLE_MAX_RESULTS);
-  const pageSize = Math.min(PAGE_SIZE, limit);
+async function searchPage({ textQuery, countryCode, includeContacts = true, pageToken = null }) {
   const fields = includeContacts ? [...SEARCH_FIELDS, ...CONTACT_FIELDS] : SEARCH_FIELDS;
-  // Every page must repeat the same parameters; only pageToken changes (Google requirement).
-  const base = { textQuery, pageSize, regionCode: countryCode.toLowerCase(), languageCode: 'en' };
+  const base = { textQuery, pageSize: PAGE_SIZE, regionCode: countryCode.toLowerCase(), languageCode: 'en' };
+  const body = await call('/places:searchText', { method: 'POST', json: pageToken ? { ...base, pageToken } : base, fields });
+  if (!Array.isArray(body.places ?? [])) throw new ProviderError({ message: 'Google Places returned results in an unexpected format.', code: 'PROVIDER_ERROR' });
   const places = [];
-  const seen = new Set();
-  let pageToken = null;
-  let pages = 0;
-  let partial = null;
   let malformed = 0;
-  do {
-    let body;
-    try {
-      body = await call('/places:searchText', { method: 'POST', json: pageToken ? { ...base, pageToken } : base, fields });
-    } catch (err) {
-      if (!pages) throw err;
-      partial = { code: err.code, message: err.message };
-      break;
-    }
-    if (!Array.isArray(body.places ?? [])) {
-      if (!pages) throw new ProviderError({ message: 'Google Places returned results in an unexpected format.', code: 'PROVIDER_ERROR' });
-      partial = { code: 'PROVIDER_ERROR', message: 'A later results page had an unexpected format.' };
-      break;
-    }
-    pages++;
-    for (const raw of body.places || []) {
-      const p = mapPlace(raw);
-      if (!p) { malformed++; continue; }
-      if (seen.has(p.placeId)) continue;
-      seen.add(p.placeId);
-      places.push(p);
-      if (places.length >= limit) break;
-    }
-    pageToken = typeof body.nextPageToken === 'string' && body.nextPageToken ? body.nextPageToken : null;
-  } while (pageToken && places.length < limit);
-  return { places, pages, partial, malformed, exhausted: !pageToken, requested: limit };
+  for (const raw of body.places || []) {
+    const p = mapPlace(raw);
+    if (p) places.push(p);
+    else malformed++;
+  }
+  return { places, malformed, nextPageToken: typeof body.nextPageToken === 'string' && body.nextPageToken ? body.nextPageToken : null };
 }
 
 /** Place Details (New) for one place ID, fetched live (not stored). */
@@ -163,4 +148,4 @@ async function getPlace(placeId) {
   return mapped;
 }
 
-module.exports = { buildTextQuery, countryName, mapPlace, searchText, getPlace, isConfigured, GOOGLE_MAX_RESULTS, PAGE_SIZE, SEARCH_FIELDS, CONTACT_FIELDS };
+module.exports = { buildTextQuery, buildQuery, locationLabel, countryName, mapPlace, searchPage, getPlace, isConfigured, GOOGLE_MAX_RESULTS, PAGE_SIZE, SEARCH_FIELDS, CONTACT_FIELDS };

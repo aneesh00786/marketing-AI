@@ -7,6 +7,7 @@ const { recordUsage } = require('../../lib/usage');
 const { generateStructured, untrusted, AiUnavailableError } = require('../../lib/aiStructured');
 const leadService = require('../leads/leadService');
 const places = require('./googlePlacesProvider');
+const planner = require('./queryPlanner');
 
 /**
  * AI Lead Discovery: finds real businesses with Google Places API (New), lets the user review
@@ -21,19 +22,38 @@ const places = require('./googlePlacesProvider');
  * - the optional AI product-fit assessment is shown during review only.
  * Every search targets one Digital Product of the workspace (required), and every imported lead
  * is linked to that product. Everything is scoped to the session's workspace.
+ *
+ * Coverage: one Google query returns at most 60 places, so a search runs several DISTINCT queries
+ * (related categories, then states/cities seen in Google's results) until it has the requested
+ * number of unique businesses or uses its request budget. Identical queries are never repeated.
  */
-const DEFAULT_RESULTS = 20;
-const maxResultsCap = () => Math.min(parseInt(process.env.LEAD_DISCOVERY_MAX_RESULTS || String(places.GOOGLE_MAX_RESULTS), 10) || places.GOOGLE_MAX_RESULTS, places.GOOGLE_MAX_RESULTS);
+const DEFAULT_RESULTS = 50;
+const DEFAULT_REQUESTS = 10;
+const HARD_MAX_RESULTS = 500;
+const HARD_MAX_REQUESTS = 50;
+const capEnv = (name, def, hard) => Math.min(Math.max(parseInt(process.env[name] || String(def), 10) || def, 1), hard);
+const maxResultsCap = () => capEnv('LEAD_DISCOVERY_MAX_RESULTS', 300, HARD_MAX_RESULTS);
+const maxRequestsCap = () => capEnv('LEAD_DISCOVERY_MAX_REQUESTS', 20, HARD_MAX_REQUESTS);
+const maxCategoriesCap = () => capEnv('LEAD_DISCOVERY_MAX_CATEGORIES', 8, 12);
+const maxSubLocations = () => capEnv('LEAD_DISCOVERY_MAX_SUBLOCATIONS', 10, 30);
+const aiFitMax = () => capEnv('LEAD_DISCOVERY_AI_FIT_MAX', 60, 200);
 const dailySearchLimit = () => parseInt(process.env.LEAD_DISCOVERY_DAILY_SEARCHES || '20', 10);
+const dailyRequestLimit = () => parseInt(process.env.LEAD_DISCOVERY_DAILY_REQUESTS || '300', 10);
 const dailyDetailsLimit = () => parseInt(process.env.LEAD_DISCOVERY_DAILY_DETAILS || '200', 10);
+// List prices per 1,000 Text Search requests (Places API (New), first paid tier, before Google's
+// free monthly usage). Estimates only; the Google Cloud bill is authoritative.
+const pricePer1000 = includeContacts => parseFloat(includeContacts ? (process.env.PLACES_PRICE_PER_1000_ENTERPRISE || '35') : (process.env.PLACES_PRICE_PER_1000_PRO || '32'));
 const REPEAT_WINDOW_MIN = 2;
+// Stop paging a query when fewer than this share of a page's places are new.
+const MOSTLY_REPEATS = 0.2;
+const FATAL_CODES = new Set(['QUOTA_EXCEEDED', 'PERMISSION_DENIED', 'SETUP_REQUIRED']);
 const AI_BATCH = 20;
 // A shared domain of a free mailbox provider says nothing about the business.
 const FREE_MAIL = new Set(['gmail.com', 'googlemail.com', 'yahoo.com', 'yahoo.co.in', 'hotmail.com', 'outlook.com', 'live.com', 'icloud.com', 'aol.com', 'proton.me', 'protonmail.com', 'rediffmail.com', 'zoho.com', 'gmx.com', 'mail.com', 'yandex.com']);
 const RELIABLE_MATCHES = new Set(['place_id', 'phone', 'website_domain']);
 
-const NOTICE = 'Results come from Google Places and are limited by Google\'s coverage and ranking (at most 60 places per search). '
-  + 'They are not every business in the area, and asking for more results does not guarantee more unique businesses. '
+const NOTICE = 'Results come from Google Places. Each Google query returns at most 60 places (20 per request), so a search runs several distinct queries within its request budget. '
+  + 'Results are still limited by Google\'s coverage and ranking: they are not every business in the area, and a higher target does not guarantee more unique businesses. '
   + 'Business details are shown for review only: Google\'s terms do not allow storing them, so imported leads keep a Google place reference and show the details live.';
 
 function httpError(status, message, code) {
@@ -53,7 +73,11 @@ const searchSchema = z.object({
   city: optText(80),
   keywords: optText(200),
   productId: z.union([z.number().int().positive(), z.string().regex(/^\d+$/).transform(Number)], { errorMap: () => ({ message: 'Choose the product these leads are for.' }) }),
+  scope: z.enum(['city', 'region', 'country']).optional(),
+  expandCategories: z.boolean().optional(),
+  categories: z.array(z.string().trim().min(2).max(60)).min(1).max(12).optional(),
   maxResults: z.number().int().min(1).optional(),
+  maxRequests: z.number().int().min(1).optional(),
   includeContacts: z.boolean().optional(),
   aiQualify: z.boolean().optional()
 }).strict();
@@ -148,7 +172,7 @@ ${untrusted('product', JSON.stringify(productFacts(product)), 3000)}
 ${untrusted('businesses', JSON.stringify(businesses), 8000)}
 Return JSON: {"results":[{"placeId":"...","score":0-100,"confidence":"low|medium|high","evidence":"...","inference":true|false}]}`;
     const { data } = await generateStructured({
-      workspaceId, prompt, schema: fitSchema, referenceType: 'lead_discovery', maxTokens: 2500,
+      workspaceId, prompt, schema: fitSchema, referenceType: 'lead_discovery', maxTokens: 2500, excludeProviders: leadService.LEADS_AI_EXCLUDE,
       system: 'You are a careful B2B sales analyst. You never invent facts and you label assumptions.'
     });
     const ids = new Set(batch.map(p => p.placeId));
@@ -159,66 +183,233 @@ Return JSON: {"results":[{"placeId":"...","score":0-100,"confidence":"low|medium
 
 // ---------------------------------------------------------------- config and limits
 async function searchesToday(workspaceId) {
-  const r = await get('SELECT COUNT(*) AS n FROM lead_discovery_runs WHERE workspace_id = ? AND created_at >= UTC_DATE()', [workspaceId]);
-  return Number(r.n);
+  const r = await get('SELECT COUNT(*) AS n, COALESCE(SUM(requests), 0) AS requests FROM lead_discovery_runs WHERE workspace_id = ? AND created_at >= UTC_DATE()', [workspaceId]);
+  return { searches: Number(r.n), requests: Number(r.requests) };
 }
 
 async function config(ctx) {
+  const today = await searchesToday(ws(ctx));
   return {
     configured: places.isConfigured(),
     maxResults: maxResultsCap(),
     defaultResults: Math.min(DEFAULT_RESULTS, maxResultsCap()),
+    maxRequests: maxRequestsCap(),
+    defaultRequests: Math.min(DEFAULT_REQUESTS, maxRequestsCap()),
+    maxCategories: maxCategoriesCap(),
+    resultsPerRequest: places.PAGE_SIZE,
+    resultsPerQuery: places.GOOGLE_MAX_RESULTS,
     dailySearchLimit: dailySearchLimit(),
-    searchesToday: await searchesToday(ws(ctx)),
+    searchesToday: today.searches,
+    dailyRequestLimit: dailyRequestLimit(),
+    requestsToday: today.requests,
+    pricePer1000: { withContacts: pricePer1000(true), withoutContacts: pricePer1000(false) },
     notice: NOTICE
   };
 }
 
-// ---------------------------------------------------------------- search
-async function search(ctx, input) {
+// ---------------------------------------------------------------- search planning
+/** Validates the request and resolves product, scope, location and budgets (no Google calls). */
+async function resolve(ctx, input) {
   const workspaceId = ws(ctx);
   const v = searchSchema.parse(input || {});
-  const cap = maxResultsCap();
-  const maxResults = v.maxResults ?? Math.min(DEFAULT_RESULTS, cap);
-  if (maxResults > cap) throw httpError(400, `Ask for at most ${cap} results per search (Google returns at most 60 per query). Narrow the search by state or city for more.`, 'VALIDATION_ERROR');
+  const resultsCap = maxResultsCap();
+  const requestsCap = maxRequestsCap();
+  const maxResults = v.maxResults ?? Math.min(DEFAULT_RESULTS, resultsCap);
+  if (maxResults > resultsCap) throw httpError(400, `Ask for at most ${resultsCap} unique results per search.`, 'VALIDATION_ERROR');
+  const maxRequests = v.maxRequests ?? Math.min(DEFAULT_REQUESTS, requestsCap);
+  if (maxRequests > requestsCap) throw httpError(400, `Use at most ${requestsCap} Google requests per search.`, 'VALIDATION_ERROR');
   if (!places.countryName(v.countryCode)) throw httpError(400, 'Choose a valid country.', 'VALIDATION_ERROR');
+  const scope = v.scope || (v.city ? 'city' : v.region ? 'region' : 'country');
+  if (scope === 'city' && !v.city) throw httpError(400, 'Enter the city to search in, or choose a wider scope.', 'VALIDATION_ERROR');
+  if (scope === 'region' && !v.region) throw httpError(400, 'Enter the state or region to search in, or choose a wider scope.', 'VALIDATION_ERROR');
   const product = await leadService.requireWorkspaceProduct(workspaceId, v.productId);
-  if (!places.isConfigured()) throw httpError(503, 'Google Places is not set up: add GOOGLE_PLACES_API_KEY on the server (Places API (New) enabled).', 'PLACES_NOT_CONFIGURED');
+  const loc = { city: scope === 'city' ? v.city : null, region: scope === 'country' ? null : v.region, countryCode: v.countryCode };
+  const categories = v.categories ? planner.cleanCategories(v.categories, maxCategoriesCap()) : null;
+  if (v.categories && !categories.length) throw httpError(400, 'Each category must name a kind of business (no locations or numbers).', 'VALIDATION_ERROR');
+  return { v, product, scope, loc, location: places.locationLabel(loc), maxResults, maxRequests, categories, includeContacts: v.includeContacts !== false, expand: v.expandCategories === true };
+}
 
-  const used = await searchesToday(workspaceId);
-  if (used >= dailySearchLimit()) throw httpError(429, `Daily discovery limit reached (${dailySearchLimit()} searches per workspace). Try again tomorrow.`, 'DISCOVERY_DAILY_LIMIT');
-
-  const includeContacts = v.includeContacts !== false;
-  const textQuery = places.buildTextQuery(v);
-  const criteriaHash = crypto.createHash('sha1').update(JSON.stringify([textQuery.toLowerCase(), v.countryCode, maxResults, includeContacts, product.id])).digest('hex');
-  const recent = await get(`SELECT id FROM lead_discovery_runs WHERE workspace_id = ? AND criteria_hash = ? AND created_at >= UTC_TIMESTAMP() - INTERVAL ${REPEAT_WINDOW_MIN} MINUTE AND status <> 'failed' ORDER BY id DESC LIMIT 1`, [workspaceId, criteriaHash]);
-  if (recent) throw httpError(409, `The same search ran less than ${REPEAT_WINDOW_MIN} minutes ago. Review those results or change the search to avoid paying for it twice.`, 'DUPLICATE_SEARCH');
-
-  const runRow = {
-    business_type: v.businessType, country_code: v.countryCode, region: v.region, city: v.city, keywords: v.keywords,
-    product_id: product.id, max_results: maxResults, include_contacts: includeContacts ? 1 : 0, text_query: textQuery.slice(0, 400), criteria_hash: criteriaHash
+function estimate(r, allowedRequests) {
+  const maxPlaces = allowedRequests * places.PAGE_SIZE;
+  const per = pricePer1000(r.includeContacts);
+  return {
+    allowedRequests,
+    maxPlacesBeforeDuplicates: maxPlaces,
+    maxCostUsd: Math.round(allowedRequests * per / 10) / 100,
+    pricePer1000: per,
+    shortfall: r.maxResults > maxPlaces
+      ? `A target of ${r.maxResults} is more than ${allowedRequests} Google request(s) can return: at most ${maxPlaces} places (20 per request) before duplicates. Raise the request budget or lower the target.`
+      : null
   };
-  const insertRun = async (extra) => (await run(
-    `INSERT INTO lead_discovery_runs (workspace_id, created_by, business_type, country_code, region, city, keywords, product_id, max_results, include_contacts, text_query, criteria_hash,
-       status, found, duplicates, possible_duplicates, eligible, missing_contact, pages, error_code, error_message, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())`,
-    [workspaceId, ctx.auth.userId || null, runRow.business_type, runRow.country_code, runRow.region, runRow.city, runRow.keywords, runRow.product_id, runRow.max_results,
-      runRow.include_contacts, runRow.text_query, runRow.criteria_hash, extra.status, extra.found || 0, extra.duplicates || 0, extra.possible || 0, extra.eligible || 0,
-      extra.missing || 0, extra.pages || 0, extra.errorCode || null, extra.errorMessage ? String(extra.errorMessage).slice(0, 500) : null]
-  )).lastID;
+}
 
-  let result;
-  try {
-    result = await places.searchText({ textQuery, countryCode: v.countryCode, maxResults, includeContacts });
-  } catch (err) {
-    const runId = await insertRun({ status: 'failed', errorCode: err.code, errorMessage: err.message });
-    await audit(ctx, 'leads.discovery_failed', { resourceType: 'lead_discovery_run', resourceId: runId, metadata: { code: err.code } });
-    throw toHttp(err);
+/** Preview: the categories and first queries a search would run, with its budget. Uses AI only. */
+async function plan(ctx, input) {
+  const r = await resolve(ctx, input);
+  const today = await searchesToday(ws(ctx));
+  const allowed = Math.max(0, Math.min(r.maxRequests, dailyRequestLimit() - today.requests));
+  const s = r.categories ? { categories: r.categories, suggested: [], ai: null }
+    : (r.expand ? await planner.suggestCategories(ws(ctx), { businessType: r.v.businessType, keywords: r.v.keywords, product: r.product, maxCategories: maxCategoriesCap() })
+      : { categories: [r.v.businessType], suggested: [], ai: null });
+  return {
+    scope: r.scope,
+    location: r.location,
+    categories: s.categories,
+    suggested: s.suggested,
+    ai: s.ai,
+    firstQueries: s.categories.map(c => places.buildQuery({ category: c, keywords: r.v.keywords, location: r.location })),
+    progressive: r.scope === 'city' ? null : `After these, the search continues in the ${r.scope === 'country' ? 'states' : 'cities'} where Google's results are, while budget remains.`,
+    budget: estimate(r, allowed),
+    dailyRequestsRemaining: Math.max(0, dailyRequestLimit() - today.requests)
+  };
+}
+
+/** Checks limits and repeats before a search starts (so errors return before streaming). */
+async function prepareSearch(ctx, input) {
+  const workspaceId = ws(ctx);
+  const r = await resolve(ctx, input);
+  if (!places.isConfigured()) throw httpError(503, 'Google Places is not set up: add GOOGLE_PLACES_API_KEY on the server (Places API (New) enabled).', 'PLACES_NOT_CONFIGURED');
+  const today = await searchesToday(workspaceId);
+  if (today.searches >= dailySearchLimit()) throw httpError(429, `Daily discovery limit reached (${dailySearchLimit()} searches per workspace). Try again tomorrow.`, 'DISCOVERY_DAILY_LIMIT');
+  const dailyRemaining = dailyRequestLimit() - today.requests;
+  if (dailyRemaining <= 0) throw httpError(429, `Today's Google request budget for this workspace is used up (${dailyRequestLimit()} requests). Try again tomorrow.`, 'DISCOVERY_DAILY_REQUESTS');
+  const criteriaHash = crypto.createHash('sha1').update(JSON.stringify([r.v.businessType.toLowerCase(), r.v.keywords, r.scope, r.location.toLowerCase(), r.v.countryCode,
+    r.categories || (r.expand ? 'auto' : null), r.maxResults, r.maxRequests, r.includeContacts, r.product.id])).digest('hex');
+  const recent = await get(`SELECT id FROM lead_discovery_runs WHERE workspace_id = ? AND criteria_hash = ? AND created_at >= UTC_TIMESTAMP() - INTERVAL ${REPEAT_WINDOW_MIN} MINUTE AND status NOT IN ('failed', 'cancelled') ORDER BY id DESC LIMIT 1`, [workspaceId, criteriaHash]);
+  if (recent) throw httpError(409, `The same search ran less than ${REPEAT_WINDOW_MIN} minutes ago. Review those results or change the search to avoid paying for it twice.`, 'DUPLICATE_SEARCH');
+  return { ...r, criteriaHash, allowedRequests: Math.min(r.maxRequests, dailyRemaining) };
+}
+
+const STOP_TEXT = {
+  reached_target: 'Found the requested number of unique businesses.',
+  budget_exhausted: 'Stopped after using this search\'s Google request budget. Raise the budget to search further.',
+  daily_budget: 'Stopped at the workspace\'s remaining Google request budget for today.',
+  no_more_queries: 'All planned queries ran; Google had no further matching places for them.',
+  quota: 'Google\'s quota or rate limit was reached; showing the results received so far.',
+  provider_rejected: 'Google rejected further requests; showing the results received so far.',
+  cancelled: 'The search was cancelled.'
+};
+
+/**
+ * Runs the planned queries: each query is followed through its pages (nextPageToken) while it keeps
+ * producing new places; results are de-duplicated across all queries. After the first-tier queries,
+ * sub-locations seen in Google's results are searched (country -> states, state -> cities).
+ * onProgress receives counts only. A failed query is recorded and the search moves on; quota and
+ * permission errors stop it but keep everything already received.
+ */
+async function executeSearch(ctx, prep, { onProgress = () => {}, signal } = {}) {
+  const workspaceId = ws(ctx);
+  const { v, product } = prep;
+  let categories = prep.categories;
+  let planAi = null;
+  if (!categories) {
+    if (prep.expand) {
+      onProgress({ phase: 'planning' });
+      const s = await planner.suggestCategories(workspaceId, { businessType: v.businessType, keywords: v.keywords, product, maxCategories: maxCategoriesCap() });
+      categories = s.categories;
+      planAi = s.ai;
+    } else {
+      categories = [v.businessType];
+    }
   }
-  if (result.pages) await recordUsage({ workspaceId, category: 'places_search', providerKey: 'google_places', quantity: result.pages, unit: 'request', referenceType: 'lead_discovery' });
+
+  const queue = categories.map(category => ({ category, location: prep.location, tier: 'primary' }));
+  const seenQueries = new Set();
+  const unique = new Map();
+  const log = [];
+  let requests = 0;
+  let billed = 0;
+  let raw = 0;
+  let repeats = 0;
+  let stop = null;
+  let fatal = null;
+  let lastError = null;
+  let expanded = false;
+  const country = places.countryName(v.countryCode);
+  // The queue holds every planned query, including those already run.
+  const stateOf = () => ({ phase: 'searching', completedQueries: log.length, plannedQueries: queue.length, requests, maxRequests: prep.allowedRequests, unique: unique.size, raw, repeats, target: prep.maxResults });
+
+  for (let i = 0; i < queue.length && !stop; i++) {
+    const q = queue[i];
+    const text = places.buildQuery({ category: q.category, keywords: v.keywords, location: q.location });
+    if (seenQueries.has(text.toLowerCase())) continue;
+    seenQueries.add(text.toLowerCase());
+    const entry = { query: text, category: q.category, tier: q.tier, requests: 0, places: 0, newUnique: 0, status: 'ok', note: null };
+    let pageToken = null;
+    do {
+      if (signal?.aborted) { stop = 'cancelled'; break; }
+      if (unique.size >= prep.maxResults) { stop = 'reached_target'; break; }
+      if (requests >= prep.allowedRequests) { stop = prep.allowedRequests < prep.maxRequests ? 'daily_budget' : 'budget_exhausted'; break; }
+      onProgress({ ...stateOf(), current: text });
+      requests++;
+      entry.requests++;
+      let page;
+      try {
+        page = await places.searchPage({ textQuery: text, countryCode: v.countryCode, includeContacts: prep.includeContacts, pageToken });
+        billed++;
+      } catch (err) {
+        entry.status = 'error';
+        entry.note = String(err.message).slice(0, 200);
+        lastError = err;
+        if (FATAL_CODES.has(err.code)) { fatal = err; stop = err.code === 'QUOTA_EXCEEDED' ? 'quota' : 'provider_rejected'; }
+        break;
+      }
+      entry.places += page.places.length;
+      raw += page.places.length;
+      let fresh = 0;
+      for (const p of page.places) {
+        if (unique.has(p.placeId)) { repeats++; continue; }
+        if (unique.size >= prep.maxResults) break;
+        unique.set(p.placeId, p);
+        fresh++;
+      }
+      entry.newUnique += fresh;
+      pageToken = page.nextPageToken;
+      if (pageToken && page.places.length && fresh / page.places.length < MOSTLY_REPEATS) {
+        entry.note = 'Remaining pages skipped: mostly businesses already found.';
+        pageToken = null;
+      }
+    } while (pageToken && !stop);
+    if (entry.requests) log.push(entry);
+    // After the first-tier queries, cover the states/cities where Google's results actually are.
+    if (!stop && !expanded && i === queue.length - 1 && prep.scope !== 'city') {
+      expanded = true;
+      for (const sub of planner.subLocations([...unique.values()], { scope: prep.scope, region: prep.loc.region, countryCode: v.countryCode }, maxSubLocations())) {
+        const location = prep.scope === 'country' ? `${sub}, ${country}` : `${sub}, ${prep.loc.region}, ${country}`;
+        for (const category of categories) queue.push({ category, location, tier: 'local' });
+      }
+    }
+  }
+  if (!stop) stop = 'no_more_queries';
+  onProgress({ ...stateOf(), phase: 'checking' });
+
+  const runCols = {
+    business_type: v.businessType, country_code: v.countryCode, region: prep.loc.region, city: prep.loc.city, keywords: v.keywords, product_id: product.id,
+    max_results: prep.maxResults, include_contacts: prep.includeContacts ? 1 : 0, text_query: places.buildTextQuery({ businessType: v.businessType, keywords: v.keywords, ...prep.loc }).slice(0, 400),
+    criteria_hash: prep.criteriaHash, scope: prep.scope, expand_categories: prep.expand ? 1 : 0, categories_json: JSON.stringify(categories), max_requests: prep.maxRequests,
+    requests, queries_run: log.length, raw_results: raw, stop_reason: stop
+  };
+  const insertRun = async extra => {
+    const cols = { ...runCols, workspace_id: workspaceId, created_by: ctx.auth.userId || null, status: extra.status, found: extra.found || 0, duplicates: extra.duplicates || 0,
+      possible_duplicates: extra.possible || 0, eligible: extra.eligible || 0, missing_contact: extra.missing || 0, pages: requests,
+      error_code: extra.errorCode || null, error_message: extra.errorMessage ? String(extra.errorMessage).slice(0, 500) : null };
+    const keys = Object.keys(cols);
+    return (await run(`INSERT INTO lead_discovery_runs (${keys.join(', ')}, created_at) VALUES (${keys.map(() => '?').join(', ')}, UTC_TIMESTAMP())`, keys.map(k => cols[k]))).lastID;
+  };
+  if (billed) await recordUsage({ workspaceId, category: 'places_search', providerKey: 'google_places', quantity: billed, unit: 'request', referenceType: 'lead_discovery' });
+
+  if (stop === 'cancelled') {
+    await insertRun({ status: 'cancelled', found: unique.size });
+    return null;
+  }
+  if (!unique.size && lastError && (fatal || !billed)) {
+    const runId = await insertRun({ status: 'failed', errorCode: lastError.code, errorMessage: lastError.message });
+    await audit(ctx, 'leads.discovery_failed', { resourceType: 'lead_discovery_run', resourceId: runId, metadata: { code: lastError.code } });
+    throw toHttp(lastError);
+  }
 
   const idx = await loadMatchIndex(workspaceId);
-  const rows = result.places.map(p => {
+  const rows = [...unique.values()].map(p => {
     const match = matchOf(p, idx);
     const closed = p.businessStatus === 'CLOSED_PERMANENTLY';
     const reliable = !!match && RELIABLE_MATCHES.has(match.reason);
@@ -234,11 +425,14 @@ async function search(ctx, input) {
   });
 
   let ai = null;
-  if (v.aiQualify !== false && rows.some(r => r.eligible)) {
+  const toAssess = rows.filter(r => r.eligible).slice(0, aiFitMax());
+  if (v.aiQualify !== false && toAssess.length) {
+    onProgress({ ...stateOf(), phase: 'assessing' });
     try {
-      const fit = await assessFit(workspaceId, product, rows.filter(r => r.eligible));
+      const fit = await assessFit(workspaceId, product, toAssess);
       for (const r of rows) r.fit = fit.get(r.placeId) || null;
-      ai = { available: true, assessed: fit.size };
+      const eligible = rows.filter(r => r.eligible).length;
+      ai = { available: true, assessed: fit.size, limited: eligible > toAssess.length ? `AI fit was assessed for the first ${toAssess.length} of ${eligible} eligible businesses (limit per search).` : null };
     } catch (err) {
       if (!(err instanceof AiUnavailableError) && err.code !== 'QUOTA_EXCEEDED') throw err;
       ai = { available: false, reason: err.code === 'QUOTA_EXCEEDED' ? 'Monthly AI limit reached.' : 'AI is unavailable, so no product-fit assessment was made.' };
@@ -247,28 +441,48 @@ async function search(ctx, input) {
 
   const summary = {
     found: rows.length,
+    raw,
+    repeatsAcrossQueries: repeats,
     duplicates: rows.filter(r => r.duplicate).length,
     possibleDuplicates: rows.filter(r => r.possibleDuplicate).length,
     eligible: rows.filter(r => r.eligible).length,
     missingContact: rows.filter(r => r.missingContact).length,
     closed: rows.filter(r => r.ineligibleReason === 'permanently_closed').length,
-    pages: result.pages,
-    requested: maxResults
+    requests,
+    queries: log.length,
+    requested: prep.maxResults
   };
-  const status = result.partial ? 'partial' : 'completed';
+  const failedQueries = log.filter(q => q.status === 'error').length;
+  const status = fatal || failedQueries ? 'partial' : 'completed';
   const runId = await insertRun({ status, found: summary.found, duplicates: summary.duplicates, possible: summary.possibleDuplicates, eligible: summary.eligible,
-    missing: summary.missingContact, pages: summary.pages, errorCode: result.partial?.code, errorMessage: result.partial?.message });
-  for (const r of rows) {
-    await run('INSERT INTO lead_discovery_places (run_id, workspace_id, place_id, eligible, duplicate_lead_id, match_reason, created_at) VALUES (?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())',
-      [runId, workspaceId, r.placeId, r.eligible ? 1 : 0, (r.duplicate || r.possibleDuplicate)?.leadId || null, (r.duplicate || r.possibleDuplicate)?.reason || null]);
+    missing: summary.missingContact, errorCode: fatal?.code || (failedQueries ? lastError?.code : null), errorMessage: fatal?.message || (failedQueries ? `${failedQueries} query(ies) failed: ${lastError?.message}` : null) });
+  for (let i = 0; i < rows.length; i += 100) {
+    const chunk = rows.slice(i, i + 100);
+    await run(`INSERT INTO lead_discovery_places (run_id, workspace_id, place_id, eligible, duplicate_lead_id, match_reason, created_at) VALUES ${chunk.map(() => '(?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())').join(', ')}`,
+      chunk.flatMap(r => [runId, workspaceId, r.placeId, r.eligible ? 1 : 0, (r.duplicate || r.possibleDuplicate)?.leadId || null, (r.duplicate || r.possibleDuplicate)?.reason || null]));
   }
-  await audit(ctx, 'leads.discovery_searched', { resourceType: 'lead_discovery_run', resourceId: runId, metadata: { found: summary.found, eligible: summary.eligible, pages: summary.pages, productId: product.id } });
+  await audit(ctx, 'leads.discovery_searched', { resourceType: 'lead_discovery_run', resourceId: runId, metadata: { found: summary.found, eligible: summary.eligible, requests, queries: log.length, stop, productId: product.id } });
 
+  const budget = estimate(prep, prep.allowedRequests);
+  const explanation = [budget.shortfall, STOP_TEXT[stop], stop !== 'reached_target' && summary.found < prep.maxResults ? `Found ${summary.found} unique business(es) of the ${prep.maxResults} requested.` : null].filter(Boolean).join(' ');
   return {
-    run: { id: runId, status, textQuery, countryCode: v.countryCode, productId: product.id, productName: product.name, includeContacts },
+    run: { id: runId, status, textQuery: runCols.text_query, countryCode: v.countryCode, productId: product.id, productName: product.name, includeContacts: prep.includeContacts, scope: prep.scope, location: prep.location },
     summary,
-    partial: result.partial ? { code: result.partial.code, message: `Search stopped early: ${result.partial.message} Showing the ${summary.found} result(s) received.` } : null,
-    lessThanRequested: summary.found < maxResults ? (result.exhausted ? 'Google returned fewer matching places than requested.' : null) : null,
+    coverage: {
+      categories,
+      categoriesFrom: prep.categories ? 'you' : (prep.expand ? (planAi?.available ? 'ai' : 'business_type_only') : 'business_type_only'),
+      planAi,
+      requestedResults: prep.maxResults,
+      maxRequests: prep.maxRequests,
+      allowedRequests: prep.allowedRequests,
+      requestsUsed: requests,
+      remainingRequests: Math.max(0, prep.allowedRequests - requests),
+      estimatedCostUsd: Math.round(billed * pricePer1000(prep.includeContacts) / 10) / 100,
+      stopReason: stop,
+      explanation
+    },
+    queries: log,
+    partial: status === 'partial' ? { code: fatal?.code || lastError?.code, message: fatal ? `${STOP_TEXT[stop]} (${fatal.message})` : `${failedQueries} of ${log.length} queries failed (${lastError?.message}); the others completed.` } : null,
     ai,
     results: rows,
     attribution: 'Google Maps',
@@ -276,8 +490,13 @@ async function search(ctx, input) {
   };
 }
 
+/** Non-streaming search (JSON API): prepare + execute. */
+async function search(ctx, input) {
+  return executeSearch(ctx, await prepareSearch(ctx, input));
+}
+
 // ---------------------------------------------------------------- import
-const importSchema = z.object({ placeIds: z.array(z.string().regex(/^[A-Za-z0-9_-]{10,255}$/)).min(1).max(places.GOOGLE_MAX_RESULTS) }).strict();
+const importSchema = z.object({ placeIds: z.array(z.string().regex(/^[A-Za-z0-9_-]{10,255}$/)).min(1).max(HARD_MAX_RESULTS) }).strict();
 
 async function importSelected(ctx, runIdRaw, input) {
   const workspaceId = ws(ctx);
@@ -349,4 +568,4 @@ async function liveDetails(ctx, leadIdRaw) {
   return { leadId: lead.id, place, attribution: 'Google Maps', stored: false, fetchedAt: new Date().toISOString() };
 }
 
-module.exports = { config, search, importSelected, liveDetails, matchOf, nameKey, phoneKey, domainOf, NOTICE };
+module.exports = { config, plan, prepareSearch, executeSearch, search, importSelected, liveDetails, matchOf, nameKey, phoneKey, domainOf, NOTICE };

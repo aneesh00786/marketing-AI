@@ -27,17 +27,22 @@ function extractJson(text) {
   }
 }
 
+function unavailableMessage(excludeProviders = []) {
+  const base = 'No AI language model is configured or reachable. Set GROQ_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY or GEMINI_API_KEY, or run Ollama locally.';
+  return excludeProviders.includes('telnyx') ? `${base} (Telnyx is not used for this feature.)` : base;
+}
+
 /**
  * Calls the shared AI engine expecting JSON, validates it with a zod schema,
  * enforces the workspace AI quota and meters usage. Never returns template fallbacks:
  * when no real model answers with valid output, it throws AiUnavailableError.
  */
-async function generateStructured({ workspaceId, prompt, system, schema, referenceType = null, referenceId = null, maxTokens = 2000 }) {
+async function generateStructured({ workspaceId, prompt, system, schema, referenceType = null, referenceId = null, maxTokens = 2000, excludeProviders = [] }) {
   await assertAiQuota(workspaceId);
-  const res = await aiEngine.generateAiResponse(prompt, `${system}\n\n${UNTRUSTED_RULE}\nRespond with a single valid JSON object only.`, workspaceId, { maxTokens });
+  const res = await aiEngine.generateAiResponse(prompt, `${system}\n\n${UNTRUSTED_RULE}\nRespond with a single valid JSON object only.`, workspaceId, { maxTokens, excludeProviders });
 
   if (!isRealAiProvider(res?.provider)) {
-    throw new AiUnavailableError('No AI language model is configured or reachable. Set GROQ_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY or GEMINI_API_KEY, or run Ollama locally.');
+    throw new AiUnavailableError(unavailableMessage(excludeProviders));
   }
   await recordUsage({ workspaceId, category: 'ai_text', providerKey: res.provider, referenceType, referenceId });
 
@@ -53,11 +58,11 @@ async function generateStructured({ workspaceId, prompt, system, schema, referen
 }
 
 /** Free-text generation with quota + metering, still refusing canned fallbacks. */
-async function generateText({ workspaceId, prompt, system, referenceType = null, referenceId = null, maxTokens = 800 }) {
+async function generateText({ workspaceId, prompt, system, referenceType = null, referenceId = null, maxTokens = 800, excludeProviders = [] }) {
   await assertAiQuota(workspaceId);
-  const res = await aiEngine.generateAiResponse(prompt, `${system}\n\n${UNTRUSTED_RULE}`, workspaceId, { maxTokens });
+  const res = await aiEngine.generateAiResponse(prompt, `${system}\n\n${UNTRUSTED_RULE}`, workspaceId, { maxTokens, excludeProviders });
   if (!isRealAiProvider(res?.provider)) {
-    throw new AiUnavailableError('No AI language model is configured or reachable.');
+    throw new AiUnavailableError(unavailableMessage(excludeProviders));
   }
   await recordUsage({ workspaceId, category: 'ai_text', providerKey: res.provider, referenceType, referenceId });
   return { text: String(res.text || '').trim(), provider: res.provider };
