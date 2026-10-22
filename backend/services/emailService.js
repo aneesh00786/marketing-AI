@@ -15,10 +15,40 @@ const EMAIL_RE = /^[^\s@<>"',;]+@[^\s@<>"',;]+\.[^\s@<>"',;]+$/;
 const PLACEHOLDER_DOMAIN_RE = /@(?:[^@]+\.)?(example\.(com|org|net)|[^@]+\.(example|test|invalid|localhost))$/i;
 const isValidRecipient = v => EMAIL_RE.test(String(v || '').trim()) && !PLACEHOLDER_DOMAIN_RE.test(String(v || '').trim());
 
+// Network timeouts (ms). TLS certificates are always verified.
+const ZEPTO_TIMEOUT_MS = 20000;
+const SMTP_TIMEOUTS = { connectionTimeout: 15000, greetingTimeout: 15000, socketTimeout: 60000 };
+const IMAP_TIMEOUTS = { connectionTimeout: 15000, greetingTimeout: 15000, socketTimeout: 60000 };
+
+// Failures before a connection was established: nothing can have been sent.
+const NOT_CONNECTED_CODES = new Set(['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'EHOSTUNREACH', 'ENETUNREACH', 'UND_ERR_CONNECT_TIMEOUT']);
+
+/** True when an SMTP error leaves it unclear whether the server accepted the message. */
+function smtpOutcomeUnknown(err) {
+  if (!err) return false;
+  if (err.responseCode) return false; // the server answered with a rejection
+  if (['EAUTH', 'ECONNECTION', 'EDNS', 'EENVELOPE', 'EMESSAGE', 'ETLS'].includes(err.code)) return false;
+  if (['CONN', 'EHLO', 'HELO', 'STARTTLS', 'AUTH PLAIN', 'AUTH LOGIN', 'AUTH XOAUTH2'].includes(err.command)) return false;
+  if (NOT_CONNECTED_CODES.has(err.code)) return false;
+  return true;
+}
+
 function mailError(message, status, code) {
   const err = new Error(message);
   err.status = status;
   err.code = code;
+  return err;
+}
+
+/**
+ * A provider error whose delivery outcome is unknown: the message may have been accepted before
+ * the failure (timeout, dropped connection, server error). Such an email is never resent
+ * automatically or retried through another provider; a person checks first.
+ */
+function outcomeUnknownError(message, cause) {
+  const err = mailError(`Delivery outcome unknown: ${message}. It may or may not have been delivered; check before sending again.`, 502, 'MAIL_OUTCOME_UNKNOWN');
+  err.outcomeUnknown = true;
+  if (cause) err.cause = cause;
   return err;
 }
 
@@ -54,29 +84,42 @@ async function sendZeptoMail({ to, recipientName = '', subject, html, text = '',
   if (!authToken) {
     throw mailError('ZeptoMail is not configured for this workspace. Add the ZeptoMail token in Mail Settings.', 503, 'MAIL_NOT_CONFIGURED');
   }
-  const res = await fetch('https://api.zeptomail.com/v1.1/email', {
-    method: 'POST',
-    headers: {
-      'Authorization': authToken,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      from: { address: fromAddress, name: fromName || fromAddress },
-      to: [{ email_address: { address: to, name: recipientName || to } }],
-      reply_to: [{ address: replyTo || fromAddress, name: fromName || fromAddress }],
-      subject: subject,
-      htmlbody: html || `<p>${text || ''}</p>`
-    })
-  });
-
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`ZeptoMail API error (${res.status}): ${errText}`);
+  let res;
+  try {
+    res = await fetch('https://api.zeptomail.com/v1.1/email', {
+      method: 'POST',
+      headers: {
+        'Authorization': authToken,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        from: { address: fromAddress, name: fromName || fromAddress },
+        to: [{ email_address: { address: to, name: recipientName || to } }],
+        reply_to: [{ address: replyTo || fromAddress, name: fromName || fromAddress }],
+        subject: subject,
+        htmlbody: html || `<p>${text || ''}</p>`,
+        // Plain-text part for clients that do not show HTML.
+        textbody: text || undefined
+      }),
+      signal: AbortSignal.timeout(ZEPTO_TIMEOUT_MS)
+    });
+  } catch (err) {
+    const code = err?.cause?.code || err?.code;
+    if (NOT_CONNECTED_CODES.has(code)) throw mailError(`ZeptoMail could not be reached (${code}).`, 502, 'MAIL_SEND_FAILED');
+    throw outcomeUnknownError(err?.name === 'TimeoutError' ? 'ZeptoMail did not answer in time' : `the connection to ZeptoMail failed (${code || err?.message})`, err);
   }
 
-  const data = await res.json();
+  if (!res.ok) {
+    const errText = (await res.text().catch(() => '')).slice(0, 300);
+    // 5xx: ZeptoMail may have accepted the message before failing.
+    if (res.status >= 500) throw outcomeUnknownError(`ZeptoMail returned HTTP ${res.status}`);
+    throw mailError(`ZeptoMail API error (${res.status}): ${errText}`, 502, 'MAIL_SEND_FAILED');
+  }
+
+  // Accepted. The provider's request id is kept when present; none is invented.
+  const data = await res.json().catch(() => ({}));
   return {
-    messageId: data.request_id || `zepto_${Date.now()}`,
+    messageId: data.request_id || null,
     data
   };
 }
@@ -208,18 +251,38 @@ function createSmtpTransporter(config) {
   const port = parseInt(config.smtp_port, 10) || 587;
   const isSecure = config.smtp_secure === 1 || port === 465;
 
-  return nodemailer.createTransport({
+  return nodemailer.createTransport(smtpTransportOptions(config, port, isSecure));
+}
+
+/** SMTP options: certificates are verified, TLS 1.2+, bounded timeouts. */
+function smtpTransportOptions(config, port = parseInt(config.smtp_port, 10) || 587, isSecure = config.smtp_secure === 1 || port === 465) {
+  return {
     host: config.smtp_host,
-    port: port,
+    port,
     secure: isSecure,
     auth: {
       user: config.smtp_user,
       pass: config.smtp_pass
     },
-    tls: {
-      rejectUnauthorized: false
-    }
-  });
+    tls: { minVersion: 'TLSv1.2', rejectUnauthorized: true },
+    ...SMTP_TIMEOUTS
+  };
+}
+
+/** IMAP options: certificates are verified, TLS 1.2+, bounded timeouts. */
+function imapClientOptions(config) {
+  return {
+    host: config.imap_host,
+    port: parseInt(config.imap_port, 10) || 993,
+    secure: config.imap_tls === 1,
+    auth: {
+      user: config.imap_user,
+      pass: config.imap_pass
+    },
+    logger: false,
+    tls: { minVersion: 'TLSv1.2', rejectUnauthorized: true },
+    ...IMAP_TIMEOUTS
+  };
 }
 
 /**
@@ -298,6 +361,7 @@ async function sendRealEmail(workspaceId, {
   const plain = text || html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
   const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
 
+  let sent = false;
   let messageId = null;
   let smtpStatus = null;
   let deliveryDetails = null;
@@ -307,44 +371,51 @@ async function sendRealEmail(workspaceId, {
   if (usesZepto(workspaceId, config)) {
     try {
       const zeptoResult = await sendZeptoMail({
-        to: recipient, recipientName, subject, html, text,
+        to: recipient, recipientName, subject, html, text: plain,
         fromAddress: senderEmail,
         fromName: config.sender_name || senderEmail,
         replyTo: replyTo || senderEmail,
         token: zeptoToken(workspaceId, config)
       });
+      sent = true;
       messageId = zeptoResult.messageId;
       smtpStatus = 'Sent via ZeptoMail';
       deliveryDetails = zeptoResult.data;
     } catch (zeptoErr) {
+      // Possibly delivered: never fall back to SMTP, which could deliver a second copy.
+      if (zeptoErr.outcomeUnknown) throw zeptoErr;
       lastError = zeptoErr;
       console.warn('ZeptoMail dispatch error:', zeptoErr.message);
     }
   }
 
-  // 2. The workspace's SMTP server.
-  if (!messageId) {
+  // 2. The workspace's SMTP server, only when nothing was sent above.
+  if (!sent) {
     const transporter = config.smtp_host ? createSmtpTransporter(config) : null;
     if (transporter) {
       try {
         await assertSafeMailHost(config.smtp_host);
         const info = await transporter.sendMail({ from: fromAddress, to: recipient, subject, text: plain, html, replyTo: replyTo || senderEmail });
-        messageId = info.messageId || `smtp_${Date.now()}`;
+        sent = true;
+        messageId = info.messageId || null;
         smtpStatus = 'Sent via SMTP';
         deliveryDetails = { response: info.response, accepted: info.accepted };
       } catch (err) {
+        if (smtpOutcomeUnknown(err)) throw outcomeUnknownError(`the SMTP connection failed while sending (${err.code || err.message})`, err);
         lastError = err;
         console.warn('SMTP dispatch error:', err.message);
       }
     }
   }
 
-  if (!messageId) {
+  if (!sent) {
     if (lastError) throw mailError(`Email was not sent: ${lastError.message}`, lastError.status === 400 ? 400 : 502, lastError.code || 'MAIL_SEND_FAILED');
     throw mailError('Email was not sent: mail is not configured for this workspace. Add SMTP or ZeptoMail settings in Mail Settings.', 503, 'MAIL_NOT_CONFIGURED');
   }
 
-  const insertRes = await run(`
+  let insertRes;
+  try {
+    insertRes = await run(`
     INSERT INTO emails (
       workspace_id, campaign_id, client_id, sender, sender_email, recipient_email, recipient_name,
       subject, body, html_body, snippet, is_urgent, is_read, status, message_id, smtp_status, sent_at
@@ -356,6 +427,13 @@ async function sendRealEmail(workspaceId, {
     workspaceId, campaignId, clientId, config.sender_name || senderEmail, senderEmail, recipient, recipientName || recipient,
     subject, plain, html, plain.substring(0, 120), messageId, smtpStatus, now
   ]);
+  } catch (dbErr) {
+    // Delivered but not recorded: callers must not send it again.
+    console.error('Email sent but not recorded:', dbErr.message);
+    const err = mailError(`The email was accepted (${smtpStatus}) but could not be recorded. Do not send it again.`, 500, 'MAIL_SENT_NOT_RECORDED');
+    err.outcomeUnknown = true;
+    throw err;
+  }
 
   return {
     success: true,
@@ -389,19 +467,7 @@ async function syncIncomingEmails(workspaceId) {
     return { success: false, isImapConfigured: false, error: err.message };
   }
 
-  const client = new ImapFlow({
-    host: config.imap_host,
-    port: parseInt(config.imap_port, 10) || 993,
-    secure: config.imap_tls === 1,
-    auth: {
-      user: config.imap_user,
-      pass: config.imap_pass
-    },
-    logger: false,
-    tls: {
-      rejectUnauthorized: false
-    }
-  });
+  const client = new ImapFlow(imapClientOptions(config));
 
   let fetchedCount = 0;
   const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
@@ -510,6 +576,9 @@ async function syncIncomingEmails(workspaceId) {
 }
 
 module.exports = {
+  smtpTransportOptions,
+  imapClientOptions,
+  smtpOutcomeUnknown,
   EMAIL_RE,
   isValidRecipient,
   getRawMailConfig,

@@ -223,7 +223,7 @@ test('bounces suppress the address; other failures wait for a confirmed retry', 
   const calls = [];
   let mock = h.mockFetch([zepto(calls, body => body.to[0].email_address.address === 'dana@fleetco.io'
     ? h.json(400, { error: { message: '550 5.1.1 mailbox unavailable' } })
-    : h.json(500, { error: 'temporary outage' }))]);
+    : h.json(422, { error: 'sender address not verified' }))]);
   try { await tick(); await tick(); } finally { mock.restore(); }
   assert.equal(calls.length, 2, 'failed sends are not retried automatically');
   const st = Object.fromEntries((await recipients(id)).map(r => [r.email, r.status]));

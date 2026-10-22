@@ -208,6 +208,12 @@ async function sendOne(campaign, recipient, workerId) {
     return 'sent';
   } catch (err) {
     const message = String(err.message || 'Send failed').slice(0, 500);
+    if (err.outcomeUnknown) {
+      // Possibly delivered: never retried automatically (same handling as an interrupted send).
+      await run("UPDATE outreach_sends SET status = 'needs_review', error = ? WHERE id = ?", [message, sendId]);
+      await run("UPDATE outreach_recipients SET status = 'needs_review', next_send_at = NULL, last_error = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?", [message, recipient.id]);
+      return 'needs_review';
+    }
     await run("UPDATE outreach_sends SET status = 'failed', error = ? WHERE id = ?", [message, sendId]);
     if (err.code === 'MAIL_NOT_CONFIGURED') {
       // Nothing can be sent for this workspace: pause the whole campaign with the reason.

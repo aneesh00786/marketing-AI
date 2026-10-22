@@ -17,6 +17,17 @@ async function configure(ws, token, sender) {
   assert.equal(r.status, 200, JSON.stringify(r.data));
 }
 
+/** Fills the draft's [placeholders] (as a person would) so it can be approved. */
+async function fill(ws, draft) {
+  const replacements = Object.fromEntries((draft.placeholders || []).map(p => [p, 'Jane Doe']));
+  const r = await h.api('PATCH', `/api/v1/drafts/${draft.id}`, { token: ws.token, body: { replacements } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.deepEqual(r.data.draft.placeholders, []);
+  return r.data.draft;
+}
+
+const key = () => ({ 'Idempotency-Key': require('crypto').randomBytes(16).toString('hex') });
+
 async function newDraft(ws, body = {}) {
   const r = await h.api('POST', '/api/v1/drafts/generate', { token: ws.token, body: { recipientName: 'Dana', recipientEmail: 'dana@acme.io', goal: 'Intro', ...body } });
   assert.equal(r.status, 200, JSON.stringify(r.data));
@@ -111,6 +122,7 @@ test('permissions: members draft, approvers send, only owners/admins configure',
   const md = await h.api('POST', '/api/v1/drafts/generate', { token: member.token, body: { recipientEmail: 'lee@acme.io', goal: 'Hi' } });
   assert.equal(md.status, 200);
   const id = md.data.draft.id;
+  await fill(member, md.data.draft);
   assert.equal((await h.api('PUT', `/api/v1/drafts/${id}/approve`, { token: member.token })).status, 403);
   assert.equal((await h.api('POST', `/api/v1/drafts/${id}/send`, { token: member.token, body: { confirm: true } })).status, 403);
   assert.equal((await h.api('POST', '/api/v1/emails/send', { token: member.token, body: { recipient_email: 'lee@acme.io', subject: 's', body: 'b', confirm: true } })).status, 403);
@@ -133,7 +145,7 @@ test('sending needs a valid recipient, approval and explicit confirmation, and u
   const noRecipient = await newDraft(A, { recipientEmail: '' });
   assert.equal((await h.api('PUT', `/api/v1/drafts/${noRecipient.id}/approve`, { token: A.token })).status, 400);
 
-  const d = await newDraft(A);
+  const d = await fill(A, await newDraft(A));
   const calls = [];
   const mock = h.mockFetch([zeptoRoute(calls)]);
   try {
@@ -166,7 +178,7 @@ test('sending needs a valid recipient, approval and explicit confirmation, and u
     const msg = { recipient_email: 'kim@client.io', subject: 'Hello', body: 'Hi Kim' };
     assert.equal((await h.api('POST', '/api/v1/emails/send', { token: B.token, body: msg })).status, 400, 'no confirm');
     assert.equal((await h.api('POST', '/api/v1/emails/send', { token: B.token, body: { ...msg, recipient_email: 'kim@example.com', confirm: true } })).status, 400);
-    const ok = await h.api('POST', '/api/v1/emails/send', { token: B.token, body: { ...msg, confirm: true } });
+    const ok = await h.api('POST', '/api/v1/emails/send', { token: B.token, body: { ...msg, confirm: true }, headers: key() });
     assert.equal(ok.status, 200, JSON.stringify(ok.data));
   } finally { mock2.restore(); }
   assert.equal(direct.length, 1);
@@ -175,10 +187,11 @@ test('sending needs a valid recipient, approval and explicit confirmation, and u
 
 test('failures are reported and nothing is recorded as sent', async () => {
   const { get } = h.db();
-  const d = await newDraft(A, { recipientEmail: 'fail@acme.io' });
+  const d = await fill(A, await newDraft(A, { recipientEmail: 'fail@acme.io' }));
   await h.api('PUT', `/api/v1/drafts/${d.id}/approve`, { token: A.token });
   const calls = [];
-  const mock = h.mockFetch([zeptoRoute(calls, 500)]);
+  // A clear rejection (4xx): nothing was sent. (A 5xx or timeout is an unknown outcome; see mailSafety.test.js.)
+  const mock = h.mockFetch([zeptoRoute(calls, 422)]);
   let r;
   try {
     r = await h.api('POST', `/api/v1/drafts/${d.id}/send`, { token: A.token, body: { confirm: true } });
@@ -194,7 +207,7 @@ test('failures are reported and nothing is recorded as sent', async () => {
   const mock2 = h.mockFetch([zeptoRoute(leaked)]);
   let c;
   try {
-    c = await h.api('POST', '/api/v1/emails/send', { token: C.token, body: { recipient_email: 'kim@client.io', subject: 'Hi', body: 'x', confirm: true } });
+    c = await h.api('POST', '/api/v1/emails/send', { token: C.token, body: { recipient_email: 'kim@client.io', subject: 'Hi', body: 'x', confirm: true }, headers: key() });
   } finally { mock2.restore(); process.env.ZEPTOMAIL_TOKEN = saved; }
   assert.equal(c.status, 503);
   assert.equal(c.data.code, 'MAIL_NOT_CONFIGURED');

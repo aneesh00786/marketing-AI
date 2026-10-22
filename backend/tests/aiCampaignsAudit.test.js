@@ -139,7 +139,7 @@ test('bounces are not reported as failed sends; transport failures are', async (
   const outage = await lead(ws, 'Good Address', 'someone@fleet.io');
   const respond = b => (b.to[0].email_address.address === 'nobody@fleet.io'
     ? h.json(400, { error: { message: '550 5.1.1 mailbox unavailable' } })
-    : h.json(500, { error: 'temporary outage' }));
+    : h.json(422, { error: 'sender address not verified' })); // a clear rejection (a 5xx is an unknown outcome)
   const onlyBounce = await sequence(ws, [bounced]);
   await sendTick(respond);
   let ov = (await overview(ws)).data;
