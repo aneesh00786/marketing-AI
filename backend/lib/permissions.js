@@ -4,6 +4,8 @@
  */
 const CAPABILITIES = [
   'workspace.manage',
+  // Everyone sees who is in the workspace; only Owners/Admins invite, change roles or remove.
+  'members.view',
   'members.manage',
   'agents.use',
   'content.create',
@@ -29,14 +31,16 @@ const ROLE_CAPABILITIES = {
   'Workspace Owner': CAPABILITIES,
   'Workspace Admin': CAPABILITIES.filter(c => c !== 'billing.manage'),
   'Marketing Manager': [
-    'agents.use', 'content.create', 'content.approve', 'content.publish', 'campaigns.manage',
+    'members.view', 'agents.use', 'content.create', 'content.approve', 'content.publish', 'campaigns.manage',
     'analytics.view', 'inbox.view', 'inbox.reply', 'usage.view', 'leads.view', 'leads.manage',
     'mail.view', 'mail.compose', 'mail.send'
   ],
   // Mail: Members write drafts, Approvers approve and send them, only Owners/Admins see mail settings.
-  'Approver': ['agents.use', 'content.approve', 'analytics.view', 'inbox.view', 'leads.view', 'mail.view', 'mail.send'],
-  'Member': ['agents.use', 'content.create', 'analytics.view', 'inbox.view', 'leads.view', 'leads.manage', 'mail.view', 'mail.compose']
+  'Approver': ['members.view', 'agents.use', 'content.approve', 'analytics.view', 'inbox.view', 'leads.view', 'mail.view', 'mail.send'],
+  'Member': ['members.view', 'agents.use', 'content.create', 'analytics.view', 'inbox.view', 'leads.view', 'leads.manage', 'mail.view', 'mail.compose']
 };
+
+const ROLES = Object.keys(ROLE_CAPABILITIES);
 
 function capabilitiesForRole(role) {
   return new Set(ROLE_CAPABILITIES[role] || []);
@@ -45,5 +49,6 @@ function capabilitiesForRole(role) {
 module.exports = {
   CAPABILITIES,
   ROLE_CAPABILITIES,
+  ROLES,
   capabilitiesForRole
 };

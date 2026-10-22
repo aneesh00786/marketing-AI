@@ -13,17 +13,18 @@ import { CommandCenterComponent } from './features/command/command-center.compon
 import { IconComponent } from './shared/icon.component';
 import { DashboardComponent, DashboardNavigation } from './features/dashboard/dashboard.component';
 import { LeadDiscoveryComponent } from './features/leads/lead-discovery.component';
+import { MembersComponent } from './features/members/members.component';
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [CommonModule, FormsModule, LoginComponent, SocialHubComponent, CommandCenterComponent, IconComponent, DashboardComponent, LeadDiscoveryComponent],
+  imports: [CommonModule, FormsModule, LoginComponent, SocialHubComponent, CommandCenterComponent, IconComponent, DashboardComponent, LeadDiscoveryComponent, MembersComponent],
   templateUrl: './app.component.html',
   styleUrls: ['./app.component.css']
 })
 export class AppComponent implements OnInit, OnDestroy {
   // Navigation: Directly accessible HUD
-  currentRoute: 'dashboard' | 'products' | 'leads' | 'emails' | 'drafts' | 'businesses' | 'social' | 'voice' | 'appointments' = 'dashboard';
+  currentRoute: 'dashboard' | 'products' | 'leads' | 'emails' | 'drafts' | 'businesses' | 'social' | 'voice' | 'appointments' | 'members' = 'dashboard';
 
   // ---------- App shell (sidebar, top bar, menus) ----------
   readonly navGroups: { label: string; items: { route: AppComponent['currentRoute']; label: string; icon: string; subtitle: string }[] }[] = [
@@ -59,6 +60,12 @@ export class AppComponent implements OnInit, OnDestroy {
       label: 'Assistant',
       items: [
         { route: 'voice', label: 'Mark Voice Center', icon: 'voice', subtitle: 'Talk to Mark, your AI executive assistant' }
+      ]
+    },
+    {
+      label: 'Workspace',
+      items: [
+        { route: 'members', label: 'Members', icon: 'building', subtitle: 'People in this workspace, roles and invitations' }
       ]
     }
   ];
@@ -100,6 +107,140 @@ export class AppComponent implements OnInit, OnDestroy {
   toggleSidebar(): void {
     this.sidebarCollapsed = !this.sidebarCollapsed;
     try { localStorage.setItem('tradesage_sidebar_collapsed', this.sidebarCollapsed ? '1' : '0'); } catch { /* storage unavailable */ }
+  }
+
+  // ---------- Invitations to the signed-in account ----------
+  private readonly INVITE_KEY = 'marketech_invite_token';
+  myInvitations: any[] = [];
+  invitePreview: any = null;
+  inviteLinkError = '';
+  showInvitations = false;
+  inviteBusy = false;
+
+  private get inviteToken(): string | null {
+    try { return sessionStorage.getItem(this.INVITE_KEY); } catch { return null; }
+  }
+  private clearInviteToken(): void {
+    try { sessionStorage.removeItem(this.INVITE_KEY); } catch { /* ignore */ }
+  }
+
+  checkInvitations(): void {
+    this.apiService.getMyInvitations().subscribe({
+      next: (res) => { this.myInvitations = res.invitations || []; },
+      error: () => { this.myInvitations = []; }
+    });
+    const token = this.inviteToken;
+    if (!token) return;
+    this.apiService.previewInvitation(token).subscribe({
+      next: (res) => { this.invitePreview = res; this.inviteLinkError = ''; this.showInvitations = true; },
+      error: (err) => {
+        this.clearInviteToken();
+        this.invitePreview = null;
+        this.inviteLinkError = err?.error?.error || 'This invitation link is not valid.';
+        this.showInvitations = true;
+      }
+    });
+  }
+
+  /** The invitation that came with the link, if it is one of mine. */
+  isLinkedInvitation(inv: any): boolean {
+    return !!this.invitePreview && this.invitePreview.invitation.id === inv.id;
+  }
+
+  acceptInvitation(): void {
+    const token = this.inviteToken;
+    if (!token || !this.invitePreview?.canAccept) return;
+    this.inviteBusy = true;
+    this.apiService.acceptInvitation(token).subscribe({
+      next: (res) => {
+        this.clearInviteToken();
+        // Open the joined workspace with its own session (full reload clears the previous one).
+        this.startSession(res.session);
+      },
+      error: (err) => {
+        this.inviteBusy = false;
+        this.clearInviteToken();
+        this.invitePreview = null;
+        this.inviteLinkError = err?.error?.error || 'Could not accept the invitation.';
+      }
+    });
+  }
+
+  declineInvitation(inv: any): void {
+    if (!confirm(`Decline the invitation to ${inv.workspaceName}?`)) return;
+    const token = this.isLinkedInvitation(inv) ? this.inviteToken : null;
+    this.inviteBusy = true;
+    this.apiService.declineInvitation(token ? { token } : { id: inv.id }).subscribe({
+      next: () => {
+        this.inviteBusy = false;
+        if (token) { this.clearInviteToken(); this.invitePreview = null; }
+        this.myInvitations = this.myInvitations.filter(i => i.id !== inv.id);
+        this.showToast('Invitation declined.');
+        if (!this.myInvitations.length && !this.invitePreview) this.showInvitations = false;
+      },
+      error: (err) => { this.inviteBusy = false; this.showToast(err?.error?.error || 'Could not decline the invitation.'); }
+    });
+  }
+
+  // ---------- Workspaces (list, switch, create) ----------
+  workspaces: any[] = [];
+  workspaceBusy = false;
+  workspaceError = '';
+  showCreateWorkspace = false;
+  newWorkspace = { name: '', industry: '' };
+
+  loadWorkspaces(then?: () => void): void {
+    this.apiService.getWorkspaces().subscribe({
+      next: (res) => { this.workspaces = res.workspaces || []; then?.(); },
+      error: () => { this.workspaces = []; }
+    });
+  }
+
+  /** Workspace-1-only modules (Demos, Mark text chat) work only where the server says so. */
+  get legacyModules(): boolean {
+    const id = this.auth.workspace?.id;
+    const listed = this.workspaces.find(w => w.id === id);
+    if (listed) return !!listed.legacyModules;
+    return this.auth.workspace?.legacyModules !== false;
+  }
+
+  get legacyWorkspaceName(): string {
+    return this.workspaces.find(w => w.legacyModules)?.name || 'the main workspace';
+  }
+
+  /** A new token for the chosen workspace, then a full reload so no data of the previous one stays in memory. */
+  switchWorkspace(w: any): void {
+    if (this.workspaceBusy || w.id === this.auth.workspace?.id) { this.openMenu = null; return; }
+    this.workspaceBusy = true;
+    this.apiService.switchWorkspace(w.id).subscribe({
+      next: (res) => this.startSession(res),
+      error: (err) => { this.workspaceBusy = false; this.showToast(err?.error?.error || 'Could not switch workspace.'); }
+    });
+  }
+
+  openCreateWorkspace(): void {
+    this.openMenu = null;
+    this.newWorkspace = { name: '', industry: '' };
+    this.workspaceError = '';
+    this.showCreateWorkspace = true;
+  }
+
+  createWorkspace(): void {
+    const name = this.newWorkspace.name.trim();
+    if (name.length < 2) { this.workspaceError = 'Enter a workspace name (at least 2 characters).'; return; }
+    this.workspaceBusy = true;
+    this.workspaceError = '';
+    this.apiService.createWorkspace({ name, industry: this.newWorkspace.industry.trim() || undefined }).subscribe({
+      next: (res) => this.startSession(res),
+      error: (err) => { this.workspaceBusy = false; this.workspaceError = err?.error?.error || 'Could not create the workspace.'; }
+    });
+  }
+
+  private startSession(res: any): void {
+    this.voiceManualStop = true;
+    this.speechService.stopElevenLabsSession();
+    this.auth.setSession(res);
+    window.location.reload();
   }
 
   toggleMenu(menu: 'workspace' | 'notifications' | 'profile', event: Event): void {
@@ -344,6 +485,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.readDeepLink();
     this.sessionSub = this.auth.sessionExpired$.subscribe(() => this.showToast('Session ended — please sign in again.'));
     if (this.auth.isLoggedIn) {
+      this.checkInvitations();
       this.loadWorkspaceData();
       this.restoreVoiceAlwaysOn();
       this.checkVoiceReadiness();
@@ -354,6 +496,13 @@ export class AppComponent implements OnInit, OnDestroy {
   private readDeepLink(): void {
     if (typeof window === 'undefined') return;
     const params = new URLSearchParams(window.location.search);
+    // Invitation link (/?invite=<token>): kept for this tab until the invitation is answered,
+    // so it survives signing in or registering first.
+    const invite = params.get('invite');
+    if (invite && /^[A-Za-z0-9_-]{40,64}$/.test(invite)) {
+      try { sessionStorage.setItem(this.INVITE_KEY, invite); } catch { /* storage unavailable */ }
+      window.history.replaceState({}, '', window.location.pathname);
+    }
     if (params.get('view') === 'social') {
       this.currentRoute = 'social';
       this.socialSection = params.get('section');
@@ -376,6 +525,7 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   onLoggedIn(): void {
+    this.checkInvitations();
     this.loadWorkspaceData();
     this.restoreVoiceAlwaysOn();
     this.checkVoiceReadiness();
@@ -435,7 +585,9 @@ export class AppComponent implements OnInit, OnDestroy {
     this.loadDrafts();
     this.loadMailConfig();
     this.loadConnectedBusinesses();
-    this.loadAppointments();
+    // Appointments are a workspace-1-only module: load them only once the server confirms they
+    // work here (sessions from before multi-workspace support carry no flag).
+    this.loadWorkspaces(() => { if (this.legacyModules) this.loadAppointments(); });
   }
 
   ngOnDestroy(): void {
@@ -657,6 +809,10 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   sendQuickText(): void {
+    if (!this.legacyModules) {
+      this.showToast('Text chat with Mark is not available in this workspace. Voice calls work.');
+      return;
+    }
     const text = this.quickTextInput.trim();
     if (!text) return;
 

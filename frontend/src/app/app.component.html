@@ -58,13 +58,26 @@
             <app-icon name="chevron-down" [size]="16"></app-icon>
           </button>
           <div class="dropdown" *ngIf="openMenu === 'workspace'" (click)="$event.stopPropagation()" role="menu">
-            <div class="dropdown-label">Workspace</div>
-            <div class="dropdown-item current">
-              <span class="ws-avatar">{{ (auth.workspace?.name || 'W')[0] }}</span>
-              <span class="grow"><strong>{{ auth.workspace?.name || 'Workspace' }}</strong><small>{{ auth.workspace?.plan || 'Plan' }} plan</small></span>
-              <app-icon name="check" [size]="16"></app-icon>
-            </div>
-            <div class="dropdown-note">Your account belongs to one workspace. Sign in with another account to switch.</div>
+            <div class="dropdown-label">Your workspaces</div>
+            <ng-container *ngIf="workspaces.length; else currentOnly">
+              <button *ngFor="let w of workspaces" class="dropdown-item" role="menuitemradio" [class.current]="w.id === auth.workspace?.id"
+                      [attr.aria-checked]="w.id === auth.workspace?.id" [disabled]="workspaceBusy" (click)="switchWorkspace(w)">
+                <span class="ws-avatar">{{ (w.name || 'W')[0] }}</span>
+                <span class="grow"><strong>{{ w.name }}</strong><small>{{ w.role }} · {{ w.plan || 'No' }} plan</small></span>
+                <app-icon *ngIf="w.id === auth.workspace?.id" name="check" [size]="16"></app-icon>
+              </button>
+            </ng-container>
+            <ng-template #currentOnly>
+              <div class="dropdown-item current">
+                <span class="ws-avatar">{{ (auth.workspace?.name || 'W')[0] }}</span>
+                <span class="grow"><strong>{{ auth.workspace?.name || 'Workspace' }}</strong><small>{{ auth.workspace?.plan || 'No' }} plan</small></span>
+                <app-icon name="check" [size]="16"></app-icon>
+              </div>
+            </ng-template>
+            <div class="dropdown-note" *ngIf="workspaceBusy">Switching…</div>
+            <button class="dropdown-item" role="menuitem" (click)="openMenu = null; navigate('members')">Members &amp; invitations</button>
+            <button class="dropdown-item" role="menuitem" *ngIf="myInvitations.length" (click)="openMenu = null; showInvitations = true">Invitations for you ({{ myInvitations.length }})</button>
+            <button class="dropdown-item ws-create" role="menuitem" (click)="openCreateWorkspace()" [disabled]="workspaceBusy">+ Create workspace</button>
           </div>
         </div>
 
@@ -683,6 +696,8 @@
     </div>
   </section>
 
+  <app-members *ngIf="currentRoute === 'members'" (toast)="showToast($event)"></app-members>
+
   <!-- =================================================================== -->
   <!-- TAB 6: NEURAL VOICE CENTER (ELEVENLABS + MARK AI ORB) -->
   <!-- =================================================================== -->
@@ -739,7 +754,8 @@
         <button class="chip-action-btn" (click)="sendPresetPrompt('Sync my company email')">🔄 Sync Mailbox</button>
       </div>
 
-      <div class="quick-chat-row">
+      <div class="unavailable-note" *ngIf="!legacyModules" role="status">Text chat with Mark is not available in this workspace yet. Voice calls (Talk to Mark) work.</div>
+      <div class="quick-chat-row" *ngIf="legacyModules">
         <button class="btn btn-mic-quick" [class.listening]="isListeningQuickChat" (click)="toggleVoiceDictation()" title="Voice Dictation: Speak in English">
           {{ isListeningQuickChat ? '🔴' : '🎙️' }}
         </button>
@@ -813,7 +829,13 @@
   <!-- =================================================================== -->
   <!-- TAB 7: APPOINTMENTS & DEMOS -->
   <!-- =================================================================== -->
-  <section *ngIf="currentRoute === 'appointments'" class="hud-panel full-width-panel">
+  <section *ngIf="currentRoute === 'appointments' && !legacyModules" class="hud-panel full-width-panel">
+    <div class="unavailable-box" role="status">
+      <h2>Not available in this workspace</h2>
+      <p>Demos and appointments currently work only in {{ legacyWorkspaceName }}. Switch workspace from the menu at the top to use them.</p>
+    </div>
+  </section>
+  <section *ngIf="currentRoute === 'appointments' && legacyModules" class="hud-panel full-width-panel">
     <div class="panel-header">
       <div>
         <h2>Scheduled demos & appointments</h2>
@@ -912,6 +934,59 @@
       <div class="modal-footer">
         <button class="btn btn-primary" (click)="dismissVoiceNotice()">OK, got it</button>
       </div>
+    </div>
+  </div>
+
+  <div *ngIf="showInvitations" class="modal-backdrop" (click)="showInvitations = false">
+    <div class="modal-card" (click)="$event.stopPropagation()" role="dialog" aria-modal="true" aria-labelledby="invites-title">
+      <div class="modal-header">
+        <h3 id="invites-title">Workspace invitations</h3>
+        <button class="close-btn" (click)="showInvitations = false" aria-label="Close">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="lead-warn" *ngIf="inviteLinkError" role="alert">{{ inviteLinkError }}</p>
+        <div class="invite-item" *ngIf="invitePreview && !invitePreview.canAccept">
+          <strong>{{ invitePreview.invitation.workspaceName }}</strong>
+          <p class="helper-text">{{ invitePreview.reason }} You are signed in as {{ auth.user?.email }}.</p>
+        </div>
+        <div class="invite-item" *ngFor="let inv of myInvitations">
+          <div>
+            <strong>{{ inv.workspaceName }}</strong> · {{ inv.role }}
+            <div class="helper-text">Invited by {{ inv.invitedBy || 'a workspace admin' }} · expires {{ inv.expiresAt | date:'medium' }}</div>
+            <div class="helper-text" *ngIf="!isLinkedInvitation(inv)">To accept, open the invitation link from the email while signed in.</div>
+          </div>
+          <div class="button-group">
+            <button class="btn btn-secondary btn-sm" (click)="declineInvitation(inv)" [disabled]="inviteBusy">Decline</button>
+            <button *ngIf="isLinkedInvitation(inv) && invitePreview.canAccept" class="btn btn-primary btn-sm" (click)="acceptInvitation()" [disabled]="inviteBusy">{{ inviteBusy ? 'Joining…' : 'Accept and open' }}</button>
+          </div>
+        </div>
+        <p class="helper-text" *ngIf="!myInvitations.length && !invitePreview && !inviteLinkError">No pending invitations.</p>
+      </div>
+    </div>
+  </div>
+
+  <div *ngIf="showCreateWorkspace" class="modal-backdrop" (click)="showCreateWorkspace = false">
+    <div class="modal-card" (click)="$event.stopPropagation()" role="dialog" aria-label="Create workspace">
+      <div class="modal-header">
+        <h3>Create workspace</h3>
+        <button class="close-btn" (click)="showCreateWorkspace = false" aria-label="Close">✕</button>
+      </div>
+      <form class="modal-body" (ngSubmit)="createWorkspace()">
+        <p class="helper-text">A separate workspace with its own products, leads, mail and campaigns. You will be its owner and it opens right away.</p>
+        <div class="form-group">
+          <label for="new-ws-name">Workspace name</label>
+          <input id="new-ws-name" class="hud-input" name="wsName" [(ngModel)]="newWorkspace.name" maxlength="100" required placeholder="e.g. My second brand" />
+        </div>
+        <div class="form-group">
+          <label for="new-ws-industry">Industry (optional)</label>
+          <input id="new-ws-industry" class="hud-input" name="wsIndustry" [(ngModel)]="newWorkspace.industry" maxlength="100" placeholder="e.g. Retail" />
+        </div>
+        <p class="lead-warn" *ngIf="workspaceError" role="alert">{{ workspaceError }}</p>
+        <div class="button-group">
+          <button type="button" class="btn btn-secondary" (click)="showCreateWorkspace = false">Cancel</button>
+          <button type="submit" class="btn btn-primary" [disabled]="workspaceBusy">{{ workspaceBusy ? 'Creating…' : 'Create and open' }}</button>
+        </div>
+      </form>
     </div>
   </div>
 

@@ -14,6 +14,7 @@ import { AuthStateService } from './auth-state.service';
         <div class="brand"><div class="mark" aria-hidden="true"><span></span></div><h1>Marketech.ai <span>Mark · AI Workforce</span></h1></div>
         <p class="sub">{{ mode === 'login' ? 'Sign in to your workspace' : 'Create a workspace' }}</p>
         <div *ngIf="expired" class="note">Your session ended. Please sign in again.</div>
+        <div *ngIf="invited" class="note">You have a workspace invitation. Sign in, or create an account, with the email address the invitation was sent to; you can accept it next.</div>
         <label>Email<input name="email" type="email" [(ngModel)]="email" required autocomplete="username" /></label>
         <label>Password<input name="password" type="password" [(ngModel)]="password" required [attr.autocomplete]="mode === 'login' ? 'current-password' : 'new-password'" /></label>
         <ng-container *ngIf="mode === 'register'">
@@ -65,6 +66,8 @@ export class LoginComponent {
   busy = false;
   error: string | null = null;
   expired = false;
+  // Set when the page was opened from an invitation link (the app keeps the token for this tab).
+  invited = (() => { try { return !!sessionStorage.getItem('marketech_invite_token'); } catch { return false; } })();
 
   constructor(private api: ApiService, private auth: AuthStateService) {}
 

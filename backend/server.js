@@ -13,7 +13,7 @@ const usageService = require('./services/usageService');
 const aiEngine = require('./services/aiEngine');
 const emailService = require('./services/emailService');
 const voiceStatus = require('./services/voiceStatus');
-const { apiGate, legacyWorkspaceOnly, requireCapability } = require('./middleware/auth');
+const { apiGate, legacyWorkspaceOnly, requireCapability, LEGACY_WORKSPACE_ID } = require('./middleware/auth');
 const { rateLimit } = require('./lib/rateLimit');
 const { resolveSelectedProduct, findProductNamedIn } = require('./lib/productContext');
 const websiteExtractor = require('./services/websiteExtractor');
@@ -29,6 +29,7 @@ const abTestsRouter = require('./modules/abtests/routes');
 const automationRouter = require('./modules/automation/routes');
 const campaignAnalyticsRouter = require('./modules/campaignAnalytics/routes');
 const budgetRouter = require('./modules/budget/routes');
+const workspacesRouter = require('./modules/workspaces/routes');
 const leadService = require('./modules/leads/leadService');
 const strategistService = require('./modules/social/strategistService');
 const crypto = require('crypto');
@@ -126,6 +127,8 @@ app.use('/api/v1/automations', automationRouter);
 app.use('/api/v1/campaign-analytics', campaignAnalyticsRouter);
 // Tenant-aware campaign budgets, actual spend, pacing, alerts and ROI (not subscription billing).
 app.use('/api/v1/budgets', budgetRouter);
+// The signed-in user's workspaces: list, create, switch (every workspace; before the legacy gate).
+app.use(workspacesRouter);
 
 // Voice (Mark, ElevenLabs) is available to every workspace: the agent only has client tools, which
 // run in the caller's browser with the caller's own workspace session. Both routes need sign-in and
@@ -203,11 +206,17 @@ function getLocalIp() {
 // 1. AUTHENTICATION & WORKSPACE (SRS FR-01)
 // ==========================================
 
+// Marks the workspace where the workspace-1-only (legacy) modules work, so the UI can say so elsewhere.
+function withModuleFlags(session) {
+  const flag = w => (w ? { ...w, legacyModules: Number(w.id) === LEGACY_WORKSPACE_ID } : w);
+  return { ...session, workspace: flag(session.workspace), workspaces: (session.workspaces || []).map(flag) };
+}
+
 app.post(['/api/v1/auth/register', '/api/auth/register'], async (req, res) => {
   try {
     const { email, password, displayName, workspaceName, industry } = req.body;
     const result = await authService.registerUser(email, password, displayName, workspaceName, industry);
-    res.json({ success: true, ...result });
+    res.json({ success: true, ...withModuleFlags(result) });
   } catch (err) {
     res.status(400).json({ success: false, error: err.message });
   }
@@ -215,11 +224,12 @@ app.post(['/api/v1/auth/register', '/api/auth/register'], async (req, res) => {
 
 app.post(['/api/v1/auth/login', '/api/auth/login'], async (req, res) => {
   try {
-    const { email, password } = req.body;
-    const result = await authService.loginUser(email, password);
-    res.json({ success: true, ...result });
+    const { email, password, workspaceId } = req.body || {};
+    // Optional workspaceId: the user must be an active member of it (checked by loginUser).
+    const result = await authService.loginUser(email, password, workspaceId);
+    res.json({ success: true, ...withModuleFlags(result) });
   } catch (err) {
-    res.status(401).json({ success: false, error: err.message });
+    res.status(err.status === 403 || err.status === 400 ? err.status : 401).json({ success: false, code: err.code, error: err.message });
   }
 });
 

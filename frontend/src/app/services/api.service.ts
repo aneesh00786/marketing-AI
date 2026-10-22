@@ -30,6 +30,36 @@ export class ApiService {
     return this.http.post(`${this.baseUrl}/auth/register`, data);
   }
 
+  // Workspaces of the signed-in user. Switching and creating return a new token for that workspace.
+  getWorkspaces(): Observable<any> {
+    return this.http.get(`${this.baseUrl}/workspaces`);
+  }
+
+  switchWorkspace(workspaceId: number): Observable<any> {
+    return this.http.post(`${this.baseUrl}/auth/switch-workspace`, { workspaceId });
+  }
+
+  createWorkspace(data: { name: string; industry?: string }): Observable<any> {
+    return this.http.post(`${this.baseUrl}/workspaces`, data);
+  }
+
+  // Invitations sent to the signed-in account. Accepting needs the token from the invitation link.
+  getMyInvitations(): Observable<any> {
+    return this.http.get(`${this.baseUrl}/invitations`);
+  }
+
+  previewInvitation(token: string): Observable<any> {
+    return this.http.post(`${this.baseUrl}/invitations/preview`, { token });
+  }
+
+  acceptInvitation(token: string): Observable<any> {
+    return this.http.post(`${this.baseUrl}/invitations/accept`, { token });
+  }
+
+  declineInvitation(body: { token?: string; id?: number }): Observable<any> {
+    return this.http.post(`${this.baseUrl}/invitations/decline`, body);
+  }
+
   getMe(): Observable<any> {
     return this.http.get(`${this.baseUrl}/auth/me`, { headers: this.getHeaders() });
   }

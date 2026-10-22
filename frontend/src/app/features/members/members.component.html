@@ -1,0 +1,84 @@
+<section class="hud-panel full-width-panel members">
+  <div class="panel-header">
+    <div>
+      <h2>Members</h2>
+      <p class="subtitle">People with access to this workspace. Owners and Admins can invite, change roles and remove members.</p>
+    </div>
+  </div>
+
+  <div class="note error" *ngIf="error" role="alert">{{ error }}</div>
+  <p class="muted" *ngIf="loading && !data">Loading members…</p>
+
+  <ng-container *ngIf="data">
+    <form class="invite-form" *ngIf="data.canManage" (ngSubmit)="invite()">
+      <label>Invite by email
+        <input class="hud-input" type="email" name="inviteEmail" [(ngModel)]="inviteForm.email" required maxlength="255" placeholder="name@company.com" />
+      </label>
+      <label>Role
+        <select class="hud-input" name="inviteRole" [(ngModel)]="inviteForm.role">
+          <option *ngFor="let r of assignableRoles" [value]="r">{{ r }}</option>
+        </select>
+      </label>
+      <button class="btn btn-primary" type="submit" [disabled]="busy === 'invite' || !inviteForm.email.trim()">{{ busy === 'invite' ? 'Inviting…' : 'Send invitation' }}</button>
+    </form>
+    <p class="muted small" *ngIf="data.canManage">The invited person signs in (or creates an account) with that email address, then opens the invitation link. Links expire and work once.</p>
+
+    <div class="link-box" *ngIf="lastLink" role="status">
+      <div><b>{{ lastLink.emailed ? 'Emailed to' : 'Not emailed — share this link with' }} {{ lastLink.email }}</b></div>
+      <div class="muted small" *ngIf="!lastLink.emailed && lastLink.emailError">Email not sent: {{ lastLink.emailError }}</div>
+      <div class="link-row">
+        <input class="hud-input" [value]="lastLink.link" readonly aria-label="Invitation link" (focus)="$any($event.target).select()" />
+        <button class="btn btn-secondary btn-sm" type="button" (click)="copyLink()">Copy link</button>
+        <button class="btn btn-secondary btn-sm" type="button" (click)="lastLink = null">Hide</button>
+      </div>
+      <div class="muted small">Only someone signed in as {{ lastLink.email }} can use it.</div>
+    </div>
+
+    <h3 class="sub">Members ({{ data.members.length }})</h3>
+    <div class="table-wrap">
+      <table class="tbl">
+        <thead><tr><th>Member</th><th>Role</th><th>Status</th><th>Joined</th><th *ngIf="data.canManage"></th></tr></thead>
+        <tbody>
+          <tr *ngFor="let m of data.members" [class.dim]="m.status !== 'Active'">
+            <td><b>{{ m.displayName || m.email }}</b><span class="you" *ngIf="m.isYou">You</span><div class="muted small">{{ m.email }}</div></td>
+            <td>
+              <select *ngIf="canEdit(m); else roleText" class="hud-input sm" [ngModel]="m.role" (ngModelChange)="changeRole(m, $event)" [attr.aria-label]="'Role of ' + m.email">
+                <option *ngFor="let r of assignableRoles" [value]="r">{{ r }}</option>
+              </select>
+              <ng-template #roleText>{{ m.role }}</ng-template>
+            </td>
+            <td><span class="tag" [class.ok]="m.status === 'Active'">{{ m.status }}</span></td>
+            <td>{{ m.joinedAt | date:'mediumDate' }}</td>
+            <td *ngIf="data.canManage" class="right">
+              <button *ngIf="canEdit(m)" class="btn btn-danger btn-sm" type="button" (click)="remove(m)">Remove</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <ng-container *ngIf="data.canManage">
+      <h3 class="sub">Pending invitations ({{ data.invitations.length }})</h3>
+      <div class="table-wrap" *ngIf="data.invitations.length; else noInvites">
+        <table class="tbl">
+          <thead><tr><th>Email</th><th>Role</th><th>Invited by</th><th>Expires</th><th></th></tr></thead>
+          <tbody>
+            <tr *ngFor="let i of data.invitations">
+              <td>{{ i.email }}</td>
+              <td>{{ i.role }}</td>
+              <td>{{ i.invitedBy || '—' }}</td>
+              <td>{{ i.expiresAt | date:'medium' }}</td>
+              <td class="right">
+                <ng-container *ngIf="i.role !== 'Workspace Owner' || data.canManageOwners">
+                  <button class="btn btn-secondary btn-sm" type="button" (click)="resend(i)" [disabled]="busy === 'resend-' + i.id">Resend</button>
+                  <button class="btn btn-secondary btn-sm" type="button" (click)="cancel(i)">Cancel</button>
+                </ng-container>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <ng-template #noInvites><p class="muted small">No pending invitations.</p></ng-template>
+    </ng-container>
+  </ng-container>
+</section>
