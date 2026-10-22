@@ -32,11 +32,18 @@
         </ul>
       </div>
     </div>
-    <label>State or region
-      <input class="hud-input" name="region" [(ngModel)]="form.region" maxlength="80" placeholder="optional" />
+    <label>Search scope *
+      <select class="hud-input" name="scope" [(ngModel)]="form.scope">
+        <option value="country">Whole country</option>
+        <option value="region">A state or region</option>
+        <option value="city">A city</option>
+      </select>
     </label>
-    <label>City
-      <input class="hud-input" name="city" [(ngModel)]="form.city" maxlength="80" placeholder="optional" />
+    <label *ngIf="form.scope !== 'country'">State or region{{ form.scope === 'region' ? ' *' : '' }}
+      <input class="hud-input" name="region" [(ngModel)]="form.region" maxlength="80" [placeholder]="form.scope === 'region' ? 'e.g. Kerala' : 'optional, helps Google'" />
+    </label>
+    <label *ngIf="form.scope === 'city'">City *
+      <input class="hud-input" name="city" [(ngModel)]="form.city" maxlength="80" placeholder="e.g. Kochi" />
     </label>
     <label>Extra keywords
       <input class="hud-input" name="keywords" [(ngModel)]="form.keywords" maxlength="200" placeholder="optional, e.g. FMCG" />
@@ -47,37 +54,92 @@
         <option *ngFor="let p of products" [value]="p.id">{{ p.name }}</option>
       </select>
     </label>
-    <label>Maximum results
-      <input class="hud-input" type="number" name="maxResults" [(ngModel)]="form.maxResults" min="1" [max]="config?.maxResults || 60" />
+    <label>Target unique businesses
+      <input class="hud-input" type="number" name="maxResults" [(ngModel)]="form.maxResults" min="1" [max]="config?.maxResults || 300" />
     </label>
+    <label>Google request budget
+      <input class="hud-input" type="number" name="maxRequests" [(ngModel)]="form.maxRequests" min="1" [max]="config?.maxRequests || 20" />
+    </label>
+    <div class="budget-line" *ngIf="config">
+      Up to {{ budgetInfo.maxPlaces }} places before duplicates (20 per request) · estimated cost at most ${{ budgetInfo.maxCost.toFixed(2) }}
+      ({{ form.includeContacts ? config.pricePer1000.withContacts : config.pricePer1000.withoutContacts }} USD per 1,000 requests, before Google's free monthly usage)
+      · {{ dailyRequestsLeft }} of {{ config.dailyRequestLimit }} requests left today
+      <div class="warn-text" *ngIf="budgetInfo.shortfall">A target of {{ form.maxResults }} is more than {{ form.maxRequests }} request(s) can return. Raise the budget or lower the target.</div>
+    </div>
     <div class="checks">
+      <label class="check"><input type="checkbox" name="expandCategories" [(ngModel)]="form.expandCategories" /> Also search related business categories (AI suggests them)</label>
       <label class="check"><input type="checkbox" name="includeContacts" [(ngModel)]="form.includeContacts" /> Include phone and website (higher Google price tier)</label>
       <label class="check"><input type="checkbox" name="aiQualify" [(ngModel)]="form.aiQualify" /> Assess product fit with AI</label>
       <label class="check"><input type="checkbox" name="review" [(ngModel)]="form.review" /> Review results before importing</label>
     </div>
     <div class="form-actions">
       <button class="btn btn-primary" type="submit" [disabled]="!canSearch">{{ phase === 'searching' ? 'Searching…' : 'Search businesses' }}</button>
+      <button class="btn btn-secondary" type="button" (click)="previewPlan()" [disabled]="!!searchBlockedReason || planning || phase === 'searching'">{{ planning ? 'Planning…' : 'Preview search plan' }}</button>
+      <button class="btn btn-secondary" type="button" *ngIf="phase === 'searching'" (click)="cancelSearch()">Cancel</button>
       <span class="muted small" *ngIf="config && config.configured && searchBlockedReason">{{ searchBlockedReason }}</span>
-      <span class="muted small" *ngIf="config && !searchBlockedReason">{{ config.searchesToday }} of {{ config.dailySearchLimit }} searches used today · at most {{ config.maxResults }} results per search</span>
+      <span class="muted small" *ngIf="config && !searchBlockedReason">{{ config.searchesToday }} of {{ config.dailySearchLimit }} searches used today</span>
     </div>
   </form>
 
-  <p class="muted small">Google returns at most 60 places per search and only what its coverage and ranking provide, so a search never lists every business in an area, and a higher maximum does not guarantee more unique businesses. Narrow by state or city to find more.</p>
+  <p class="muted small">Each Google query returns at most 60 places, so a search runs several distinct queries (related categories, then the states or cities where results are) until it reaches your target or its request budget. Results are limited by Google's coverage and ranking; they are never every business in an area.</p>
 
-  <div class="status" *ngIf="status" role="status"><span class="spinner"></span>{{ status }}</div>
+  <div class="plan" *ngIf="plan && planIsCurrent">
+    <div><b>Search plan</b> · {{ plan.location }}</div>
+    <div class="muted small" *ngIf="plan.ai && !plan.ai.available">{{ plan.ai.reason }}</div>
+    <div class="chips">
+      <span class="chip-edit" *ngFor="let c of planCategories; let i = index">{{ c }}<button type="button" (click)="removeCategory(i)" [disabled]="planCategories.length <= 1" [attr.aria-label]="'Remove ' + c">✕</button></span>
+      <span class="chip-add" *ngIf="planCategories.length < (config?.maxCategories || 8)">
+        <input class="hud-input sm" [(ngModel)]="newCategory" name="newCategory" (keydown.enter)="$event.preventDefault(); addCategory()" placeholder="Add a category" maxlength="60" />
+        <button type="button" class="btn btn-secondary btn-sm" (click)="addCategory()">Add</button>
+      </span>
+    </div>
+    <ng-container *ngFor="let sItem of plan.suggested"><div class="muted small" *ngIf="planCategories.includes(sItem.name)">{{ sItem.name }}: {{ sItem.why }}</div></ng-container>
+    <div class="muted small" *ngIf="plan.progressive">{{ plan.progressive }}</div>
+    <div class="warn-text" *ngIf="plan.budget.shortfall">{{ plan.budget.shortfall }}</div>
+    <div class="muted small">These categories are used when you click Search (until you change the search inputs).</div>
+  </div>
+
+  <div class="progress-box" *ngIf="phase === 'searching' && progress" role="status" aria-live="polite">
+    <div class="status"><span class="spinner"></span>{{ progressText }}</div>
+    <div class="progress-stats" *ngIf="progress.maxRequests">
+      <span><b>{{ progress.completedQueries }}</b> of {{ progress.plannedQueries }} queries</span>
+      <span><b>{{ progress.requests }}</b> of {{ progress.maxRequests }} requests ({{ progress.maxRequests - progress.requests }} left)</span>
+      <span><b>{{ progress.unique }}</b> of {{ progress.target }} unique businesses</span>
+      <span><b>{{ progress.repeats }}</b> repeats skipped</span>
+    </div>
+    <div class="bar" *ngIf="progress.maxRequests"><span [style.width.%]="progress.requests / progress.maxRequests * 100"></span></div>
+  </div>
   <div class="note error" *ngIf="error" role="alert">{{ error }}</div>
 
   <ng-container *ngIf="data">
     <div class="summary">
-      <div><b>{{ data.summary.found }}</b><span>found</span></div>
+      <div><b>{{ data.summary.found }}</b><span>unique businesses</span></div>
+      <div><b>{{ data.summary.raw }}</b><span>raw results ({{ data.summary.repeatsAcrossQueries }} repeats)</span></div>
       <div><b>{{ data.summary.eligible }}</b><span>eligible to import</span></div>
       <div><b>{{ data.summary.duplicates }}</b><span>duplicates</span></div>
       <div><b>{{ data.summary.possibleDuplicates }}</b><span>possible duplicates</span></div>
       <div><b>{{ data.summary.missingContact }}</b><span>no phone or website</span></div>
+      <div><b>{{ data.summary.closed }}</b><span>excluded (closed)</span></div>
     </div>
-    <p class="muted small">Search: “{{ data.run.textQuery }}” · imported leads will be linked to <b>{{ data.run.productName }}</b></p>
+    <p class="muted small">{{ data.summary.queries }} queries · {{ data.coverage.requestsUsed }} of {{ data.coverage.allowedRequests }} Google requests used ({{ stopText(data.coverage.stopReason) }}) · estimated cost ${{ data.coverage.estimatedCostUsd.toFixed(2) }} · imported leads will be linked to <b>{{ data.run.productName }}</b></p>
+    <div class="note" [class.warn]="data.coverage.stopReason !== 'reached_target'">{{ data.coverage.explanation }}</div>
     <div class="note warn" *ngIf="data.partial">{{ data.partial.message }}</div>
-    <div class="note" *ngIf="data.lessThanRequested">{{ data.lessThanRequested }}</div>
+    <div class="note warn" *ngIf="data.coverage.planAi && !data.coverage.planAi.available">{{ data.coverage.planAi.reason }}</div>
+    <div class="note warn" *ngIf="data.ai?.limited">{{ data.ai.limited }}</div>
+    <div class="muted small">Categories searched ({{ data.coverage.categoriesFrom === 'ai' ? 'suggested by AI' : data.coverage.categoriesFrom === 'you' ? 'chosen by you' : 'your business type' }}): {{ data.coverage.categories.join(' · ') }}
+      <button type="button" class="link-btn" (click)="showQueries = !showQueries">{{ showQueries ? 'Hide' : 'Show' }} queries</button></div>
+    <div class="table-wrap" *ngIf="showQueries">
+      <table class="tbl">
+        <thead><tr><th>Query</th><th>Requests</th><th>Places</th><th>New unique</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr *ngFor="let q of data.queries">
+            <td>{{ q.query }}<div class="muted small" *ngIf="q.tier === 'local'">from locations in earlier results</div></td>
+            <td>{{ q.requests }}</td><td>{{ q.places }}</td><td>{{ q.newUnique }}</td>
+            <td>{{ q.status === 'ok' ? 'OK' : 'Failed' }}<div class="muted small" *ngIf="q.note">{{ q.note }}</div></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
     <div class="note warn" *ngIf="data.ai && !data.ai.available">{{ data.ai.reason }}</div>
 
     <div class="toolbar">

@@ -5,12 +5,17 @@ and imports the selected ones as leads.
 
 ## Flow
 
-1. The user enters a business type and country (required), plus optional state/region, city,
-   keywords, target Digital Product and maximum results (default 20, at most 60).
-2. `POST /api/v1/leads/discovery/search` runs one Google Text Search query built only from those
-   inputs ("Wholesale distributors (FMCG) in Kochi, Kerala, India"), following page tokens.
-3. Results are checked for duplicates. If a product was chosen, the AI engine can assess product fit.
-   The user reviews, selects and imports.
+1. The user enters:
+   - **Required:** business type, country, search scope (whole country, a state or region, or a
+     city) and the target Digital Product.
+   - **Optional:** keywords, the target number of unique businesses (default 50, at most 300), a
+     Google request budget (default 10, at most 20), and whether to search related categories.
+2. Optionally, `POST /api/v1/leads/discovery/plan` previews the categories and first queries, with
+   the budget and estimated cost. The categories can be edited before searching.
+3. `POST /api/v1/leads/discovery/search` runs several distinct Text Search queries (see
+   *Coverage*). With `Accept: application/x-ndjson` it streams progress lines, then the result.
+4. Results are checked for duplicates. The AI engine can assess product fit. The user reviews,
+   selects and imports.
 4. `POST /api/v1/leads/discovery/runs/:id/import` creates leads in one transaction.
 5. `GET /api/v1/leads/discovery/leads/:id/place` shows an imported lead's business details live
    from Google.
@@ -20,9 +25,54 @@ returns the key.
 
 ## What Google Places can and cannot provide
 
-Google returns **at most 60 places per query** (20 per page), limited by its coverage and
-ranking. A search never lists every business in an area, and asking for more results does not
-guarantee more unique businesses. Narrow by state or city to find more.
+Google returns **at most 60 places per query** (20 per request), limited by its coverage and
+ranking. A search never lists every business in an area, and a higher target does not guarantee
+more unique businesses.
+
+## Coverage: how a search runs
+
+A broad type such as "B2B businesses" is not a Google place type, so one query finds little. A
+search therefore runs several **distinct** queries within its request budget:
+
+1. **Categories.** The user's business type always comes first. With "related categories" on, the
+   AI engine suggests up to 7 more searchable kinds of business that fit the description and could
+   buy the product (e.g. "Wholesale distributors", "Packaging suppliers"). Rules:
+   - There is no built-in industry list.
+   - Locations, brand names and repeats are rejected.
+   - Companies selling the same kind of product are excluded unless the description asks for them.
+   - Without AI, only the user's business type is searched, and the response says so.
+2. **First-tier queries:** each category in the chosen location ("Wholesale distributors in
+   India"). Each query is followed through its pages (`nextPageToken`, up to 60 places). The
+   remaining pages are skipped when a page brings under 20% new places.
+3. **Progressive locations** (country or state scope only), taken from **addresses in Google's own
+   results**, most frequent first:
+   - Country-wide: the states.
+   - State-wide: the cities in that state.
+
+   Each category runs again there, e.g. "Wholesale distributors in Kerala, India". Nothing is
+   guessed: a state appears only if Google returned businesses there.
+4. **Stop conditions:**
+   - the target number of unique businesses is reached;
+   - the request budget is used;
+   - the workspace's daily request budget is used;
+   - no queries are left;
+   - Google reports a quota or permission error (results so far are kept);
+   - the user cancels (no further requests are sent).
+
+Places are de-duplicated across all queries before counting. The response separates:
+- **raw** results;
+- **repeats** across queries;
+- **unique** businesses;
+- **CRM duplicates** and **possible duplicates**;
+- **excluded** (permanently closed) businesses;
+- businesses **eligible** to import.
+
+It also lists every query run, with its requests, places, new unique businesses and status. A
+query that fails (timeout, server error, invalid query) is recorded and the search continues.
+Identical query texts never run twice.
+
+If the target is more than the budget allows (20 places per request), the plan and the result say
+so explicitly.
 
 Google Places does **not** provide contact people, decision-maker names, email addresses, company
 size or revenue. These are never filled in or guessed.
@@ -103,13 +153,21 @@ competitors and vendors, not customers.
 | Variable | Default | Purpose |
 |---|---|---|
 | `GOOGLE_PLACES_API_KEY` | none | required; server only |
-| `LEAD_DISCOVERY_MAX_RESULTS` | 60 | per-search cap (never above Google's 60) |
+| `LEAD_DISCOVERY_MAX_RESULTS` | 300 | most unique businesses per search (hard limit 500) |
+| `LEAD_DISCOVERY_MAX_REQUESTS` | 20 | most Google requests per search (hard limit 50) |
+| `LEAD_DISCOVERY_MAX_CATEGORIES` | 8 | categories per search, including the user's business type |
+| `LEAD_DISCOVERY_MAX_SUBLOCATIONS` | 10 | states or cities covered progressively |
+| `LEAD_DISCOVERY_AI_FIT_MAX` | 60 | businesses per search assessed for product fit |
 | `LEAD_DISCOVERY_DAILY_SEARCHES` | 20 | searches per workspace per day (UTC) |
+| `LEAD_DISCOVERY_DAILY_REQUESTS` | 300 | Google Text Search requests per workspace per day (UTC) |
+| `PLACES_PRICE_PER_1000_ENTERPRISE` / `_PRO` | 35 / 32 | list price used for cost estimates |
 | `LEAD_DISCOVERY_DAILY_DETAILS` | 200 | live-detail lookups per workspace per day |
 | `PLACES_TIMEOUT_MS` | 10000 | per Google request |
 | `AI_ROUTE_RATE_MAX` / `AI_ROUTE_RATE_WINDOW_MS` | 20 / 10 min | per-member limit on the search route |
 
 Other controls:
+- Every limit is enforced on the server.
+- A search uses at most min(its request budget, the workspace's remaining daily requests).
 - The same search repeated within 2 minutes is refused, so it is not paid for twice.
 - The smallest field mask is used. Phone and website are Google's higher-priced tier and can be
   turned off per search.
@@ -118,6 +176,14 @@ Other controls:
   `places_details`).
 
 Google bills these requests to your Google Cloud account; the feature is not free.
+
+**Cost.** Each Text Search request with phone and website is billed as *Text Search Enterprise*:
+**$35 per 1,000 requests** after a free cap of 1,000 per month. Without them it is *Text Search
+Pro*: **$32 per 1,000**, free cap 5,000 per month. These are list prices from Google's pricing page
+when this was written. A search with a budget of 10 requests therefore costs at most about $0.35,
+before the free usage. The UI shows this estimate; your Google Cloud bill is authoritative.
+
+Live details are *Place Details* calls: Enterprise $20 per 1,000, Pro $17 per 1,000.
 
 ## Permissions
 
