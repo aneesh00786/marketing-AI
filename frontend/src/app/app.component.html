@@ -379,9 +379,12 @@
         <button class="btn btn-secondary" (click)="syncCompanyMail()" [disabled]="isSyncingMail">
           {{ isSyncingMail ? 'Syncing...' : '🔄 Sync Mailbox via IMAP' }}
         </button>
+        <button class="btn btn-secondary" (click)="showZohoPanel = !showZohoPanel" [attr.aria-expanded]="showZohoPanel">📣 Email Campaigns</button>
         <button class="btn btn-primary" (click)="showComposeModal = true">✉️ Compose & Send Email</button>
       </div>
     </div>
+
+    <app-email-campaigns *ngIf="showZohoPanel" [oauthResult]="zohoOauthResult" (toast)="showToast($event)"></app-email-campaigns>
 
     <!-- Company Mail Status Bar -->
     <div class="mail-auth-status-bar" [class.connected]="mailConfig.status === 'Connected'">
@@ -544,17 +547,31 @@
             </div>
             <h2>{{ selectedDraft.subject }}</h2>
             <p class="inspector-meta">Recipient: <strong>{{ selectedDraft.recipient_name || '—' }}</strong> ({{ selectedDraft.recipient_email || 'no email address' }}) &bull; Product: <strong>{{ selectedDraft.product_name || 'None (generic draft)' }}</strong> &bull; Tone: <em>{{ selectedDraft.tone }}</em></p>
-            <div class="draft-recipient-edit" *ngIf="selectedDraft.status !== 'Sent' && selectedDraft.status !== 'Sending'">
+            <div class="draft-review-box" *ngIf="selectedDraft.status === 'Needs Review'" role="alert">
+              <strong>Delivery unknown.</strong> The last send may or may not have reached {{ selectedDraft.recipient_email }}. Check before sending again.
+              <div class="button-group">
+                <button class="btn btn-secondary btn-sm" (click)="resolveDraft(selectedDraft, 'sent')">It was delivered</button>
+                <button class="btn btn-secondary btn-sm" (click)="resolveDraft(selectedDraft, 'not_sent')">It was not delivered</button>
+              </div>
+            </div>
+            <div class="draft-placeholders" *ngIf="selectedDraft.placeholders?.length && selectedDraft.status !== 'Sent' && selectedDraft.status !== 'Sending' && selectedDraft.status !== 'Needs Review'">
+              <strong>Fill in before sending:</strong>
+              <label *ngFor="let p of selectedDraft.placeholders">{{ p }}
+                <input type="text" class="hud-input" [(ngModel)]="placeholderValues[p]" maxlength="500" [attr.aria-label]="'Value for ' + p" />
+              </label>
+              <button class="btn btn-secondary btn-sm" (click)="fillDraftPlaceholders(selectedDraft)">Save values</button>
+            </div>
+            <div class="draft-recipient-edit" *ngIf="selectedDraft.status !== 'Sent' && selectedDraft.status !== 'Sending' && selectedDraft.status !== 'Needs Review'">
               <input type="text" class="hud-input" [(ngModel)]="draftRecipientEdit.name" placeholder="Recipient name" aria-label="Recipient name" />
               <input type="email" class="hud-input" [(ngModel)]="draftRecipientEdit.email" placeholder="name@company.com" aria-label="Recipient email" />
               <button class="btn btn-secondary btn-sm" (click)="saveDraftRecipient(selectedDraft)">Save recipient</button>
             </div>
           </div>
           <div class="approval-main-actions">
-            <button *ngIf="selectedDraft.status === 'Draft'" class="btn btn-accent" (click)="approveDraft(selectedDraft)">
+            <button *ngIf="selectedDraft.status === 'Draft'" class="btn btn-accent" [disabled]="selectedDraft.placeholders?.length" (click)="approveDraft(selectedDraft)">
               ✓ Approve Draft
             </button>
-            <button class="btn btn-primary" *ngIf="selectedDraft.status !== 'Sent'" (click)="sendApprovedDraft(selectedDraft)">
+            <button class="btn btn-primary" *ngIf="selectedDraft.status !== 'Sent' && selectedDraft.status !== 'Needs Review' && selectedDraft.status !== 'Sending'" [disabled]="selectedDraft.placeholders?.length" (click)="sendApprovedDraft(selectedDraft)">
               🚀 {{ selectedDraft.status === 'Approved' ? 'Send Approved Email' : 'Approve & Send' }}
             </button>
             <button class="btn btn-secondary btn-sm" (click)="deleteDraft(selectedDraft.id)">✕ Delete</button>
@@ -1144,7 +1161,7 @@
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" (click)="showComposeModal = false">Cancel</button>
-        <button class="btn btn-primary" (click)="sendOutboundEmail()">🚀 Dispatch Email</button>
+        <button class="btn btn-primary" (click)="sendOutboundEmail()" [disabled]="isSendingCompose">{{ isSendingCompose ? "Sending…" : "🚀 Dispatch Email" }}</button>
       </div>
     </div>
   </div>

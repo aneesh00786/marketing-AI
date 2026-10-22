@@ -1,0 +1,25 @@
+<section class="zoho">
+  <div class="zoho-head">
+    <div>
+      <h3>Delivery: Zoho Campaigns</h3>
+      <p class="muted small">Campaigns are written and approved here; Zoho only delivers them to the mailing lists you choose. Lists, contacts and consent are managed in Zoho; Marketech.ai never uploads contacts.</p>
+    </div>
+    <div class="zoho-actions" *ngIf="status?.canConfigure">
+      <button *ngIf="!connected || missingScopes.length" class="btn btn-primary btn-sm" (click)="connect()" [disabled]="busy === 'connect' || !status.serverConfigured">
+        {{ status.connection?.status === 'not_connected' || status.connection?.status === 'disconnected' ? 'Connect Zoho' : 'Reconnect Zoho' }}
+      </button>
+      <button *ngIf="connected" class="btn btn-secondary btn-sm" (click)="test()" [disabled]="busy === 'test'">Test connection</button>
+      <button *ngIf="connected || status.connection?.status === 'reauth_required'" class="btn btn-secondary btn-sm" (click)="disconnect()" [disabled]="busy === 'disconnect'">Disconnect</button>
+    </div>
+  </div>
+
+  <div class="note error" *ngIf="error" role="alert">{{ error }}</div>
+  <ng-container *ngIf="status">
+    <p class="muted small" *ngIf="!status.serverConfigured">Zoho Campaigns is not set up on the server yet (Zoho client credentials missing).</p>
+    <p class="muted small" *ngIf="connected">Connected ({{ status.connection.location | uppercase }} data center){{ status.connection.lastCheckedAt ? ' · last checked ' + (status.connection.lastCheckedAt | date:'medium') : '' }}.</p>
+    <p class="muted small" *ngIf="missingScopes.length">This connection was made before campaign delivery was added. Reconnect to grant: {{ missingScopes.join(', ') }}.</p>
+    <p class="muted small" *ngIf="status.connection?.status === 'reauth_required'">The Zoho connection expired or was revoked. Reconnect to continue.</p>
+    <p class="muted small" *ngIf="!connected && !status.canConfigure">Ask an Owner or Admin to connect Zoho Campaigns.</p>
+    <p class="muted small">{{ status.limits.note }} One-time Zoho setup: verify your sender address and authenticate your domain (SPF/DKIM) in Zoho.</p>
+  </ng-container>
+</section>

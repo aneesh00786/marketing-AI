@@ -14,16 +14,20 @@ import { IconComponent } from './shared/icon.component';
 import { DashboardComponent, DashboardNavigation } from './features/dashboard/dashboard.component';
 import { LeadDiscoveryComponent } from './features/leads/lead-discovery.component';
 import { MembersComponent } from './features/members/members.component';
+import { EmailCampaignsComponent } from './features/mail/email-campaigns.component';
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [CommonModule, FormsModule, LoginComponent, SocialHubComponent, CommandCenterComponent, IconComponent, DashboardComponent, LeadDiscoveryComponent, MembersComponent],
+  imports: [CommonModule, FormsModule, LoginComponent, SocialHubComponent, CommandCenterComponent, IconComponent, DashboardComponent, LeadDiscoveryComponent, MembersComponent, EmailCampaignsComponent],
   templateUrl: './app.component.html',
   styleUrls: ['./app.component.css']
 })
 export class AppComponent implements OnInit, OnDestroy {
   // Navigation: Directly accessible HUD
+  // Email campaigns panel in Mail Center (Zoho delivery), and the result of returning from Zoho sign-in.
+  showZohoPanel = false;
+  zohoOauthResult: { zoho?: string; reason?: string } | null = null;
   currentRoute: 'dashboard' | 'products' | 'leads' | 'emails' | 'drafts' | 'businesses' | 'social' | 'voice' | 'appointments' | 'members' = 'dashboard';
 
   // ---------- App shell (sidebar, top bar, menus) ----------
@@ -528,6 +532,13 @@ export class AppComponent implements OnInit, OnDestroy {
     const invite = params.get('invite');
     if (invite && /^[A-Za-z0-9_-]{40,64}$/.test(invite)) {
       try { sessionStorage.setItem(this.INVITE_KEY, invite); } catch { /* storage unavailable */ }
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+    // Return from Zoho sign-in (/?view=mail&section=zoho&zoho=connected|error&reason=...).
+    if (params.get('view') === 'mail') {
+      this.currentRoute = 'emails';
+      this.showZohoPanel = params.get('section') === 'zoho';
+      this.zohoOauthResult = { zoho: params.get('zoho') || undefined, reason: params.get('reason') || undefined };
       window.history.replaceState({}, '', window.location.pathname);
     }
     if (params.get('view') === 'social') {
@@ -1279,13 +1290,53 @@ export class AppComponent implements OnInit, OnDestroy {
     reader.readAsText(file);
   }
 
+  // One idempotency key per composed email: a double click or a retry of the same content reuses it,
+  // so the server never sends it twice; changed content gets a new key.
+  private composeSend: { fingerprint: string; key: string } | null = null;
+  isSendingCompose = false;
+
+  private composeKey(): string {
+    const c = this.composeEmail;
+    const fingerprint = JSON.stringify([c.recipient_email, c.recipient_name, c.subject, c.body, c.is_html ? c.html_body : '']);
+    if (!this.composeSend || this.composeSend.fingerprint !== fingerprint) {
+      const key = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID()
+        : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+      this.composeSend = { fingerprint, key };
+    }
+    return this.composeSend.key;
+  }
+
+  /** Error text for a failed send; an unknown outcome is not reported as "not sent". */
+  private sendErrorText(err: any): string {
+    const code = err?.error?.code;
+    if (code === 'MAIL_OUTCOME_UNKNOWN' || code === 'MAIL_SENT_NOT_RECORDED') return `Delivery unknown: ${this.apiError(err)}`;
+    return `Email not sent: ${this.apiError(err)}`;
+  }
+
   sendOutboundEmail(): void {
+    if (this.isSendingCompose) return;
     if (!this.composeEmail.recipient_email || !this.composeEmail.subject) {
       this.showToast('Recipient email and subject are required');
       return;
     }
     if (!confirm(`Send "${this.composeEmail.subject}" to ${this.composeEmail.recipient_email} now?`)) return;
 
+    const key = this.composeKey();
+    const done = {
+      next: (res: any) => {
+        this.isSendingCompose = false;
+        this.composeSend = null;
+        this.showToast(res.message);
+        this.showComposeModal = false;
+        this.loadEmails();
+      },
+      error: (err: any) => {
+        this.isSendingCompose = false;
+        this.showToast(this.sendErrorText(err));
+      }
+    };
+    this.isSendingCompose = true;
     if (this.composeEmail.is_html && this.composeEmail.html_body) {
       this.apiService.sendHtmlEmail({
         recipient_email: this.composeEmail.recipient_email,
@@ -1293,23 +1344,9 @@ export class AppComponent implements OnInit, OnDestroy {
         subject: this.composeEmail.subject,
         html_body: this.composeEmail.html_body,
         body_text: this.composeEmail.body
-      }, true).subscribe({
-        next: (res) => {
-          this.showToast(res.message);
-          this.showComposeModal = false;
-          this.loadEmails();
-        },
-        error: (err) => this.showToast(`Email not sent: ${this.apiError(err)}`)
-      });
+      }, true, key).subscribe(done);
     } else {
-      this.apiService.sendEmail(this.composeEmail, true).subscribe({
-        next: (res) => {
-          this.showToast(res.message);
-          this.showComposeModal = false;
-          this.loadEmails();
-        },
-        error: (err) => this.showToast(`Email not sent: ${this.apiError(err)}`)
-      });
+      this.apiService.sendEmail(this.composeEmail, true, key).subscribe(done);
     }
   }
 
@@ -1414,6 +1451,34 @@ export class AppComponent implements OnInit, OnDestroy {
   selectDraft(draft: any): void {
     this.selectedDraft = draft;
     this.draftRecipientEdit = { name: draft?.recipient_name || '', email: draft?.recipient_email || '' };
+    this.placeholderValues = Object.fromEntries((draft?.placeholders || []).map((p: string) => [p, '']));
+  }
+
+  // Values typed for the draft's [placeholders]; they must be filled before approval or sending.
+  placeholderValues: Record<string, string> = {};
+  get filledPlaceholders(): Record<string, string> {
+    return Object.fromEntries(Object.entries(this.placeholderValues).map(([k, v]) => [k, v.trim()]).filter(([, v]) => v));
+  }
+
+  fillDraftPlaceholders(draft: any): void {
+    const replacements = this.filledPlaceholders;
+    if (!Object.keys(replacements).length) { this.showToast('Type a value for each placeholder first.'); return; }
+    this.apiService.updateMailDraft(draft.id, { replacements }).subscribe({
+      next: (res) => { this.showToast('Placeholders filled. Approve the draft again before sending.'); this.selectDraft(res.draft); this.loadDrafts(); },
+      error: (err) => this.showToast(`Not saved: ${this.apiError(err)}`)
+    });
+  }
+
+  /** A send with an unknown outcome (or stuck): the user says whether it arrived. */
+  resolveDraft(draft: any, outcome: 'sent' | 'not_sent'): void {
+    const q = outcome === 'sent'
+      ? `Mark "${draft.subject}" as sent? Only if you confirmed it reached ${draft.recipient_email}.`
+      : `Mark "${draft.subject}" as NOT sent? Only if you checked it did not reach ${draft.recipient_email}. You can then send it again.`;
+    if (!confirm(q)) return;
+    this.apiService.resolveMailDraft(draft.id, outcome).subscribe({
+      next: (res) => { this.showToast(res.message); this.selectDraft(res.draft); this.loadDrafts(); },
+      error: (err) => this.showToast(this.apiError(err))
+    });
   }
 
   /** Server error text (e.g. "Approve the draft before sending it.") rather than the generic HTTP message. */
@@ -1458,8 +1523,9 @@ export class AppComponent implements OnInit, OnDestroy {
         if (this.selectedDraft?.id === draft.id) this.selectedDraft.status = 'Sent';
       },
       error: (err) => {
-        this.showToast(`Email not sent: ${this.apiError(err)}`);
+        this.showToast(this.sendErrorText(err));
         this.loadDrafts();
+        if (this.selectedDraft?.id === draft.id && err?.error?.code === 'MAIL_OUTCOME_UNKNOWN') this.selectedDraft.status = 'Needs Review';
       }
     });
     if (draft.status === 'Approved') {

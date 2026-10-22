@@ -257,8 +257,9 @@ export class ApiService {
   }
 
   // Sending requires the user's explicit confirmation; callers pass it after a confirm dialog.
-  sendEmail(data: { recipient_email: string; recipient_name?: string; subject: string; body: string }, confirm: boolean): Observable<any> {
-    return this.http.post(`${this.root}/api/emails/send`, { ...data, confirm });
+  // idempotencyKey: one per compose action, reused if the same send is retried (never sends twice).
+  sendEmail(data: { recipient_email: string; recipient_name?: string; subject: string; body: string }, confirm: boolean, idempotencyKey: string): Observable<any> {
+    return this.http.post(`${this.root}/api/emails/send`, { ...data, confirm }, { headers: { 'Idempotency-Key': idempotencyKey } });
   }
 
   // 19. Appointments & CRM
@@ -310,8 +311,13 @@ export class ApiService {
   }
 
   // 23. Visual HTML Email & Email AI Analysis
-  sendHtmlEmail(data: { recipient_email: string; recipient_name?: string; subject: string; html_body: string; body_text?: string }, confirm: boolean): Observable<any> {
-    return this.http.post(`${this.root}/api/emails/send-html`, { ...data, confirm });
+  sendHtmlEmail(data: { recipient_email: string; recipient_name?: string; subject: string; html_body: string; body_text?: string }, confirm: boolean, idempotencyKey: string): Observable<any> {
+    return this.http.post(`${this.root}/api/emails/send-html`, { ...data, confirm }, { headers: { 'Idempotency-Key': idempotencyKey } });
+  }
+
+  /** After checking the recipient's mailbox: was a send with an unknown outcome delivered? */
+  resolveMailDraft(id: number, outcome: 'sent' | 'not_sent'): Observable<any> {
+    return this.http.post(`${this.root}/api/drafts/${id}/resolve`, { outcome, confirm: true });
   }
 
   analyzeEmailWithAi(emailId: number): Observable<any> {
@@ -339,7 +345,7 @@ export class ApiService {
     return this.http.post(`${this.root}/api/drafts/${id}/send`, { confirm });
   }
 
-  updateMailDraft(id: number, data: { recipient_email?: string; recipient_name?: string; subject?: string }): Observable<any> {
+  updateMailDraft(id: number, data: { recipient_email?: string; recipient_name?: string; subject?: string; replacements?: Record<string, string> }): Observable<any> {
     return this.http.patch(`${this.root}/api/drafts/${id}`, data);
   }
 

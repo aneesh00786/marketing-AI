@@ -1,0 +1,95 @@
+<section class="ec">
+  <app-zoho-campaigns [oauthResult]="oauthResult" (toast)="toast.emit($event)" (statusChange)="onZohoStatus($event)"></app-zoho-campaigns>
+
+  <div class="ec-head">
+    <h3>Email campaigns</h3>
+    <button *ngIf="canCompose" class="btn btn-primary btn-sm" (click)="newCampaign()" [disabled]="busy === 'create'">+ New campaign</button>
+  </div>
+  <div class="note error" *ngIf="error" role="alert">{{ error }}</div>
+
+  <div class="ec-grid">
+    <div class="ec-list">
+      <p class="muted small" *ngIf="!campaigns.length">No campaigns yet.</p>
+      <button *ngFor="let c of campaigns" class="ec-item" [class.active]="selected?.id === c.id" (click)="open(c)">
+        <b>{{ c.name }}</b>
+        <span class="tag" [class.ok]="c.status === 'submitted'" [class.warn]="c.status === 'needs_review' || c.status === 'failed'">{{ statusLabel(c.status) }}</span>
+        <small class="muted">{{ c.subject || 'No subject' }}</small>
+      </button>
+    </div>
+
+    <div class="ec-detail" *ngIf="selected && form">
+      <div class="ec-detail-head">
+        <div>
+          <span class="tag" [class.ok]="selected.status === 'submitted'" [class.warn]="selected.status === 'needs_review' || selected.status === 'failed'">{{ statusLabel(selected.status) }}</span>
+          <span class="muted small">Version {{ selected.version }}{{ selected.approved ? ' · approved' : '' }}</span>
+        </div>
+        <div class="ec-actions">
+          <button class="btn btn-secondary btn-sm" (click)="validate()" [disabled]="busy === 'validate'">Validate</button>
+          <button *ngIf="editable" class="btn btn-secondary btn-sm" (click)="save()" [disabled]="busy === 'save'">Save</button>
+          <button *ngIf="canSend && selected.status === 'draft'" class="btn btn-accent btn-sm" (click)="approve()" [disabled]="busy === 'approve'">Approve</button>
+          <button *ngIf="canSend && selected.approved && (selected.status === 'approved' || selected.status === 'failed')" class="btn btn-primary btn-sm" (click)="send()" [disabled]="busy === 'send' || !zohoReady">Send through Zoho</button>
+          <button *ngIf="selected.status === 'submitted' || selected.status === 'needs_review' || selected.zohoPrepared" class="btn btn-secondary btn-sm" (click)="refresh()" [disabled]="busy === 'refresh'">Refresh status</button>
+          <button *ngIf="editable" class="btn btn-secondary btn-sm" (click)="remove()">Delete</button>
+        </div>
+      </div>
+
+      <div class="review" *ngIf="selected.status === 'needs_review'" role="alert">
+        <b>Outcome unknown.</b> Zoho did not confirm the last {{ selected.submitStage === 'create' ? 'preparation' : 'send' }} request. "Refresh status" settles it when Zoho shows the result. It is never resent automatically.
+        <button *ngIf="canSend" class="btn btn-secondary btn-sm" (click)="resolve()">Mark as not done</button>
+      </div>
+      <div class="note error" *ngIf="selected.status === 'failed' && selected.providerMessage">{{ selected.providerMessage }}</div>
+
+      <div class="report" *ngIf="selected.report as r">
+        <div><span>Zoho status</span><b>{{ selected.zohoStatus || '—' }}</b></div>
+        <div><span>Sent</span><b>{{ r.emails_sent_count ?? '—' }}</b></div>
+        <div><span>Delivered</span><b>{{ r.delivered_count ?? '—' }}</b></div>
+        <div><span>Opens</span><b>{{ r.opens_count ?? '—' }}</b></div>
+        <div><span>Bounces</span><b>{{ r.bounces_count ?? '—' }}</b></div>
+        <div><span>Unsubscribes</span><b>{{ r.unsub_count ?? '—' }}</b></div>
+      </div>
+
+      <div class="ec-form">
+        <label>Campaign name <input class="hud-input" [(ngModel)]="form.name" maxlength="150" [disabled]="!editable" /></label>
+        <label>Subject <input class="hud-input" [(ngModel)]="form.subject" maxlength="255" [disabled]="!editable" /></label>
+        <div class="row2">
+          <label>Sender name <input class="hud-input" [(ngModel)]="form.fromName" maxlength="100" [disabled]="!editable" /></label>
+          <label>Sender email (verified in Zoho) <input class="hud-input" type="email" [(ngModel)]="form.fromEmail" maxlength="255" [disabled]="!editable" placeholder="news@yourdomain.com" /></label>
+        </div>
+
+        <fieldset class="lists">
+          <legend>Recipient lists (Zoho)</legend>
+          <p class="muted small" *ngIf="!zohoReady">Connect Zoho Campaigns to choose lists.</p>
+          <p class="muted small" *ngIf="zohoReady && audiences && !audiences.lists.length">No mailing lists in the connected Zoho account.</p>
+          <label class="check" *ngFor="let l of audiences?.lists || []">
+            <input type="checkbox" [checked]="form.listKeys.has(l.key)" (change)="toggleList(l.key)" [disabled]="!editable" />
+            {{ l.name || l.key }} <span class="muted small" *ngIf="l.contacts !== null">({{ l.contacts }} contacts)</span>
+          </label>
+          <p class="muted small" *ngIf="!audiences && selected.lists.length">Selected: {{ selectedListNames }}</p>
+          <label *ngIf="audiences?.topics?.length">Topic
+            <select class="hud-input" [(ngModel)]="form.topicId" [disabled]="!editable">
+              <option value="">None</option>
+              <option *ngFor="let t of audiences!.topics" [value]="t.id">{{ t.name || t.id }}</option>
+            </select>
+          </label>
+        </fieldset>
+
+        <div class="content">
+          <label>HTML content
+            <textarea class="hud-input code" rows="14" [(ngModel)]="form.html" [disabled]="!editable" spellcheck="false"></textarea>
+          </label>
+          <div class="preview">
+            <span class="muted small">Preview</span>
+            <iframe sandbox="" title="Campaign preview" [srcdoc]="previewHtml"></iframe>
+          </div>
+        </div>
+        <p class="muted small">Include <code>$[LI:UNSUBSCRIBE]$</code> for the unsubscribe link (Zoho requires one). Use https:// image URLs.</p>
+      </div>
+
+      <div class="validation" *ngIf="validation">
+        <p *ngIf="validation.ready" class="ok-text">Ready to approve and send.</p>
+        <ul *ngIf="validation.problems.length" class="problems"><li *ngFor="let p of validation.problems">{{ p }}</li></ul>
+        <ul *ngIf="validation.warnings.length" class="warnings"><li *ngFor="let w of validation.warnings">{{ w }}</li></ul>
+      </div>
+    </div>
+  </div>
+</section>
