@@ -1,3 +1,11 @@
+<div *ngIf="sessionChange" class="session-change-backdrop">
+  <div class="modal-card session-change" role="alertdialog" aria-modal="true" aria-labelledby="session-change-title" aria-describedby="session-change-body">
+    <div class="modal-header"><h3 id="session-change-title">{{ sessionChange.title }}</h3></div>
+    <div class="modal-body"><p id="session-change-body">{{ sessionChange.message }}</p></div>
+    <div class="modal-footer"><button class="btn btn-primary" (click)="reloadForSession()">Reload</button></div>
+  </div>
+</div>
+
 <app-login *ngIf="!auth.isLoggedIn" (loggedIn)="onLoggedIn()"></app-login>
 
 <div class="app-shell" *ngIf="auth.isLoggedIn" [class.collapsed]="sidebarCollapsed" [class.nav-open]="mobileNavOpen">

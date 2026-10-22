@@ -3,6 +3,8 @@ const { partsInZone, zonedLocalToUtc, isValidTimeZone } = require('../../lib/tim
 const emailService = require('../../services/emailService');
 const { suppress } = require('./outreachService');
 const automationEvents = require('../../lib/automationEvents');
+const { audit } = require('../../lib/audit');
+const { workerAuthorizationProblem } = require('../../lib/workerAuthorization');
 
 const emitRecipient = (recipient, type) => recipient.lead_id && automationEvents.emit(recipient.workspace_id, type, {
   subjectType: 'lead', subjectId: recipient.lead_id, payload: { emailCampaignId: recipient.campaign_id, recipientId: recipient.id }, key: `${type}:${recipient.id}`
@@ -245,6 +247,17 @@ async function processOutreach(workerId, { maxPerTick = 20, now = new Date() } =
     );
     let room = Math.min(campaign.daily_limit - Number(today.n), maxPerTick - processed);
     if (room <= 0) continue;
+    // Re-checked before sending: active workspace, and the person who approved (or resumed) the
+    // campaign is still an active member allowed to send. Otherwise the campaign is paused with the
+    // reason; approving/resuming it again records the current member as the approver.
+    const problem = await workerAuthorizationProblem(campaign.workspace_id, campaign.approved_by, 'mail.send');
+    if (problem) {
+      const paused = await run("UPDATE outreach_campaigns SET status = 'paused', last_error = ?, updated_at = UTC_TIMESTAMP() WHERE id = ? AND status = 'running'", [`Paused: ${problem.message}`, campaign.id]);
+      if (paused.changes) {
+        await audit({ workspaceId: campaign.workspace_id, actorType: 'worker' }, 'outreach.campaign_blocked', { resourceType: 'outreach_campaign', resourceId: campaign.id, metadata: { reason: problem.code } });
+      }
+      continue;
+    }
     const due = await all(
       `SELECT * FROM outreach_recipients WHERE campaign_id = ? AND status = 'active' AND next_send_at IS NOT NULL AND next_send_at <= UTC_TIMESTAMP() ORDER BY next_send_at, id LIMIT ${Math.max(1, room)}`,
       [campaign.id]
@@ -252,6 +265,14 @@ async function processOutreach(workerId, { maxPerTick = 20, now = new Date() } =
     for (const recipient of due) {
       const fresh = await get("SELECT status FROM outreach_campaigns WHERE id = ?", [campaign.id]);
       if (!fresh || fresh.status !== 'running') break;
+      if (Number(recipient.workspace_id) !== Number(campaign.workspace_id)) {
+        // Never send a campaign to a recipient row from another workspace.
+        const held = await run("UPDATE outreach_recipients SET status = 'needs_review', next_send_at = NULL, last_error = 'Recipient belongs to a different workspace than the campaign; not sent.', updated_at = UTC_TIMESTAMP() WHERE id = ? AND status = 'active'", [recipient.id]);
+        if (held.changes) {
+          await audit({ workspaceId: campaign.workspace_id, actorType: 'worker' }, 'outreach.recipient_blocked', { resourceType: 'outreach_recipient', resourceId: recipient.id, metadata: { reason: 'RECIPIENT_WORKSPACE_MISMATCH', campaignId: campaign.id } });
+        }
+        continue;
+      }
       const outcome = await sendOne(campaign, recipient, workerId);
       processed++;
       if (outcome === 'paused') break;

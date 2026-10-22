@@ -682,3 +682,7 @@ button.dropdown-item:disabled { opacity: 0.6; cursor: default; }
 
 .invite-item { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
 .invite-item:last-of-type { border-bottom: none; }
+
+/* Another tab changed the session: cover this tab's (stale) content until it reloads. */
+.session-change-backdrop { position: fixed; inset: 0; z-index: 2000; display: flex; align-items: center; justify-content: center; padding: 16px; background: var(--bg); }
+.session-change { max-width: 440px; width: 100%; }

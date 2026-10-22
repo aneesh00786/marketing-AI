@@ -60,11 +60,11 @@ async function handleInboundCall(fromNumber, toNumber, workspaceId = 1) {
 
   const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
 
-  // Log call record
+  // Log call record (columns of the MySQL call_records table)
   await run(
-    `INSERT INTO call_records (workspace_id, direction, caller_number, transcript, call_outcome, created_at)
+    `INSERT INTO call_records (workspace_id, direction, caller_number, transcript_text, status, started_at)
      VALUES (?, 'inbound', ?, 'Call connected. AI delivered greeting.', 'In Progress', ?)`,
-    [workspaceId, fromNumber || '+1 (555) 019-2831', now]
+    [workspaceId, String(fromNumber || '+1 (555) 019-2831').slice(0, 50), now]
   );
 
   return `<?xml version="1.0" encoding="UTF-8"?>

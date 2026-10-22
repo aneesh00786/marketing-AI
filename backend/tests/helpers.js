@@ -195,6 +195,7 @@ module.exports = {
   json,
   groqRoute,
   api,
+  startApp,
   shutdown,
   ALL_META_SCOPES,
   db

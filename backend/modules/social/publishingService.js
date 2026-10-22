@@ -6,6 +6,7 @@ const { canAccount, requiredPublishFeature, evaluateAccount, ACCOUNT_TYPES } = r
 const contentService = require('./contentService');
 const accountService = require('./accountService');
 const settingsService = require('./settingsService');
+const { workerAuthorizationProblem } = require('../../lib/workerAuthorization');
 
 const STALE_LOCK_MINUTES = 10;
 const { httpError } = contentService;
@@ -209,9 +210,9 @@ async function retryJob(ctx, jobId, { confirmNotPublished = false } = {}) {
   await preflight(workspaceId, content, account);
   await run(
     `UPDATE publishing_jobs SET status = 'queued', next_attempt_at = UTC_TIMESTAMP(), max_attempts = attempt_count + 3,
-       last_error = NULL, last_error_code = NULL, locked_by = NULL, locked_at = NULL, updated_at = UTC_TIMESTAMP()
+       last_error = NULL, last_error_code = NULL, locked_by = NULL, locked_at = NULL, requested_by = ?, updated_at = UTC_TIMESTAMP()
      WHERE workspace_id = ? AND id = ? AND status IN ('failed', 'needs_review')`,
-    [workspaceId, jobId]
+    [ctx.auth.userId || null, workspaceId, jobId]
   );
   await run(
     "UPDATE content_items SET status = 'scheduled', last_error = NULL, updated_at = UTC_TIMESTAMP() WHERE workspace_id = ? AND id = ?",
@@ -307,6 +308,16 @@ async function executeJob(job, workerId) {
   const content = await contentService.getRow(job.workspace_id, job.content_item_id);
   const account = await accountService.getAccountRow(job.workspace_id, job.social_account_id);
 
+  if (!content) {
+    const owner = await get('SELECT workspace_id FROM content_items WHERE id = ?', [job.content_item_id]);
+    if (owner) {
+      // The content exists in another workspace: never publish it from this job.
+      const problem = { code: 'CONTENT_WORKSPACE_MISMATCH', message: 'The content belongs to a different workspace.' };
+      await failJob(job, 'failed', problem, null);
+      await audit(workerCtx, 'social.publish.blocked', { resourceType: 'publishing_job', resourceId: job.id, metadata: { reason: problem.code } });
+      return { status: 'failed', code: problem.code };
+    }
+  }
   if (!content || content.version !== job.content_version || !['scheduled', 'publishing'].includes(content.status)) {
     await run("UPDATE publishing_jobs SET status = 'cancelled', last_error = 'Content changed or was unscheduled before publishing', locked_by = NULL, updated_at = UTC_TIMESTAMP() WHERE id = ?", [job.id]);
     return { status: 'cancelled' };
@@ -315,6 +326,20 @@ async function executeJob(job, workerId) {
     // Already confirmed by the provider in an earlier attempt; never post twice.
     await run("UPDATE publishing_jobs SET status = 'succeeded', locked_by = NULL, completed_at = COALESCE(completed_at, UTC_TIMESTAMP()) WHERE id = ?", [job.id]);
     return { status: 'succeeded' };
+  }
+
+  // Authorization is re-checked right before publishing: the workspace must be active, the
+  // account must belong to the job's workspace, and the scheduler must still be allowed to publish.
+  // A refused job is blocked like a failed preflight (nothing was sent, so no outcome is unknown);
+  // "Retry" in the Publishing Queue by an authorized member re-queues it under their name.
+  const accountOwner = await get('SELECT workspace_id FROM social_accounts WHERE id = ?', [job.social_account_id]);
+  const problem = (accountOwner && Number(accountOwner.workspace_id) !== Number(job.workspace_id))
+    ? { code: 'ACCOUNT_WORKSPACE_MISMATCH', message: 'The social account belongs to a different workspace.' }
+    : await workerAuthorizationProblem(job.workspace_id, job.requested_by, 'content.publish');
+  if (problem) {
+    await failJob(job, 'failed', problem, 'failed', `Not published: ${problem.message}`);
+    await audit(workerCtx, 'social.publish.blocked', { resourceType: 'publishing_job', resourceId: job.id, metadata: { reason: problem.code } });
+    return { status: 'failed', code: problem.code };
   }
 
   let prepared;

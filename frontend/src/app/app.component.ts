@@ -5,7 +5,7 @@ import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import * as XLSX from 'xlsx';
 import { ApiService } from './services/api.service';
 import { SpeechService } from './services/speech.service';
-import { AuthStateService } from './core/auth-state.service';
+import { AuthStateService, SessionChangeKind } from './core/auth-state.service';
 import { ThemeService } from './core/theme.service';
 import { LoginComponent } from './core/login.component';
 import { SocialHubComponent } from './features/social/social-hub.component';
@@ -236,6 +236,28 @@ export class AppComponent implements OnInit, OnDestroy {
     });
   }
 
+  /** Another tab changed the shared session: stop live activity and require a reload. */
+  private onSessionChanged(kind: SessionChangeKind): void {
+    this.voiceManualStop = true;
+    this.clearVoiceRetry();
+    this.speechService.stopElevenLabsSession();
+    this.isElevenLabsConnected = false;
+    this.openMenu = null;
+    const messages: Record<SessionChangeKind, [string, string]> = {
+      'switched-workspace': ['Workspace changed in another tab', 'You switched to a different workspace in another tab. Reload to continue in that workspace; this page will not load or save anything for the previous one.'],
+      'signed-out': ['Signed out in another tab', 'You signed out in another tab. Reload to sign in again.'],
+      'signed-in': ['Signed in in another tab', 'You signed in in another tab. Reload to continue.'],
+      'other-user': ['Different account signed in', 'Another account signed in in another tab. Reload to continue as that account; nothing more will be loaded or saved here for the previous account.'],
+      'replaced': ['Session changed in another tab', 'Your session changed in another tab. Reload to continue.']
+    };
+    const [title, message] = messages[kind];
+    this.sessionChange = { title, message };
+  }
+
+  reloadForSession(): void {
+    window.location.reload();
+  }
+
   private startSession(res: any): void {
     this.voiceManualStop = true;
     this.speechService.stopElevenLabsSession();
@@ -288,6 +310,9 @@ export class AppComponent implements OnInit, OnDestroy {
   socialLibraryStatus: string | null = null;
   socialOauthResult: Record<string, string> | null = null;
   private sessionSub: any = null;
+  private sessionChangeSub: any = null;
+  // Set when another tab switched workspace, signed out or signed in: this tab must reload.
+  sessionChange: { title: string; message: string } | null = null;
 
   // Company Mail Authorization State (SMTP & IMAP)
   showMailConfigModal: boolean = false;
@@ -484,6 +509,8 @@ export class AppComponent implements OnInit, OnDestroy {
     try { this.sidebarCollapsed = localStorage.getItem('tradesage_sidebar_collapsed') === '1'; } catch { this.sidebarCollapsed = false; }
     this.readDeepLink();
     this.sessionSub = this.auth.sessionExpired$.subscribe(() => this.showToast('Session ended — please sign in again.'));
+    this.sessionChangeSub = this.auth.sessionChanged$.subscribe(kind => this.onSessionChanged(kind));
+    this.auth.checkSession();
     if (this.auth.isLoggedIn) {
       this.checkInvitations();
       this.loadWorkspaceData();
@@ -597,6 +624,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.stopCallTimer();
     this.speechService.stopElevenLabsSession();
     this.sessionSub?.unsubscribe();
+    this.sessionChangeSub?.unsubscribe();
   }
 
   showToast(msg: string): void {

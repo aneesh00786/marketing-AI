@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { apiRoot } from '../../core/api-base';
+import { AuthStateService } from '../../core/auth-state.service';
 
 /**
  * AI Lead Discovery: search Google Places for businesses, review them, import selected ones
@@ -58,7 +59,7 @@ export class LeadDiscoveryComponent implements OnInit, OnDestroy {
   countryOpen = false;
   activeCountry = 0;
 
-  constructor(private http: HttpClient) {}
+  constructor(private http: HttpClient, private auth: AuthStateService) {}
 
   ngOnInit(): void {
     this.http.get<any>(`${this.base}/config`).subscribe({
@@ -221,8 +222,13 @@ export class LeadDiscoveryComponent implements OnInit, OnDestroy {
     const body = this.body();
     if (this.planIsCurrent) body.categories = this.planCategories;
     this.abort = new AbortController();
-    let token: string | null = null;
-    try { token = localStorage.getItem('tradesage_token'); } catch { token = null; }
+    // Streaming search uses fetch (not HttpClient), so it checks the tab's session itself.
+    if (this.auth.checkSession()) {
+      this.phase = 'idle';
+      this.error = 'Your session changed in another tab. Reload this page to continue.';
+      return;
+    }
+    const token = this.auth.token;
     try {
       const res = await fetch(`${this.base}/search`, {
         method: 'POST',

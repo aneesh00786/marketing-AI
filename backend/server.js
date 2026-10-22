@@ -14,6 +14,7 @@ const aiEngine = require('./services/aiEngine');
 const emailService = require('./services/emailService');
 const voiceStatus = require('./services/voiceStatus');
 const { apiGate, legacyWorkspaceOnly, requireCapability, LEGACY_WORKSPACE_ID } = require('./middleware/auth');
+const { requireTelnyxSignature } = require('./lib/telnyxWebhook');
 const { rateLimit } = require('./lib/rateLimit');
 const { resolveSelectedProduct, findProductNamedIn } = require('./lib/productContext');
 const websiteExtractor = require('./services/websiteExtractor');
@@ -62,7 +63,11 @@ app.use(express.json({
   limit: '2mb',
   verify: (req, res, buf) => { req.rawBody = buf; }
 }));
-app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+app.use(express.urlencoded({
+  extended: true,
+  limit: '1mb',
+  verify: (req, res, buf) => { req.rawBody = buf; }
+}));
 
 // Prevent aggressive caching for static/API assets
 app.use((req, res, next) => {
@@ -642,7 +647,7 @@ Core Rules:
 //    legacy workspace gate (voice works in every workspace).
 
 // 2. B2B Purchasing Clients / Inquiries
-app.get(['/api/v1/b2b/clients', '/api/b2b/clients'], async (req, res) => {
+app.get(['/api/v1/b2b/clients', '/api/b2b/clients'], requireCapability('leads.view'), async (req, res) => {
   try {
     const clients = await all('SELECT * FROM b2b_clients ORDER BY id DESC');
     res.json({ success: true, clients });
@@ -651,7 +656,7 @@ app.get(['/api/v1/b2b/clients', '/api/b2b/clients'], async (req, res) => {
   }
 });
 
-app.post(['/api/v1/b2b/clients', '/api/b2b/clients'], async (req, res) => {
+app.post(['/api/v1/b2b/clients', '/api/b2b/clients'], requireCapability('leads.manage'), async (req, res) => {
   try {
     const { companyName, contactName, email, phone, productInterest, inquiryDetails, dealValue } = req.body;
     if (!companyName || !email) {
@@ -694,7 +699,7 @@ app.post(['/api/v1/b2b/clients', '/api/b2b/clients'], async (req, res) => {
 });
 
 // 3. Email Campaigns & Automated Dispatch
-app.get(['/api/v1/b2b/campaigns', '/api/b2b/campaigns'], async (req, res) => {
+app.get(['/api/v1/b2b/campaigns', '/api/b2b/campaigns'], requireCapability('analytics.view'), async (req, res) => {
   try {
     const campaigns = await all('SELECT * FROM email_campaigns ORDER BY id DESC');
     res.json({ success: true, campaigns });
@@ -703,7 +708,7 @@ app.get(['/api/v1/b2b/campaigns', '/api/b2b/campaigns'], async (req, res) => {
   }
 });
 
-app.post(['/api/v1/b2b/campaigns', '/api/b2b/campaigns'], async (req, res) => {
+app.post(['/api/v1/b2b/campaigns', '/api/b2b/campaigns'], requireCapability('campaigns.manage'), async (req, res) => {
   try {
     const { name, productKey, subject, templateBody, targetAudience } = req.body;
     const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
@@ -729,7 +734,7 @@ app.post(['/api/v1/b2b/campaigns/send', '/api/b2b/campaigns/send'], (req, res) =
 });
 
 // 4. Client Replies Feed
-app.get(['/api/v1/b2b/replies', '/api/b2b/replies'], async (req, res) => {
+app.get(['/api/v1/b2b/replies', '/api/b2b/replies'], requireCapability('leads.view'), async (req, res) => {
   try {
     const replies = await all('SELECT * FROM client_replies ORDER BY id DESC');
     res.json({ success: true, replies });
@@ -739,7 +744,7 @@ app.get(['/api/v1/b2b/replies', '/api/b2b/replies'], async (req, res) => {
 });
 
 // 5. Simplified B2B Statistics
-app.get(['/api/v1/b2b/statistics', '/api/b2b/statistics'], async (req, res) => {
+app.get(['/api/v1/b2b/statistics', '/api/b2b/statistics'], requireCapability('analytics.view'), async (req, res) => {
   try {
     const clientsCount = await get('SELECT count(*) as c FROM b2b_clients');
     const newInquiries = await get("SELECT count(*) as c FROM b2b_clients WHERE status = 'New Inquiry'");
@@ -772,7 +777,7 @@ app.get(['/api/v1/b2b/statistics', '/api/b2b/statistics'], async (req, res) => {
 });
 
 // 6. Marketing & Growth Ideas Generator
-app.get(['/api/v1/b2b/ideas', '/api/b2b/ideas'], async (req, res) => {
+app.get(['/api/v1/b2b/ideas', '/api/b2b/ideas'], requireCapability('analytics.view'), async (req, res) => {
   try {
     const productKey = req.query.productKey || 'traivo';
     const ideas = [
@@ -1047,7 +1052,8 @@ app.post(['/api/v1/marketing/generate-social-post', '/api/marketing/generate-soc
   }
 });
 
-app.delete(['/api/v1/content/:id', '/api/content/:id'], async (req, res) => {
+// Same capability as deleting content in the Social module.
+app.delete(['/api/v1/content/:id', '/api/content/:id'], requireCapability('content.create'), async (req, res) => {
   try {
     const result = await marketingService.deleteContentItem(req.params.id, 1);
     res.json(result);
@@ -1125,10 +1131,12 @@ app.post(['/api/v1/telnyx/synthesize', '/api/telnyx/synthesize'], async (req, re
   }
 });
 
-app.all(['/api/v1/telnyx/inbound', '/api/telnyx/inbound'], async (req, res) => {
+// Telnyx TeXML webhooks: public, so only POSTs carrying a valid Telnyx Ed25519 signature over the
+// raw body are processed (lib/telnyxWebhook.js); everything else is rejected before any work.
+app.post(['/api/v1/telnyx/inbound', '/api/telnyx/inbound'], requireTelnyxSignature(), async (req, res) => {
   try {
-    const from = req.body?.From || req.query?.From || '+15550192831';
-    const to = req.body?.To || req.query?.To || telnyxService.TELNYX_PHONE_NUMBER;
+    const from = req.body?.From || '+15550192831';
+    const to = req.body?.To || telnyxService.TELNYX_PHONE_NUMBER;
     const texml = await telnyxService.handleInboundCall(from, to, 1);
     res.type('text/xml').send(texml);
   } catch (err) {
@@ -1136,10 +1144,10 @@ app.all(['/api/v1/telnyx/inbound', '/api/telnyx/inbound'], async (req, res) => {
   }
 });
 
-app.all(['/api/v1/telnyx/dialogue', '/api/telnyx/dialogue'], async (req, res) => {
+app.post(['/api/v1/telnyx/dialogue', '/api/telnyx/dialogue'], requireTelnyxSignature(), async (req, res) => {
   try {
-    const speechResult = req.body?.SpeechResult || req.query?.SpeechResult || '';
-    const from = req.body?.From || req.query?.From || '';
+    const speechResult = req.body?.SpeechResult || '';
+    const from = req.body?.From || '';
     const texml = await telnyxService.handleCallDialogue(speechResult, from, 1);
     res.type('text/xml').send(texml);
   } catch (err) {
@@ -1186,7 +1194,8 @@ app.get(['/api/v1/business-profile', '/api/business-profile', '/api/workspaces/c
   }
 });
 
-app.put(['/api/v1/business-profile', '/api/business-profile'], async (req, res) => {
+// Owners and Admins only (settings.manage).
+app.put(['/api/v1/business-profile', '/api/business-profile'], requireCapability('settings.manage'), async (req, res) => {
   try {
     const { businessName, industry, websiteUrl, description, brandVoice, products } = req.body;
     await run(
@@ -1232,23 +1241,14 @@ app.get(['/api/v1/billing/subscription', '/api/billing/subscription'], async (re
   }
 });
 
-app.post(['/api/v1/billing/change-plan', '/api/billing/change-plan'], async (req, res) => {
-  try {
-    const { planKey } = req.body;
-    const plan = await get('SELECT id, name FROM plans WHERE plan_key = ?', [planKey]);
-    if (!plan) return res.status(404).json({ error: 'Plan not found' });
-
-    const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
-    await run(
-      `INSERT INTO subscriptions (workspace_id, plan_id, status, current_period_start, current_period_end, created_at)
-       VALUES (1, ?, 'Active', ?, date(?, '+30 days'), ?)`,
-      [plan.id, now, now, now]
-    );
-
-    res.json({ success: true, message: `Upgraded to ${plan.name} successfully` });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+// Billing writes are disabled until real billing (payment, verified plans) exists: this route used
+// to record a paid subscription without any payment. Nobody, including Owners, can change plans here.
+app.post(['/api/v1/billing/change-plan', '/api/billing/change-plan'], (req, res) => {
+  res.status(501).json({
+    success: false,
+    code: 'BILLING_NOT_AVAILABLE',
+    error: 'Plan changes are not available yet. Billing has not been set up.'
+  });
 });
 
 app.get(['/api/v1/usage/summary', '/api/usage/summary'], async (req, res) => {
