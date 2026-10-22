@@ -438,7 +438,8 @@ async function syncIncomingEmails(workspaceId) {
           const receivedAt = parsed.date ? new Date(parsed.date).toISOString().replace('T', ' ').substring(0, 19) : now;
 
           // Auto-run AI Analysis on received email!
-          const analysis = await aiEngine.analyzeEmail({ subject, body: textBody, sender: fromName });
+          // Metered to the workspace that owns this mailbox; past the quota it keeps the non-AI summary.
+          const analysis = await aiEngine.analyzeEmail({ subject, body: textBody, sender: fromName }, null, { workspaceId, referenceType: 'email_sync', fallbackOnQuota: true });
           const isUrgent = analysis.ai_priority === 'Urgent' ? 1 : 0;
 
           await run(`

@@ -68,8 +68,24 @@ async function generateText({ workspaceId, prompt, system, referenceType = null,
   return { text: String(res.text || '').trim(), provider: res.provider };
 }
 
+/**
+ * Engine call with the workspace quota and metering, for callers that keep their own non-AI
+ * fallback (they do not throw when no model answers). Usage is recorded once, and only when a
+ * real model answered; the built-in fallback replies are never metered.
+ */
+async function meteredResponse({ workspaceId, prompt, system, referenceType = null, referenceId = null, maxTokens = null, excludeProviders = [] }) {
+  if (!workspaceId) throw new Error('meteredResponse requires the workspace that owns the request.');
+  await assertAiQuota(workspaceId);
+  const res = await aiEngine.generateAiResponse(prompt, system, workspaceId, { maxTokens, excludeProviders });
+  if (isRealAiProvider(res?.provider)) {
+    await recordUsage({ workspaceId, category: 'ai_text', providerKey: res.provider, referenceType, referenceId });
+  }
+  return res;
+}
+
 module.exports = {
   AiUnavailableError,
+  meteredResponse,
   untrusted,
   generateStructured,
   generateText,

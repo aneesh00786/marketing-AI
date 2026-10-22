@@ -168,7 +168,7 @@ router.get('/products', wrap(async (req, res) => {
 
 router.post('/facts/extract', requireCapability('campaigns.manage'), aiLimiter, body(z.object({ url: z.string().min(4).max(500) })), wrap(async (req, res) => {
   try {
-    const { product, fetched } = await websiteExtractor.extractFromUrl(req.valid.url);
+    const { product, fetched } = await websiteExtractor.extractFromUrl(req.valid.url, { workspaceId: ws(req) });
     res.json({ success: true, fetched, facts: product, note: fetched ? 'Review these facts before saving them.' : 'The page could not be fetched; facts may be incomplete.' });
   } catch (err) {
     if (err.code === 'UNSAFE_URL') return res.status(400).json({ success: false, error: err.message, code: err.code });

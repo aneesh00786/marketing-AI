@@ -3,6 +3,7 @@ const { z } = require('zod');
 const authService = require('../../services/authService');
 const { LEGACY_WORKSPACE_ID, requireCapability } = require('../../middleware/auth');
 const members = require('./memberService');
+const profiles = require('./profileService');
 const { audit } = require('../../lib/audit');
 const { rateLimit } = require('../../lib/rateLimit');
 
@@ -65,6 +66,17 @@ router.post(['/api/v1/auth/switch-workspace', '/api/auth/switch-workspace'], mem
 // The workspace is always the session's; target users and invitations are checked against it.
 const inviteLimit = rateLimit({ windowMs: 60 * 60 * 1000, max: 30, keyFn: req => `members.invite:${req.auth?.workspaceId}:${req.auth?.userId || req.ip}`, message: 'Too many invitations. Please try again later.' });
 const answerLimit = rateLimit({ windowMs: 10 * 60 * 1000, max: 30, keyFn: req => `invitations.answer:${req.auth?.userId || req.ip}`, message: 'Too many attempts. Please wait a few minutes.' });
+
+// Business profile of the current workspace (read: any member; write: Owners/Admins).
+router.get(['/api/v1/business-profile', '/api/business-profile', '/api/workspaces/current'], member, wrap(async (req, res) => {
+  res.json({ success: true, ...(await profiles.getProfile(req)) });
+}));
+
+router.put(['/api/v1/business-profile', '/api/business-profile'], member, requireCapability('settings.manage'), wrap(async (req, res) => {
+  const r = await profiles.updateProfile(req, req.body);
+  await audit(auditCtx(req, req.auth.workspaceId), r.created ? 'workspace.business_profile_created' : 'workspace.business_profile_updated', { resourceType: 'business_profile', resourceId: r.profile.id, metadata: { fields: r.fields } });
+  res.json({ success: true, message: 'Business profile updated successfully', businessProfile: r.profile });
+}));
 
 router.get('/api/v1/workspace/members', member, requireCapability('members.view'), wrap(async (req, res) => res.json({ success: true, ...(await members.listMembers(req)) })));
 router.post('/api/v1/workspace/invitations', member, requireCapability('members.manage'), inviteLimit, wrap(async (req, res) => res.json({ success: true, ...(await members.invite(req, req.body)) })));

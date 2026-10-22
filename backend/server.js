@@ -16,6 +16,7 @@ const voiceStatus = require('./services/voiceStatus');
 const { apiGate, legacyWorkspaceOnly, requireCapability, LEGACY_WORKSPACE_ID } = require('./middleware/auth');
 const { requireTelnyxSignature } = require('./lib/telnyxWebhook');
 const { rateLimit } = require('./lib/rateLimit');
+const { meteredResponse } = require('./lib/aiStructured');
 const { resolveSelectedProduct, findProductNamedIn } = require('./lib/productContext');
 const websiteExtractor = require('./services/websiteExtractor');
 const socialRouter = require('./modules/social/routes');
@@ -556,7 +557,7 @@ ${connectedBiz.map(b => `  * ${b.business_type === 'owner' ? '[MY BUSINESS]' : '
       const urlMatch = cleanMsg.match(/https?:\/\/[^\s]+/i);
       const targetUrl = urlMatch[0];
       try {
-        const extracted = await aiEngine.extractProductFromWebpage(targetUrl);
+        const extracted = await aiEngine.extractProductFromWebpage(targetUrl, '', '', {}, { workspaceId: req.auth.workspaceId, referenceType: 'assistant_chat' });
         fastReply = [
           `Sir, I have analyzed ${targetUrl}:`,
           `**${extracted.name || '—'}**${extracted.tagline ? `\n${extracted.tagline}` : ''}`,
@@ -600,7 +601,7 @@ Core Rules:
 - Keep spoken answers concise (1 to 3 spoken sentences) unless the user asks for a comprehensive breakdown.
 - Do not repeat boilerplate greetings or loop.`;
 
-      const aiResult = await aiEngine.generateAiResponse(cleanMsg, systemInstruction, 1);
+      const aiResult = await meteredResponse({ workspaceId: req.auth.workspaceId, prompt: cleanMsg, system: systemInstruction, referenceType: 'assistant_chat' });
       reply = aiResult.text;
       provider = aiResult.provider;
     }
@@ -635,6 +636,7 @@ Core Rules:
       taskSteps
     });
   } catch (err) {
+    if (err.code === 'QUOTA_EXCEEDED') return res.status(429).json({ success: false, error: err.message, code: err.code });
     res.status(500).json({ error: err.message });
   }
 });
@@ -1181,34 +1183,8 @@ app.get(['/api/v1/telnyx/call-records', '/api/telnyx/call-records'], async (req,
 // 8. BUSINESS PROFILE & CRM (SRS 4 - /app/business-profile & Leads)
 // ==========================================
 
-app.get(['/api/v1/business-profile', '/api/business-profile', '/api/workspaces/current'], async (req, res) => {
-  try {
-    const ws = await get('SELECT * FROM workspaces ORDER BY id ASC LIMIT 1');
-    const profile = await get('SELECT * FROM business_profiles WHERE workspace_id = ?', [ws?.id || 1]);
-    if (profile && profile.products_json) {
-      profile.products = JSON.parse(profile.products_json);
-    }
-    res.json({ workspace: ws, businessProfile: profile });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+// Business profile routes live in modules/workspaces (current workspace only), mounted above.
 
-// Owners and Admins only (settings.manage).
-app.put(['/api/v1/business-profile', '/api/business-profile'], requireCapability('settings.manage'), async (req, res) => {
-  try {
-    const { businessName, industry, websiteUrl, description, brandVoice, products } = req.body;
-    await run(
-      `UPDATE business_profiles SET
-        business_name = ?, industry = ?, website_url = ?, description = ?, brand_voice = ?, products_json = ?
-       WHERE workspace_id = 1`,
-      [businessName, industry, websiteUrl, description, brandVoice, JSON.stringify(products || [])]
-    );
-    res.json({ success: true, message: 'Business profile updated successfully' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
 
 // ==========================================
 // 9. BILLING & SUBSCRIPTIONS (SRS 4 - /app/billing)

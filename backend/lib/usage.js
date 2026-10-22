@@ -4,7 +4,8 @@ const { run, get } = require('../db/database');
  * Usage metering for paid operations. Provider pricing is not configured in code,
  * so costs are recorded as estimates (AI_COST_PER_REQUEST_USD, default 0) with is_estimate = 1.
  */
-const AI_MONTHLY_REQUEST_LIMIT = parseInt(process.env.SOCIAL_AI_MONTHLY_REQUEST_LIMIT || '500', 10);
+// Read on each check so a changed setting applies without code changes (default as documented in .env.example).
+const aiMonthlyRequestLimit = () => parseInt(process.env.SOCIAL_AI_MONTHLY_REQUEST_LIMIT || '500', 10);
 
 // Old TradeSage labels kept so usage rows recorded before the rename still count as fallbacks.
 const FALLBACK_PROVIDERS = new Set(['Marketech.ai Conversational AI', 'Marketech.ai Core', 'TradeSage Conversational AI', 'TradeSage Core']);
@@ -27,14 +28,15 @@ async function aiRequestsThisMonth(workspaceId) {
 }
 
 async function assertAiQuota(workspaceId) {
+  const limit = aiMonthlyRequestLimit();
   const used = await aiRequestsThisMonth(workspaceId);
-  if (used >= AI_MONTHLY_REQUEST_LIMIT) {
-    const err = new Error(`Monthly AI request limit reached (${used}/${AI_MONTHLY_REQUEST_LIMIT}). Increase SOCIAL_AI_MONTHLY_REQUEST_LIMIT or wait until next month.`);
+  if (used >= limit) {
+    const err = new Error(`Monthly AI request limit reached (${used}/${limit}). Increase SOCIAL_AI_MONTHLY_REQUEST_LIMIT or wait until next month.`);
     err.status = 429;
     err.code = 'QUOTA_EXCEEDED';
     throw err;
   }
-  return { used, limit: AI_MONTHLY_REQUEST_LIMIT };
+  return { used, limit };
 }
 
 async function recordUsage({ workspaceId, category, providerKey = null, modelKey = null, quantity = 1, unit = 'request', referenceType = null, referenceId = null }) {
@@ -49,7 +51,7 @@ async function recordUsage({ workspaceId, category, providerKey = null, modelKey
 }
 
 module.exports = {
-  AI_MONTHLY_REQUEST_LIMIT,
+  get AI_MONTHLY_REQUEST_LIMIT() { return aiMonthlyRequestLimit(); },
   isRealAiProvider,
   aiRequestsThisMonth,
   assertAiQuota,

@@ -104,7 +104,6 @@ test('other workspaces stay blocked from these routes, Owners included', async (
   const id = await newContent();
   const attempts = [
     ['POST', '/api/v1/billing/change-plan', { planKey: 'pro' }],
-    ['PUT', '/api/v1/business-profile', { businessName: 'X' }],
     ['DELETE', `/api/v1/content/${id}`],
     ['POST', '/api/v1/b2b/campaigns', { name: 'X' }],
     ['POST', '/api/v1/b2b/clients', { companyName: 'X', email: 'x@x.example' }],
@@ -119,7 +118,7 @@ test('other workspaces stay blocked from these routes, Owners included', async (
 });
 
 test('unauthenticated requests are refused', async () => {
-  for (const [method, path] of [['POST', '/api/v1/billing/change-plan'], ['PUT', '/api/v1/business-profile'], ['DELETE', '/api/v1/content/1'], ['POST', '/api/v1/b2b/campaigns']]) {
+  for (const [method, path] of [['POST', '/api/v1/billing/change-plan'], ['DELETE', '/api/v1/content/1'], ['POST', '/api/v1/b2b/campaigns']]) {
     assert.equal((await h.api(method, path, { body: {} })).status, 401, path);
   }
 });

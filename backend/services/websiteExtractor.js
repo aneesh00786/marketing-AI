@@ -52,7 +52,8 @@ function parseHtml(html) {
 }
 
 /** @returns {Promise<{ product: object, fetched: boolean }>} throws UnsafeUrlError for blocked destinations */
-async function extractFromUrl(url) {
+/** workspaceId: the workspace making the request (server-side session); AI use counts against its quota. */
+async function extractFromUrl(url, { workspaceId } = {}) {
   const targetUrl = normalizeUrl(url);
   assertSafeUrl(targetUrl);
 
@@ -78,7 +79,7 @@ async function extractFromUrl(url) {
   const product = await aiEngine.extractProductFromWebpage(targetUrl, parsed.textContent, parsed.pageTitle, {
     headings: parsed.headings,
     bulletPoints: parsed.bulletPoints
-  });
+  }, { workspaceId, referenceType: 'website_extraction' });
   // Guarantee no pricing is returned for any product
   product.pricing = [];
   return { product, fetched };

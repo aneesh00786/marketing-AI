@@ -20,6 +20,8 @@ process.env.GROQ_API_KEY = 'test-groq-key';
 // Tests never send real email: no server mailbox credentials, and SMTP/IMAP only to hosts tests choose.
 for (const k of ['ZEPTOMAIL_TOKEN', 'SMTP_PASS', 'IMAP_PASS', 'MAIL_ALLOW_PRIVATE_HOSTS']) process.env[k] = '';
 process.env.APP_BASE_URL = 'http://localhost:8000';
+// The shared test database accumulates AI usage across runs; quota tests lower this themselves.
+process.env.SOCIAL_AI_MONTHLY_REQUEST_LIMIT = '1000000';
 process.env.FRONTEND_URL = 'http://localhost:4200';
 
 const crypto = require('crypto');

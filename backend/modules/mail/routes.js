@@ -231,7 +231,7 @@ emails.post('/send-html', requireCapability('mail.send'), body(sendSchema), wrap
 emails.post('/:id/ai-analyze', requireCapability('mail.compose'), wrap(async (req, res) => {
   const email = await requireEmail(ws(req), req.params.id);
   // No product is assumed for inbox replies; replies stay generic unless the email itself says more.
-  const analysis = await aiEngine.analyzeEmail(email, null);
+  const analysis = await aiEngine.analyzeEmail(email, null, { workspaceId: ws(req), referenceType: 'email', referenceId: email.id });
   await run('UPDATE emails SET ai_summary = ?, ai_priority = ?, ai_replies_json = ? WHERE id = ? AND workspace_id = ?',
     [analysis.ai_summary, analysis.ai_priority, JSON.stringify(analysis.ai_replies), email.id, ws(req)]);
   res.json({ success: true, emailId: email.id, summary: analysis.ai_summary, priority: analysis.ai_priority, smartReplies: analysis.ai_replies });

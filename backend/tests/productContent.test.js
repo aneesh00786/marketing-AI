@@ -198,10 +198,13 @@ test('inbox analysis and website extraction invent nothing when the AI is unavai
   ]);
   let analysis;
   let extracted;
+  const usage = async () => Number((await h.db().get('SELECT COUNT(*) AS n FROM usage_ledger WHERE workspace_id = ?', [A.ctx.auth.workspaceId])).n);
+  const before = await usage();
   try {
-    analysis = await aiEngine.analyzeEmail({ subject: 'What does it cost?', body: 'Please send pricing', sender: 'Kim' });
-    extracted = await aiEngine.extractProductFromWebpage('https://thrivewoo.com', 'Short page text', 'Page Title', { headings: ['Order tracking for teams'] });
+    analysis = await aiEngine.analyzeEmail({ subject: 'What does it cost?', body: 'Please send pricing', sender: 'Kim' }, null, { workspaceId: A.ctx.auth.workspaceId });
+    extracted = await aiEngine.extractProductFromWebpage('https://thrivewoo.com', 'Short page text', 'Page Title', { headings: ['Order tracking for teams'] }, { workspaceId: A.ctx.auth.workspaceId });
   } finally { mock.restore(); }
+  assert.equal(await usage(), before, 'failed AI calls record no usage');
   assert.equal(analysis.ai_priority, 'Pricing');
   assert.equal(analysis.ai_summary, 'Kim wrote about "What does it cost?".');
   assert.deepEqual(analysis.ai_replies, []);

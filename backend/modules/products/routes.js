@@ -72,7 +72,7 @@ router.use((req, res, next) => {
 // Website feature extraction (reads a public page through the SSRF-safe fetcher; stores nothing).
 router.post('/extract-url', requireCapability('campaigns.manage'), body(z.object({ url: z.string().min(4).max(500) })), wrap(async (req, res) => {
   try {
-    const { product } = await websiteExtractor.extractFromUrl(req.valid.url);
+    const { product } = await websiteExtractor.extractFromUrl(req.valid.url, { workspaceId: ws(req) });
     res.json({ success: true, product });
   } catch (err) {
     if (err.code === 'UNSAFE_URL') return res.status(400).json({ success: false, error: err.message, code: err.code });

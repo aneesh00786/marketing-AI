@@ -412,7 +412,11 @@ How would you like me to proceed, sir?`;
 /**
  * Extract structured digital product features from webpage text/HTML
  */
-async function extractProductFromWebpage(url, textContent = '', pageTitle = '', structuredData = {}) {
+/**
+ * meter: { workspaceId, referenceType?, referenceId? } of the workspace that owns the request
+ * (from the server-side session or job); the call counts against that workspace's AI quota.
+ */
+async function extractProductFromWebpage(url, textContent = '', pageTitle = '', structuredData = {}, meter = {}) {
   const cleanUrl = url || '';
   const domain = cleanUrl.replace(/^https?:\/\/(www\.)?/, '').split('/')[0];
   const { headings = [], bulletPoints = [] } = structuredData;
@@ -439,7 +443,13 @@ Respond in valid JSON ONLY with this exact structure:
 }`;
 
   try {
-    const aiRes = await generateAiResponse(prompt, 'You are an elite product marketing architect and feature analyst. Output strictly valid JSON with no prices.');
+    const aiRes = await require('../lib/aiStructured').meteredResponse({
+      workspaceId: meter.workspaceId,
+      prompt,
+      system: 'You are an elite product marketing architect and feature analyst. Output strictly valid JSON with no prices.',
+      referenceType: meter.referenceType || 'website_extraction',
+      referenceId: meter.referenceId || null
+    });
     if (aiRes && aiRes.text) {
       const jsonMatch = aiRes.text.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
@@ -459,6 +469,8 @@ Respond in valid JSON ONLY with this exact structure:
       }
     }
   } catch (err) {
+    // The quota is enforced, not bypassed with the page heuristics below.
+    if (err.code === 'QUOTA_EXCEEDED' || !meter.workspaceId) throw err;
     console.warn('AI feature extraction parse fallback:', err.message);
   }
 
@@ -562,7 +574,11 @@ Provide a 1-2 sentence high-impact strategic sales recommendation on how to clos
 /**
  * AI Email Analyzer: Summary, Priority detection, and 3 1-click smart replies
  */
-async function analyzeEmail(email, productContext = null) {
+/**
+ * meter: { workspaceId, referenceType?, referenceId?, fallbackOnQuota? }. With fallbackOnQuota
+ * (background inbox sync) a reached quota gives the non-AI summary instead of an error.
+ */
+async function analyzeEmail(email, productContext = null, meter = {}) {
   const subject = email.subject || '';
   const body = email.body || email.snippet || '';
   const sender = email.sender || email.recipient_name || 'the sender';
@@ -598,7 +614,13 @@ Respond in JSON ONLY with:
 }`;
 
   try {
-    const aiRes = await generateAiResponse(prompt, 'You are an executive email communication specialist. Output valid JSON.');
+    const aiRes = await require('../lib/aiStructured').meteredResponse({
+      workspaceId: meter.workspaceId,
+      prompt,
+      system: 'You are an executive email communication specialist. Output valid JSON.',
+      referenceType: meter.referenceType || 'email',
+      referenceId: meter.referenceId || null
+    });
     if (aiRes && aiRes.text) {
       const match = aiRes.text.match(/\{[\s\S]*\}/);
       if (match) {
@@ -611,6 +633,7 @@ Respond in JSON ONLY with:
       }
     }
   } catch (e) {
+    if (!meter.workspaceId || (e.code === 'QUOTA_EXCEEDED' && !meter.fallbackOnQuota)) throw e;
     console.warn('analyzeEmail fallback:', e.message);
   }
 
