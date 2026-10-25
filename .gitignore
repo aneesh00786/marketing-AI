@@ -39,3 +39,6 @@ Thumbs.db
 .idea/
 __pycache__/
 *.pyc
+
+# Uploaded email template images (runtime data)
+backend/storage/

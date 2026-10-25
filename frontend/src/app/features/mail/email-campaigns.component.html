@@ -3,7 +3,10 @@
 
   <div class="ec-head">
     <h3>Email campaigns</h3>
-    <button *ngIf="canCompose" class="btn btn-primary btn-sm" (click)="newCampaign()" [disabled]="busy === 'create'">+ New campaign</button>
+    <div class="ec-actions" *ngIf="canCompose">
+      <button class="btn btn-secondary btn-sm" (click)="picker = 'new'" [disabled]="busy === 'create'">🧩 New from template</button>
+      <button class="btn btn-primary btn-sm" (click)="newCampaign()" [disabled]="busy === 'create'">+ New campaign</button>
+    </div>
   </div>
   <div class="note error" *ngIf="error" role="alert">{{ error }}</div>
 
@@ -74,7 +77,7 @@
         </fieldset>
 
         <div class="content">
-          <label>HTML content
+          <label>HTML content <button *ngIf="editable" type="button" class="btn btn-secondary btn-sm inline-btn" (click)="picker = 'load'">🧩 Choose template</button>
             <textarea class="hud-input code" rows="14" [(ngModel)]="form.html" [disabled]="!editable" spellcheck="false"></textarea>
           </label>
           <div class="preview">
@@ -92,4 +95,5 @@
       </div>
     </div>
   </div>
+  <app-template-picker *ngIf="picker" [title]="picker === 'new' ? 'New campaign from a template' : 'Load a template into this campaign'" (picked)="onTemplatePicked($event)" (closed)="picker = null"></app-template-picker>
 </section>

@@ -1,0 +1,103 @@
+<section class="tpl">
+  <div class="tpl-head">
+    <div>
+      <h3>Email templates</h3>
+      <p class="muted small">Reusable designs for emails, drafts and campaigns. Using a template makes a copy, so editing an email never changes the template.</p>
+    </div>
+    <div class="tpl-actions" *ngIf="canCompose">
+      <button class="btn btn-secondary btn-sm" (click)="newBlank()">+ Blank template</button>
+      <input type="file" id="tplUpload" accept=".html,.htm,.zip" (change)="onFile($event)" hidden />
+      <label for="tplUpload" class="btn btn-primary btn-sm" [class.disabled]="busy === 'upload'">{{ busy === 'upload' ? 'Importing…' : '⬆ Upload HTML or ZIP' }}</label>
+    </div>
+  </div>
+  <div class="note error" *ngIf="error" role="alert">{{ error }}</div>
+
+  <div class="entry-choice" *ngIf="pendingUpload" role="dialog" aria-label="Choose the main HTML file">
+    <b>{{ pendingUpload.file.name }} contains several HTML files.</b> Which one is the email?
+    <div class="entries">
+      <button *ngFor="let e of pendingUpload.entries" class="btn btn-secondary btn-sm" (click)="upload(pendingUpload.file, e)">{{ e }}</button>
+      <button class="btn btn-secondary btn-sm" (click)="pendingUpload = null">Cancel</button>
+    </div>
+  </div>
+
+  <div class="tpl-grid" [class.with-editor]="editing">
+    <div class="tpl-list">
+      <div class="filters">
+        <input class="hud-input" [(ngModel)]="q" (ngModelChange)="search()" placeholder="Search templates" aria-label="Search templates" />
+        <select class="hud-input" [(ngModel)]="category" (ngModelChange)="page = 1; load()" aria-label="Category">
+          <option value="">All categories</option>
+          <option *ngFor="let c of categories" [value]="c">{{ c }}</option>
+        </select>
+      </div>
+      <p class="muted small" *ngIf="!templates.length">No templates found.</p>
+      <div class="cards">
+        <div *ngFor="let t of templates" class="card" [class.active]="editing?.id === t.id">
+          <button class="card-main" (click)="open(t)">
+            <b>{{ t.name }}</b>
+            <small class="muted">{{ t.category }} · {{ t.source | titlecase }}{{ t.sourceFilename ? ' (' + t.sourceFilename + ')' : '' }}</small>
+            <small class="muted">Updated {{ t.updatedAt | date:'medium' }}</small>
+          </button>
+          <div class="card-actions" *ngIf="canCompose">
+            <button class="btn btn-secondary btn-sm" (click)="duplicate(t)">Duplicate</button>
+            <button class="btn btn-secondary btn-sm" (click)="remove(t)">Delete</button>
+          </div>
+        </div>
+      </div>
+      <div class="pager" *ngIf="pages > 1">
+        <button class="btn btn-secondary btn-sm" (click)="go(page - 1)" [disabled]="page <= 1">‹ Prev</button>
+        <span class="muted small">Page {{ page }} of {{ pages }}</span>
+        <button class="btn btn-secondary btn-sm" (click)="go(page + 1)" [disabled]="page >= pages">Next ›</button>
+      </div>
+    </div>
+
+    <div class="tpl-editor" *ngIf="editing">
+      <div class="editor-head">
+        <span class="tag">{{ editing.id ? 'Editing saved template' : 'New template (not saved yet)' }}</span>
+        <span class="tag warn" *ngIf="dirty">Unsaved changes</span>
+        <div class="editor-actions">
+          <button class="btn btn-secondary btn-sm" (click)="validate()" [disabled]="busy === 'validate'">Validate</button>
+          <button *ngIf="canCompose" class="btn btn-primary btn-sm" (click)="save()" [disabled]="busy === 'save' || !editing.name?.trim()">Save</button>
+          <button class="btn btn-secondary btn-sm" (click)="cancel()">{{ dirty ? 'Cancel' : 'Close' }}</button>
+        </div>
+      </div>
+
+      <div class="meta">
+        <label>Name <input class="hud-input" [(ngModel)]="editing.name" maxlength="150" [disabled]="!canCompose" /></label>
+        <label>Category
+          <input class="hud-input" [(ngModel)]="editing.category" list="tplCategories" maxlength="50" [disabled]="!canCompose" />
+          <datalist id="tplCategories"><option *ngFor="let c of categories" [value]="c"></option></datalist>
+        </label>
+        <label class="wide">Description <input class="hud-input" [(ngModel)]="editing.description" maxlength="500" [disabled]="!canCompose" /></label>
+      </div>
+
+      <div class="use-row" *ngIf="editing.id">
+        <span class="muted small">Use a copy in:</span>
+        <button class="btn btn-secondary btn-sm" (click)="useIn('email')">✉️ New email</button>
+        <button class="btn btn-secondary btn-sm" (click)="useIn('draft')">📝 New draft</button>
+        <button class="btn btn-secondary btn-sm" (click)="useIn('campaign')">📣 New campaign</button>
+      </div>
+
+      <div class="panes">
+        <label class="source">HTML source
+          <textarea class="hud-input code" rows="20" [(ngModel)]="editing.html" spellcheck="false" [disabled]="!canCompose" aria-label="HTML source"></textarea>
+        </label>
+        <div class="preview">
+          <div class="preview-bar">
+            <span class="muted small">Preview</span>
+            <button class="btn btn-sm" [class.btn-primary]="viewport === 'desktop'" [class.btn-secondary]="viewport !== 'desktop'" (click)="viewport = 'desktop'">Desktop</button>
+            <button class="btn btn-sm" [class.btn-primary]="viewport === 'mobile'" [class.btn-secondary]="viewport !== 'mobile'" (click)="viewport = 'mobile'">Mobile</button>
+          </div>
+          <iframe class="frame" [class.mobile]="viewport === 'mobile'" sandbox="" title="Template preview" [srcdoc]="previewHtml"></iframe>
+        </div>
+      </div>
+
+      <div class="checks">
+        <div *ngIf="editing.placeholders?.length"><b>Placeholders:</b> {{ editing.placeholders.join(', ') }} — filled per email before sending (supported: {{ tokenList }}; campaigns: Zoho merge tags such as $[LI:UNSUBSCRIBE]$).</div>
+        <ul class="warnings" *ngIf="editing.warnings?.length">
+          <li *ngFor="let w of editing.warnings">{{ w }}</li>
+        </ul>
+        <p class="muted small" *ngIf="!editing.warnings?.length">No compatibility warnings. Press Validate after editing to check again (the server sanitizes the HTML when saving).</p>
+      </div>
+    </div>
+  </div>
+</section>

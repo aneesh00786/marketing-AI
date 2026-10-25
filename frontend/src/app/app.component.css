@@ -692,3 +692,9 @@ button.dropdown-item:disabled { opacity: 0.6; cursor: default; }
 .draft-review-box .button-group { margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap; }
 .draft-placeholders { border: 1px dashed var(--border-strong); border-radius: 8px; padding: 10px 12px; margin: 10px 0; display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
 .draft-placeholders label { display: flex; flex-direction: column; gap: 4px; color: var(--text-muted); }
+
+/* Templates in Compose and Drafts. */
+.compose-tokens { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; border: 1px dashed var(--border-strong); border-radius: 8px; padding: 8px 10px; margin: 8px 0; font-size: 13px; }
+.compose-tokens label { display: flex; flex-direction: column; gap: 4px; color: var(--text-muted); }
+.upload-template-btn { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.draft-template-row > div { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }

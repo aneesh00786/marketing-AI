@@ -315,6 +315,10 @@ export class ApiService {
     return this.http.post(`${this.root}/api/emails/send-html`, { ...data, confirm }, { headers: { 'Idempotency-Key': idempotencyKey } });
   }
 
+  saveEmailAsTemplate(data: { name: string; html: string; category?: string }): Observable<any> {
+    return this.http.post(`${this.baseUrl}/mail/templates`, { ...data, source: 'email' });
+  }
+
   /** After checking the recipient's mailbox: was a send with an unknown outcome delivered? */
   resolveMailDraft(id: number, outcome: 'sent' | 'not_sent'): Observable<any> {
     return this.http.post(`${this.root}/api/drafts/${id}/resolve`, { outcome, confirm: true });
@@ -329,7 +333,8 @@ export class ApiService {
     return this.http.get(`${this.root}/api/drafts`);
   }
 
-  generateMailDraft(data: { productId?: number; recipientName?: string; recipientEmail?: string; goal?: string; tone?: string }): Observable<any> {
+  // templateId: start from a saved template (its HTML is copied into the draft).
+  generateMailDraft(data: { productId?: number; recipientName?: string; recipientEmail?: string; goal?: string; tone?: string; templateId?: number | null }): Observable<any> {
     return this.http.post(`${this.root}/api/drafts/generate`, data);
   }
 

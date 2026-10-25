@@ -23,8 +23,10 @@
     "mailparser": "^3.9.46",
     "mysql2": "^3.24.6",
     "nodemailer": "^10.1.7",
+    "sanitize-html": "2.18.1",
     "sqlite3": "^5.1.7",
     "undici": "^6.29.1",
+    "yauzl": "3.4.0",
     "zod": "^3.25.76"
   }
 }

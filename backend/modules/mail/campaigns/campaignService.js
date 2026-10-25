@@ -3,7 +3,8 @@ const { z } = require('zod');
 const { run, get, all } = require('../../../db/database');
 const { audit } = require('../../../lib/audit');
 const { toDbDateTime } = require('../../../lib/time');
-const { unresolvedPlaceholders } = require('../../../lib/mailContent');
+const { unresolvedPlaceholders, TOKEN_RE } = require('../../../lib/mailContent');
+const { sanitizeEmailHtml } = require('../../../lib/emailHtml');
 const { workerAuthorizationProblem } = require('../../../lib/workerAuthorization');
 const zoho = require('../zoho/zohoService');
 
@@ -42,7 +43,8 @@ const fields = {
   lists: z.array(z.object({ key: z.string().regex(KEY_RE), name: z.string().max(200).optional() }).strict()).max(20),
   topicId: z.union([z.literal(''), z.string().regex(KEY_RE)]).nullable()
 };
-const createSchema = z.object({ ...fields, name: fields.name }).partial().required({ name: true }).strict();
+// templateId: start from a saved template (its HTML is copied into the campaign).
+const createSchema = z.object({ ...fields, name: fields.name, templateId: z.union([z.number().int().positive(), z.string().regex(/^\d{1,10}$/)]).nullable() }).partial().required({ name: true }).strict();
 const updateSchema = z.object(fields).partial().strict();
 
 const COLUMN = { name: 'name', subject: 'subject', fromName: 'from_name', fromEmail: 'from_email', html: 'html_content', topicId: 'topic_id' };
@@ -101,7 +103,11 @@ function columnsFrom(v) {
   const sets = [];
   const params = [];
   for (const [k, col] of Object.entries(COLUMN)) {
-    if (v[k] !== undefined) { sets.push(`${col} = ?`); params.push(v[k] === '' ? null : v[k]); }
+    if (v[k] === undefined) continue;
+    // Campaign HTML is served publicly to Zoho and recipients: sanitized on every save.
+    const val = k === 'html' && v[k] ? sanitizeEmailHtml(v[k]) : v[k];
+    sets.push(`${col} = ?`);
+    params.push(val === '' ? null : val);
   }
   if (v.lists !== undefined) {
     sets.push('list_keys_json = ?', 'list_names_json = ?');
@@ -112,6 +118,11 @@ function columnsFrom(v) {
 
 async function create(ctx, input) {
   const v = createSchema.parse(input || {});
+  if (v.templateId) {
+    const { html } = await require('../templates/templateService').htmlForUse(ws(ctx), v.templateId);
+    if (v.html === undefined) v.html = html;
+  }
+  delete v.templateId;
   const { sets, params } = columnsFrom(v);
   const cols = sets.map(s => s.split(' = ')[0]);
   const ins = await run(
@@ -193,7 +204,10 @@ async function validateRow(ctx, row, { checkZoho = true } = {}) {
   if (!html.trim()) problems.push('Add the email content.');
   if (html.length > MAX_HTML) problems.push(`Content exceeds ${MAX_HTML} characters.`);
   const placeholders = unresolvedPlaceholders({ subject: String(row.subject || '').replace(ZOHO_TAG_RE, ''), html: html.replace(ZOHO_TAG_RE, '') });
-  if (placeholders.length) problems.push(`Replace the placeholders: ${placeholders.join(', ')}.`);
+  const tokens = placeholders.filter(p => new RegExp(`^${TOKEN_RE.source}$`).test(p));
+  const brackets = placeholders.filter(p => !tokens.includes(p));
+  if (brackets.length) problems.push(`Replace the placeholders: ${brackets.join(', ')}.`);
+  if (tokens.length) problems.push(`Personalization tokens are not filled for Zoho delivery yet: ${tokens.join(', ')}. Replace them with text (or use Zoho merge tags such as $[LI:UNSUBSCRIBE]$).`);
   const keys = parse(row.list_keys_json, []);
   if (!keys.length) problems.push('Choose at least one Zoho mailing list.');
   if (html && !UNSUB_TAG_RE.test(html)) warnings.push('No unsubscribe link: add $[LI:UNSUBSCRIBE]$ (or $[LI:ORG_OPTOUT]$). Without it Zoho adds its default footer or holds the campaign.');

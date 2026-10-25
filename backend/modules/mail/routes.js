@@ -4,7 +4,8 @@ const { run, get, all } = require('../../db/database');
 const { requireCapability } = require('../../middleware/auth');
 const { audit } = require('../../lib/audit');
 const crypto = require('crypto');
-const { unresolvedPlaceholders, assertNoPlaceholders, fillPlaceholders, PLACEHOLDER_RE } = require('../../lib/mailContent');
+const { htmlToText } = require('../../lib/emailHtml');
+const { unresolvedPlaceholders, assertNoPlaceholders, fillPlaceholders, isPlaceholderKey } = require('../../lib/mailContent');
 const aiEngine = require('../../services/aiEngine');
 const emailService = require('../../services/emailService');
 const { resolveSelectedProduct } = require('../../lib/productContext');
@@ -90,6 +91,9 @@ drafts.get('/', requireCapability('mail.view'), wrap(async (req, res) => {
 
 drafts.post('/generate', requireCapability('mail.compose'), body(z.object({
   productId,
+  // Start from a saved template (its HTML is copied; the template itself is not changed).
+  templateId: z.union([z.number().int().positive(), z.string().regex(/^\d{1,10}$/)]).optional().nullable(),
+  subject: z.string().trim().max(255).optional().nullable(),
   recipientName: z.string().max(255).optional().nullable(),
   recipientEmail: recipientEmail.optional().nullable(),
   goal: z.string().max(2000).optional().nullable(),
@@ -99,6 +103,15 @@ drafts.post('/generate', requireCapability('mail.compose'), body(z.object({
   // Only the explicitly selected product of this workspace; malformed or foreign ids are rejected.
   const product = await resolveSelectedProduct(ws(req), v.productId);
   const draftContent = await aiEngine.generateMailDraft(product, { name: v.recipientName, email: v.recipientEmail }, v.goal, v.tone || 'Professional');
+  if (v.templateId) {
+    const { template, html } = await require('./templates/templateService').htmlForUse(ws(req), v.templateId);
+    draftContent.body_html = html;
+    draftContent.body_text = htmlToText(html);
+    draftContent.subject = v.subject || draftContent.subject || template.name;
+    draftContent.missing_context = (draftContent.missing_context || []).filter(m => m !== 'product');
+  } else if (v.subject) {
+    draftContent.subject = v.subject;
+  }
   const now = nowSql();
   const result = await run(
     `INSERT INTO email_drafts (workspace_id, product_id, product_name, recipient_email, recipient_name, subject, body_html, body_text, tone, status, created_at, updated_at)
@@ -124,7 +137,7 @@ drafts.get('/:id', requireCapability('mail.view'), wrap(async (req, res) => {
 
 // Editing a draft sends it back to "Draft", so it must be approved again before sending.
 // replacements: { "[Your name]": "Jane Doe" } fills placeholders in the subject and both bodies.
-const placeholderKey = z.string().max(170).refine(k => new RegExp(`^${PLACEHOLDER_RE.source}$`).test(k), 'must be a [placeholder] from the draft');
+const placeholderKey = z.string().max(170).refine(isPlaceholderKey, 'must be a [placeholder] or {{token}} from the draft');
 const placeholderValue = z.string().trim().min(1).max(500).refine(v => !unresolvedPlaceholders({ text: v }).length, 'must not contain another [placeholder]');
 
 drafts.patch('/:id', requireCapability('mail.compose'), body(z.object({
@@ -172,22 +185,32 @@ drafts.put('/:id/approve', requireCapability('mail.send'), wrap(async (req, res)
   res.json({ success: true, draft: presentDraft(await requireDraft(ws(req), draft.id)), message: 'Draft approved. Ready for dispatch.' });
 }));
 
-drafts.post('/:id/send', requireCapability('mail.send'), body(z.object({ confirm: confirmed })), wrap(async (req, res) => {
-  const draft = await requireDraft(ws(req), req.params.id);
+/**
+ * Sends one approved draft (also used for each recipient of a product email batch). The draft is
+ * claimed first (Approved -> Sending), so a double click, a second tab or an overlapping batch
+ * can never send it twice; an unknown delivery outcome leaves it in Needs Review.
+ */
+async function sendDraftCore(ctx, draft) {
+  const workspaceId = ctx.auth.workspaceId;
   if (draft.status !== 'Approved') {
     if (draft.status === 'Needs Review') throw httpError('The last send of this draft has an unknown outcome. Check the recipient\'s mailbox, then resolve it.', 409, 'NEEDS_REVIEW');
     throw httpError(draft.status === 'Sent' ? 'This draft has already been sent.' : 'Approve the draft before sending it.', 409, draft.status === 'Sent' ? 'DRAFT_SENT' : 'NOT_APPROVED');
   }
   if (!isEmail(draft.recipient_email)) throw httpError('This draft has no valid recipient email address. Add one before sending.', 400, 'INVALID_RECIPIENT');
   assertNoPlaceholders(draftParts(draft));
+  // Product email batch drafts are marketing email: the lead must still be eligible (consent, not unsubscribed).
+  if (draft.batch_id) {
+    const why = await require('./productEmails/service').recheckRecipient(workspaceId, draft);
+    if (why) throw httpError(`Not sent: ${why}.`, 409, 'RECIPIENT_INELIGIBLE');
+  }
 
   // Claim the draft so a double click or a second tab cannot send it twice.
-  const claim = await run(`UPDATE email_drafts SET status = 'Sending', updated_at = ? WHERE id = ? AND workspace_id = ? AND status = 'Approved'`, [nowSql(), draft.id, ws(req)]);
+  const claim = await run(`UPDATE email_drafts SET status = 'Sending', updated_at = ? WHERE id = ? AND workspace_id = ? AND status = 'Approved'`, [nowSql(), draft.id, workspaceId]);
   if (!claim.changes) throw httpError('This draft is already being sent.', 409, 'DRAFT_SENT');
 
   let sendResult;
   try {
-    sendResult = await emailService.sendRealEmail(ws(req), {
+    sendResult = await emailService.sendRealEmail(workspaceId, {
       to: draft.recipient_email,
       recipientName: draft.recipient_name || '',
       subject: draft.subject,
@@ -197,16 +220,22 @@ drafts.post('/:id/send', requireCapability('mail.send'), body(z.object({ confirm
   } catch (err) {
     if (err.outcomeUnknown) {
       // Possibly delivered: held for a person to check; never resent automatically.
-      await run(`UPDATE email_drafts SET status = 'Needs Review', updated_at = ? WHERE id = ? AND workspace_id = ?`, [nowSql(), draft.id, ws(req)]);
-      await audit(req, 'mail.draft_outcome_unknown', { resourceType: 'email_draft', resourceId: draft.id, metadata: { code: err.code } });
+      await run(`UPDATE email_drafts SET status = 'Needs Review', updated_at = ? WHERE id = ? AND workspace_id = ?`, [nowSql(), draft.id, workspaceId]);
+      await audit(ctx, 'mail.draft_outcome_unknown', { resourceType: 'email_draft', resourceId: draft.id, metadata: { code: err.code } });
       throw err;
     }
     // Nothing was sent: the draft goes back to Approved and the error is reported as is.
-    await run(`UPDATE email_drafts SET status = 'Approved', updated_at = ? WHERE id = ? AND workspace_id = ?`, [nowSql(), draft.id, ws(req)]);
+    await run(`UPDATE email_drafts SET status = 'Approved', updated_at = ? WHERE id = ? AND workspace_id = ?`, [nowSql(), draft.id, workspaceId]);
     throw err;
   }
-  await run(`UPDATE email_drafts SET status = 'Sent', updated_at = ? WHERE id = ? AND workspace_id = ?`, [nowSql(), draft.id, ws(req)]);
-  await audit(req, 'mail.draft_sent', { resourceType: 'email_draft', resourceId: draft.id, metadata: { emailId: sendResult.emailId } });
+  await run(`UPDATE email_drafts SET status = 'Sent', updated_at = ? WHERE id = ? AND workspace_id = ?`, [nowSql(), draft.id, workspaceId]);
+  await audit(ctx, 'mail.draft_sent', { resourceType: 'email_draft', resourceId: draft.id, metadata: { emailId: sendResult.emailId, batchId: draft.batch_id || null } });
+  return sendResult;
+}
+
+drafts.post('/:id/send', requireCapability('mail.send'), body(z.object({ confirm: confirmed })), wrap(async (req, res) => {
+  const draft = await requireDraft(ws(req), req.params.id);
+  const sendResult = await sendDraftCore(req, draft);
   res.json({ success: true, sendResult, message: `Email sent to ${draft.recipient_email} (${sendResult.smtpStatus}).` });
 }));
 
@@ -414,4 +443,4 @@ settings.post('/sync', requireCapability('mail.compose'), wrap(async (req, res) 
 }));
 
 // Every route above starts with requireCapability, which also rejects unauthenticated calls (401).
-module.exports = { drafts, emails, settings, tools };
+module.exports = { drafts, emails, settings, tools, sendDraftCore, presentDraft, draftParts };

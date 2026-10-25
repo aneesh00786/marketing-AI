@@ -119,6 +119,9 @@ function present(row) {
     aiSuggestedAt: row.ai_suggested_at || null,
     // Found through AI Lead Discovery: business details are shown live from Google, not stored.
     googlePlace: !!row.google_place,
+    // Marketing email consent (never assumed; recorded in Mail Center > Product emails).
+    marketingConsent: row.marketing_consent || 'unknown',
+    marketingConsentSource: row.marketing_consent_source || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at || null
   };

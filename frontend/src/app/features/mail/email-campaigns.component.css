@@ -35,3 +35,4 @@ textarea.code { font-family: ui-monospace, Menlo, monospace; font-size: 12px; re
 @media (max-width: 900px) {
   .ec-grid, .content, .row2 { grid-template-columns: 1fr; }
 }
+.inline-btn { align-self: flex-start; margin: 2px 0 4px; }

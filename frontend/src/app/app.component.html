@@ -379,12 +379,29 @@
         <button class="btn btn-secondary" (click)="syncCompanyMail()" [disabled]="isSyncingMail">
           {{ isSyncingMail ? 'Syncing...' : '🔄 Sync Mailbox via IMAP' }}
         </button>
+        <button class="btn btn-secondary" (click)="showProductEmailsPanel = !showProductEmailsPanel" [attr.aria-expanded]="showProductEmailsPanel">🎯 Product Emails</button>
+        <button class="btn btn-secondary" (click)="showTemplatesPanel = !showTemplatesPanel" [attr.aria-expanded]="showTemplatesPanel">🧩 Email Templates</button>
         <button class="btn btn-secondary" (click)="showZohoPanel = !showZohoPanel" [attr.aria-expanded]="showZohoPanel">📣 Email Campaigns</button>
         <button class="btn btn-primary" (click)="showComposeModal = true">✉️ Compose & Send Email</button>
       </div>
     </div>
 
-    <app-email-campaigns *ngIf="showZohoPanel" [oauthResult]="zohoOauthResult" (toast)="showToast($event)"></app-email-campaigns>
+    <!-- Loaded on first use (keeps the initial bundle small). -->
+    <ng-container *ngIf="showProductEmailsPanel">
+      @defer (on immediate) {
+        <app-product-emails (toast)="showToast($event)"></app-product-emails>
+      } @loading { <p class="helper-text">Loading product emails…</p> }
+    </ng-container>
+    <ng-container *ngIf="showTemplatesPanel">
+      @defer (on immediate) {
+        <app-email-templates (toast)="showToast($event)" (use)="onTemplateUse($event)"></app-email-templates>
+      } @loading { <p class="helper-text">Loading templates…</p> }
+    </ng-container>
+    <ng-container *ngIf="showZohoPanel">
+      @defer (on immediate) {
+        <app-email-campaigns [oauthResult]="zohoOauthResult" [startTemplate]="campaignStartTemplate" (toast)="showToast($event)"></app-email-campaigns>
+      } @loading { <p class="helper-text">Loading campaigns…</p> }
+    </ng-container>
 
     <!-- Company Mail Status Bar -->
     <div class="mail-auth-status-bar" [class.connected]="mailConfig.status === 'Connected'">
@@ -501,6 +518,14 @@
             <option value="Short">⚡ Short & Punchy</option>
             <option value="Executive">👔 Executive Briefing</option>
           </select>
+        </div>
+      </div>
+      <div class="form-group draft-template-row" style="margin-top: 10px;">
+        <label>Start from a template (optional)</label>
+        <div>
+          <span *ngIf="draftTemplate" class="badge">🧩 {{ draftTemplate.name }}</span>
+          <button class="btn btn-secondary btn-sm" (click)="templatePickerFor = 'draft'">{{ draftTemplate ? 'Change' : 'Choose template' }}</button>
+          <button *ngIf="draftTemplate" class="btn btn-secondary btn-sm" (click)="draftTemplate = null">Clear</button>
         </div>
       </div>
       <div class="form-group" style="margin-top: 10px;">
@@ -1139,11 +1164,21 @@
             </button>
           </div>
           <div class="upload-template-btn">
+            <button class="btn btn-secondary btn-sm" (click)="templatePickerFor = 'compose'">🧩 Choose Template</button>
+            <button class="btn btn-secondary btn-sm" (click)="saveComposeAsTemplate()" [disabled]="!composeEmail.html_body">💾 Save as template</button>
             <input type="file" id="htmlTemplateInput" accept=".html,.htm" (change)="onHtmlTemplateUpload($event)" style="display: none;" />
             <label for="htmlTemplateInput" class="btn btn-secondary btn-sm" style="cursor: pointer;">
               📄 Upload .html File
             </label>
           </div>
+        </div>
+
+        <div class="compose-tokens" *ngIf="composeTokens.length">
+          <span>Fill in before sending{{ composeTemplateName ? ' (from "' + composeTemplateName + '")' : '' }}:</span>
+          <label *ngFor="let tk of composeTokens">{{ tk }}
+            <input type="text" class="hud-input" [(ngModel)]="composeTokenValues[tk]" maxlength="200" [attr.aria-label]="'Value for ' + tk" />
+          </label>
+          <button class="btn btn-secondary btn-sm" (click)="applyComposeTokens()">Apply values</button>
         </div>
 
         <!-- Visual Rendered Preview -->
@@ -1165,6 +1200,12 @@
       </div>
     </div>
   </div>
+
+  <ng-container *ngIf="templatePickerFor">
+    @defer (on immediate) {
+      <app-template-picker [title]="templatePickerFor === 'draft' ? 'Start the draft from a template' : 'Choose a template for this email'" (picked)="onTemplatePicked($event)" (closed)="templatePickerFor = null"></app-template-picker>
+    }
+  </ng-container>
 
   <!-- =================================================================== -->
   <!-- MODAL 3: VIEW RENDERED EMAIL PAGE POPUP -->

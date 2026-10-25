@@ -15,11 +15,16 @@ import { DashboardComponent, DashboardNavigation } from './features/dashboard/da
 import { LeadDiscoveryComponent } from './features/leads/lead-discovery.component';
 import { MembersComponent } from './features/members/members.component';
 import { EmailCampaignsComponent } from './features/mail/email-campaigns.component';
+import { EmailTemplatesComponent } from './features/mail/email-templates.component';
+import type { TemplateUseTarget } from './features/mail/email-templates.component';
+import { TemplatePickerComponent } from './features/mail/template-picker.component';
+import { ProductEmailsComponent } from './features/mail/product-emails.component';
+import { findTokens, fillTokens, defaultTokenValues } from './features/mail/template-utils';
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [CommonModule, FormsModule, LoginComponent, SocialHubComponent, CommandCenterComponent, IconComponent, DashboardComponent, LeadDiscoveryComponent, MembersComponent, EmailCampaignsComponent],
+  imports: [CommonModule, FormsModule, LoginComponent, SocialHubComponent, CommandCenterComponent, IconComponent, DashboardComponent, LeadDiscoveryComponent, MembersComponent, EmailCampaignsComponent, EmailTemplatesComponent, TemplatePickerComponent, ProductEmailsComponent],
   templateUrl: './app.component.html',
   styleUrls: ['./app.component.css']
 })
@@ -27,6 +32,15 @@ export class AppComponent implements OnInit, OnDestroy {
   // Navigation: Directly accessible HUD
   // Email campaigns panel in Mail Center (Zoho delivery), and the result of returning from Zoho sign-in.
   showZohoPanel = false;
+  // Email Templates panel; template picker for Compose or Drafts; template handed to Campaigns.
+  showTemplatesPanel = false;
+  // Product → Leads → personalized emails panel.
+  showProductEmailsPanel = false;
+  templatePickerFor: 'compose' | 'draft' | null = null;
+  campaignStartTemplate: { id: number; name: string } | null = null;
+  draftTemplate: { id: number; name: string } | null = null;
+  composeTemplateName = '';
+  composeTokenValues: Record<string, string> = {};
   zohoOauthResult: { zoho?: string; reason?: string } | null = null;
   currentRoute: 'dashboard' | 'products' | 'leads' | 'emails' | 'drafts' | 'businesses' | 'social' | 'voice' | 'appointments' | 'members' = 'dashboard';
 
@@ -1314,6 +1328,63 @@ export class AppComponent implements OnInit, OnDestroy {
     return `Email not sent: ${this.apiError(err)}`;
   }
 
+  // ---------- Templates in Mail Center workflows (always a working copy) ----------
+
+  /** "Use in" from Email Templates. */
+  onTemplateUse(e: { template: any; target: TemplateUseTarget }): void {
+    if (e.target === 'email') this.composeFromTemplate(e.template);
+    if (e.target === 'draft') {
+      this.draftTemplate = { id: e.template.id, name: e.template.name };
+      this.navigate('drafts');
+      this.showToast(`Draft generator will start from "${e.template.name}".`);
+    }
+    if (e.target === 'campaign') {
+      this.showTemplatesPanel = false;
+      this.showZohoPanel = true;
+      this.campaignStartTemplate = { id: e.template.id, name: e.template.name };
+    }
+  }
+
+  onTemplatePicked(t: any): void {
+    const target = this.templatePickerFor;
+    this.templatePickerFor = null;
+    if (target === 'compose') this.composeFromTemplate(t, true);
+    if (target === 'draft') this.draftTemplate = { id: t.id, name: t.name };
+  }
+
+  /** Loads a copy of the template into Compose; editing it never changes the saved template. */
+  composeFromTemplate(t: any, keepRecipient = false): void {
+    if (!keepRecipient) this.composeEmail = { recipient_email: '', recipient_name: '', subject: '', body: '', html_body: '', is_html: true };
+    if (this.composeEmail.html_body?.trim() && keepRecipient && !confirm('Replace the current email content with the template?')) return;
+    this.composeEmail.html_body = t.html;
+    this.composeEmail.is_html = true;
+    this.composeTab = 'visual';
+    this.composeTemplateName = t.name;
+    this.composeTokenValues = defaultTokenValues(findTokens(t.html), this.composeEmail.recipient_name);
+    this.composeSend = null;
+    this.showComposeModal = true;
+  }
+
+  get composeTokens(): string[] {
+    return this.composeEmail.is_html ? findTokens(this.composeEmail.html_body) : [];
+  }
+
+  applyComposeTokens(): void {
+    this.composeEmail.html_body = fillTokens(this.composeEmail.html_body, this.composeTokenValues);
+    const left = findTokens(this.composeEmail.html_body);
+    this.showToast(left.length ? `Still to fill: ${left.join(', ')}` : 'Placeholders filled.');
+  }
+
+  saveComposeAsTemplate(): void {
+    if (!this.composeEmail.html_body?.trim()) { this.showToast('There is no HTML content to save.'); return; }
+    const name = prompt('Template name', this.composeTemplateName ? `${this.composeTemplateName} (edited)` : (this.composeEmail.subject || 'New template'));
+    if (!name?.trim()) return;
+    this.apiService.saveEmailAsTemplate({ name: name.trim().slice(0, 150), html: this.composeEmail.html_body }).subscribe({
+      next: () => this.showToast(`Saved as template "${name.trim()}".`),
+      error: (err) => this.showToast(`Template not saved: ${this.apiError(err)}`)
+    });
+  }
+
   sendOutboundEmail(): void {
     if (this.isSendingCompose) return;
     if (!this.composeEmail.recipient_email || !this.composeEmail.subject) {
@@ -1418,7 +1489,7 @@ export class AppComponent implements OnInit, OnDestroy {
 
   generateNewDraft(): void {
     this.isGeneratingDraft = true;
-    this.apiService.generateMailDraft(this.newDraftForm).subscribe({
+    this.apiService.generateMailDraft({ ...this.newDraftForm, templateId: this.draftTemplate?.id || null }).subscribe({
       next: (res) => {
         this.isGeneratingDraft = false;
         this.showToast(res.message);

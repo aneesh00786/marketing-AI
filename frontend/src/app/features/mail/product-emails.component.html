@@ -1,0 +1,153 @@
+<section class="pe">
+  <div class="pe-head">
+    <div>
+      <h3>Product emails</h3>
+      <p class="muted small">Choose a product, select leads, and send each one a personalized email. Only leads with marketing consent recorded (and not unsubscribed) can be selected. For one-off emails to any address, use Compose &amp; Send or Mail Drafts.</p>
+    </div>
+  </div>
+  <div class="note error" *ngIf="error" role="alert">{{ error }}</div>
+  <p class="muted small" *ngIf="!caps.compose">You can view batches, but creating product emails needs the Member role or higher.</p>
+
+  <ng-container *ngIf="!batch">
+    <!-- 1. Product -->
+    <div class="step">
+      <label>1. Product
+        <select class="hud-input" [(ngModel)]="productId" (ngModelChange)="chooseProduct()" aria-label="Product">
+          <option [ngValue]="null">Choose a product…</option>
+          <option *ngFor="let p of products" [ngValue]="p.id">{{ p.name }}</option>
+        </select>
+      </label>
+      <div class="product" *ngIf="product">
+        <b>{{ product.name }}</b><span *ngIf="product.tagline"> — {{ product.tagline }}</span>
+        <div class="muted small" *ngIf="product.features?.length">Features: {{ product.features.join(', ') }}</div>
+        <div class="muted small" *ngIf="product.targetAudience">Audience: {{ product.targetAudience }}</div>
+      </div>
+    </div>
+
+    <!-- 2. Leads -->
+    <div class="step" *ngIf="product">
+      <div class="step-head">
+        <b>2. Recipients</b>
+        <span class="muted small">{{ selected.size }} selected (max {{ maxBatch }})</span>
+        <button class="btn btn-secondary btn-sm" (click)="selectAllEligible()" [disabled]="!eligibleIds.length">Select all eligible ({{ eligibleIds.length }})</button>
+        <button class="btn btn-secondary btn-sm" (click)="clearSelection()" [disabled]="!selected.size">Clear</button>
+      </div>
+      <div class="filters">
+        <input class="hud-input" [(ngModel)]="q" (ngModelChange)="search()" placeholder="Search name, email, company" aria-label="Search leads" />
+        <select class="hud-input" [(ngModel)]="status" (ngModelChange)="page = 1; loadRecipients()" aria-label="Lead status">
+          <option value="">All statuses</option>
+          <option *ngFor="let s of ['New','Imported','Contacted','Qualified','Demo Scheduled','Proposal','Won','Lost']" [value]="s">{{ s }}</option>
+        </select>
+        <select class="hud-input" [(ngModel)]="eligibility" (ngModelChange)="page = 1; loadRecipients()" aria-label="Eligibility">
+          <option value="">Eligible and not eligible</option>
+          <option value="eligible">Eligible only</option>
+          <option value="ineligible">Not eligible only</option>
+        </select>
+        <label class="check"><input type="checkbox" [(ngModel)]="productLeadsOnly" (ngModelChange)="page = 1; loadRecipients()" /> Only leads for this product</label>
+      </div>
+      <div class="table-wrap">
+        <table class="tbl">
+          <thead><tr><th></th><th>Lead</th><th>Company</th><th>Status</th><th>Eligibility</th></tr></thead>
+          <tbody>
+            <tr *ngFor="let l of leads" [class.dim]="!l.eligible">
+              <td><input type="checkbox" [checked]="selected.has(l.id)" [disabled]="!l.eligible" (change)="toggle(l)" [attr.aria-label]="'Select ' + l.name" /></td>
+              <td><b>{{ l.name }}</b><div class="muted small">{{ l.email || 'no email' }}</div></td>
+              <td>{{ l.company || '—' }}</td>
+              <td>{{ l.status }}</td>
+              <td>
+                <span class="tag ok" *ngIf="l.eligible">Eligible</span>
+                <ng-container *ngIf="!l.eligible">
+                  <span class="muted small">{{ l.reasons.join('; ') }}</span>
+                  <button *ngIf="l.consent === 'unknown' && l.email" class="btn btn-secondary btn-sm" (click)="recordConsent(l)">Record consent…</button>
+                </ng-container>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="muted small" *ngIf="!leads.length">No leads match.</p>
+      <div class="pager" *ngIf="pages > 1">
+        <button class="btn btn-secondary btn-sm" (click)="go(page - 1)" [disabled]="page <= 1">‹ Prev</button>
+        <span class="muted small">Page {{ page }} of {{ pages }} · {{ total }} leads</span>
+        <button class="btn btn-secondary btn-sm" (click)="go(page + 1)" [disabled]="page >= pages">Next ›</button>
+      </div>
+    </div>
+
+    <!-- 3. Email -->
+    <div class="step" *ngIf="product && caps.compose">
+      <b>3. Email</b>
+      <div class="grid2">
+        <label>Goal / message (use {{ tokenHint }} to personalize)
+          <input class="hud-input" [(ngModel)]="form.goal" maxlength="2000" [placeholder]="goalPlaceholder" />
+        </label>
+        <label>Subject (optional)
+          <input class="hud-input" [(ngModel)]="form.subject" maxlength="255" placeholder="Default: product name, + company" />
+        </label>
+        <label>Tone
+          <select class="hud-input" [(ngModel)]="form.tone">
+            <option>Professional</option><option>Persuasive</option><option>Short</option><option>Executive</option>
+          </select>
+        </label>
+        <label>Signed by
+          <input class="hud-input" [(ngModel)]="form.senderName" maxlength="150" />
+        </label>
+      </div>
+      <div class="tpl-row">
+        <span class="muted small">Design:</span>
+        <span *ngIf="template" class="tag">🧩 {{ template.name }}</span>
+        <button class="btn btn-secondary btn-sm" (click)="showPicker = true">{{ template ? 'Change template' : 'Use a template (optional)' }}</button>
+        <button *ngIf="template" class="btn btn-secondary btn-sm" (click)="template = null">No template</button>
+      </div>
+      <button class="btn btn-primary" (click)="generate()" [disabled]="busy === 'generate' || !selected.size || !form.senderName.trim() || (!form.goal.trim() && !template)">
+        {{ busy === 'generate' ? 'Preparing…' : 'Prepare ' + selected.size + ' personalized email(s)' }}
+      </button>
+      <div class="skipped" *ngIf="skipped.length">
+        <b>Not included:</b>
+        <ul><li *ngFor="let s of skipped">{{ s.name }} ({{ s.email || 'no email' }}): {{ s.reasons.join('; ') }}</li></ul>
+      </div>
+    </div>
+  </ng-container>
+
+  <!-- 4. Preview, approve, send -->
+  <div class="step" *ngIf="batch">
+    <div class="step-head">
+      <b>4. Preview and send — {{ batch.productName }}</b>
+      <span class="tag">{{ batch.status }}</span>
+      <span class="muted small">{{ drafts.length }} email(s) · {{ readyCount }} approved</span>
+      <button class="btn btn-secondary btn-sm" (click)="refreshBatch()">Refresh</button>
+      <button class="btn btn-secondary btn-sm" (click)="startOver()">New batch</button>
+    </div>
+    <div class="skipped" *ngIf="skipped.length">
+      <b>Not included ({{ skipped.length }}):</b>
+      <ul><li *ngFor="let s of skipped">{{ s.name }} ({{ s.email || 'no email' }}): {{ s.reasons.join('; ') }}</li></ul>
+    </div>
+    <div class="batch-grid">
+      <div class="recips">
+        <button *ngFor="let d of drafts" class="recip" [class.active]="d.id === previewId" (click)="previewId = d.id">
+          <b>{{ d.recipientName || d.recipientEmail }}</b>
+          <small class="muted">{{ d.recipientEmail }}</small>
+          <span class="tag" [class.ok]="d.status === 'Sent'" [class.warn]="d.status === 'Needs Review' || d.placeholders?.length">{{ d.placeholders?.length ? 'Fill ' + d.placeholders.join(', ') : d.status }}</span>
+        </button>
+      </div>
+      <div class="pv" *ngIf="preview">
+        <div class="muted small">To {{ preview.recipientEmail }} · Subject: <b>{{ preview.subject }}</b></div>
+        <iframe sandbox="" title="Email preview" [srcdoc]="previewHtml"></iframe>
+        <p class="muted small" *ngIf="preview.placeholders?.length">Fill {{ preview.placeholders.join(', ') }} for this recipient in Mail Drafts (or remove the recipient by deleting the draft), then approve again.</p>
+      </div>
+    </div>
+    <ul class="problems" *ngIf="problems.length"><li *ngFor="let p of problems">{{ p.email }}: {{ p.problem }}</li></ul>
+    <div class="actions" *ngIf="caps.send">
+      <button class="btn btn-secondary" (click)="approve()" [disabled]="busy === 'approve'">Approve ready emails</button>
+      <button class="btn btn-primary" (click)="send()" [disabled]="busy === 'send' || !readyCount">{{ busy === 'send' ? 'Sending…' : 'Send ' + readyCount + ' email(s)' }}</button>
+    </div>
+    <p class="muted small" *ngIf="!caps.send">An Approver, Manager, Admin or Owner approves and sends.</p>
+    <div class="table-wrap" *ngIf="results.length">
+      <table class="tbl">
+        <thead><tr><th>Recipient</th><th>Result</th><th>Details</th></tr></thead>
+        <tbody><tr *ngFor="let r of results"><td>{{ r.email }}</td><td>{{ r.outcome }}</td><td class="muted small">{{ r.reason || '' }}</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <app-template-picker *ngIf="showPicker" title="Template for these emails" (picked)="onTemplate($event)" (closed)="showPicker = false"></app-template-picker>
+</section>

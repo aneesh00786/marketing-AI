@@ -100,6 +100,10 @@ app.use('/api', apiGate({
     '/api/v1/mail/zoho/callback',
     // Zoho imports approved campaign HTML from a token-bound, expiring URL.
     /^\/api\/v1\/mail\/campaigns\/content\/[A-Za-z0-9_-]{43}$/,
+    // Template images/fonts, loaded by recipients' mail clients and Zoho (opaque, unguessable ids).
+    /^\/api\/v1\/mail\/assets\/[A-Za-z0-9_-]{43}$/,
+    // Unsubscribe links in product emails carry a random per-recipient token.
+    /^\/api\/v1\/mail\/unsubscribe\/[a-f0-9]{40}$/,
     /^\/api\/v1\/social\/webhooks\/[a-z_]+$/,
     // Email unsubscribe links carry a random per-recipient token.
     /^\/api\/v1\/outreach\/unsubscribe\/[a-f0-9]{40}$/
@@ -123,6 +127,14 @@ app.use(['/api/v1/emails', '/api/emails'], mailRoutes.emails);
 // Zoho Campaigns connection and Marketech.ai email campaigns delivered through Zoho. Before the mail settings router.
 app.use('/api/v1/mail/zoho', require('./modules/mail/zoho/routes'));
 app.use('/api/v1/mail/campaigns', require('./modules/mail/campaigns/routes'));
+// Reusable email templates (HTML/ZIP import) and their public image URLs.
+const mailTemplateRoutes = require('./modules/mail/templates/routes');
+app.use('/api/v1/mail/templates', mailTemplateRoutes.templates);
+app.use('/api/v1/mail/assets', mailTemplateRoutes.assets);
+// Product -> Leads -> personalized emails (batches of drafts) and their unsubscribe links.
+const productEmailRoutes = require('./modules/mail/productEmails/routes');
+app.use('/api/v1/mail/product-emails', productEmailRoutes.router);
+app.use('/api/v1/mail/unsubscribe', productEmailRoutes.unsubscribe);
 app.use(['/api/v1/mail', '/api/mail'], mailRoutes.settings);
 app.use(mailRoutes.tools);
 // Tenant-aware Business Playbooks ("AI Campaigns").

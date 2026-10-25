@@ -5,6 +5,7 @@ import { HttpClient } from '@angular/common/http';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { apiRoot } from '../../core/api-base';
 import { ZohoCampaignsComponent } from './zoho-campaigns.component';
+import { TemplatePickerComponent } from './template-picker.component';
 
 /**
  * Email campaigns: written, validated, approved and sent from Marketech.ai; delivered by Zoho.
@@ -14,12 +15,16 @@ import { ZohoCampaignsComponent } from './zoho-campaigns.component';
 @Component({
   selector: 'app-email-campaigns',
   standalone: true,
-  imports: [CommonModule, FormsModule, ZohoCampaignsComponent],
+  imports: [CommonModule, FormsModule, ZohoCampaignsComponent, TemplatePickerComponent],
   templateUrl: './email-campaigns.component.html',
   styleUrls: ['../command/command-center.component.css', './email-campaigns.component.css']
 })
 export class EmailCampaignsComponent implements OnInit {
   @Input() oauthResult: { zoho?: string; reason?: string } | null = null;
+  /** Set by Email Templates → "New campaign": creates a campaign from that template. */
+  @Input() set startTemplate(t: { id: number; name: string } | null) {
+    if (t && t.id) this.newFromTemplate(t);
+  }
   @Output() toast = new EventEmitter<string>();
 
   private base = `${apiRoot()}/api/v1/mail/campaigns`;
@@ -31,6 +36,8 @@ export class EmailCampaignsComponent implements OnInit {
   validation: any = null;
   busy = '';
   error = '';
+  // 'new': create a campaign from a template; 'load': replace this campaign's content with one.
+  picker: 'new' | 'load' | null = null;
 
   constructor(private http: HttpClient, private sanitizer: DomSanitizer) {}
 
@@ -65,6 +72,27 @@ export class EmailCampaignsComponent implements OnInit {
     this.busy = 'create';
     this.http.post<any>(this.base, { name: 'Untitled campaign', html: '<p>Hello,</p>\n<p></p>\n<p><a href="$[LI:UNSUBSCRIBE]$">Unsubscribe</a></p>' }).subscribe({
       next: r => { this.busy = ''; this.open(r.campaign); this.load(); },
+      error: e => { this.busy = ''; this.toast.emit(this.err(e)); }
+    });
+  }
+
+  /** A copy of the template's HTML goes into the campaign; the template itself is not changed. */
+  onTemplatePicked(t: any): void {
+    const mode = this.picker;
+    this.picker = null;
+    if (mode === 'new') {
+      this.newFromTemplate(t);
+    } else if (mode === 'load' && this.form) {
+      if (this.form.html.trim() && !confirm('Replace this campaign\'s content with the template? Save afterwards; an approved campaign must be approved again.')) return;
+      this.form.html = t.html;
+      this.toast.emit(`Loaded "${t.name}". Review it, then Save.`);
+    }
+  }
+
+  newFromTemplate(t: { id: number; name: string }): void {
+    this.busy = 'create';
+    this.http.post<any>(this.base, { name: String(t.name).slice(0, 150), templateId: t.id }).subscribe({
+      next: r => { this.busy = ''; this.open(r.campaign); this.load(); this.toast.emit('Campaign created from the template.'); },
       error: e => { this.busy = ''; this.toast.emit(this.err(e)); }
     });
   }

@@ -5,6 +5,16 @@
  * (styles, scripts, comments such as <!--[if mso]> and tags are ignored).
  */
 const PLACEHOLDER_RE = /\[[^[\]{}<>\n]{0,80}[A-Za-z][^[\]{}<>\n]{0,80}\]/g;
+// Template personalization tokens, e.g. {{first_name}}, {{company}} (same syntax as outreach).
+const TOKEN_RE = /\{\{\s*[A-Za-z_][A-Za-z0-9_.]{0,40}\s*\}\}/g;
+// Zoho Campaigns merge tags ($[LI:UNSUBSCRIBE]$) are filled by Zoho, not placeholders.
+const ZOHO_TAG_RE = /\$\[[^\]\n]{1,80}\]\$/g;
+const TEMPLATE_TOKENS = ['first_name', 'company'];
+
+/** A single placeholder string, either style. */
+function isPlaceholderKey(k) {
+  return new RegExp(`^(?:${PLACEHOLDER_RE.source}|${TOKEN_RE.source})$`).test(String(k));
+}
 
 function visibleText(html) {
   return String(html || '')
@@ -18,7 +28,9 @@ function visibleText(html) {
 function unresolvedPlaceholders({ subject = '', text = '', html = '' } = {}) {
   const found = new Set();
   for (const part of [subject, text, visibleText(html)]) {
-    for (const m of String(part || '').match(PLACEHOLDER_RE) || []) found.add(m.trim());
+    const p = String(part || '').replace(ZOHO_TAG_RE, '');
+    for (const m of p.match(PLACEHOLDER_RE) || []) found.add(m.trim());
+    for (const m of p.match(TOKEN_RE) || []) found.add(m.trim());
   }
   return [...found].slice(0, 20);
 }
@@ -52,4 +64,4 @@ function fillPlaceholders({ subject = '', text = '', html = '' }, replacements) 
   return { subject: s, text: t, html: hBody };
 }
 
-module.exports = { PLACEHOLDER_RE, unresolvedPlaceholders, assertNoPlaceholders, fillPlaceholders };
+module.exports = { PLACEHOLDER_RE, TOKEN_RE, ZOHO_TAG_RE, TEMPLATE_TOKENS, isPlaceholderKey, unresolvedPlaceholders, assertNoPlaceholders, fillPlaceholders };
