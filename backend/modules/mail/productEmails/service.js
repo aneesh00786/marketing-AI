@@ -7,6 +7,7 @@ const aiEngine = require('../../../services/aiEngine');
 const { resolveSelectedProduct } = require('../../../lib/productContext');
 const { htmlToText } = require('../../../lib/emailHtml');
 const { unresolvedPlaceholders } = require('../../../lib/mailContent');
+const { workerAuthorizationProblem } = require('../../../lib/workerAuthorization');
 
 /**
  * Product -> Leads -> Personalized emails -> Preview -> Send (Mail Center).
@@ -16,13 +17,22 @@ const { unresolvedPlaceholders } = require('../../../lib/mailContent');
  * single-send claim, unknown-outcome review and audit log. Each recipient gets a separate email.
  *
  * Marketing consent is never assumed: a lead is eligible for these bulk sends only with a valid
- * email address, consent recorded as "granted", and no unsubscribe/bounce on record. Eligibility
- * is checked when the batch is created and again right before each email is sent.
+ * email address, consent recorded as "granted" WITH evidence (method, date given, evidence
+ * reference), and no unsubscribe/bounce on record. Eligibility is checked when the batch is
+ * created and again right before each email is sent.
+ *
+ * Sending is done by the background worker (processBatches): a batch is queued, then each email is
+ * sent separately with its state stored per recipient, so an interrupted batch resumes without
+ * resending anything sent or uncertain. Unsubscribes arrive by link (incl. RFC 8058 one-click) or
+ * by reply (detectUnsubscribeReplies, using the outreach inbox sync).
  */
 const ws = ctx => ctx.auth.workspaceId;
 const MAX_LIST = 2000;
 const maxBatch = () => Math.max(1, Math.min(500, parseInt(process.env.MAIL_BATCH_MAX_RECIPIENTS || '100', 10) || 100));
-const STALE_SENDING_MS = 15 * 60 * 1000;
+const STALE_LOCK_MS = 10 * 60 * 1000;
+const EMAILS_PER_TICK = () => Math.max(1, Math.min(100, parseInt(process.env.MAIL_BATCH_EMAILS_PER_TICK || '10', 10) || 10));
+const REPLY_MONITOR_DAYS = 60;
+const CONSENT_METHODS = ['web_form', 'double_opt_in', 'checkbox_at_signup', 'written', 'event_signup', 'customer_request', 'imported_with_proof'];
 
 function httpError(status, message, code) {
   const err = new Error(message);
@@ -57,7 +67,10 @@ async function withEligibility(workspaceId, leads) {
     else if (suppressed.has(email.toLowerCase())) reasons.push(suppressed.get(email.toLowerCase()) === 'bounced' ? 'Email bounced earlier' : 'Unsubscribed');
     const consent = l.marketing_consent || 'unknown';
     if (consent === 'withdrawn') reasons.push('Marketing consent withdrawn');
-    else if (consent !== 'granted') {
+    else if (consent === 'granted' && !(l.marketing_consent_method && l.marketing_consent_evidence)) {
+      // Recorded before evidence was required (a note only): not trusted as consent.
+      reasons.push('Consent recorded without evidence; record how and when it was given');
+    } else if (consent !== 'granted') {
       reasons.push(discovered.has(l.id)
         ? 'Found with AI Lead Discovery (public business listing); no marketing consent recorded'
         : 'Marketing consent not recorded');
@@ -72,6 +85,8 @@ async function withEligibility(workspaceId, leads) {
       productInterest: l.product_interest || null,
       consent,
       consentSource: l.marketing_consent_source || null,
+      consentMethod: l.marketing_consent_method || null,
+      consentObtainedAt: l.marketing_consent_obtained_at || null,
       source: discovered.has(l.id) ? 'discovery' : 'crm',
       eligible: reasons.length === 0,
       reasons
@@ -79,7 +94,7 @@ async function withEligibility(workspaceId, leads) {
   });
 }
 
-const LEAD_COLUMNS = 'id, name, email, company_name, status, product_id, product_interest, marketing_consent, marketing_consent_source';
+const LEAD_COLUMNS = 'id, name, email, company_name, status, product_id, product_interest, marketing_consent, marketing_consent_source, marketing_consent_method, marketing_consent_obtained_at, marketing_consent_evidence';
 
 /**
  * Leads of the workspace for the recipient picker: searchable and filterable, each with its
@@ -132,27 +147,116 @@ function presentProduct(p) {
   return { id: p.id, name: p.name, tagline: p.tagline || null, description: p.description || null, url: p.url || null, targetAudience: p.target_audience || p.targetAudience || null, features };
 }
 
-const consentSchema = z.object({
-  leadIds: z.array(id).min(1).max(500),
-  status: z.enum(['granted', 'withdrawn', 'unknown']),
-  source: z.string().trim().max(255).optional()
-}).strict().refine(v => v.status !== 'granted' || (v.source && v.source.length >= 3), { message: 'Say how consent was obtained (e.g. "Signed up on website form, 2026-09-12").', path: ['source'] });
+const consentSchema = z.discriminatedUnion('status', [
+  // Granting needs evidence of genuine consent, not just a note.
+  z.object({
+    status: z.literal('granted'),
+    leadIds: z.array(id).min(1).max(500),
+    method: z.enum(CONSENT_METHODS),
+    obtainedAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Give the date consent was given (YYYY-MM-DD).'),
+    evidence: z.string().trim().min(3, 'Give the evidence reference (form submission id, document, URL...).').max(500),
+    note: z.string().trim().max(255).optional(),
+    attest: z.literal(true, { errorMap: () => ({ message: 'Confirm that you hold this evidence for each selected lead.' }) })
+  }).strict(),
+  z.object({ status: z.literal('withdrawn'), leadIds: z.array(id).min(1).max(500), note: z.string().trim().max(255).optional() }).strict(),
+  z.object({ status: z.literal('unknown'), leadIds: z.array(id).min(1).max(500), note: z.string().trim().max(255).optional() }).strict()
+]);
 
-/** Records marketing consent for leads (who, when, and how it was obtained). */
+async function consentEvent(workspaceId, leadId, { status, method = null, obtainedAt = null, evidence = null, note = null, actorType = 'user', actorUserId = null, reference = null }) {
+  await run(
+    `INSERT INTO lead_consent_events (workspace_id, lead_id, status, method, obtained_at, evidence, note, actor_type, actor_user_id, reference, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())`,
+    [workspaceId, leadId, status, method, obtainedAt, evidence, note ? String(note).slice(0, 255) : null, actorType, actorUserId, reference ? String(reference).slice(0, 100) : null]
+  );
+}
+
+/**
+ * Records marketing consent with its evidence: how it was obtained, when it was given, and a
+ * reference to the proof (plus the recorder's confirmation that they hold it). Every change is
+ * kept in lead_consent_events and the audit log.
+ */
 async function recordConsent(ctx, input) {
   const v = consentSchema.parse(input || {});
   const ids = [...new Set(v.leadIds)];
   const found = await all(`SELECT id FROM leads WHERE workspace_id = ? AND id IN (${ids.map(() => '?').join(',')})`, [ws(ctx), ...ids]);
   if (found.length !== ids.length) throw httpError(404, 'One or more leads were not found in this workspace.', 'NOT_FOUND');
+  if (v.status === 'granted') {
+    const given = new Date(`${v.obtainedAt}T00:00:00Z`);
+    if (Number.isNaN(given.getTime()) || given.getTime() > Date.now() + 86400000) throw httpError(400, 'The consent date cannot be in the future.', 'VALIDATION_ERROR');
+  }
+  const source = v.status === 'granted' ? `${v.method}: ${v.evidence}`.slice(0, 255) : (v.note || null);
   await run(
-    `UPDATE leads SET marketing_consent = ?, marketing_consent_source = ?, marketing_consent_at = ${v.status === 'unknown' ? 'NULL' : 'UTC_TIMESTAMP()'}, marketing_consent_by = ?
+    `UPDATE leads SET marketing_consent = ?, marketing_consent_source = ?, marketing_consent_method = ?, marketing_consent_obtained_at = ?, marketing_consent_evidence = ?,
+       marketing_consent_at = ${v.status === 'unknown' ? 'NULL' : 'UTC_TIMESTAMP()'}, marketing_consent_by = ?
      WHERE workspace_id = ? AND id IN (${ids.map(() => '?').join(',')})`,
-    [v.status, v.status === 'unknown' ? null : (v.source || null), v.status === 'unknown' ? null : ctx.auth.userId, ws(ctx), ...ids]
+    [v.status, source, v.status === 'granted' ? v.method : null, v.status === 'granted' ? `${v.obtainedAt} 00:00:00` : null, v.status === 'granted' ? v.evidence : null,
+      v.status === 'unknown' ? null : ctx.auth.userId, ws(ctx), ...ids]
   );
   for (const leadId of ids) {
-    await audit(ctx, 'leads.consent_recorded', { resourceType: 'lead', resourceId: leadId, metadata: { status: v.status, source: v.source || null } });
+    await consentEvent(ws(ctx), leadId, { status: v.status, method: v.method || null, obtainedAt: v.obtainedAt ? `${v.obtainedAt} 00:00:00` : null, evidence: v.evidence || null, note: v.note || null, actorUserId: ctx.auth.userId });
+    await audit(ctx, 'leads.consent_recorded', { resourceType: 'lead', resourceId: leadId, metadata: { status: v.status, method: v.method || null, obtainedAt: v.obtainedAt || null } });
   }
   return { updated: ids.length, status: v.status };
+}
+
+/**
+ * Applies an unsubscribe for one address in one workspace (idempotent): the address is suppressed
+ * and consent is withdrawn on the lead the email was sent to; other leads are not touched.
+ * Returns true when something changed.
+ */
+async function applyUnsubscribe(workspaceId, { email, leadId, source, reference }) {
+  const addr = String(email || '').trim().toLowerCase();
+  if (!addr) return false;
+  const existing = await get('SELECT reason FROM email_suppressions WHERE workspace_id = ? AND email = ?', [workspaceId, addr]);
+  if (!existing) await require('../../outreach/outreachService').suppress(workspaceId, addr, 'unsubscribed', source);
+  let withdrew = false;
+  if (leadId) {
+    const r = await run(
+      `UPDATE leads SET marketing_consent = 'withdrawn', marketing_consent_source = ?, marketing_consent_method = NULL, marketing_consent_evidence = NULL,
+         marketing_consent_obtained_at = NULL, marketing_consent_at = UTC_TIMESTAMP(), marketing_consent_by = NULL
+       WHERE workspace_id = ? AND id = ? AND LOWER(email) = ? AND marketing_consent <> 'withdrawn'`,
+      [source === 'reply' ? 'Unsubscribe reply' : 'Unsubscribe link', workspaceId, leadId, addr]
+    );
+    withdrew = r.changes > 0;
+    if (withdrew) await consentEvent(workspaceId, leadId, { status: 'withdrawn', note: source === 'reply' ? 'Unsubscribe reply' : 'Unsubscribe link', actorType: 'recipient', reference });
+  }
+  if (!existing || withdrew) {
+    await audit({ workspaceId, actorType: 'recipient' }, 'mail.unsubscribed', { resourceType: 'lead', resourceId: leadId || null, metadata: { source, reference: reference || null } });
+  }
+  return !existing || withdrew;
+}
+
+/**
+ * Unsubscribe requests sent as replies to product emails (the inbox sync stores replies in
+ * emails). A reply counts only from the exact recipient address, in the same workspace, received
+ * after that email was sent and within REPLY_MONITOR_DAYS. Safe to run repeatedly.
+ */
+async function detectUnsubscribeReplies({ workspaceId = null, limit = 200 } = {}) {
+  const { isUnsubscribeRequest } = require('../../outreach/outreachSender');
+  const rows = await all(
+    `SELECT d.id, d.workspace_id, d.lead_id, d.recipient_email, d.sent_at FROM email_drafts d
+     WHERE d.batch_id IS NOT NULL AND d.status = 'Sent' AND d.sent_at IS NOT NULL AND d.sent_at >= UTC_TIMESTAMP() - INTERVAL ${REPLY_MONITOR_DAYS} DAY
+       ${workspaceId ? 'AND d.workspace_id = ?' : ''}
+       AND EXISTS (SELECT 1 FROM emails e WHERE e.workspace_id = d.workspace_id AND LOWER(e.sender_email) = LOWER(d.recipient_email)
+                   AND e.smtp_status LIKE 'Received%' AND e.received_at > d.sent_at)
+     ORDER BY d.id LIMIT ${Math.max(1, Math.min(1000, limit))}`,
+    workspaceId ? [workspaceId] : []
+  );
+  let applied = 0;
+  for (const d of rows) {
+    const replies = await all(
+      "SELECT id, subject, body FROM emails WHERE workspace_id = ? AND LOWER(sender_email) = LOWER(?) AND smtp_status LIKE 'Received%' AND received_at > ? ORDER BY id",
+      [d.workspace_id, d.recipient_email, d.sent_at]
+    );
+    const hit = replies.find(r => isUnsubscribeRequest(r.subject, r.body));
+    if (hit && await applyUnsubscribe(d.workspace_id, { email: d.recipient_email, leadId: d.lead_id, source: 'reply', reference: `email:${hit.id}` })) applied++;
+  }
+  return applied;
+}
+
+/** Workspaces whose product emails may still get replies (for the inbox sync). */
+async function monitoredWorkspaces() {
+  return (await all(`SELECT DISTINCT workspace_id FROM email_drafts WHERE batch_id IS NOT NULL AND status = 'Sent' AND sent_at >= UTC_TIMESTAMP() - INTERVAL ${REPLY_MONITOR_DAYS} DAY`)).map(r => r.workspace_id);
 }
 
 // ------------------------------------------------------------------ batches
@@ -177,6 +281,7 @@ function fillLeadTokens(text, values, { html }) {
 }
 
 function unsubscribeLink(token) {
+  if (!token) return null;
   const base = (process.env.APP_BASE_URL || '').replace(/\/$/, '');
   const isPublic = /^https:\/\//i.test(base) && !/localhost|127\.0\.0\.1|\.local\b/i.test(base);
   return isPublic ? `${base}/api/v1/mail/unsubscribe/${token}` : null;
@@ -279,6 +384,7 @@ function counts(drafts) {
   return c;
 }
 
+
 async function getBatch(ctx, rawId) {
   const b = await requireBatch(ctx, rawId);
   const { presentDraft } = require('../routes');
@@ -287,12 +393,16 @@ async function getBatch(ctx, rawId) {
     batch: {
       id: b.id, productId: b.product_id, productName: b.product_name, templateId: b.template_id, goal: b.goal, tone: b.tone,
       subject: b.subject, senderName: b.sender_name, status: b.status, recipients: b.recipients, createdAt: b.created_at,
-      approvedAt: b.approved_at, sentAt: b.sent_at, counts: counts(drafts)
+      approvedAt: b.approved_at, queuedAt: b.queued_at, sentAt: b.sent_at, lastError: b.last_error, counts: counts(drafts),
+      outcomes: drafts.reduce((o, d) => (d.batch_outcome ? { ...o, [d.batch_outcome]: (o[d.batch_outcome] || 0) + 1 } : o), {})
     },
     drafts: drafts.map(d => ({
       id: d.id, leadId: d.lead_id, recipientName: d.recipient_name, recipientEmail: d.recipient_email, subject: d.subject,
-      status: d.status, placeholders: d.placeholders, bodyHtml: d.body_html, updatedAt: d.updated_at
-    }))
+      status: d.status, outcome: d.batch_outcome || null, error: d.send_error || null, sentAt: d.sent_at || null,
+      placeholders: d.placeholders, bodyHtml: d.body_html, updatedAt: d.updated_at
+    })),
+    // Product emails are marketing email: blocked through ZeptoMail; SMTP only when approved.
+    marketingDelivery: await emailService.marketingDeliveryStatus(ws(ctx))
   };
 }
 
@@ -304,7 +414,7 @@ async function listBatches(ctx) {
 /** Approves every draft of the batch that is ready (valid recipient, no placeholders); reports the rest. */
 async function approveBatch(ctx, rawId) {
   const b = await requireBatch(ctx, rawId);
-  if (b.status === 'sending') throw httpError(409, 'This batch is being sent.', 'BATCH_SENDING');
+  if (['queued', 'sending'].includes(b.status)) throw httpError(409, 'This batch is being sent.', 'BATCH_SENDING');
   const { draftParts } = require('../routes');
   const problems = [];
   let approved = 0;
@@ -317,7 +427,7 @@ async function approveBatch(ctx, rawId) {
     approved += r.changes;
   }
   if (approved) {
-    await run("UPDATE mail_draft_batches SET status = 'approved', approved_by = ?, approved_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP() WHERE id = ? AND status <> 'sending'", [ctx.auth.userId, b.id]);
+    await run("UPDATE mail_draft_batches SET status = 'approved', approved_by = ?, approved_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP() WHERE id = ? AND status NOT IN ('queued', 'sending')", [ctx.auth.userId, b.id]);
   }
   await audit(ctx, 'mail.batch_approved', { resourceType: 'mail_draft_batch', resourceId: b.id, metadata: { approved, problems: problems.length } });
   return { approved, problems, ...(await getBatch(ctx, b.id)) };
@@ -335,60 +445,128 @@ async function recheckRecipient(workspaceId, draft) {
 }
 
 /**
- * Sends each approved email of the batch separately, one at a time. The batch is claimed first so
- * a second click or tab cannot run it twice; each email is claimed again by the draft sender.
- * Recipients that became ineligible are skipped; an unknown outcome goes to Needs Review and is
- * never retried; a mail configuration error stops the batch (the rest stay Approved).
+ * Queues the batch for the background worker, which sends each approved email separately. The
+ * request returns at once; progress and per-recipient results are in the batch. Queuing again
+ * (e.g. after a pause) resumes it: only emails not yet attempted are sent.
  */
 async function sendBatch(ctx, rawId, { confirm } = {}) {
   if (confirm !== true) throw httpError(400, 'Explicit confirmation (confirm: true) is required to send.', 'CONFIRMATION_REQUIRED');
   const b = await requireBatch(ctx, rawId);
-  const claim = await run(
-    `UPDATE mail_draft_batches SET status = 'sending', sent_by = ?, updated_at = UTC_TIMESTAMP()
-     WHERE id = ? AND workspace_id = ? AND (status <> 'sending' OR updated_at < UTC_TIMESTAMP() - INTERVAL ${STALE_SENDING_MS / 60000} MINUTE)`,
+  const pending = await get("SELECT COUNT(*) AS n FROM email_drafts WHERE workspace_id = ? AND batch_id = ? AND status = 'Approved' AND batch_outcome IS NULL", [ws(ctx), b.id]);
+  if (!Number(pending.n)) throw httpError(409, 'There are no approved emails waiting to be sent in this batch.', 'NOTHING_TO_SEND');
+  const delivery = await emailService.marketingDeliveryStatus(ws(ctx));
+  if (!delivery.allowed) throw httpError(409, delivery.reason, delivery.code);
+  const q = await run(
+    "UPDATE mail_draft_batches SET status = 'queued', sent_by = ?, queued_at = UTC_TIMESTAMP(), last_error = NULL, updated_at = UTC_TIMESTAMP() WHERE id = ? AND workspace_id = ? AND status NOT IN ('queued', 'sending')",
     [ctx.auth.userId, b.id, ws(ctx)]
   );
-  if (!claim.changes) throw httpError(409, 'This batch is already being sent.', 'BATCH_SENDING');
-  const { sendDraftCore } = require('../routes');
-  const results = [];
-  let stopped = null;
-  try {
-    for (const d of await batchDrafts(ctx, b.id)) {
-      if (d.status !== 'Approved') continue;
-      if (stopped) { results.push({ draftId: d.id, email: d.recipient_email, outcome: 'not_sent', reason: stopped }); continue; }
-      const why = await recheckRecipient(ws(ctx), d);
-      if (why) { results.push({ draftId: d.id, email: d.recipient_email, outcome: 'skipped', reason: why }); continue; }
-      try {
-        await sendDraftCore(ctx, d);
-        results.push({ draftId: d.id, email: d.recipient_email, outcome: 'sent' });
-      } catch (err) {
-        if (err.outcomeUnknown) results.push({ draftId: d.id, email: d.recipient_email, outcome: 'needs_review', reason: err.message });
-        else results.push({ draftId: d.id, email: d.recipient_email, outcome: 'failed', reason: err.message });
-        if (err.code === 'MAIL_NOT_CONFIGURED') stopped = 'Stopped: mail is not configured for this workspace.';
-      }
-    }
-  } finally {
-    const left = await get("SELECT COUNT(*) AS n FROM email_drafts WHERE workspace_id = ? AND batch_id = ? AND status IN ('Draft', 'Approved')", [ws(ctx), b.id]);
-    await run(`UPDATE mail_draft_batches SET status = ?, sent_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP() WHERE id = ?`, [Number(left.n) ? 'partial' : 'done', b.id]);
-  }
-  const summary = results.reduce((s, r) => ({ ...s, [r.outcome]: (s[r.outcome] || 0) + 1 }), {});
-  await audit(ctx, 'mail.batch_sent', { resourceType: 'mail_draft_batch', resourceId: b.id, metadata: summary });
-  return { results, summary, ...(await getBatch(ctx, b.id)) };
+  if (!q.changes) throw httpError(409, 'This batch is already queued or being sent.', 'BATCH_SENDING');
+  await audit(ctx, 'mail.batch_queued', { resourceType: 'mail_draft_batch', resourceId: b.id, metadata: { pending: Number(pending.n) } });
+  return { queued: true, ...(await getBatch(ctx, b.id)) };
 }
 
-/** Public unsubscribe (token from the email): suppresses the address and records withdrawn consent. */
+/** Explicitly retries emails that failed with a clear (not-sent) error. Never touches uncertain ones. */
+async function retryFailed(ctx, rawId, { confirm } = {}) {
+  if (confirm !== true) throw httpError(400, 'Explicit confirmation (confirm: true) is required.', 'CONFIRMATION_REQUIRED');
+  const b = await requireBatch(ctx, rawId);
+  if (['queued', 'sending'].includes(b.status)) throw httpError(409, 'This batch is being sent.', 'BATCH_SENDING');
+  const delivery = await emailService.marketingDeliveryStatus(ws(ctx));
+  if (!delivery.allowed) throw httpError(409, delivery.reason, delivery.code);
+  const r = await run("UPDATE email_drafts SET batch_outcome = NULL, send_error = NULL WHERE workspace_id = ? AND batch_id = ? AND batch_outcome = 'failed' AND status = 'Approved'", [ws(ctx), b.id]);
+  await audit(ctx, 'mail.batch_retry_failed', { resourceType: 'mail_draft_batch', resourceId: b.id, metadata: { reset: r.changes } });
+  return sendBatch(ctx, b.id, { confirm: true });
+}
+
+async function markOutcome(draftId, outcome, error) {
+  await run('UPDATE email_drafts SET batch_outcome = ?, send_error = ? WHERE id = ?', [outcome, error ? String(error).slice(0, 500) : null, draftId]);
+}
+
+/**
+ * A worker that stopped mid-send: emails left "Sending" may or may not have been delivered, so
+ * they go to Needs Review (never resent); the batch lock is released so the rest can resume.
+ */
+async function recoverStaleBatches() {
+  const cutoff = new Date(Date.now() - STALE_LOCK_MS).toISOString().replace('T', ' ').substring(0, 19);
+  const stuck = await all("SELECT id FROM email_drafts WHERE batch_id IS NOT NULL AND status = 'Sending' AND updated_at < ?", [cutoff]);
+  for (const d of stuck) {
+    const r = await run("UPDATE email_drafts SET status = 'Needs Review', batch_outcome = 'needs_review', send_error = 'The sender stopped during this email; it may or may not have been delivered.', updated_at = UTC_TIMESTAMP() WHERE id = ? AND status = 'Sending'", [d.id]);
+    if (r.changes) await audit({ actorType: 'worker' }, 'mail.batch_email_outcome_unknown', { resourceType: 'email_draft', resourceId: d.id });
+  }
+  await run("UPDATE mail_draft_batches SET status = 'queued', locked_by = NULL, locked_at = NULL WHERE status = 'sending' AND locked_at < ?", [cutoff]);
+  return stuck.length;
+}
+
+/**
+ * Worker tick: claims one queued batch at a time and sends up to EMAILS_PER_TICK emails. Before
+ * each email: active workspace, the person who queued it is still an active member allowed to
+ * send, and the recipient is still eligible (consent with evidence, not unsubscribed/bounced).
+ */
+async function processBatches(workerId, { maxEmails = EMAILS_PER_TICK() } = {}) {
+  await recoverStaleBatches();
+  const cutoff = new Date(Date.now() - STALE_LOCK_MS).toISOString().replace('T', ' ').substring(0, 19);
+  const candidates = await all("SELECT id FROM mail_draft_batches WHERE status IN ('queued', 'sending') AND (locked_by IS NULL OR locked_at < ?) ORDER BY queued_at, id LIMIT 5", [cutoff]);
+  let sent = 0;
+  for (const { id: batchId } of candidates) {
+    const claim = await run(
+      "UPDATE mail_draft_batches SET status = 'sending', locked_by = ?, locked_at = UTC_TIMESTAMP() WHERE id = ? AND status IN ('queued', 'sending') AND (locked_by IS NULL OR locked_at < ?)",
+      [workerId, batchId, cutoff]
+    );
+    if (!claim.changes) continue;
+    const b = await get('SELECT * FROM mail_draft_batches WHERE id = ?', [batchId]);
+    const ctx = { auth: { workspaceId: b.workspace_id, userId: b.sent_by, actorType: 'worker' } };
+    let pause = null;
+    try {
+      const auth = await workerAuthorizationProblem(b.workspace_id, b.sent_by, 'mail.send');
+      if (auth) { pause = auth.message; continue; }
+      // Re-checked by the worker too: the provider or its approval may have changed since queuing.
+      const delivery = await emailService.marketingDeliveryStatus(b.workspace_id);
+      if (!delivery.allowed) { pause = delivery.reason; continue; }
+      const drafts = await all(`SELECT * FROM email_drafts WHERE workspace_id = ? AND batch_id = ? AND status = 'Approved' AND batch_outcome IS NULL ORDER BY id LIMIT ${Math.max(1, maxEmails - sent)}`, [b.workspace_id, b.id]);
+      const { sendDraftCore } = require('../routes');
+      for (const d of drafts) {
+        if (sent >= maxEmails) break;
+        await run('UPDATE mail_draft_batches SET locked_at = UTC_TIMESTAMP() WHERE id = ?', [b.id]);
+        const why = await recheckRecipient(b.workspace_id, d);
+        if (why) { await markOutcome(d.id, 'skipped', why); continue; }
+        try {
+          await sendDraftCore(ctx, d);
+          await markOutcome(d.id, 'sent', null);
+          sent++;
+        } catch (err) {
+          if (err.outcomeUnknown) await markOutcome(d.id, 'needs_review', err.message);
+          else if (err.code === 'MAIL_NOT_CONFIGURED' || err.marketingBlocked) { pause = err.message; break; }
+          else if (err.code === 'RECIPIENT_INELIGIBLE') await markOutcome(d.id, 'skipped', err.message);
+          else if (['DRAFT_SENT', 'NEEDS_REVIEW'].includes(err.code)) {
+            const cur = await get('SELECT status FROM email_drafts WHERE id = ?', [d.id]);
+            await markOutcome(d.id, cur.status === 'Sent' ? 'sent' : 'needs_review', err.message);
+          } else await markOutcome(d.id, 'failed', err.message);
+        }
+      }
+    } finally {
+      const left = await get("SELECT COUNT(*) AS n FROM email_drafts WHERE workspace_id = ? AND batch_id = ? AND status = 'Approved' AND batch_outcome IS NULL", [b.workspace_id, b.id]);
+      const status = pause ? 'paused' : (Number(left.n) ? 'queued' : 'done');
+      await run(`UPDATE mail_draft_batches SET status = ?, locked_by = NULL, locked_at = NULL, last_error = ?, ${status === 'done' ? 'sent_at = UTC_TIMESTAMP(),' : ''} updated_at = UTC_TIMESTAMP() WHERE id = ? AND locked_by = ?`,
+        [status, pause ? String(pause).slice(0, 500) : null, b.id, workerId]);
+      if (status !== 'queued') await audit(ctx, status === 'done' ? 'mail.batch_sent' : 'mail.batch_paused', { resourceType: 'mail_draft_batch', resourceId: b.id, metadata: { reason: pause || null } });
+    }
+    if (sent >= maxEmails) break;
+  }
+  return sent;
+}
+
+/** Public unsubscribe (token from the email): suppresses the address and withdraws that lead's consent. */
 async function unsubscribeByToken(token, { apply }) {
   if (!/^[a-f0-9]{40}$/.test(String(token || ''))) return null;
-  const d = await get('SELECT workspace_id, recipient_email FROM email_drafts WHERE unsubscribe_token = ?', [token]);
+  const d = await get('SELECT id, workspace_id, lead_id, recipient_email FROM email_drafts WHERE unsubscribe_token = ?', [token]);
   if (!d) return null;
   const email = String(d.recipient_email).trim().toLowerCase();
-  if (apply) {
-    await require('../../outreach/outreachService').suppress(d.workspace_id, email, 'unsubscribed', 'mail_link');
-    await run("UPDATE leads SET marketing_consent = 'withdrawn', marketing_consent_source = 'Unsubscribe link', marketing_consent_at = UTC_TIMESTAMP(), marketing_consent_by = NULL WHERE workspace_id = ? AND LOWER(email) = ?", [d.workspace_id, email]);
-    await audit({ workspaceId: d.workspace_id, actorType: 'recipient' }, 'mail.unsubscribed', { resourceType: 'email_suppression', metadata: { source: 'mail_link' } });
-  }
+  if (apply) await applyUnsubscribe(d.workspace_id, { email, leadId: d.lead_id, source: 'link', reference: `draft:${d.id}` });
   const s = await get('SELECT 1 AS x FROM email_suppressions WHERE workspace_id = ? AND email = ?', [d.workspace_id, email]);
   return { unsubscribed: !!s };
 }
 
-module.exports = { listRecipients, recordConsent, createBatch, getBatch, listBatches, approveBatch, sendBatch, recheckRecipient, unsubscribeByToken, personalize, withEligibility };
+module.exports = {
+  CONSENT_METHODS, listRecipients, recordConsent, createBatch, getBatch, listBatches, approveBatch, sendBatch, retryFailed,
+  processBatches, recoverStaleBatches, recheckRecipient, unsubscribeByToken, unsubscribeLink, applyUnsubscribe,
+  detectUnsubscribeReplies, monitoredWorkspaces, personalize, withEligibility
+};

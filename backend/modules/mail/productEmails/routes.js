@@ -7,8 +7,9 @@ const svc = require('./service');
  * Product email batches: /api/v1/mail/product-emails (signed-in members).
  * Pick recipients: mail.compose + leads.view. Record consent: leads.manage.
  * Create a batch: mail.compose. View: mail.view. Approve and send: mail.send.
- * Public unsubscribe links: /api/v1/mail/unsubscribe/:token (GET shows a confirmation; POST applies,
- * so mail scanners that open links do not unsubscribe people).
+ * Public unsubscribe links: /api/v1/mail/unsubscribe/:token. GET shows a confirmation (mail scanners
+ * that open links do not unsubscribe people); POST applies it. POST is also the RFC 8058 one-click
+ * target of the List-Unsubscribe header (body "List-Unsubscribe=One-Click", no cookies or login).
  */
 const router = express.Router();
 const unsubscribe = express.Router();
@@ -50,5 +51,6 @@ router.post('/batches', requireCapability('mail.compose', 'leads.view'), wrap(as
 router.get('/batches/:id', requireCapability('mail.view'), wrap(async (req, res) => res.json({ success: true, ...(await svc.getBatch(req, req.params.id)) })));
 router.post('/batches/:id/approve', requireCapability('mail.send'), wrap(async (req, res) => res.json({ success: true, ...(await svc.approveBatch(req, req.params.id)) })));
 router.post('/batches/:id/send', requireCapability('mail.send'), wrap(async (req, res) => res.json({ success: true, ...(await svc.sendBatch(req, req.params.id, req.body || {})) })));
+router.post('/batches/:id/retry-failed', requireCapability('mail.send'), wrap(async (req, res) => res.json({ success: true, ...(await svc.retryFailed(req, req.params.id, req.body || {})) })));
 
 module.exports = { router, unsubscribe };

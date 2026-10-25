@@ -173,6 +173,53 @@ function zeptoToken(workspaceId, config) {
   return own || (isLegacy(workspaceId) ? process.env.ZEPTOMAIL_TOKEN : null) || null;
 }
 
+/**
+ * Whether this workspace may send marketing email (Product Emails), and why not. ZeptoMail is a
+ * transactional-only service, so marketing never goes through it; the workspace's own SMTP mailbox
+ * is used only after an Owner/Admin confirms the provider allows marketing email.
+ */
+function marketingDeliveryProblem(workspaceId, config) {
+  if (usesZepto(workspaceId, config)) {
+    return { code: 'MARKETING_PROVIDER_BLOCKED', message: 'Marketing emails cannot be sent through ZeptoMail: Zoho limits ZeptoMail to transactional email. Configure your own SMTP mailbox for marketing in Mail Settings, or use Email Campaigns (Zoho Campaigns).' };
+  }
+  if (!config.smtp_host || !config.smtp_user || !config.smtp_pass) {
+    return { code: 'MARKETING_SMTP_REQUIRED', message: 'Marketing emails need an SMTP mailbox configured in Mail Settings.' };
+  }
+  if (!Number(config.marketing_approved)) {
+    return { code: 'MARKETING_NOT_APPROVED', message: 'This SMTP mailbox is not approved for marketing email yet. An Owner or Admin must confirm in Mail Settings that the provider allows marketing email.' };
+  }
+  return null;
+}
+
+async function marketingDeliveryStatus(workspaceId) {
+  const config = await getRawMailConfig(workspaceId);
+  const problem = marketingDeliveryProblem(workspaceId, config);
+  return {
+    allowed: !problem,
+    code: problem ? problem.code : null,
+    reason: problem ? problem.message : null,
+    provider: config.provider || null,
+    approvedAt: config.marketing_approved_at || null
+  };
+}
+
+/** Owner/Admin confirmation that the SMTP mailbox may be used for marketing (or withdrawal of it). */
+async function setMarketingApproval(workspaceId, { approved, userId, note }) {
+  const config = await getRawMailConfig(workspaceId);
+  if (config.exists === false || !(await get('SELECT id FROM mail_configurations WHERE workspace_id = ?', [workspaceId]))) {
+    throw mailError('Save your mail settings first.', 400, 'MAIL_NOT_CONFIGURED');
+  }
+  if (approved) {
+    const p = marketingDeliveryProblem(workspaceId, { ...config, marketing_approved: 1 });
+    if (p) throw mailError(p.message, 409, p.code);
+  }
+  await run(
+    'UPDATE mail_configurations SET marketing_approved = ?, marketing_approved_by = ?, marketing_approved_at = ?, marketing_approval_note = ? WHERE workspace_id = ?',
+    approved ? [1, userId, new Date().toISOString().replace('T', ' ').substring(0, 19), note ? String(note).slice(0, 255) : null, workspaceId] : [0, null, null, null, workspaceId]
+  );
+  return marketingDeliveryStatus(workspaceId);
+}
+
 function usesZepto(workspaceId, config) {
   if (config.provider === 'zeptomail') return true;
   // Historical heuristic kept for the legacy workspace only.
@@ -225,6 +272,11 @@ async function saveMailConfig(workspaceId, config = {}) {
   ];
   const row = await get('SELECT id FROM mail_configurations WHERE workspace_id = ? LIMIT 1', [workspaceId]);
   if (row) {
+    // Marketing approval belongs to one sending account: a different provider/server/login/sender clears it.
+    const changed = ['provider', 'smtp_host', 'smtp_user', 'sender_email'].some((k, i) => String(existing[k] || '') !== String([provider, smtpHost, smtpUser, senderEmail][i] || ''));
+    if (changed) {
+      await run('UPDATE mail_configurations SET marketing_approved = 0, marketing_approved_by = NULL, marketing_approved_at = NULL, marketing_approval_note = NULL WHERE workspace_id = ?', [workspaceId]);
+    }
     await run(`
       UPDATE mail_configurations
       SET provider = ?, smtp_host = ?, smtp_port = ?, smtp_secure = ?, smtp_user = ?, smtp_pass = ?,
@@ -347,7 +399,11 @@ async function sendRealEmail(workspaceId, {
   text = '',
   campaignId = null,
   clientId = null,
-  replyTo = null
+  replyTo = null,
+  // Marketing emails: { url, mailto } for List-Unsubscribe; url (https) also enables RFC 8058 one-click.
+  listUnsubscribe = null,
+  // 'marketing': never through ZeptoMail, only an SMTP mailbox approved for marketing (no fallback).
+  purpose = 'transactional'
 }) {
   const recipient = String(to || '').trim();
   if (!isValidRecipient(recipient)) throw mailError('A valid recipient email address is required (placeholder domains such as example.com are not accepted).', 400, 'INVALID_RECIPIENT');
@@ -361,14 +417,30 @@ async function sendRealEmail(workspaceId, {
   const plain = text || html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
   const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
 
+  // mailtoSelf: a mailto: to the sender address; such replies are detected by the inbox sync.
+  const unsubParts = listUnsubscribe ? [listUnsubscribe.url, listUnsubscribe.mailtoSelf ? `mailto:${senderEmail}?subject=unsubscribe` : listUnsubscribe.mailto].filter(Boolean) : [];
+  const unsubHeaders = unsubParts.length ? {
+    'List-Unsubscribe': unsubParts.map(u => `<${u}>`).join(', '),
+    ...(listUnsubscribe.url ? { 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' } : {})
+  } : null;
+
+  if (purpose === 'marketing') {
+    const problem = marketingDeliveryProblem(workspaceId, config);
+    if (problem) {
+      const err = mailError(problem.message, 409, problem.code);
+      err.marketingBlocked = true;
+      throw err;
+    }
+  }
+
   let sent = false;
   let messageId = null;
   let smtpStatus = null;
   let deliveryDetails = null;
   let lastError = null;
 
-  // 1. ZeptoMail with this workspace's token.
-  if (usesZepto(workspaceId, config)) {
+  // 1. ZeptoMail with this workspace's token (transactional email only).
+  if (purpose !== 'marketing' && usesZepto(workspaceId, config)) {
     try {
       const zeptoResult = await sendZeptoMail({
         to: recipient, recipientName, subject, html, text: plain,
@@ -395,7 +467,10 @@ async function sendRealEmail(workspaceId, {
     if (transporter) {
       try {
         await assertSafeMailHost(config.smtp_host);
-        const info = await transporter.sendMail({ from: fromAddress, to: recipient, subject, text: plain, html, replyTo: replyTo || senderEmail });
+        const info = await transporter.sendMail({
+          from: fromAddress, to: recipient, subject, text: plain, html, replyTo: replyTo || senderEmail,
+          ...(unsubHeaders ? { headers: unsubHeaders } : {})
+        });
         sent = true;
         messageId = info.messageId || null;
         smtpStatus = 'Sent via SMTP';
@@ -576,6 +651,9 @@ async function syncIncomingEmails(workspaceId) {
 }
 
 module.exports = {
+  marketingDeliveryProblem,
+  marketingDeliveryStatus,
+  setMarketingApproval,
   smtpTransportOptions,
   imapClientOptions,
   smtpOutcomeUnknown,

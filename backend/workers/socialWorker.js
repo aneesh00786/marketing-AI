@@ -86,6 +86,25 @@ async function processOutreach() {
   }
 }
 
+/**
+ * Product email batches: send queued emails (resumable, one claim per email) and apply
+ * unsubscribe replies (the inbox sync is shared with outreach and rate-limited per workspace).
+ */
+async function processProductEmails() {
+  const productEmails = require('../modules/mail/productEmails/service');
+  try {
+    const watched = await productEmails.monitoredWorkspaces();
+    if (watched.length) {
+      await outreachSender.syncInboxes(watched);
+      await productEmails.detectUnsubscribeReplies();
+    }
+    return await productEmails.processBatches(WORKER_ID);
+  } catch (err) {
+    log('product email error:', err.message);
+    return 0;
+  }
+}
+
 /** Automation workflows: match recorded events to active workflows, then run due steps. */
 async function processAutomation() {
   try {
@@ -136,7 +155,7 @@ async function loop() {
         await processBudgets();
         lastSchedule = Date.now();
       }
-      const worked = (await processPublishing()) + (await processBackground()) + (await processOutreach()) + (await processAutomation());
+      const worked = (await processPublishing()) + (await processBackground()) + (await processOutreach()) + (await processProductEmails()) + (await processAutomation());
       if (worked > 0) continue;
     } catch (err) {
       log('loop error:', err.message);
@@ -159,4 +178,4 @@ if (require.main === module) {
   loop().then(() => process.exit(0));
 }
 
-module.exports = { processPublishing, processBackground, processOutreach, processAutomation, scheduleRecurring, HANDLERS };
+module.exports = { processPublishing, processBackground, processOutreach, processProductEmails, processAutomation, scheduleRecurring, HANDLERS };

@@ -81,6 +81,9 @@ async function recoverStale() {
   return stale.length;
 }
 
+/** True when a reply asks to stop emails (shared with Product Emails). */
+const isUnsubscribeRequest = (subject, body) => /\bunsubscribe\b|\bremove me\b|\bstop emailing\b/i.test(`${subject || ''} ${body || ''}`);
+
 /** Reply or unsubscribe-by-reply from this address since the first email (needs the inbox sync). */
 async function replyState(recipient) {
   if (!recipient.first_sent_at) return null;
@@ -89,7 +92,7 @@ async function replyState(recipient) {
     [recipient.workspace_id, recipient.email, recipient.first_sent_at]
   );
   if (!reply) return null;
-  return /\bunsubscribe\b|\bremove me\b|\bstop emailing\b/i.test(`${reply.subject} ${reply.body}`) ? 'unsubscribed' : 'replied';
+  return isUnsubscribeRequest(reply.subject, reply.body) ? 'unsubscribed' : 'replied';
 }
 
 async function syncInboxes(workspaceIds) {
@@ -289,4 +292,4 @@ async function processOutreach(workerId, { maxPerTick = 20, now = new Date() } =
   return processed;
 }
 
-module.exports = { processOutreach, inWindow, render, recoverStale, detectReplies, REPLY_MONITOR_DAYS };
+module.exports = { processOutreach, inWindow, render, recoverStale, detectReplies, syncInboxes, isUnsubscribeRequest, REPLY_MONITOR_DAYS };

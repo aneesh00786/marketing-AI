@@ -215,7 +215,11 @@ async function sendDraftCore(ctx, draft) {
       recipientName: draft.recipient_name || '',
       subject: draft.subject,
       html: draft.body_html || draft.html_body,
-      text: draft.body_text || draft.body
+      text: draft.body_text || draft.body,
+      // Product email (marketing): List-Unsubscribe with the one-click link and a mailto: fallback,
+      // and only through an SMTP mailbox approved for marketing (never ZeptoMail).
+      listUnsubscribe: draft.batch_id ? { url: require('./productEmails/service').unsubscribeLink(draft.unsubscribe_token), mailtoSelf: true } : null,
+      purpose: draft.batch_id ? 'marketing' : 'transactional'
     });
   } catch (err) {
     if (err.outcomeUnknown) {
@@ -228,7 +232,7 @@ async function sendDraftCore(ctx, draft) {
     await run(`UPDATE email_drafts SET status = 'Approved', updated_at = ? WHERE id = ? AND workspace_id = ?`, [nowSql(), draft.id, workspaceId]);
     throw err;
   }
-  await run(`UPDATE email_drafts SET status = 'Sent', updated_at = ? WHERE id = ? AND workspace_id = ?`, [nowSql(), draft.id, workspaceId]);
+  await run(`UPDATE email_drafts SET status = 'Sent', sent_at = UTC_TIMESTAMP(), email_id = ?, send_error = NULL, updated_at = ? WHERE id = ? AND workspace_id = ?`, [sendResult.emailId || null, nowSql(), draft.id, workspaceId]);
   await audit(ctx, 'mail.draft_sent', { resourceType: 'email_draft', resourceId: draft.id, metadata: { emailId: sendResult.emailId, batchId: draft.batch_id || null } });
   return sendResult;
 }
@@ -438,8 +442,27 @@ settings.post('/test-smtp', requireCapability('mail.configure'), body(z.object({
   res.json(await emailService.verifySmtpConnection(ws(req), req.valid.config || null));
 }));
 
+// Marketing email (Product Emails) delivery: status for everyone who reads mail; approving an SMTP
+// mailbox for marketing is an Owner/Admin decision, recorded and audited.
+settings.get('/marketing', requireCapability('mail.view'), wrap(async (req, res) => {
+  res.json({ success: true, marketing: await emailService.marketingDeliveryStatus(ws(req)) });
+}));
+
+settings.post('/marketing', requireCapability('mail.configure'), body(z.object({
+  approved: z.boolean(),
+  confirm: confirmed,
+  note: z.string().trim().max(255).optional()
+})), wrap(async (req, res) => {
+  const marketing = await emailService.setMarketingApproval(ws(req), { approved: req.valid.approved, userId: req.auth.userId, note: req.valid.note });
+  await audit(req, req.valid.approved ? 'mail.marketing_approved' : 'mail.marketing_approval_withdrawn', { resourceType: 'mail_configuration', metadata: { provider: marketing.provider, note: req.valid.note || null } });
+  res.json({ success: true, marketing });
+}));
+
 settings.post('/sync', requireCapability('mail.compose'), wrap(async (req, res) => {
-  res.json(await emailService.syncIncomingEmails(ws(req)));
+  const result = await emailService.syncIncomingEmails(ws(req));
+  // Unsubscribe replies to product emails take effect as soon as they are synced.
+  await require('./productEmails/service').detectUnsubscribeReplies({ workspaceId: ws(req) }).catch(err => console.warn('Unsubscribe reply check failed:', err.message));
+  res.json(result);
 }));
 
 // Every route above starts with requireCapability, which also rejects unauthenticated calls (401).
