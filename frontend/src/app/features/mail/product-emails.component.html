@@ -7,6 +7,14 @@
   </div>
   <div class="note error" *ngIf="error" role="alert">{{ error }}</div>
   <p class="muted small" *ngIf="!caps.compose">You can view batches, but creating product emails needs the Member role or higher.</p>
+  <div class="note warn delivery" *ngIf="delivery && !delivery.allowed" role="alert">
+    <b>Sending is blocked:</b> {{ delivery.reason }}
+    <div *ngIf="delivery.code === 'MARKETING_NOT_APPROVED' && caps.configure" class="approve">
+      <label class="check"><input type="checkbox" [(ngModel)]="approveMarketingConfirm" /> I confirm our SMTP provider's terms allow marketing email from this mailbox.</label>
+      <button class="btn btn-secondary btn-sm" (click)="approveMarketing()" [disabled]="!approveMarketingConfirm">Approve for marketing</button>
+    </div>
+    <div class="muted small">You can still prepare and approve emails; they are sent once this is fixed.</div>
+  </div>
 
   <ng-container *ngIf="!batch">
     <!-- 1. Product -->
@@ -58,7 +66,7 @@
                 <span class="tag ok" *ngIf="l.eligible">Eligible</span>
                 <ng-container *ngIf="!l.eligible">
                   <span class="muted small">{{ l.reasons.join('; ') }}</span>
-                  <button *ngIf="l.consent === 'unknown' && l.email" class="btn btn-secondary btn-sm" (click)="recordConsent(l)">Record consent…</button>
+                  <button *ngIf="(l.consent === 'unknown' || (l.consent === 'granted' && !l.consentMethod)) && l.email" class="btn btn-secondary btn-sm" (click)="recordConsent(l)">Record consent…</button>
                 </ng-container>
               </td>
             </tr>
@@ -66,6 +74,22 @@
         </table>
       </div>
       <p class="muted small" *ngIf="!leads.length">No leads match.</p>
+      <div class="consent-form" *ngIf="consentFor" role="dialog" aria-label="Record marketing consent">
+        <b>Record marketing consent for {{ consentFor.name }}</b>
+        <p class="muted small">Only record consent you can prove. A note alone is not consent.</p>
+        <label>How was consent given?
+          <select class="hud-input" [(ngModel)]="consentForm.method">
+            <option *ngFor="let m of consentMethods" [value]="m.value">{{ m.label }}</option>
+          </select>
+        </label>
+        <label>Date consent was given <input class="hud-input" type="date" [(ngModel)]="consentForm.obtainedAt" /></label>
+        <label>Evidence reference (form submission id, document, URL…) <input class="hud-input" [(ngModel)]="consentForm.evidence" maxlength="500" /></label>
+        <label class="check"><input type="checkbox" [(ngModel)]="consentForm.attest" /> I confirm we hold this evidence for this person.</label>
+        <div class="actions">
+          <button class="btn btn-primary btn-sm" (click)="saveConsent()" [disabled]="!consentReady">Save consent</button>
+          <button class="btn btn-secondary btn-sm" (click)="consentFor = null">Cancel</button>
+        </div>
+      </div>
       <div class="pager" *ngIf="pages > 1">
         <button class="btn btn-secondary btn-sm" (click)="go(page - 1)" [disabled]="page <= 1">‹ Prev</button>
         <span class="muted small">Page {{ page }} of {{ pages }} · {{ total }} leads</span>
@@ -113,10 +137,11 @@
     <div class="step-head">
       <b>4. Preview and send — {{ batch.productName }}</b>
       <span class="tag">{{ batch.status }}</span>
-      <span class="muted small">{{ drafts.length }} email(s) · {{ readyCount }} approved</span>
+      <span class="muted small">{{ drafts.length }} email(s) · {{ readyCount }} waiting to send<span *ngIf="sending"> · sending in the background…</span></span>
       <button class="btn btn-secondary btn-sm" (click)="refreshBatch()">Refresh</button>
       <button class="btn btn-secondary btn-sm" (click)="startOver()">New batch</button>
     </div>
+    <div class="note error" *ngIf="batch.lastError" role="alert">Paused: {{ batch.lastError }} Fix it, then press Send again to resume.</div>
     <div class="skipped" *ngIf="skipped.length">
       <b>Not included ({{ skipped.length }}):</b>
       <ul><li *ngFor="let s of skipped">{{ s.name }} ({{ s.email || 'no email' }}): {{ s.reasons.join('; ') }}</li></ul>
@@ -126,7 +151,8 @@
         <button *ngFor="let d of drafts" class="recip" [class.active]="d.id === previewId" (click)="previewId = d.id">
           <b>{{ d.recipientName || d.recipientEmail }}</b>
           <small class="muted">{{ d.recipientEmail }}</small>
-          <span class="tag" [class.ok]="d.status === 'Sent'" [class.warn]="d.status === 'Needs Review' || d.placeholders?.length">{{ d.placeholders?.length ? 'Fill ' + d.placeholders.join(', ') : d.status }}</span>
+          <span class="tag" [class.ok]="d.outcome === 'sent' || d.status === 'Sent'" [class.warn]="d.outcome && d.outcome !== 'sent' || d.status === 'Needs Review' || d.placeholders?.length">{{ outcomeLabel(d) }}</span>
+          <small class="muted" *ngIf="d.error">{{ d.error }}</small>
         </button>
       </div>
       <div class="pv" *ngIf="preview">
@@ -138,15 +164,11 @@
     <ul class="problems" *ngIf="problems.length"><li *ngFor="let p of problems">{{ p.email }}: {{ p.problem }}</li></ul>
     <div class="actions" *ngIf="caps.send">
       <button class="btn btn-secondary" (click)="approve()" [disabled]="busy === 'approve'">Approve ready emails</button>
-      <button class="btn btn-primary" (click)="send()" [disabled]="busy === 'send' || !readyCount">{{ busy === 'send' ? 'Sending…' : 'Send ' + readyCount + ' email(s)' }}</button>
+      <button class="btn btn-primary" (click)="send()" [disabled]="busy === 'send' || !readyCount || sending || (delivery && !delivery.allowed)">{{ sending ? 'Sending…' : 'Send ' + readyCount + ' email(s)' }}</button>
+      <button *ngIf="failedCount && !sending" class="btn btn-secondary" (click)="retryFailed()">Retry {{ failedCount }} failed</button>
     </div>
+    <p class="muted small">Emails are sent by the background worker. Emails with an unknown outcome are never resent automatically; resolve them in Mail Drafts.</p>
     <p class="muted small" *ngIf="!caps.send">An Approver, Manager, Admin or Owner approves and sends.</p>
-    <div class="table-wrap" *ngIf="results.length">
-      <table class="tbl">
-        <thead><tr><th>Recipient</th><th>Result</th><th>Details</th></tr></thead>
-        <tbody><tr *ngFor="let r of results"><td>{{ r.email }}</td><td>{{ r.outcome }}</td><td class="muted small">{{ r.reason || '' }}</td></tr></tbody>
-      </table>
-    </div>
   </div>
 
   <app-template-picker *ngIf="showPicker" title="Template for these emails" (picked)="onTemplate($event)" (closed)="showPicker = false"></app-template-picker>

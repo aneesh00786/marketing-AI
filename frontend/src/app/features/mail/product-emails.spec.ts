@@ -22,7 +22,8 @@ describe('ProductEmailsComponent', () => {
     fixture = TestBed.createComponent(ProductEmailsComponent);
     comp = fixture.componentInstance;
     fixture.detectChanges();
-    http.expectOne(`${apiRoot()}/api/v1/mail/zoho/status`).flush({ canCompose: true, canSend: true });
+    http.expectOne(`${apiRoot()}/api/v1/mail/zoho/status`).flush({ canCompose: true, canSend: true, canConfigure: true });
+    http.expectOne(`${apiRoot()}/api/v1/mail/marketing`).flush({ marketing: { allowed: true, code: null, reason: null, provider: 'custom_smtp' } });
     http.expectOne(`${apiRoot()}/api/v1/products`).flush({ products: [{ id: 5, name: 'RouteKit' }] });
     comp.productId = 5;
     comp.chooseProduct();
@@ -82,6 +83,44 @@ describe('ProductEmailsComponent', () => {
     comp.send();
     const send = http.expectOne(`${BASE}/batches/9/send`);
     expect(send.request.body).toEqual({ confirm: true });
-    send.flush({ batch: { id: 9, status: 'partial' }, drafts: [], results: [{ email: 'dana@fleetco.io', outcome: 'sent' }], summary: { sent: 1 } });
+    send.flush({ queued: true, batch: { id: 9, status: 'done' }, drafts: [{ id: 21, recipientEmail: 'dana@fleetco.io', status: 'Sent', outcome: 'sent', placeholders: [] }] });
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Sent');
+  });
+
+  it('blocks sending when marketing delivery is not allowed, and lets an Owner/Admin approve the SMTP mailbox', () => {
+    comp.delivery = { allowed: false, code: 'MARKETING_NOT_APPROVED', reason: 'This SMTP mailbox is not approved for marketing email yet.', provider: 'custom_smtp' };
+    comp['setBatch']({ batch: { id: 9, productName: 'RouteKit', status: 'approved' }, drafts: [{ id: 21, recipientEmail: 'dana@fleetco.io', status: 'Approved', outcome: null, placeholders: [], bodyHtml: '<p>Hi</p>' }] });
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Sending is blocked');
+    const sendBtn = Array.from(fixture.nativeElement.querySelectorAll('.actions .btn-primary') as NodeListOf<HTMLButtonElement>).find(b => /Send/.test(b.textContent || ''));
+    expect(sendBtn?.disabled).toBeTrue();
+    comp.send();
+    http.expectNone(`${BASE}/batches/9/send`);
+    comp.approveMarketing();
+    http.expectNone(`${apiRoot()}/api/v1/mail/marketing`, 'needs the confirmation first');
+    comp.approveMarketingConfirm = true;
+    comp.approveMarketing();
+    const req = http.expectOne(`${apiRoot()}/api/v1/mail/marketing`);
+    expect(req.request.body).toEqual(jasmine.objectContaining({ approved: true, confirm: true }));
+    req.flush({ marketing: { allowed: true, code: null, reason: null, provider: 'custom_smtp' } });
+    expect(comp.delivery?.allowed).toBeTrue();
+  });
+
+  it('records consent only with method, date, evidence and an explicit confirmation', () => {
+    comp.recordConsent(LEADS[1]);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('A note alone is not consent');
+    expect(comp.consentReady).toBeFalse();
+    comp.consentForm.obtainedAt = '2026-09-10';
+    comp.consentForm.evidence = 'Form submission #8812';
+    expect(comp.consentReady).withContext('the attestation is required').toBeFalse();
+    comp.consentForm.attest = true;
+    expect(comp.consentReady).toBeTrue();
+    comp.saveConsent();
+    const req = http.expectOne(`${BASE}/consent`);
+    expect(req.request.body).toEqual({ leadIds: [2], status: 'granted', method: 'web_form', obtainedAt: '2026-09-10', evidence: 'Form submission #8812', attest: true });
+    req.flush({ updated: 1, status: 'granted' });
+    http.expectOne(r => r.url === `${BASE}/recipients`).flush({ product: null, leads: [], total: 0, eligibleIds: [], maxBatch: 100 });
   });
 });
