@@ -93,6 +93,8 @@ drafts.post('/generate', requireCapability('mail.compose'), body(z.object({
   productId,
   // Start from a saved template (its HTML is copied; the template itself is not changed).
   templateId: z.union([z.number().int().positive(), z.string().regex(/^\d{1,10}$/)]).optional().nullable(),
+  // Recipient from a lead of this workspace: name and email come from the lead record, never the browser.
+  leadId: z.union([z.number().int().positive(), z.string().regex(/^\d{1,10}$/)]).optional().nullable(),
   subject: z.string().trim().max(255).optional().nullable(),
   recipientName: z.string().max(255).optional().nullable(),
   recipientEmail: recipientEmail.optional().nullable(),
@@ -100,6 +102,15 @@ drafts.post('/generate', requireCapability('mail.compose'), body(z.object({
   tone: z.string().max(100).optional().nullable()
 })), wrap(async (req, res) => {
   const v = req.valid;
+  let leadId = null;
+  if (v.leadId) {
+    const lead = await get('SELECT id, name, email FROM leads WHERE workspace_id = ? AND id = ?', [ws(req), Number(v.leadId)]);
+    if (!lead) throw httpError('Lead not found.', 404, 'NOT_FOUND');
+    if (!isEmail(lead.email)) throw httpError(`${lead.name || 'This lead'} has no valid email address. Add one to the lead first.`, 400, 'LEAD_NO_EMAIL');
+    leadId = lead.id;
+    v.recipientName = lead.name || '';
+    v.recipientEmail = String(lead.email).trim();
+  }
   // Only the explicitly selected product of this workspace; malformed or foreign ids are rejected.
   const product = await resolveSelectedProduct(ws(req), v.productId);
   const draftContent = await aiEngine.generateMailDraft(product, { name: v.recipientName, email: v.recipientEmail }, v.goal, v.tone || 'Professional');
@@ -114,9 +125,9 @@ drafts.post('/generate', requireCapability('mail.compose'), body(z.object({
   }
   const now = nowSql();
   const result = await run(
-    `INSERT INTO email_drafts (workspace_id, product_id, product_name, recipient_email, recipient_name, subject, body_html, body_text, tone, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Draft', ?, ?)`,
-    [ws(req), product ? product.id : null, product ? product.name : null, (v.recipientEmail || '').trim(), v.recipientName || '',
+    `INSERT INTO email_drafts (workspace_id, product_id, product_name, lead_id, recipient_email, recipient_name, subject, body_html, body_text, tone, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Draft', ?, ?)`,
+    [ws(req), product ? product.id : null, product ? product.name : null, leadId, (v.recipientEmail || '').trim(), v.recipientName || '',
       draftContent.subject, draftContent.body_html, draftContent.body_text, draftContent.tone, now, now]
   );
   const missing = draftContent.missing_context || [];
@@ -149,6 +160,10 @@ drafts.patch('/:id', requireCapability('mail.compose'), body(z.object({
   const draft = await requireDraft(ws(req), req.params.id);
   if (LOCKED_DRAFT.includes(draft.status)) throw httpError(draft.status === 'Needs Review' ? 'Resolve this draft\'s unknown delivery first.' : 'A sent draft cannot be edited.', 409, 'DRAFT_SENT');
   const v = req.valid;
+  // Product email drafts are addressed to their lead; the recipient comes from the lead record only.
+  if (draft.batch_id && (v.recipient_email !== undefined || v.recipient_name !== undefined)) {
+    throw httpError('The recipient of a product email comes from its lead. Update the lead, then prepare a new email.', 409, 'RECIPIENT_FROM_LEAD');
+  }
   const filled = fillPlaceholders({
     subject: v.subject !== undefined ? v.subject : draft.subject,
     text: draft.body_text || draft.body || '',

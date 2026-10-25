@@ -76,6 +76,10 @@ test('templates: create, list with search/paging, rename, duplicate, delete; per
   assert.equal((await t(A, 'GET', '?q=Welcome')).data.templates[0].name, 'Welcome series');
   assert.ok((await t(A, 'GET', '?category=Seasonal%20deals')).data.templates.every(x => x.category === 'Seasonal deals'));
   assert.ok((await t(A, 'GET', '/categories')).data.categories.includes('Seasonal deals'), 'custom categories listed');
+  const cats = await t(A, 'GET', '/categories');
+  assert.equal(cats.data.canManage, true);
+  assert.equal(cats.data.limits.zipMb, 10);
+  assert.equal((await t(approver, 'GET', '/categories')).data.canManage, false, 'approvers only use templates');
 
   const renamed = await t(member, 'PATCH', `/${id}`, { name: 'Welcome v2', description: 'Updated', category: 'Welcome', version: 1 });
   assert.equal(renamed.data.template.version, 2);

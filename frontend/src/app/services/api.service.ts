@@ -334,7 +334,8 @@ export class ApiService {
   }
 
   // templateId: start from a saved template (its HTML is copied into the draft).
-  generateMailDraft(data: { productId?: number; recipientName?: string; recipientEmail?: string; goal?: string; tone?: string; templateId?: number | null }): Observable<any> {
+  // leadId: the recipient is that lead (name and email are read from the lead on the server).
+  generateMailDraft(data: { productId?: number; recipientName?: string; recipientEmail?: string; goal?: string; tone?: string; templateId?: number | null; leadId?: number }): Observable<any> {
     return this.http.post(`${this.root}/api/drafts/generate`, data);
   }
 

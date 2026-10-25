@@ -119,7 +119,15 @@ async function list(ctx, query = {}) {
 
 async function categories(ctx) {
   const rows = await all('SELECT DISTINCT category FROM mail_templates WHERE workspace_id = ? ORDER BY category', [ws(ctx)]);
-  return { categories: [...new Set([...CATEGORIES, ...rows.map(r => r.category)])], tokens: TEMPLATE_TOKENS };
+  const caps = ctx.auth.capabilities || new Set();
+  return {
+    categories: [...new Set([...CATEGORIES, ...rows.map(r => r.category)])],
+    tokens: TEMPLATE_TOKENS,
+    // What this member may do here (the server enforces it on every request anyway).
+    canManage: caps.has('mail.compose'),
+    canCleanup: caps.has('mail.configure'),
+    limits: { htmlKb: Math.round(importer.limits().htmlBytes / 1024), zipMb: Math.round(importer.limits().zipBytes / 1048576) }
+  };
 }
 
 async function getOne(ctx, id) {

@@ -28,8 +28,8 @@ describe('EmailTemplatesComponent', () => {
     fixture = TestBed.createComponent(EmailTemplatesComponent);
     comp = fixture.componentInstance;
     fixture.detectChanges();
-    http.expectOne(`${apiRoot()}/api/v1/mail/zoho/status`).flush({ canCompose });
-    http.expectOne(`${BASE}/categories`).flush({ categories: ['Newsletter', 'Custom'], tokens: ['first_name', 'company'] });
+    http.expectNone(`${apiRoot()}/api/v1/mail/zoho/status`); // permissions no longer depend on Zoho
+    http.expectOne(`${BASE}/categories`).flush({ categories: ['Newsletter', 'Custom'], tokens: ['first_name', 'company'], canManage: canCompose, limits: { htmlKb: 1024, zipMb: 10 } });
     http.expectOne(r => r.url === BASE).flush({ templates: [{ id: 7, name: 'Welcome', category: 'Welcome', source: 'zip', updatedAt: '2026-10-01T00:00:00Z' }], total: 1, page: 1, pageSize: 12 });
     fixture.detectChanges();
   }
@@ -116,11 +116,74 @@ describe('EmailTemplatesComponent', () => {
     http.expectNone(r => r.method === 'DELETE');
   });
 
-  it('hides write controls for members without mail.compose', () => {
+  it('accepts an HTML file chosen through "Upload HTML file" (including .htm and files typed text/html)', () => {
+    init();
+    const fake = (file: File) => ({ target: { files: [file], value: 'x' } } as any as Event);
+    comp.onFile(fake(new File(['<p>Hello</p>'], 'promo.HTM', { type: 'text/html' })), 'html');
+    const req = http.expectOne(r => r.url === `${BASE}/import`);
+    expect(req.request.params.get('filename')).toBe('promo.HTM');
+    req.flush({ needsEntry: false, suggestedName: 'promo', source: 'html', sourceFilename: 'promo.HTM', importId: null, html: '<p>Hello</p>', warnings: [], placeholders: [] });
+    expect(comp.editing.source).toBe('html');
+  });
+
+  it('shows the empty-state upload buttons, which open the file pickers', () => {
+    init();
+    comp.templates = [];
+    fixture.detectChanges();
+    const opened: string[] = [];
+    spyOn(HTMLInputElement.prototype, 'click').and.callFake(function (this: HTMLInputElement) { opened.push(this.id); });
+    const btn = Array.from(fixture.nativeElement.querySelectorAll('.empty button') as NodeListOf<HTMLButtonElement>).find(b => /Upload an HTML file/.test(b.textContent || ''))!;
+    btn.click();
+    expect(opened).toEqual(['tplUploadHtml']);
+  });
+
+  it('hides write controls for members without mail.compose, and says why', () => {
     init(false);
     const text = fixture.nativeElement.textContent;
-    expect(text).not.toContain('Upload HTML or ZIP');
+    expect(text).not.toContain('Create / Import template');
     expect(text).not.toContain('Duplicate');
+    expect(text).toContain('needs the Member role or higher');
+  });
+
+  it('offers Create / Import → Upload ZIP package, with a ZIP-only file picker wired to the importer', () => {
+    init();
+    const el: HTMLElement = fixture.nativeElement;
+    const toggle = Array.from(el.querySelectorAll('button')).find(b => /Create \/ Import template/.test(b.textContent || '')) as HTMLButtonElement;
+    expect(toggle).toBeTruthy();
+    toggle.click();
+    fixture.detectChanges();
+    const items = Array.from(el.querySelectorAll('.menu-item')).map(i => i.textContent || '');
+    expect(items.some(t => t.includes('Blank template'))).toBeTrue();
+    expect(items.some(t => t.includes('Upload HTML file'))).toBeTrue();
+    expect(items.some(t => t.includes('Upload ZIP package') && t.includes('10 MB'))).toBeTrue();
+    const zipInput = el.querySelector('#tplUploadZip') as HTMLInputElement;
+    const htmlInput = el.querySelector('#tplUploadHtml') as HTMLInputElement;
+    expect(zipInput.type).toBe('file');
+    expect(zipInput.accept).toBe('.zip');
+    expect(htmlInput.accept).toBe('.html,.htm', 'extensions only, so .html files are never greyed out');
+    // Inputs are visually hidden, not display:none, and the menu buttons open them.
+    expect(getComputedStyle(htmlInput).display).not.toBe('none');
+    expect(htmlInput.hasAttribute('hidden')).toBeFalse();
+    const opened: string[] = [];
+    spyOn(HTMLInputElement.prototype, 'click').and.callFake(function (this: HTMLInputElement) { opened.push(this.id); });
+    const menuButtons = Array.from(el.querySelectorAll('button.menu-item')) as HTMLButtonElement[];
+    menuButtons.find(b => /Upload HTML file/.test(b.textContent || ''))!.click();
+    menuButtons.find(b => /Upload ZIP package/.test(b.textContent || ''))!.click();
+    expect(opened).toEqual(['tplUploadHtml', 'tplUploadZip']);
+
+    // Choosing a non-ZIP file in the ZIP picker is refused; a .zip goes to the importer.
+    let toastMsg = '';
+    comp.toast.subscribe(m => toastMsg = m);
+    const fake = (file: File) => ({ target: { files: [file], value: 'x' } } as any as Event);
+    comp.onFile(fake(new File(['<p>x</p>'], 'page.html')), 'zip');
+    expect(toastMsg).toBe('Choose a .zip package.');
+    http.expectNone(r => r.url === `${BASE}/import`);
+    comp.onFile(fake(new File(['PK'], 'newsletter.zip')), 'zip');
+    const req = http.expectOne(r => r.url === `${BASE}/import`);
+    expect(req.request.params.get('filename')).toBe('newsletter.zip');
+    req.flush({ needsEntry: false, suggestedName: 'newsletter', source: 'zip', sourceFilename: 'newsletter.zip', importId: 'b'.repeat(32), html: '<p>ok</p>', warnings: [], placeholders: [] });
+    expect(comp.editing.source).toBe('zip');
+    expect(comp.editing.id).toBeNull('a preview, not saved yet');
   });
 });
 

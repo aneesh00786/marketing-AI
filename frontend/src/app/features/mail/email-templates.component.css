@@ -1,4 +1,4 @@
-.tpl { border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin: 16px 0; }
+.tpl { position: relative; border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin: 16px 0; }
 .tpl-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: flex-start; }
 .tpl-head h3 { margin: 0 0 4px; font-size: 1rem; }
 .tpl-actions, .editor-actions, .use-row, .entries, .card-actions, .pager, .preview-bar { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
@@ -35,3 +35,12 @@ label.disabled { opacity: 0.6; pointer-events: none; }
 @media (max-width: 1000px) {
   .tpl-grid.with-editor, .panes, .meta { grid-template-columns: 1fr; }
 }
+.create-menu { position: relative; }
+.create-menu .menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; min-width: 280px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: var(--shadow-lg, 0 8px 24px rgba(0,0,0,.15)); padding: 6px; display: flex; flex-direction: column; gap: 2px; }
+.menu-item { display: flex; flex-direction: column; gap: 2px; text-align: left; padding: 8px 10px; border-radius: 8px; background: none; border: none; color: var(--text); cursor: pointer; font: inherit; }
+.menu-item:hover, .menu-item:focus { background: var(--surface-hover); outline: none; }
+.menu-item small { color: var(--text-muted); font-size: 12px; }
+.zip-help { margin: 8px 0; font-size: 13px; }
+.zip-help summary { cursor: pointer; color: var(--accent-text); }
+.empty { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.file-input { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; pointer-events: none; }

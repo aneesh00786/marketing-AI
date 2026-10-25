@@ -466,6 +466,34 @@ export class AppComponent implements OnInit, OnDestroy {
   draftRecipientEdit = { name: '', email: '' };
   isGeneratingDraft: boolean = false;
   isRewritingDraft: boolean = false;
+  // Draft generator recipient: a lead of this workspace (the server reads its name and email).
+  draftLead: { id: number; name: string; email: string } | null = null;
+  draftLeadQuery = '';
+  draftLeadResults: any[] = [];
+  draftManualRecipient = false;
+  private draftLeadTimer: any = null;
+
+  searchDraftLeads(): void {
+    clearTimeout(this.draftLeadTimer);
+    const q = this.draftLeadQuery.trim();
+    if (!q) { this.draftLeadResults = []; return; }
+    this.draftLeadTimer = setTimeout(() => {
+      this.apiService.getLeads({ q, limit: 20 }).subscribe({
+        next: (res) => this.draftLeadResults = res.leads || [],
+        error: () => this.draftLeadResults = []
+      });
+    }, 250);
+  }
+
+  pickDraftLead(l: any): void {
+    if (!l.hasValidEmail) return;
+    this.draftLead = { id: l.id, name: l.name, email: l.email };
+    this.draftLeadResults = [];
+    this.draftLeadQuery = '';
+  }
+
+  clearDraftLead(): void { this.draftLead = null; }
+
   newDraftForm = {
     productId: null as any,
     recipientName: '',
@@ -1294,6 +1322,7 @@ export class AppComponent implements OnInit, OnDestroy {
     const files = event.target.files;
     if (!files || files.length === 0) return;
     const file = files[0];
+    event.target.value = ''; // so choosing the same file again still loads it
     const reader = new FileReader();
     reader.onload = (e: any) => {
       this.composeEmail.html_body = e.target.result;
@@ -1489,7 +1518,10 @@ export class AppComponent implements OnInit, OnDestroy {
 
   generateNewDraft(): void {
     this.isGeneratingDraft = true;
-    this.apiService.generateMailDraft({ ...this.newDraftForm, templateId: this.draftTemplate?.id || null }).subscribe({
+    const recipient = this.draftLead
+      ? { leadId: this.draftLead.id, recipientName: '', recipientEmail: '' }
+      : (this.draftManualRecipient ? {} : { recipientName: '', recipientEmail: '' });
+    this.apiService.generateMailDraft({ ...this.newDraftForm, ...recipient, templateId: this.draftTemplate?.id || null }).subscribe({
       next: (res) => {
         this.isGeneratingDraft = false;
         this.showToast(res.message);

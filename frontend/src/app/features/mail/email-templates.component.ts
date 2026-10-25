@@ -34,6 +34,9 @@ export class EmailTemplatesComponent implements OnInit {
   categories: string[] = [];
   tokens: string[] = [];
   canCompose = false;
+  permissionsLoaded = false;
+  limits = { htmlKb: 1024, zipMb: 10 };
+  showCreateMenu = false;
   private searchTimer: any = null;
   // Upload / entry choice
   busy = '';
@@ -47,8 +50,15 @@ export class EmailTemplatesComponent implements OnInit {
   constructor(private http: HttpClient, private sanitizer: DomSanitizer) {}
 
   ngOnInit(): void {
-    this.http.get<any>(`${apiRoot()}/api/v1/mail/zoho/status`).subscribe({ next: r => this.canCompose = !!r.canCompose, error: () => this.canCompose = false });
-    this.http.get<any>(`${this.base}/categories`).subscribe({ next: r => { this.categories = r.categories; this.tokens = r.tokens; } });
+    // Permissions come from the template API itself (not from any other module's status).
+    this.http.get<any>(`${this.base}/categories`).subscribe({
+      next: r => {
+        this.categories = r.categories; this.tokens = r.tokens;
+        this.canCompose = !!r.canManage; this.permissionsLoaded = true;
+        if (r.limits) this.limits = r.limits;
+      },
+      error: e => { this.permissionsLoaded = true; this.error = `Could not load template settings: ${this.err(e)}`; }
+    });
     this.load();
   }
 
@@ -95,18 +105,25 @@ export class EmailTemplatesComponent implements OnInit {
   // ---------------------------------------------------------------- create / import
 
   newBlank(): void {
+    this.showCreateMenu = false;
     if (!this.confirmDiscard()) return;
     this.startEditing({ id: null, name: 'Untitled template', description: '', category: 'Custom', source: 'blank', version: null,
       html: '<!doctype html>\n<html>\n<body style="margin:0;padding:0;">\n<table role="presentation" width="100%" cellpadding="0" cellspacing="0">\n  <tr><td style="padding:24px;font-family:Arial,sans-serif;">\n    <p>Hello {{first_name}},</p>\n    <p></p>\n    <p><a href="$[LI:UNSUBSCRIBE]$">Unsubscribe</a></p>\n  </td></tr>\n</table>\n</body>\n</html>',
       warnings: [], placeholders: [] });
   }
 
-  onFile(ev: Event): void {
+  /** kind: 'html' (.html/.htm), 'zip' (.zip package with HTML, CSS and images) or 'any'. */
+  onFile(ev: Event, kind: 'html' | 'zip' | 'any' = 'any'): void {
     const input = ev.target as HTMLInputElement;
     const file = input.files?.[0];
     input.value = '';
+    this.showCreateMenu = false;
     if (!file) return;
-    if (!/\.(html?|zip)$/i.test(file.name)) { this.toast.emit('Choose an .html, .htm or .zip file.'); return; }
+    // By extension, or by type for HTML files saved without one (the server checks the content again).
+    const isHtml = /\.html?$/i.test(file.name) || file.type === 'text/html';
+    const isZip = /\.zip$/i.test(file.name);
+    const ok = kind === 'zip' ? isZip : kind === 'html' ? isHtml : (isHtml || isZip);
+    if (!ok) { this.toast.emit(kind === 'zip' ? 'Choose a .zip package.' : kind === 'html' ? 'Choose an .html or .htm file.' : 'Choose an .html, .htm or .zip file.'); return; }
     if (!this.confirmDiscard()) return;
     this.upload(file);
   }

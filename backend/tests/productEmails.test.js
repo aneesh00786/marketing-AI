@@ -475,6 +475,48 @@ test('unsubscribe replies: matched to the right recipient and workspace, idempot
   assert.ok(id);
 });
 
+test('recipients always come from each lead record: several leads get their own name and email; browser values are ignored', async () => {
+  const l1 = await lead(A, { name: 'Mia Rossi', email: `mia-${uid()}@acme.io`, company: 'Acme', consent: 'granted' });
+  const l2 = await lead(A, { name: 'Noah Kim', email: `noah-${uid()}@beta.io`, company: 'Beta', consent: 'granted' });
+  const rows = Object.fromEntries((await db().all('SELECT id, name, email FROM leads WHERE id IN (?, ?)', [l1, l2])).map(r => [r.id, r]));
+  // Recipient details or a workspace id sent by the browser are rejected outright.
+  for (const extra of [{ recipientEmail: 'attacker@evil.io' }, { recipients: [{ email: 'x@evil.io' }] }, { workspaceId: B.workspaceId }]) {
+    assert.equal((await pe(A, 'POST', '/batches', { productId: product, leadIds: [l1], goal: 'Hi', senderName: 'J', ...extra })).status, 400, JSON.stringify(extra));
+  }
+  const c = await pe(A, 'POST', '/batches', { productId: product, leadIds: [l1, l2], goal: 'Hi {{first_name}}', senderName: 'J' });
+  assert.equal(c.status, 200, JSON.stringify(c.data));
+  const byLead = Object.fromEntries(c.data.drafts.map(d => [d.leadId, d]));
+  for (const id of [l1, l2]) {
+    assert.equal(byLead[id].recipientEmail, rows[id].email);
+    assert.equal(byLead[id].recipientName, rows[id].name);
+  }
+  assert.match(byLead[l1].bodyHtml, /Hi Mia/);
+  assert.match(byLead[l2].bodyHtml, /Hi Noah/);
+  // The recipient of a product email cannot be changed afterwards (only placeholders/content).
+  const d1 = byLead[l1].id;
+  const edit = await h.api('PATCH', `/api/v1/drafts/${d1}`, { token: A.token, body: { recipient_email: 'other@acme.io' } });
+  assert.equal(edit.status, 409);
+  assert.equal(edit.data.code, 'RECIPIENT_FROM_LEAD');
+  assert.equal((await h.api('PATCH', `/api/v1/drafts/${d1}`, { token: A.token, body: { recipient_name: 'Someone' } })).data.code, 'RECIPIENT_FROM_LEAD');
+  assert.equal((await db().get('SELECT recipient_email FROM email_drafts WHERE id = ?', [d1])).recipient_email, rows[l1].email);
+});
+
+test('Mail Drafts generator: choosing a lead fills the recipient from the lead (workspace-checked); leads without email are refused', async () => {
+  const l = await lead(A, { name: 'Ola Berg', email: `ola-${uid()}@acme.io`, consent: 'unknown' });
+  const noMail = await lead(A, { name: 'No Mail' });
+  const badMail = await lead(A, { name: 'Bad Mail', email: 'someone@example.com' });
+  const email = (await db().get('SELECT email FROM leads WHERE id = ?', [l])).email;
+  const g = await h.api('POST', '/api/v1/drafts/generate', { token: A.token, body: { leadId: l, productId: product, recipientEmail: 'typed@other.io', recipientName: 'Typed Name', goal: 'Intro' } });
+  assert.equal(g.status, 200, JSON.stringify(g.data));
+  assert.equal(g.data.draft.recipient_email, email, 'browser-typed recipient ignored');
+  assert.equal(g.data.draft.recipient_name, 'Ola Berg');
+  assert.equal(Number(g.data.draft.lead_id), l);
+  assert.equal((await h.api('POST', '/api/v1/drafts/generate', { token: A.token, body: { leadId: noMail } })).data.code, 'LEAD_NO_EMAIL');
+  assert.equal((await h.api('POST', '/api/v1/drafts/generate', { token: A.token, body: { leadId: badMail } })).data.code, 'LEAD_NO_EMAIL');
+  assert.equal((await h.api('POST', '/api/v1/drafts/generate', { token: A.token, body: { leadId: L.b } })).status, 404, "another workspace's lead");
+  assert.equal((await h.api('POST', '/api/v1/drafts/generate', { token: B.token, body: { leadId: l } })).status, 404);
+});
+
 test('transactional email unchanged: manual drafts and direct sends still go through ZeptoMail', async () => {
   const g = await h.api('POST', '/api/v1/drafts/generate', { token: B.token, body: { recipientEmail: 'manual@person.io', recipientName: 'Manual', goal: 'Hi' } });
   assert.equal(g.status, 200);

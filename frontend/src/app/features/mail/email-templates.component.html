@@ -1,15 +1,29 @@
 <section class="tpl">
+  <!-- File pickers at the top level so every upload button can open them. Visually hidden, not
+       display:none; uploads are still refused by the server for members without permission. -->
+  <input #htmlPicker type="file" id="tplUploadHtml" class="file-input" accept=".html,.htm" tabindex="-1" aria-hidden="true" (change)="onFile($event, 'html')" />
+  <input #zipPicker type="file" id="tplUploadZip" class="file-input" accept=".zip" tabindex="-1" aria-hidden="true" (change)="onFile($event, 'zip')" />
   <div class="tpl-head">
     <div>
       <h3>Email templates</h3>
       <p class="muted small">Reusable designs for emails, drafts and campaigns. Using a template makes a copy, so editing an email never changes the template.</p>
     </div>
-    <div class="tpl-actions" *ngIf="canCompose">
-      <button class="btn btn-secondary btn-sm" (click)="newBlank()">+ Blank template</button>
-      <input type="file" id="tplUpload" accept=".html,.htm,.zip" (change)="onFile($event)" hidden />
-      <label for="tplUpload" class="btn btn-primary btn-sm" [class.disabled]="busy === 'upload'">{{ busy === 'upload' ? 'Importing…' : '⬆ Upload HTML or ZIP' }}</label>
+    <div class="tpl-actions create-menu" *ngIf="canCompose">
+      <button class="btn btn-primary btn-sm" (click)="showCreateMenu = !showCreateMenu" [attr.aria-expanded]="showCreateMenu" aria-haspopup="true" [disabled]="busy === 'upload'">
+        {{ busy === 'upload' ? 'Importing…' : '＋ Create / Import template ▾' }}
+      </button>
+      <div class="menu" *ngIf="showCreateMenu" role="menu">
+        <button class="menu-item" role="menuitem" (click)="newBlank()"><b>Blank template</b><small>Start from a simple email layout</small></button>
+        <button type="button" class="menu-item" role="menuitem" (click)="htmlPicker.click()"><b>Upload HTML file</b><small>.html or .htm, up to {{ limits.htmlKb }} KB</small></button>
+        <button type="button" class="menu-item" role="menuitem" (click)="zipPicker.click()"><b>Upload ZIP package</b><small>.zip with an HTML file, CSS and images, up to {{ limits.zipMb }} MB</small></button>
+      </div>
     </div>
   </div>
+  <p class="muted small" *ngIf="permissionsLoaded && !canCompose">You can view and use templates. Creating, importing and editing templates needs the Member role or higher.</p>
+  <details class="zip-help" *ngIf="canCompose">
+    <summary>What can a ZIP package contain?</summary>
+    <p class="muted small">One email HTML file (e.g. <code>index.html</code>) with its CSS files and images (PNG, JPG, GIF, WebP) in any folders, such as <code>css/style.css</code> and <code>images/logo.png</code>. Relative links are resolved, CSS is embedded and images are hosted for you. If the package has several HTML files, you choose the main one. You see a preview before saving; nothing is saved until you press Save.</p>
+  </details>
   <div class="note error" *ngIf="error" role="alert">{{ error }}</div>
 
   <div class="entry-choice" *ngIf="pendingUpload" role="dialog" aria-label="Choose the main HTML file">
@@ -29,7 +43,13 @@
           <option *ngFor="let c of categories" [value]="c">{{ c }}</option>
         </select>
       </div>
-      <p class="muted small" *ngIf="!templates.length">No templates found.</p>
+      <div class="empty" *ngIf="!templates.length">
+        <p class="muted small">No templates found.</p>
+        <ng-container *ngIf="canCompose && !q && !category">
+          <button type="button" class="btn btn-secondary btn-sm" (click)="zipPicker.click()">⬆ Import a ZIP package</button>
+          <button type="button" class="btn btn-secondary btn-sm" (click)="htmlPicker.click()">⬆ Upload an HTML file</button>
+        </ng-container>
+      </div>
       <div class="cards">
         <div *ngFor="let t of templates" class="card" [class.active]="editing?.id === t.id">
           <button class="card-main" (click)="open(t)">

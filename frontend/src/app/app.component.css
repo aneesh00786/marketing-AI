@@ -698,3 +698,16 @@ button.dropdown-item:disabled { opacity: 0.6; cursor: default; }
 .compose-tokens label { display: flex; flex-direction: column; gap: 4px; color: var(--text-muted); }
 .upload-template-btn { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .draft-template-row > div { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+
+/* Draft generator: recipient chosen from leads. */
+.draft-lead-picker { position: relative; }
+.lead-chip { display: flex; gap: 8px; align-items: center; justify-content: space-between; border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; font-size: 13px; }
+.lead-results { display: flex; flex-direction: column; gap: 2px; max-height: 220px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; padding: 4px; margin-top: 4px; background: var(--surface); }
+.lead-option { text-align: left; display: flex; flex-direction: column; gap: 1px; padding: 6px 8px; border: none; border-radius: 6px; background: none; color: var(--text); cursor: pointer; font: inherit; }
+.lead-option:hover:not([disabled]) { background: var(--surface-hover); }
+.lead-option[disabled] { opacity: 0.55; cursor: not-allowed; }
+.lead-option small { color: var(--text-muted); font-size: 12px; }
+.link-btn { background: none; border: none; color: var(--accent-text); cursor: pointer; font: inherit; font-size: 12px; padding: 4px 0; text-align: left; }
+
+/* File inputs opened by buttons: visually hidden but not display:none. */
+.file-input { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; pointer-events: none; }

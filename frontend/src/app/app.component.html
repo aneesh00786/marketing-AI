@@ -502,13 +502,27 @@
             <option *ngFor="let p of digitalProducts" [ngValue]="p.id">{{ p.name }}</option>
           </select>
         </div>
-        <div class="form-group">
-          <label>Recipient Name</label>
-          <input type="text" class="hud-input" [(ngModel)]="newDraftForm.recipientName" placeholder="e.g. Michael Chang" />
-        </div>
-        <div class="form-group">
-          <label>Recipient Email</label>
-          <input type="email" class="hud-input" [(ngModel)]="newDraftForm.recipientEmail" placeholder="m.chang@apexwholesale.com" />
+        <div class="form-group draft-lead-picker">
+          <label>Recipient (lead)</label>
+          <div *ngIf="draftLead" class="lead-chip">
+            <span><b>{{ draftLead.name }}</b> · {{ draftLead.email }}</span>
+            <button class="btn btn-secondary btn-sm" (click)="clearDraftLead()">Change</button>
+          </div>
+          <ng-container *ngIf="!draftLead && !draftManualRecipient">
+            <input type="search" class="hud-input" [(ngModel)]="draftLeadQuery" (ngModelChange)="searchDraftLeads()" placeholder="Search leads by name, email or company" aria-label="Search leads" />
+            <div class="lead-results" *ngIf="draftLeadResults.length">
+              <button *ngFor="let l of draftLeadResults" type="button" class="lead-option" [disabled]="!l.hasValidEmail" (click)="pickDraftLead(l)">
+                <b>{{ l.name }}</b>
+                <small>{{ l.hasValidEmail ? l.email : (l.email ? 'Invalid email address: ' + l.email : 'No email address') }}{{ l.companyName ? ' · ' + l.companyName : '' }}</small>
+              </button>
+            </div>
+            <button type="button" class="link-btn" (click)="draftManualRecipient = true">or enter an address manually</button>
+          </ng-container>
+          <ng-container *ngIf="!draftLead && draftManualRecipient">
+            <input type="text" class="hud-input" [(ngModel)]="newDraftForm.recipientName" placeholder="Recipient name" aria-label="Recipient name" />
+            <input type="email" class="hud-input" [(ngModel)]="newDraftForm.recipientEmail" placeholder="name@company.com" aria-label="Recipient email" />
+            <button type="button" class="link-btn" (click)="draftManualRecipient = false">choose a lead instead</button>
+          </ng-container>
         </div>
         <div class="form-group">
           <label>Tone of Voice</label>
@@ -586,7 +600,8 @@
               </label>
               <button class="btn btn-secondary btn-sm" (click)="fillDraftPlaceholders(selectedDraft)">Save values</button>
             </div>
-            <div class="draft-recipient-edit" *ngIf="selectedDraft.status !== 'Sent' && selectedDraft.status !== 'Sending' && selectedDraft.status !== 'Needs Review'">
+            <p class="helper-text" *ngIf="selectedDraft.batch_id">Recipient comes from the lead. To change it, update the lead and prepare a new product email.</p>
+            <div class="draft-recipient-edit" *ngIf="!selectedDraft.batch_id && selectedDraft.status !== 'Sent' && selectedDraft.status !== 'Sending' && selectedDraft.status !== 'Needs Review'">
               <input type="text" class="hud-input" [(ngModel)]="draftRecipientEdit.name" placeholder="Recipient name" aria-label="Recipient name" />
               <input type="email" class="hud-input" [(ngModel)]="draftRecipientEdit.email" placeholder="name@company.com" aria-label="Recipient email" />
               <button class="btn btn-secondary btn-sm" (click)="saveDraftRecipient(selectedDraft)">Save recipient</button>
@@ -1166,10 +1181,10 @@
           <div class="upload-template-btn">
             <button class="btn btn-secondary btn-sm" (click)="templatePickerFor = 'compose'">🧩 Choose Template</button>
             <button class="btn btn-secondary btn-sm" (click)="saveComposeAsTemplate()" [disabled]="!composeEmail.html_body">💾 Save as template</button>
-            <input type="file" id="htmlTemplateInput" accept=".html,.htm" (change)="onHtmlTemplateUpload($event)" style="display: none;" />
-            <label for="htmlTemplateInput" class="btn btn-secondary btn-sm" style="cursor: pointer;">
+            <input #composeHtmlPicker type="file" id="htmlTemplateInput" class="file-input" accept=".html,.htm" tabindex="-1" aria-hidden="true" (change)="onHtmlTemplateUpload($event)" />
+            <button type="button" class="btn btn-secondary btn-sm" (click)="composeHtmlPicker.click()">
               📄 Upload .html File
-            </label>
+            </button>
           </div>
         </div>
 
