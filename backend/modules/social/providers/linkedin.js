@@ -4,6 +4,7 @@
  * Requires an approved LinkedIn app with the Community Management API product.
  */
 const { ProviderError, providerRequest } = require('./http');
+const { openBlob } = require('./media');
 
 const API = 'https://api.linkedin.com/rest';
 const OAUTH = 'https://www.linkedin.com/oauth/v2';
@@ -47,8 +48,95 @@ function orgUrn(account) {
   return `urn:li:organization:${account.external_account_id}`;
 }
 
+const UPLOAD_TIMEOUT_MS = 30 * 60 * 1000;
+
+/** Upload URLs come from LinkedIn's responses; only https linkedin.com hosts are used. */
+function assertUploadUrl(url) {
+  let u;
+  try { u = new URL(url); } catch (e) { u = null; }
+  if (!u || u.protocol !== 'https:' || !/(^|\.)linkedin\.com$/i.test(u.hostname)) {
+    throw new ProviderError({ message: 'LinkedIn returned an unexpected upload address.', code: 'PROVIDER_ERROR', retryable: false });
+  }
+}
+
+/** Images API: initialize, then PUT the bytes. Nothing is visible until the post is created. */
+async function uploadImage(account, token, m) {
+  if (!m.filePath) throw new ProviderError({ message: 'LinkedIn needs the uploaded image file.', code: 'INVALID_REQUEST' });
+  const init = await rest('/images?action=initializeUpload', token, { method: 'POST', json: { initializeUploadRequest: { owner: orgUrn(account) } }, sent: false });
+  const { uploadUrl, image } = init.body?.value || {};
+  if (!uploadUrl || !image) throw new ProviderError({ message: 'LinkedIn did not return an image upload address.', code: 'PROVIDER_ERROR', retryable: true });
+  assertUploadUrl(uploadUrl);
+  await providerRequest(uploadUrl, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': m.mime || 'application/octet-stream' },
+    body: await openBlob(m),
+    classify: classifyLinkedIn,
+    label: 'LinkedIn image upload',
+    timeoutMs: UPLOAD_TIMEOUT_MS,
+    sent: false
+  });
+  // The post is created only once LinkedIn reports the image AVAILABLE.
+  for (let i = 0; i < linkedin._imagePollAttempts; i++) {
+    const st = await rest(`/images/${enc(image)}`, token);
+    const status = st.body?.status;
+    if (status === 'AVAILABLE') return image;
+    if (status === 'PROCESSING_FAILED') throw new ProviderError({ message: 'LinkedIn could not process the image.', code: 'INVALID_REQUEST' });
+    await new Promise(r => setTimeout(r, linkedin._imagePollDelayMs));
+  }
+  // Nothing was posted; a later attempt uploads again.
+  throw new ProviderError({ message: 'LinkedIn is still processing the image.', code: 'PROVIDER_ERROR', retryable: true, retryAfterSec: 120 });
+}
+
+/** Videos API: initialize, PUT each part, finalize with the part ETags, wait until AVAILABLE. */
+async function uploadVideo(account, token, m) {
+  if (!m.filePath) throw new ProviderError({ message: 'LinkedIn needs the uploaded video file.', code: 'INVALID_REQUEST' });
+  const init = await rest('/videos?action=initializeUpload', token, {
+    method: 'POST',
+    json: { initializeUploadRequest: { owner: orgUrn(account), fileSizeBytes: Number(m.sizeBytes), uploadCaptions: false, uploadThumbnail: false } },
+    sent: false
+  });
+  const v = init.body?.value || {};
+  if (!v.video || !Array.isArray(v.uploadInstructions) || !v.uploadInstructions.length) {
+    throw new ProviderError({ message: 'LinkedIn did not return video upload instructions.', code: 'PROVIDER_ERROR', retryable: true });
+  }
+  const partIds = [];
+  for (const part of v.uploadInstructions) {
+    assertUploadUrl(part.uploadUrl);
+    const res = await providerRequest(part.uploadUrl, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: await openBlob(m, Number(part.firstByte), Number(part.lastByte) + 1),
+      classify: classifyLinkedIn,
+      label: 'LinkedIn video upload',
+      timeoutMs: UPLOAD_TIMEOUT_MS,
+      sent: false
+    });
+    const etag = res.headers.get('etag');
+    if (!etag) throw new ProviderError({ message: 'LinkedIn did not confirm a video part upload.', code: 'PROVIDER_ERROR', retryable: true });
+    partIds.push(etag);
+  }
+  await rest('/videos?action=finalizeUpload', token, {
+    method: 'POST',
+    json: { finalizeUploadRequest: { video: v.video, uploadToken: v.uploadToken || '', uploadedPartIds: partIds } },
+    sent: false
+  });
+  for (let i = 0; i < linkedin._videoPollAttempts; i++) {
+    const st = await rest(`/videos/${enc(v.video)}`, token);
+    const status = st.body?.status;
+    if (status === 'AVAILABLE') return v.video;
+    if (status === 'PROCESSING_FAILED') throw new ProviderError({ message: 'LinkedIn could not process the video.', code: 'INVALID_REQUEST' });
+    await new Promise(r => setTimeout(r, linkedin._videoPollDelayMs));
+  }
+  // Nothing was posted; a later attempt uploads again.
+  throw new ProviderError({ message: 'LinkedIn is still processing the video.', code: 'PROVIDER_ERROR', retryable: true, retryAfterSec: 300 });
+}
+
 const linkedin = {
   key: 'linkedin',
+  _videoPollAttempts: 40,
+  _imagePollAttempts: 10,
+  _imagePollDelayMs: 1000,
+  _videoPollDelayMs: 3000,
 
   buildAuthorizeUrl({ state, redirectUri, scopes, app = envApp() }) {
     return `${OAUTH}/authorization?${new URLSearchParams({
@@ -139,7 +227,23 @@ const linkedin = {
     });
   },
 
-  async publish(account, secret, { text, linkUrl, title }) {
+  async publish(account, secret, { text, linkUrl, title, media = [] }) {
+    const token = secret.access_token;
+    const images = media.filter(m => m.kind === 'image');
+    const videos = media.filter(m => m.kind === 'video');
+    let content = null;
+    if (videos.length) {
+      content = { media: { title: String(title || '').slice(0, 200), id: await uploadVideo(account, token, videos[0]) } };
+    } else if (images.length === 1) {
+      const id = await uploadImage(account, token, images[0]);
+      content = { media: { id, ...(images[0].altText ? { altText: String(images[0].altText).slice(0, 4086) } : {}) } };
+    } else if (images.length > 1) {
+      const list = [];
+      for (const img of images) list.push({ id: await uploadImage(account, token, img), ...(img.altText ? { altText: String(img.altText).slice(0, 4086) } : {}) });
+      content = { multiImage: { images: list } };
+    } else if (linkUrl) {
+      content = { article: { source: linkUrl, title: (title || linkUrl).slice(0, 200) } };
+    }
     const body = {
       author: orgUrn(account),
       commentary: text || '',
@@ -148,8 +252,8 @@ const linkedin = {
       lifecycleState: 'PUBLISHED',
       isReshareDisabledByAuthor: false
     };
-    if (linkUrl) body.content = { article: { source: linkUrl, title: (title || linkUrl).slice(0, 200) } };
-    const res = await rest('/posts', secret.access_token, { method: 'POST', json: body });
+    if (content) body.content = content;
+    const res = await rest('/posts', token, { method: 'POST', json: body });
     const urn = res.headers.get('x-restli-id') || res.body?.id;
     if (!urn) {
       throw new ProviderError({ message: 'LinkedIn accepted the request but returned no post id.', code: 'PROVIDER_ERROR', outcomeUnknown: true });

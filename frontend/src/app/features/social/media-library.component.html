@@ -1,0 +1,79 @@
+<div class="ml" [class.pick]="mode === 'pick'">
+  <div class="ml-toolbar">
+    <div class="filter-row">
+      <button type="button" *ngFor="let f of [['all','All'],['image','Images'],['video','Videos'],['unused','Unused']]" class="chip" [class.active]="filter === f[0]" (click)="filter = $any(f[0]); load()">{{ f[1] }}</button>
+      <input class="hud-input search" [(ngModel)]="q" (keyup.enter)="load()" placeholder="Search files…" aria-label="Search media" />
+    </div>
+    <div class="button-row" *ngIf="canEdit">
+      <input #picker type="file" class="visually-hidden-input" multiple accept=".jpg,.jpeg,.png,.webp,.mp4,.mov,image/jpeg,image/png,image/webp,video/mp4,video/quicktime" tabindex="-1" aria-hidden="true" (change)="onFiles($event)" />
+      <button type="button" class="btn btn-primary btn-sm" (click)="picker.click()">⬆ Upload images or videos</button>
+    </div>
+  </div>
+
+  <div class="small muted" *ngIf="limits">
+    JPEG, PNG or WebP images up to {{ limits.imageBytes / 1048576 | number:'1.0-0' }} MB · MP4 or MOV videos up to {{ limits.videoBytes / 1048576 | number:'1.0-0' }} MB.
+    Each platform's own limits are checked when you attach a file to a post.
+    <span *ngIf="storage"> · Storage {{ size(storage.usedBytes) }} of {{ size(storage.quotaBytes) }} ({{ usagePercent() }}%)</span>
+  </div>
+  <div class="banner warn small" *ngIf="publicFetchProblem && mode === 'manage'">Instagram cannot publish uploaded files yet: {{ publicFetchProblem }}</div>
+  <div class="banner bad small" *ngIf="error">{{ error }}</div>
+
+  <div class="uploads" *ngIf="uploads.length">
+    <div class="upload-row" *ngFor="let u of uploads">
+      <span class="u-name">{{ u.name }}</span>
+      <span class="small muted">{{ size(u.size) }}</span>
+      <div class="bar" *ngIf="u.status === 'uploading'" role="progressbar" [attr.aria-valuenow]="u.progress" aria-valuemin="0" aria-valuemax="100"><span [style.width.%]="u.progress"></span></div>
+      <span class="small" *ngIf="u.status === 'uploading'">{{ u.progress }}%</span>
+      <span class="small muted" *ngIf="u.status === 'thumbnail'">Making thumbnail…</span>
+      <span class="small ok-text" *ngIf="u.status === 'done'">✓ Uploaded and verified</span>
+      <span class="small warn-text" *ngIf="u.status === 'error'">{{ u.error }}</span>
+    </div>
+  </div>
+
+  <div class="grid" [class.loading]="loading">
+    <button type="button" *ngFor="let a of items" class="tile" [class.on]="mode === 'pick' && isSelected(a)" (click)="toggle(a)" [attr.aria-pressed]="mode === 'pick' ? isSelected(a) : null" [title]="a.originalName || a.title || ''">
+      <img *ngIf="thumbSrc(a)" [src]="thumbSrc(a)" alt="" loading="lazy" referrerpolicy="no-referrer" />
+      <span *ngIf="!thumbSrc(a)" class="ph">{{ a.assetType === 'video' ? '🎬' : '🖼️' }}</span>
+      <span class="badge" *ngIf="a.assetType === 'video'">▶ {{ duration(a.durationSeconds) }}</span>
+      <span class="order" *ngIf="mode === 'pick' && isSelected(a)">{{ order(a) }}</span>
+      <span class="unverified" *ngIf="!a.verified" title="Linked URL: size and dimensions not verified">URL</span>
+    </button>
+    <div class="empty-box" *ngIf="!items.length && !loading">No media yet. Upload images or videos to reuse them across posts.</div>
+  </div>
+  <div class="small muted" *ngIf="mode === 'pick'">Tap files to attach them; the numbers show the order they will appear in. <button type="button" class="link-btn" *ngIf="selected.length && canEdit" (click)="selected = []; selectedChange.emit([])">Clear</button></div>
+
+  <!-- Details -->
+  <div class="detail card" *ngIf="active && mode === 'manage'">
+    <div class="row-line">
+      <strong>{{ active.originalName || active.title || ('File #' + active.id) }}</strong>
+      <button type="button" class="btn btn-secondary btn-sm" (click)="active = null" aria-label="Close details">✕</button>
+    </div>
+    <div class="detail-grid">
+      <div class="preview-box">
+        <img *ngIf="active.assetType === 'image'" [src]="src(active)" alt="" referrerpolicy="no-referrer" />
+        <video *ngIf="active.assetType === 'video'" [src]="src(active)" controls preload="metadata" [attr.poster]="activeThumb ? src(activeThumb) : null"></video>
+      </div>
+      <div class="field-block">
+        <div class="small">{{ facts(active) }}</div>
+        <div class="small muted" *ngIf="!active.verified">Linked URL — not verified. Upload the file to check it against platform rules.</div>
+        <label>Name<input class="hud-input" [(ngModel)]="titleDraft" [disabled]="!canEdit" /></label>
+        <label *ngIf="active.assetType === 'image'">Alt text (description for screen readers)
+          <textarea class="hud-textarea" rows="2" [(ngModel)]="altDraft" [disabled]="!canEdit" maxlength="1000"></textarea>
+          <span class="small muted">Sent with LinkedIn images. Facebook and Instagram generate their own through the API.</span>
+        </label>
+        <div class="small">
+          <strong>Used by</strong>
+          <span *ngIf="!active.usedBy?.length" class="muted"> no posts</span>
+          <span *ngFor="let u of active.usedBy" class="status-pill">#{{ u.id }} {{ u.platformKey }} · {{ u.status }}</span>
+        </div>
+        <div class="button-row" *ngIf="canEdit">
+          <button type="button" class="btn btn-primary btn-sm" (click)="saveDetails()">Save</button>
+          <input #replacePicker type="file" class="visually-hidden-input" [attr.accept]="active.assetType === 'video' ? '.mp4,.mov,video/mp4,video/quicktime' : '.jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp'" tabindex="-1" aria-hidden="true" (change)="replace($event)" />
+          <button type="button" class="btn btn-secondary btn-sm" *ngIf="active.verified" (click)="replacePicker.click()">Replace file…</button>
+          <button type="button" class="btn btn-danger btn-sm" [disabled]="active.activeUseCount > 0" [title]="active.activeUseCount ? 'Remove it from unpublished posts first' : ''" (click)="remove()">Delete</button>
+        </div>
+        <div class="small muted" *ngIf="active.activeUseCount > 0">Used by {{ active.activeUseCount }} unpublished post(s): remove it from them before deleting.</div>
+      </div>
+    </div>
+  </div>
+</div>

@@ -647,7 +647,12 @@
   <!-- =================================================================== -->
   <!-- TAB 4: SOCIAL MEDIA MARKETING STUDIO -->
   <!-- =================================================================== -->
-  <app-social-hub *ngIf="currentRoute === 'social'" [initialSection]="socialSection" [initialCampaignId]="socialCampaignId" [initialLibraryStatus]="socialLibraryStatus" [oauthResult]="socialOauthResult" (toast)="showToast($event)"></app-social-hub>
+  <!-- Loaded on first use (keeps the initial bundle small). -->
+  <ng-container *ngIf="currentRoute === 'social'">
+    @defer (on immediate) {
+      <app-social-hub [initialSection]="socialSection" [initialCampaignId]="socialCampaignId" [initialLibraryStatus]="socialLibraryStatus" [oauthResult]="socialOauthResult" (toast)="showToast($event)"></app-social-hub>
+    } @loading { <p class="helper-text">Loading social media hub…</p> }
+  </ng-container>
 
   <!-- =================================================================== -->
   <!-- TAB 5: AI CAMPAIGNS & MULTI-BUSINESS PLAYBOOKS -->

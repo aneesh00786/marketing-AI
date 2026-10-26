@@ -59,7 +59,8 @@ test('capability registry reflects provider support, implementation and granted 
   const ig = evaluateAccount({ account_type: 'instagram_business', scopes_json: JSON.stringify(['instagram_basic', 'instagram_content_publish']) });
   assert.equal(ig.publish_image.status, 'available');
   assert.equal(ig.publish_text.status, 'unsupported_by_provider');
-  assert.equal(ig.publish_video.status, 'not_implemented');
+  assert.equal(ig.publish_video.status, 'available');
+  assert.equal(ig.messages_read.status, 'not_implemented');
   assert.equal(ig.comments_read.status, 'missing_permission');
   assert.deepEqual(ig.comments_read.missingScopes, ['instagram_manage_comments']);
 

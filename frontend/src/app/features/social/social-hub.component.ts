@@ -2,8 +2,11 @@ import { Component, EventEmitter, Input, OnDestroy, OnInit, Output } from '@angu
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { SocialApiService } from './social-api.service';
+import { MediaLibraryComponent } from './media-library.component';
+import { PostComposerComponent } from './post-composer.component';
+import { apiRoot } from '../../core/api-base';
 
-type Section = 'overview' | 'accounts' | 'campaigns' | 'calendar' | 'library' | 'queue' | 'analytics' | 'inbox' | 'strategist' | 'settings';
+type Section = 'overview' | 'accounts' | 'campaigns' | 'calendar' | 'library' | 'media' | 'queue' | 'analytics' | 'inbox' | 'strategist' | 'settings';
 
 const PLATFORMS = [
   { key: 'facebook', label: 'Facebook', icon: '📘' },
@@ -15,15 +18,15 @@ const PLATFORMS = [
 
 const METRIC_LABELS: Record<string, string> = {
   impressions: 'Impressions', reach: 'Reach', views: 'Views', likes: 'Likes',
-  comments: 'Comments', shares: 'Shares', saves: 'Saves', clicks: 'Clicks'
+  comments: 'Comments', shares: 'Shares', saves: 'Saves', clicks: 'Clicks', avg_watch_time: 'Avg. watch time'
 };
 
 @Component({
   selector: 'app-social-hub',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, MediaLibraryComponent, PostComposerComponent],
   templateUrl: './social-hub.component.html',
-  styleUrls: ['./social-hub.component.css']
+  styleUrls: ['./social-shared.css', './social-hub.component.css']
 })
 export class SocialHubComponent implements OnInit, OnDestroy {
   @Input() initialSection: Section | null = null;
@@ -38,6 +41,7 @@ export class SocialHubComponent implements OnInit, OnDestroy {
     { key: 'campaigns', label: 'Campaigns', icon: '🎯' },
     { key: 'calendar', label: 'Content Calendar', icon: '🗓️' },
     { key: 'library', label: 'Content Library', icon: '🗂️' },
+    { key: 'media', label: 'Media Library', icon: '🖼️' },
     { key: 'queue', label: 'Publishing Queue', icon: '🚀' },
     { key: 'analytics', label: 'Analytics & Reports', icon: '📊' },
     { key: 'inbox', label: 'Engagement Inbox', icon: '💬' },
@@ -131,8 +135,11 @@ export class SocialHubComponent implements OnInit, OnDestroy {
   newAssetType: 'image' | 'video' = 'image';
   busy = false;
 
+  showComposer = false;
+
   // Calendar
-  calendarView: 'month' | 'week' | 'list' = 'month';
+  calendarView: 'month' | 'week' | 'day' | 'list' = 'month';
+  dragItem: any = null;
   calendarAnchor = new Date();
   calendarItems: any[] = [];
   calendarFilters: any = { platformKey: '', accountId: '', campaignId: '', status: '' };
@@ -242,6 +249,25 @@ export class SocialHubComponent implements OnInit, OnDestroy {
     return Number(m.value).toLocaleString();
   }
 
+  /** Like metricValue, with units for metrics that have them. */
+  metricDisplay(key: string, m: any): string {
+    const v = this.metricValue(m);
+    return key === 'avg_watch_time' && m && m.value !== null && m.value !== undefined ? `${v} s` : v;
+  }
+
+  /** Image URL for an asset: uploads are served by the API, linked media by their own URL. */
+  mediaSrc(a: any): string | null {
+    if (!a) return null;
+    if (a.assetType === 'video') return a.thumbnailPreviewPath ? `${apiRoot()}${a.thumbnailPreviewPath}` : null;
+    return a.previewPath ? `${apiRoot()}${a.previewPath}` : a.url;
+  }
+
+  mergeAssets(list: any[]): void {
+    const byId = new Map(this.assets.map(a => [a.id, a]));
+    for (const a of list) byId.set(a.id, a);
+    this.assets = [...byId.values()];
+  }
+
   metricCoverage(m: any): string {
     if (!m) return '';
     const total = (m.availableFor || 0) + (m.unavailableFor || 0) + (m.notCollectedFor || 0);
@@ -275,6 +301,7 @@ export class SocialHubComponent implements OnInit, OnDestroy {
       case 'campaigns': this.loadCampaigns(); break;
       case 'calendar': this.loadCalendar(); break;
       case 'library': this.loadLibrary(); break;
+      case 'media': break;
       case 'queue': this.loadQueue(); break;
       case 'analytics': this.loadAnalytics(); break;
       case 'inbox': this.loadThreads(); break;
@@ -509,7 +536,15 @@ export class SocialHubComponent implements OnInit, OnDestroy {
   }
 
   newContent(): void {
-    this.openEditor({ id: null, platformKey: 'linkedin', caption: '', hashtags: [], status: 'draft', mediaAssetIds: [], version: 1 });
+    this.showComposer = true;
+  }
+
+  onComposed(r: any): void {
+    this.showComposer = false;
+    this.section = 'library';
+    this.libraryFilters = { ...this.libraryFilters, status: 'all' };
+    this.loadLibrary();
+    if (r.items?.length === 1) this.openEditor(r.items[0].content);
   }
 
   openEditor(item: any): void {
@@ -522,7 +557,8 @@ export class SocialHubComponent implements OnInit, OnDestroy {
       title: item.title || '', caption: item.caption || '', hashtagsText: (item.hashtags || []).join(' '),
       callToAction: item.callToAction || '', linkUrl: item.linkUrl || '', platformKey: item.platformKey || 'linkedin',
       socialAccountId: item.socialAccountId || null, campaignId: item.campaignId || null,
-      mediaAssetIds: [...(item.mediaAssetIds || [])], imagePrompt: item.imagePrompt || '', videoScript: item.videoScript || ''
+      mediaAssetIds: [...(item.mediaAssetIds || [])], imagePrompt: item.imagePrompt || '', videoScript: item.videoScript || '',
+      youtube: { privacyStatus: item.platformOptions?.youtube?.privacyStatus || 'public', madeForKids: item.platformOptions?.youtube?.madeForKids === true }
     };
     const suggested = item.scheduledAt || item.suggestedPublishAt;
     this.scheduleForm = {
@@ -531,8 +567,27 @@ export class SocialHubComponent implements OnInit, OnDestroy {
       timezone: item.scheduleTimezone || this.settings.timezone || 'UTC'
     };
     if (item.id) {
-      this.api.contentDetail(item.id).subscribe({ next: r => { this.editorDetail = r; this.editor = r.content; }, error: e => this.fail(e) });
+      this.api.contentDetail(item.id).subscribe({
+        next: r => {
+          this.editorDetail = r;
+          this.editor = r.content;
+          this.mergeAssets(r.assets || []);
+          if (!item.caption && r.content) this.openEditorDraftFrom(r.content);
+        },
+        error: e => this.fail(e)
+      });
     }
+  }
+
+  /** Fills the edit form when the editor was opened by id only (e.g. from the queue). */
+  private openEditorDraftFrom(c: any): void {
+    this.editorDraft = {
+      ...this.editorDraft,
+      title: c.title || '', caption: c.caption || '', hashtagsText: (c.hashtags || []).join(' '), callToAction: c.callToAction || '',
+      linkUrl: c.linkUrl || '', platformKey: c.platformKey || 'linkedin', socialAccountId: c.socialAccountId || null, campaignId: c.campaignId || null,
+      mediaAssetIds: [...(c.mediaAssetIds || [])], imagePrompt: c.imagePrompt || '', videoScript: c.videoScript || '',
+      youtube: { privacyStatus: c.platformOptions?.youtube?.privacyStatus || 'public', madeForKids: c.platformOptions?.youtube?.madeForKids === true }
+    };
   }
 
   closeEditor(): void {
@@ -557,7 +612,8 @@ export class SocialHubComponent implements OnInit, OnDestroy {
       title: d.title || null, caption: d.caption, hashtags: d.hashtagsText, callToAction: d.callToAction || null,
       linkUrl: d.linkUrl || null, platformKey: d.platformKey, socialAccountId: d.socialAccountId ? Number(d.socialAccountId) : null,
       campaignId: d.campaignId ? Number(d.campaignId) : null, mediaAssetIds: d.mediaAssetIds,
-      imagePrompt: d.imagePrompt || null, videoScript: d.videoScript || null
+      imagePrompt: d.imagePrompt || null, videoScript: d.videoScript || null,
+      ...(d.platformKey === 'youtube' ? { platformOptions: { youtube: { privacyStatus: d.youtube.privacyStatus, madeForKids: !!d.youtube.madeForKids } } } : {})
     };
   }
 
@@ -667,7 +723,7 @@ export class SocialHubComponent implements OnInit, OnDestroy {
   }
 
   captionLimit(): number | null {
-    const map: Record<string, number> = { facebook: 63206, instagram: 2200, linkedin: 3000, x: 280 };
+    const map: Record<string, number> = { facebook: 63206, instagram: 2200, linkedin: 3000, youtube: 5000, x: 280 };
     return map[this.editorDraft?.platformKey] || null;
   }
 
@@ -686,7 +742,9 @@ export class SocialHubComponent implements OnInit, OnDestroy {
   loadCalendar(): void {
     const { from, to } = this.calendarRange();
     this.loading = true;
-    this.api.calendar({ ...this.calendarFilters, from: from.toISOString(), to: to.toISOString() }).subscribe({
+    // Days are shown in the workspace time zone, which may differ from this browser's: fetch a day either side.
+    const pad = 86400000;
+    this.api.calendar({ ...this.calendarFilters, from: new Date(from.getTime() - pad).toISOString(), to: new Date(to.getTime() + pad).toISOString() }).subscribe({
       next: r => { this.calendarItems = r.items; this.loading = false; },
       error: e => this.fail(e)
     });
@@ -700,6 +758,13 @@ export class SocialHubComponent implements OnInit, OnDestroy {
       start.setHours(0, 0, 0, 0);
       const end = new Date(start);
       end.setDate(start.getDate() + 7);
+      return { from: start, to: end };
+    }
+    if (this.calendarView === 'day') {
+      const start = new Date(a);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(start);
+      end.setDate(start.getDate() + 1);
       return { from: start, to: end };
     }
     if (this.calendarView === 'list') {
@@ -719,6 +784,7 @@ export class SocialHubComponent implements OnInit, OnDestroy {
 
   calendarTitle(): string {
     if (this.calendarView === 'month') return this.calendarAnchor.toLocaleString(undefined, { month: 'long', year: 'numeric' });
+    if (this.calendarView === 'day') return this.calendarAnchor.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
     const { from, to } = this.calendarRange();
     const end = new Date(to.getTime() - 86400000);
     return `${from.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${end.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`;
@@ -733,6 +799,7 @@ export class SocialHubComponent implements OnInit, OnDestroy {
     const a = new Date(this.calendarAnchor);
     if (this.calendarView === 'month') a.setMonth(a.getMonth() + dir);
     else if (this.calendarView === 'week') a.setDate(a.getDate() + 7 * dir);
+    else if (this.calendarView === 'day') a.setDate(a.getDate() + dir);
     else a.setDate(a.getDate() + 60 * dir);
     this.calendarAnchor = a;
     this.loadCalendar();
@@ -764,6 +831,52 @@ export class SocialHubComponent implements OnInit, OnDestroy {
 
   isToday(day: Date): boolean {
     return day.toDateString() === new Date().toDateString();
+  }
+
+  openDay(day: Date): void {
+    this.calendarAnchor = new Date(day);
+    this.calendarView = 'day';
+    this.loadCalendar();
+  }
+
+  dayItems(): any[] {
+    return this.itemsOn(this.calendarAnchor).sort((a, b) => String(a.calendarAt).localeCompare(String(b.calendarAt)));
+  }
+
+  /** Only scheduled or approved posts can be moved; drafts must be approved first. */
+  canDrag(i: any): boolean {
+    return ['scheduled', 'approved'].includes(i.status) && !!i.socialAccountId && i.platformKey !== 'x';
+  }
+
+  onDragStart(ev: DragEvent, i: any): void {
+    if (!this.canDrag(i)) { ev.preventDefault(); return; }
+    this.dragItem = i;
+    ev.dataTransfer?.setData('text/plain', String(i.id));
+  }
+
+  onDragOver(ev: DragEvent): void {
+    if (this.dragItem) ev.preventDefault();
+  }
+
+  /** Moves a post to another day at the same local time (or 09:00 for unscheduled posts), via the normal schedule checks. */
+  onDrop(ev: DragEvent, day: Date): void {
+    ev.preventDefault();
+    const i = this.dragItem;
+    this.dragItem = null;
+    if (!i) return;
+    const time = i.scheduledAt ? this.toLocalInput(i.scheduledAt).slice(11, 16) : '09:00';
+    const date = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
+    const tz = i.scheduleTimezone || this.settings.timezone || 'UTC';
+    if (!confirm(`${i.status === 'scheduled' ? 'Reschedule' : 'Schedule'} "${i.title || (i.caption || '').slice(0, 40)}" for ${date} ${time} (${tz})?`)) return;
+    this.api.scheduleContent(i.id, { accountId: i.socialAccountId, localDateTime: `${date}T${time}`, timezone: tz }).subscribe({
+      next: r => { this.notify(`Scheduled for ${this.fmt(r.job.scheduledFor)} (${r.job.scheduleTimezone}).`); this.loadCalendar(); },
+      error: e => this.fail(e)
+    });
+  }
+
+  calendarClass(i: any): string {
+    if (i.needsReview) return 'job-needs_review';
+    return i.isSuggestion ? 'suggestion' : this.statusClass(i.status);
   }
 
   // ---------- Queue ----------
@@ -800,6 +913,25 @@ export class SocialHubComponent implements OnInit, OnDestroy {
       next: r => { this.analytics = r.analytics; this.loading = false; },
       error: e => this.fail(e)
     });
+  }
+
+  exportAnalytics(): void {
+    const f = this.analyticsFilters;
+    this.api.exportAnalytics({ ...f, from: f.from ? new Date(`${f.from}T00:00:00Z`).toISOString() : null, to: f.to ? new Date(`${f.to}T23:59:59Z`).toISOString() : null }).subscribe({
+      next: blob => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `social-analytics-${f.from || 'start'}-to-${f.to || 'today'}.csv`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      },
+      error: e => this.fail(e, 'Export failed')
+    });
+  }
+
+  trendMax(): number {
+    return Math.max(1, ...(this.analytics?.trend || []).map((t: any) => t.engagements || 0));
   }
 
   syncAnalytics(): void {

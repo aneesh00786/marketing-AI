@@ -1,0 +1,214 @@
+<div class="backdrop" (click)="close()">
+  <aside class="composer" (click)="$event.stopPropagation()" role="dialog" aria-label="Create post">
+    <div class="row-line head">
+      <h3>CREATE POST</h3>
+      <div class="button-row">
+        <span class="small" [class.warn-text]="problemCount()" *ngIf="selectedKeys.length">{{ validating ? 'Checking…' : (problemCount() ? problemCount() + ' issue(s) to fix before scheduling' : '✓ Ready for approval') }}</span>
+        <button type="button" class="btn btn-secondary btn-sm" (click)="close()" aria-label="Close">✕</button>
+      </div>
+    </div>
+
+    <div class="banner warn small" *ngIf="restoreOffer">
+      You have an unsaved post from {{ restoreOffer.savedAt | date:'medium' }}.
+      <button type="button" class="btn btn-secondary btn-sm" (click)="restore()">Restore</button>
+      <button type="button" class="link-btn" (click)="discardRestore()">Discard</button>
+    </div>
+
+    <section class="field-block">
+      <div class="small"><strong>Post to</strong> <span class="muted">— each account gets its own draft, approval and publishing result.</span></div>
+      <div class="targets">
+        <button type="button" *ngFor="let t of targets" class="target" [class.on]="isSelected(t)" [class.dim]="t.status !== 'connected' && t.status !== 'manual'" (click)="toggleTarget(t)" [attr.aria-pressed]="isSelected(t)">
+          {{ icon(t.platformKey) }} {{ t.label }}
+          <span class="small warn-text" *ngIf="t.status !== 'connected' && t.status !== 'manual'">({{ t.status }})</span>
+        </button>
+      </div>
+      <div class="small muted" *ngIf="targets.length === 1">No social accounts are connected yet. Connect them under Connected Accounts; you can still draft for X.</div>
+    </section>
+
+    <div class="layout">
+      <div class="main">
+        <nav class="tabs" aria-label="Edit shared content or one platform">
+          <button type="button" class="tab" [class.active]="tab === 'shared'" (click)="tab = 'shared'">Shared</button>
+          <button type="button" *ngFor="let t of selectedTargets()" class="tab" [class.active]="tab === t.key" (click)="tab = t.key; previewKey = t.key">
+            {{ icon(t.platformKey) }} {{ t.label }}
+            <span class="dot" *ngIf="validation[t.key]?.problems?.length" aria-label="has issues">●</span>
+          </button>
+        </nav>
+
+        <!-- Shared content -->
+        <div *ngIf="tab === 'shared'" class="field-block">
+          <div class="form-grid">
+            <label class="span-2">Caption
+              <textarea class="hud-textarea" rows="6" [(ngModel)]="base.caption" (ngModelChange)="changed()" placeholder="Write once; customise per platform in its tab if needed."></textarea>
+            </label>
+            <label class="span-2">Hashtags<input class="hud-input" [(ngModel)]="base.hashtagsText" (ngModelChange)="changed()" placeholder="#launch #product" /></label>
+            <label>Call to action<input class="hud-input" [(ngModel)]="base.callToAction" (ngModelChange)="changed()" /></label>
+            <label>Link<input class="hud-input" [(ngModel)]="base.linkUrl" (ngModelChange)="changed()" placeholder="https://…" /></label>
+            <label>Title <span class="muted">(video title on YouTube, LinkedIn and Facebook)</span><input class="hud-input" [(ngModel)]="base.title" (ngModelChange)="changed()" /></label>
+            <label>Campaign<select class="hud-input" [(ngModel)]="campaignId" (ngModelChange)="changed()"><option [ngValue]="null">— none —</option><option *ngFor="let c of campaigns" [ngValue]="c.id">{{ c.name }}</option></select></label>
+          </div>
+          <div class="row-line">
+            <span class="small"><strong>Media</strong> ({{ base.mediaAssetIds.length }} attached)</span>
+            <button type="button" class="btn btn-secondary btn-sm" (click)="showMedia = !showMedia">{{ showMedia ? 'Hide library' : 'Add from library / upload' }}</button>
+          </div>
+          <div class="strip" *ngIf="base.mediaAssetIds.length">
+            <span *ngFor="let id of base.mediaAssetIds; let i = index" class="chipmedia">
+              <img *ngIf="thumb(assets.get(id))" [src]="thumb(assets.get(id))" alt="" referrerpolicy="no-referrer" />
+              <span *ngIf="!thumb(assets.get(id))">{{ assets.get(id)?.assetType === 'video' ? '🎬' : '🖼️' }}</span>
+              <span class="n">{{ i + 1 }}</span>
+            </span>
+          </div>
+          <app-media-library *ngIf="showMedia" mode="pick" [selected]="base.mediaAssetIds" (selectedChange)="setMedia('shared', $event)" (assetsLoaded)="onAssets($event)" (toast)="toast.emit($event)"></app-media-library>
+
+          <div class="row-line templates">
+            <label class="inline">Template
+              <select class="hud-input small-select" #tpl (change)="applyTemplate(tpl.value); tpl.value = ''">
+                <option value="">Apply a saved template…</option>
+                <option *ngFor="let t of templates" [value]="t.id">{{ t.name }}</option>
+              </select>
+            </label>
+            <div class="button-row">
+              <button type="button" class="btn btn-secondary btn-sm" (click)="saveTemplate()" [disabled]="!base.caption">Save as template</button>
+              <select class="hud-input small-select" #tplDel *ngIf="templates.length" (change)="deleteTemplate(tplDel.value); tplDel.value = ''" aria-label="Delete a template">
+                <option value="">Delete a template…</option>
+                <option *ngFor="let t of templates" [value]="t.id">{{ t.name }}</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- One platform -->
+        <ng-container *ngFor="let t of selectedTargets()">
+          <div *ngIf="tab === t.key" class="field-block">
+            <div class="small muted">Fields follow the Shared tab until you customise them for {{ t.label }}.</div>
+            <ng-container *ngFor="let f of [['caption','Caption'],['hashtagsText','Hashtags'],['linkUrl','Link'],['title','Title']]">
+              <div class="override">
+                <div class="row-line">
+                  <span class="small"><strong>{{ f[1] }}</strong> <span class="muted" *ngIf="!hasOverride(t.key, $any(f[0]))">— shared</span></span>
+                  <button type="button" class="link-btn" *ngIf="!hasOverride(t.key, $any(f[0]))" (click)="customize(t.key, $any(f[0]))">Customise for this account</button>
+                  <button type="button" class="link-btn" *ngIf="hasOverride(t.key, $any(f[0]))" (click)="resetField(t.key, $any(f[0]))">Use shared</button>
+                </div>
+                <ng-container *ngIf="hasOverride(t.key, $any(f[0])); else sharedValue">
+                  <textarea *ngIf="f[0] === 'caption'" class="hud-textarea" rows="5" [(ngModel)]="overrides[t.key].caption" (ngModelChange)="changed()"></textarea>
+                  <input *ngIf="f[0] !== 'caption'" class="hud-input" [(ngModel)]="$any(overrides[t.key])[f[0]]" (ngModelChange)="changed()" />
+                </ng-container>
+                <ng-template #sharedValue><div class="shared-value small">{{ $any(eff(t.key))[f[0]] || '—' }}</div></ng-template>
+              </div>
+            </ng-container>
+            <div class="override">
+              <div class="row-line">
+                <span class="small"><strong>Media</strong> <span class="muted" *ngIf="!hasOverride(t.key, 'mediaAssetIds')">— shared ({{ base.mediaAssetIds.length }})</span></span>
+                <button type="button" class="link-btn" *ngIf="!hasOverride(t.key, 'mediaAssetIds')" (click)="customize(t.key, 'mediaAssetIds')">Choose different media</button>
+                <button type="button" class="link-btn" *ngIf="hasOverride(t.key, 'mediaAssetIds')" (click)="resetField(t.key, 'mediaAssetIds')">Use shared</button>
+              </div>
+              <app-media-library *ngIf="hasOverride(t.key, 'mediaAssetIds')" mode="pick" [selected]="overrides[t.key].mediaAssetIds || []" (selectedChange)="setMedia(t.key, $event)" (assetsLoaded)="onAssets($event)" (toast)="toast.emit($event)"></app-media-library>
+            </div>
+            <div class="override" *ngIf="t.platformKey === 'youtube' && youtube[t.key]">
+              <div class="small"><strong>YouTube options</strong></div>
+              <label class="inline">Privacy
+                <select class="hud-input small-select" [(ngModel)]="youtube[t.key].privacyStatus" (ngModelChange)="changed()">
+                  <option value="public">Public</option><option value="unlisted">Unlisted</option><option value="private">Private</option>
+                </select>
+              </label>
+              <label class="check"><input type="checkbox" [(ngModel)]="youtube[t.key].madeForKids" (ngModelChange)="changed()" /> This video is made for kids (required declaration)</label>
+              <div class="small muted">Until Google audits your API project, YouTube keeps API uploads private regardless of this setting.</div>
+            </div>
+          </div>
+        </ng-container>
+
+        <!-- AI help -->
+        <details class="ai card">
+          <summary class="small">🧠 AI help — suggestions only; nothing is posted or saved until you apply it</summary>
+          <div class="form-grid">
+            <label>Product facts<select class="hud-input" [(ngModel)]="ai.productId"><option [ngValue]="null">— none —</option><option *ngFor="let p of products" [ngValue]="p.id">{{ p.name }}</option></select></label>
+            <label>Tone<select class="hud-input" [(ngModel)]="ai.tone"><option *ngFor="let t of ['Professional','Friendly','Playful','Bold','Informative']" [value]="t">{{ t }}</option></select></label>
+            <label>Length<select class="hud-input" [(ngModel)]="ai.length"><option value="short">Short</option><option value="medium">Medium / same</option><option value="long">Long</option></select></label>
+            <label class="span-2">Instruction<input class="hud-input" [(ngModel)]="ai.instruction" placeholder="e.g. announce the spring launch, mention free shipping" /></label>
+          </div>
+          <div class="button-row">
+            <button type="button" class="btn btn-secondary btn-sm" (click)="runAi('caption')" [disabled]="ai.busy">Write captions per platform</button>
+            <button type="button" class="btn btn-secondary btn-sm" (click)="runAi('rewrite')" [disabled]="ai.busy">Rewrite ({{ tab === 'shared' ? 'shared' : 'this tab' }})</button>
+            <button type="button" class="btn btn-secondary btn-sm" (click)="runAi('repurpose')" [disabled]="ai.busy || tab === 'shared'" [title]="tab === 'shared' ? 'Open a platform tab first' : ''">Adapt shared post for this platform</button>
+            <button type="button" class="btn btn-secondary btn-sm" (click)="runAi('hashtags')" [disabled]="ai.busy">Suggest hashtags</button>
+            <button type="button" class="btn btn-secondary btn-sm" (click)="runAi('cta')" [disabled]="ai.busy">Call-to-action ideas</button>
+            <button type="button" class="btn btn-secondary btn-sm" (click)="runAi('alt_text')" [disabled]="ai.busy">Draft image alt text</button>
+          </div>
+          <div class="small muted" *ngIf="ai.busy">Thinking…</div>
+          <div class="ai-result" *ngIf="ai.result?.suggestions && !ai.busy">
+            <ng-container [ngSwitch]="ai.result.mode">
+              <div *ngSwitchCase="'caption'">
+                <div class="suggestion" *ngFor="let v of ai.result.suggestions">
+                  <div class="row-line"><strong>{{ icon(v.platform) }} {{ v.platform }}</strong><span class="small" [class.warn-text]="v.overLimit">{{ v.characters }} / {{ limit(v.platform) }}{{ v.overLimit ? ' — too long, edit before use' : '' }}</span></div>
+                  <div class="pre">{{ v.caption }}</div>
+                  <div class="small muted">{{ v.hashtags.join(' ') }} <span *ngIf="v.callToAction">· {{ v.callToAction }}</span></div>
+                  <div class="small warn-text" *ngIf="v.unverified.length">Check before use — not in your product facts: {{ v.unverified.join(', ') }}</div>
+                  <button type="button" class="btn btn-secondary btn-sm" (click)="applyCaptionVariant(v)">Use for {{ v.platform }}</button>
+                </div>
+              </div>
+              <div *ngSwitchCase="'rewrite'" class="suggestion">
+                <div class="pre">{{ ai.result.suggestions.text }}</div>
+                <div class="small warn-text" *ngIf="ai.result.suggestions.unverified.length">Check: {{ ai.result.suggestions.unverified.join(', ') }}</div>
+                <button type="button" class="btn btn-secondary btn-sm" (click)="applyText(ai.result.suggestions.text)">Replace caption</button>
+              </div>
+              <div *ngSwitchCase="'repurpose'" class="suggestion">
+                <div class="small" [class.warn-text]="ai.result.suggestions.overLimit">{{ ai.result.suggestions.characters }} / {{ limit(ai.result.suggestions.platform) }} characters</div>
+                <div class="pre">{{ ai.result.suggestions.caption }}</div>
+                <div class="small muted">{{ ai.result.suggestions.hashtags.join(' ') }}</div>
+                <button type="button" class="btn btn-secondary btn-sm" (click)="applyRepurpose(ai.result.suggestions)">Use for this account</button>
+              </div>
+              <div *ngSwitchCase="'hashtags'" class="suggestion">
+                <div>{{ ai.result.suggestions.hashtags.join(' ') }}</div>
+                <button type="button" class="btn btn-secondary btn-sm" (click)="addHashtags(ai.result.suggestions.hashtags)">Add these</button>
+              </div>
+              <div *ngSwitchCase="'cta'" class="suggestion">
+                <div *ngFor="let c of ai.result.suggestions.suggestions" class="row-line">
+                  <span>{{ c.text }} <span class="small warn-text" *ngIf="c.unverified.length">(check: {{ c.unverified.join(', ') }})</span></span>
+                  <button type="button" class="btn btn-secondary btn-sm" (click)="useCta(c.text)">Use</button>
+                </div>
+              </div>
+              <div *ngSwitchCase="'alt_text'" class="suggestion">
+                <div>{{ ai.result.suggestions.altText }}</div>
+                <button type="button" class="btn btn-secondary btn-sm" (click)="saveAltText()">Save as the image's alt text</button>
+              </div>
+            </ng-container>
+            <div class="small muted" *ngFor="let n of ai.result.notes">{{ n }}</div>
+            <div class="small muted">Generated by {{ ai.result.provider }}; counts toward your workspace AI quota.</div>
+          </div>
+        </details>
+      </div>
+
+      <!-- Preview + validation -->
+      <div class="side">
+        <div *ngIf="!selectedKeys.length" class="empty-box">Choose accounts to see each platform's preview and checks.</div>
+        <ng-container *ngIf="previewKey && target(previewKey) as t">
+          <div class="button-row preview-tabs" *ngIf="selectedKeys.length > 1">
+            <button type="button" *ngFor="let s of selectedTargets()" class="chip" [class.active]="previewKey === s.key" (click)="previewKey = s.key">{{ icon(s.platformKey) }}</button>
+          </div>
+          <div class="preview" [ngClass]="'pv-' + t.platformKey">
+            <div class="small muted">{{ icon(t.platformKey) }} {{ t.label }}</div>
+            <div class="pv-title" *ngIf="t.platformKey === 'youtube'">{{ eff(t.key).title || 'Video title required' }}</div>
+            <div class="pv-media" *ngIf="mediaFor(t.key).length">
+              <ng-container *ngFor="let m of mediaFor(t.key); let i = index">
+                <img *ngIf="i < 4 && thumb(m)" [src]="thumb(m)" alt="" referrerpolicy="no-referrer" />
+                <span *ngIf="i < 4 && !thumb(m)" class="pv-ph">{{ m.assetType === 'video' ? '🎬' : '🖼️' }}</span>
+              </ng-container>
+              <span class="pv-more" *ngIf="mediaFor(t.key).length > 4">+{{ mediaFor(t.key).length - 4 }}</span>
+            </div>
+            <div class="preview-text">{{ fullText(t.key) || 'Your post text appears here.' }}</div>
+            <div class="small link-preview" *ngIf="eff(t.key).linkUrl">🔗 {{ eff(t.key).linkUrl }}</div>
+          </div>
+          <div class="small" [class.warn-text]="chars(t.key) > limit(t.platformKey)">{{ chars(t.key) }} / {{ limit(t.platformKey) }} characters</div>
+          <div class="checks" *ngIf="validation[t.key] as v">
+            <div class="small ok-text" *ngIf="!v.problems.length">✓ Meets {{ t.label }}'s publishing requirements</div>
+            <div class="small problem" *ngFor="let p of v.problems">✖ {{ p }}</div>
+            <div class="small warn-text" *ngFor="let w of v.warnings">⚠ {{ w }}</div>
+          </div>
+        </ng-container>
+        <div class="button-row create">
+          <button type="button" class="btn btn-primary" (click)="create()" [disabled]="saving || !selectedKeys.length">{{ saving ? 'Creating…' : 'Create ' + selectedKeys.length + ' draft(s)' }}</button>
+        </div>
+        <div class="small muted">Drafts with issues can still be saved; they cannot be scheduled until the issues are fixed. Text is never shortened automatically.</div>
+      </div>
+    </div>
+  </aside>
+</div>

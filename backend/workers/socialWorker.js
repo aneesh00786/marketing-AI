@@ -47,13 +47,32 @@ async function processPublishing() {
     } catch (err) {
       // Unexpected internal error: outcome may be unknown, so never auto-retry.
       log(`publishing job ${job.id} crashed:`, err.message);
-      await require('../db/database').run(
+      const { run } = require('../db/database');
+      const res = await run(
         "UPDATE publishing_jobs SET status = 'needs_review', last_error_code = 'WORKER_ERROR', last_error = ?, locked_by = NULL WHERE id = ? AND status = 'running'",
         [String(err.message).slice(0, 2000), job.id]
       );
+      if (res.changes === 1) {
+        await run(
+          "UPDATE content_items SET status = 'failed', last_error = 'Publishing outcome unknown; check the platform, then retry from the Publishing Queue.', updated_at = UTC_TIMESTAMP() WHERE workspace_id = ? AND id = ? AND status = 'publishing'",
+          [job.workspace_id, job.content_item_id]
+        );
+      }
     }
   }
   return jobs.length;
+}
+
+/** Uploads the platform is still processing (Facebook/YouTube videos): check whether they went live. */
+async function processProcessing() {
+  try {
+    const results = await publishingService.checkProcessingJobs(WORKER_ID, 10);
+    for (const r of results) if (r.status !== 'processing') log(`processing job ${r.id} -> ${r.status}`);
+    return 0;
+  } catch (err) {
+    log('processing check error:', err.message);
+    return 0;
+  }
 }
 
 async function processBackground() {
@@ -140,6 +159,7 @@ async function scheduleRecurring() {
     await jobsService.enqueue(a.workspace_id, 'sync_inbox', { accountId: a.id }, { idempotencyKey: `auto_inbox:${a.id}:${iBucket}` });
     await jobsService.enqueue(a.workspace_id, 'check_account', { accountId: a.id }, { idempotencyKey: `auto_health:${a.id}:${hBucket}`, maxAttempts: 1 });
   }
+  await require('../modules/social/mediaStore').sweepTemporaryFiles().catch(err => log('media sweep error:', err.message));
   const stalePublishing = await publishingService.recoverStaleJobs();
   const staleBackground = await jobsService.recoverStale();
   if (stalePublishing || staleBackground) log(`recovered stale jobs: publishing=${stalePublishing} background=${staleBackground}`);
@@ -155,7 +175,7 @@ async function loop() {
         await processBudgets();
         lastSchedule = Date.now();
       }
-      const worked = (await processPublishing()) + (await processBackground()) + (await processOutreach()) + (await processProductEmails()) + (await processAutomation());
+      const worked = (await processPublishing()) + (await processProcessing()) + (await processBackground()) + (await processOutreach()) + (await processProductEmails()) + (await processAutomation());
       if (worked > 0) continue;
     } catch (err) {
       log('loop error:', err.message);
@@ -178,4 +198,4 @@ if (require.main === module) {
   loop().then(() => process.exit(0));
 }
 
-module.exports = { processPublishing, processBackground, processOutreach, processProductEmails, processAutomation, scheduleRecurring, HANDLERS };
+module.exports = { processPublishing, processProcessing, processBackground, processOutreach, processProductEmails, processAutomation, scheduleRecurring, HANDLERS };

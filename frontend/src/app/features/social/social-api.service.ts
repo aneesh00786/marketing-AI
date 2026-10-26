@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { HttpClient, HttpParams } from '@angular/common/http';
+import { HttpClient, HttpEvent, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { apiRoot } from '../../core/api-base';
 
@@ -64,6 +64,26 @@ export class SocialApiService {
   assets(): Observable<any> { return this.http.get(`${this.base}/assets`); }
   registerAsset(body: { url: string; assetType: 'image' | 'video'; title?: string }): Observable<any> { return this.http.post(`${this.base}/assets`, body); }
 
+  // Media library (files are sent as the raw request body; progress events drive the upload bar)
+  mediaBase(): string { return this.base; }
+  media(filters: Record<string, any> = {}): Observable<any> { return this.http.get(`${this.base}/media`, { params: this.params(filters) }); }
+  mediaDetail(id: number): Observable<any> { return this.http.get(`${this.base}/media/${id}`); }
+  uploadMedia(file: Blob, filename: string, opts: { thumbnailFor?: number; replaceId?: number } = {}): Observable<HttpEvent<any>> {
+    const path = opts.replaceId ? `${this.base}/media/${opts.replaceId}/replace` : `${this.base}/media/upload`;
+    const params = this.params({ filename, thumbnailFor: opts.thumbnailFor || null });
+    return this.http.post(path, file, { params, reportProgress: true, observe: 'events', headers: { 'Content-Type': file.type || 'application/octet-stream' } });
+  }
+  updateMedia(id: number, body: { title?: string; altText?: string }): Observable<any> { return this.http.patch(`${this.base}/media/${id}`, body); }
+  deleteMedia(id: number): Observable<any> { return this.http.delete(`${this.base}/media/${id}`); }
+
+  // Composer, templates, AI help
+  validateTargets(body: any): Observable<any> { return this.http.post(`${this.base}/content/validate`, body); }
+  compose(body: any): Observable<any> { return this.http.post(`${this.base}/content/compose`, body); }
+  templates(): Observable<any> { return this.http.get(`${this.base}/templates`); }
+  createTemplate(body: any): Observable<any> { return this.http.post(`${this.base}/templates`, body); }
+  deleteTemplate(id: number): Observable<any> { return this.http.delete(`${this.base}/templates/${id}`); }
+  aiAssist(body: any): Observable<any> { return this.http.post(`${this.base}/ai/assist`, body); }
+
   // Calendar & queue
   calendar(filters: Record<string, any>): Observable<any> { return this.http.get(`${this.base}/calendar`, { params: this.params(filters) }); }
   queue(status = 'all'): Observable<any> { return this.http.get(`${this.base}/queue`, { params: this.params({ status }) }); }
@@ -73,6 +93,7 @@ export class SocialApiService {
   // Analytics & strategist
   analytics(filters: Record<string, any>): Observable<any> { return this.http.get(`${this.base}/analytics/summary`, { params: this.params(filters) }); }
   syncAnalytics(): Observable<any> { return this.http.post(`${this.base}/analytics/sync`, {}); }
+  exportAnalytics(filters: Record<string, any>): Observable<Blob> { return this.http.get(`${this.base}/analytics/export`, { params: this.params(filters), responseType: 'blob' }); }
   ask(question: string): Observable<any> { return this.http.post(`${this.base}/strategist/ask`, { question }); }
 
   // Inbox

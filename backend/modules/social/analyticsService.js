@@ -1,5 +1,5 @@
 const { run, get, all } = require('../../db/database');
-const { toDbDateTime } = require('../../lib/time');
+const { toDbDateTime, isValidTimeZone } = require('../../lib/time');
 const { getAdapter } = require('./providers');
 const { canAccount, ACCOUNT_TYPES } = require('./capabilities');
 const accountService = require('./accountService');
@@ -9,7 +9,9 @@ const accountService = require('./accountService');
  * with their source. A metric that the provider did not return is "unavailable",
  * never zero; a post we have not collected yet is "not_collected".
  */
-const POST_METRICS = ['impressions', 'reach', 'views', 'likes', 'comments', 'shares', 'saves', 'clicks'];
+const POST_METRICS = ['impressions', 'reach', 'views', 'likes', 'comments', 'shares', 'saves', 'clicks', 'avg_watch_time'];
+// Averages are averaged across posts, never summed.
+const AVERAGED = new Set(['avg_watch_time']);
 const ENGAGEMENT_METRICS = ['likes', 'comments', 'shares', 'saves'];
 const POST_LOOKBACK_DAYS = 60;
 
@@ -25,6 +27,15 @@ async function insertSnapshots(account, objectType, externalObjectId, contentIte
         m.reason ? String(m.reason).slice(0, 500) : null, m.period || 'lifetime', source, collectedAt]
     );
   }
+}
+
+/** 'video' when the post carried a video (platforms report video posts with different metrics). */
+async function postMediaKind(workspaceId, mediaJson) {
+  let ids = [];
+  try { ids = JSON.parse(mediaJson || '[]'); } catch (e) { ids = []; }
+  if (!ids.length) return null;
+  const v = await get(`SELECT id FROM assets WHERE workspace_id = ? AND asset_type = 'video' AND id IN (${ids.map(() => '?').join(',')}) LIMIT 1`, [workspaceId, ...ids]);
+  return v ? 'video' : 'image';
 }
 
 /** Worker handler: collects account and recent-post metrics for one account. */
@@ -49,14 +60,15 @@ async function syncAccountAnalytics(job) {
 
     if (canAccount(account, 'analytics_post')) {
       const posts = await all(
-        `SELECT id, external_post_id FROM content_items
+        `SELECT id, external_post_id, media_asset_ids_json FROM content_items
          WHERE workspace_id = ? AND social_account_id = ? AND status = 'published' AND external_post_id IS NOT NULL
            AND published_at >= UTC_TIMESTAMP() - INTERVAL ${POST_LOOKBACK_DAYS} DAY
          ORDER BY published_at DESC LIMIT 50`,
         [account.workspace_id, account.id]
       );
       for (const p of posts) {
-        const metrics = await adapter.fetchPostMetrics(account, secret, p.external_post_id);
+        const mediaKind = await postMediaKind(account.workspace_id, p.media_asset_ids_json);
+        const metrics = await adapter.fetchPostMetrics(account, secret, p.external_post_id, { mediaKind });
         await insertSnapshots(account, 'post', p.external_post_id, p.id, metrics, source);
         summary.posts += 1;
       }
@@ -82,7 +94,7 @@ function emptyMetric() {
  * Dashboard data for a date range. Values are summed only over posts where the
  * provider returned the metric; coverage counts let the UI say "available for 3 of 5 posts".
  */
-async function getSummary(workspaceId, { from, to, platformKey, accountId, campaignId } = {}) {
+async function getSummary(workspaceId, { from, to, platformKey, accountId, campaignId, timezone } = {}) {
   const toDate = to ? new Date(to) : new Date();
   const fromDate = from ? new Date(from) : new Date(toDate.getTime() - 30 * 24 * 3600 * 1000);
   if (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime())) {
@@ -141,7 +153,7 @@ async function getSummary(workspaceId, { from, to, platformKey, accountId, campa
       for (const bucket of [totals, (byPlatform[p.platform_key] = byPlatform[p.platform_key] || { posts: 0, metrics: Object.fromEntries(POST_METRICS.map(k => [k, emptyMetric()])) }).metrics,
         (byCampaign[p.campaign_id || 0] = byCampaign[p.campaign_id || 0] || { name: p.campaign_name || 'No campaign', posts: 0, metrics: Object.fromEntries(POST_METRICS.map(k => [k, emptyMetric()])) }).metrics]) {
         const t = bucket[m];
-        if (entry.value !== null) { t.value = (t.value || 0) + entry.value; t.availableFor += 1; }
+        if (entry.value !== null) { t.value = (t.value || 0) + entry.value; t.availableFor += 1; t.averaged = AVERAGED.has(m) || undefined; }
         else if (entry.availability === 'not_collected') t.notCollectedFor += 1;
         else t.unavailableFor += 1;
       }
@@ -194,10 +206,34 @@ async function getSummary(workspaceId, { from, to, platformKey, accountId, campa
     });
   }
 
+  // Averaged metrics: the bucket holds a sum until here.
+  for (const bucket of [totals, ...Object.values(byPlatform).map(b => b.metrics), ...Object.values(byCampaign).map(b => b.metrics)]) {
+    for (const m of AVERAGED) {
+      const t = bucket[m];
+      if (t && t.value !== null && t.availableFor) t.value = Math.round((t.value / t.availableFor) * 100) / 100;
+    }
+  }
+
+  // Daily trend by publish date in the workspace time zone. Engagement sums only reported values.
+  const tz = timezone && isValidTimeZone(timezone) ? timezone : 'UTC';
+  const dayFmt = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' });
+  const trendMap = new Map();
+  for (const p of postRows) {
+    const day = dayFmt.format(new Date(p.publishedAt));
+    if (!trendMap.has(day)) trendMap.set(day, { date: day, posts: 0, engagements: null, impressions: null, postsWithEngagement: 0, postsWithImpressions: 0 });
+    const t = trendMap.get(day);
+    t.posts += 1;
+    if (p.engagements !== null) { t.engagements = (t.engagements || 0) + p.engagements; t.postsWithEngagement += 1; }
+    if (p.metrics.impressions.value !== null) { t.impressions = (t.impressions || 0) + p.metrics.impressions.value; t.postsWithImpressions += 1; }
+  }
+  const trend = [...trendMap.values()].sort((a, b) => a.date.localeCompare(b.date));
+
   const ranked = postRows.filter(p => p.engagements !== null).sort((a, b) => b.engagements - a.engagements);
   return {
     range: { from: fromDate.toISOString(), to: toDate.toISOString() },
+    timezone: tz,
     publishedCount: posts.length,
+    trend,
     totals,
     byPlatform,
     byCampaign,
@@ -207,8 +243,36 @@ async function getSummary(workspaceId, { from, to, platformKey, accountId, campa
   };
 }
 
+/** A spreadsheet cell; values that a spreadsheet would run as formulas are neutralised. */
+function csvCell(v) {
+  if (v === null || v === undefined) return '';
+  let s = String(v);
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+/**
+ * Per-post report. A metric the platform did not report is left blank and named in the
+ * "Unavailable metrics" column, so a blank is never mistaken for zero.
+ */
+function toCsv(summary) {
+  const head = ['Published at (UTC)', 'Platform', 'Account', 'Campaign', 'Title', 'Post URL', ...POST_METRICS.map(m => (m === 'avg_watch_time' ? 'avg_watch_time_seconds' : m)), 'Engagements (reported metrics only)', 'Unavailable metrics', 'Metrics collected at'];
+  const lines = [head.map(csvCell).join(',')];
+  for (const p of summary.posts) {
+    const unavailable = POST_METRICS.filter(m => p.metrics[m].value === null).map(m => `${m} (${p.metrics[m].availability})`);
+    const collected = POST_METRICS.map(m => p.metrics[m].collectedAt).filter(Boolean).map(d => new Date(d).getTime());
+    lines.push([
+      new Date(p.publishedAt).toISOString(), p.platformKey, p.accountName, p.campaignName, p.title, p.externalUrl,
+      ...POST_METRICS.map(m => p.metrics[m].value),
+      p.engagements, unavailable.join('; '), collected.length ? new Date(Math.max(...collected)).toISOString() : ''
+    ].map(csvCell).join(','));
+  }
+  return lines.join('\r\n') + '\r\n';
+}
+
 module.exports = {
   POST_METRICS,
+  toCsv,
   syncAccountAnalytics,
   getSummary,
   insertSnapshots

@@ -16,7 +16,7 @@ npm test                 # backend tests against the tradesage_test database (ne
 
 Frontend development: `cd frontend && npm install && npm start` (http://localhost:4200, API on :8000). Production build: `npm run build:frontend` from the repository root.
 
-`start.bat` / `run.ps1` now run migrations and open the worker in a second window.
+`start.bat` / `run.ps1` run migrations and open the worker in a second window. For production (backups, migration with `--backup`, storage, packaging) follow `DEPLOYMENT_SAFETY.md`.
 
 The worker is a separate process. It polls MySQL (`publishing_jobs`, `background_jobs`); there is no Redis or BullMQ dependency. Run exactly one worker under a process manager (pm2, systemd, a Windows service) in production. Several workers are safe because jobs are claimed atomically, but they are not needed at this scale.
 
@@ -28,6 +28,10 @@ The worker is a separate process. It polls MySQL (`publishing_jobs`, `background
 | `SOCIAL_TOKEN_ENCRYPTION_KEY` | 32 random bytes (base64). AES-256-GCM key for OAuth tokens and mailbox passwords. **Back it up; changing it makes stored tokens unreadable.** |
 | `APP_BASE_URL` | Public API origin. OAuth redirect URLs are `APP_BASE_URL/api/v1/social/oauth/<provider>/callback`. Must be HTTPS for real providers. |
 | `FRONTEND_URL` | Browser origin (CORS + where OAuth returns the user). |
+| `SOCIAL_MEDIA_STORAGE_DIR` | Uploaded images/videos (default `backend/storage/social-media`; a relative value is relative to `backend/`). Use an **absolute path outside the deployment folder** that survives redeploys, is **backed up**, and is the **same folder for the API and the worker** (the worker reads files from it to upload them; Instagram downloads them through the API). |
+| `SOCIAL_MEDIA_MAX_IMAGE_MB` / `SOCIAL_MEDIA_MAX_VIDEO_MB` / `SOCIAL_MEDIA_WORKSPACE_QUOTA_MB` | Upload limits (defaults 8 / 500 / 5120). |
+
+Instagram publishes uploaded files only when `APP_BASE_URL` is a public `https://` address that Instagram can reach (`/api/v1/social/media-files/<id>` is public, with unguessable ids).
 | One AI key (`GROQ_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`) or a local Ollama | Campaign generation, regeneration, inbox triage, Mark strategist. Without one these features fail with a clear message; no template content is substituted. |
 
 All variables are listed with comments in `backend/.env.example`.
@@ -127,9 +131,8 @@ Not integrated: API access requires a paid X plan. Drafts can be copied for manu
 **Blocked by credentials or approval:** every live provider connection (Meta App Review, the LinkedIn Community Management API product, Google OAuth verification).
 
 **Not implemented:**
-- Image and video generation; LinkedIn image posts; Instagram Reels; YouTube upload; carousels.
+- Image and video generation (AI); server-side video transcoding.
 - Messenger and Instagram DMs; X API.
-- Drag-and-drop calendar rescheduling (reschedule from the post editor instead).
 - Automatic AI replies (deliberately excluded).
 - Billing integration.
 - Tenant-aware versions of the legacy modules.
@@ -137,8 +140,8 @@ Not integrated: API access requires a paid X plan. Drafts can be copied for manu
 ## 7. Known limitations / next milestone
 
 1. Make the legacy modules (leads, mail, drafts, products, voice, appointments) tenant-aware and remove the workspace 1 restriction.
-2. Media uploads to object storage with signed URLs. Today media must already be hosted on a public HTTPS URL.
-3. Video Studio rendering (FFmpeg), then Reels and YouTube publishing.
+2. Media is stored on the server's disk (`SOCIAL_MEDIA_STORAGE_DIR`); move it to object storage when running on more than one machine.
+3. Video Studio rendering (FFmpeg). Publishing uploaded videos (Facebook, Instagram Reels, LinkedIn, YouTube) is implemented; see `SOCIAL_MEDIA_INTEGRATION_TEST_PLAN.md` before using it with real accounts.
 4. Move sessions to HttpOnly cookies with CSRF protection; add password reset and email verification.
 5. Rate limiting and quota reservations are in-process; move them to Redis when running more than one API instance.
 6. Telnyx voice webhooks are public and not yet signature-verified.

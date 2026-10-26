@@ -37,10 +37,13 @@ function defaultClassify(status, body) {
 
 /**
  * @param {string} url
- * @param {object} opts  { method, headers, json, form, timeoutMs, classify(status, body) }
+ * @param {object} opts  { method, headers, json, form, multipart (FormData), body (Blob/Buffer, with a
+ *                        Content-Type header), timeoutMs, classify(status, body), sent }
+ *   sent: false when a failed request cannot have created anything visible (an upload step),
+ *   so a network failure is not treated as an unknown publishing outcome.
  * @returns {Promise<{ status:number, headers:Headers, body:any }>}
  */
-async function providerRequest(url, { method = 'GET', headers = {}, json, form, timeoutMs = 20000, classify = defaultClassify, label = 'provider' } = {}) {
+async function providerRequest(url, { method = 'GET', headers = {}, json, form, multipart, body: rawBody, timeoutMs = 20000, classify = defaultClassify, label = 'provider', sent = true } = {}) {
   const init = { method, headers: { Accept: 'application/json', ...headers } };
   if (json !== undefined) {
     init.body = JSON.stringify(json);
@@ -48,6 +51,10 @@ async function providerRequest(url, { method = 'GET', headers = {}, json, form, 
   } else if (form !== undefined) {
     init.body = new URLSearchParams(form).toString();
     init.headers['Content-Type'] = 'application/x-www-form-urlencoded';
+  } else if (multipart !== undefined) {
+    init.body = multipart;
+  } else if (rawBody !== undefined) {
+    init.body = rawBody;
   }
 
   const controller = new AbortController();
@@ -65,7 +72,7 @@ async function providerRequest(url, { method = 'GET', headers = {}, json, form, 
       code: isTimeout ? 'TIMEOUT' : 'NETWORK',
       retryable: true,
       // A non-GET request that may have reached the provider has an unknown outcome.
-      outcomeUnknown: method !== 'GET' && !notSent
+      outcomeUnknown: sent && method !== 'GET' && !notSent
     });
   }
   clearTimeout(timer);

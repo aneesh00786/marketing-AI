@@ -367,7 +367,7 @@
         <button class="btn btn-secondary btn-sm" (click)="goToday()">Today</button>
       </div>
       <div class="button-row">
-        <button *ngFor="let v of ['month','week','list']" class="chip" [class.active]="calendarView === v" (click)="calendarView = $any(v); loadCalendar()">{{ v }}</button>
+        <button *ngFor="let v of ['month','week','day','list']" class="chip" [class.active]="calendarView === v" (click)="calendarView = $any(v); loadCalendar()">{{ v }}</button>
       </div>
     </div>
     <div class="filter-row">
@@ -378,18 +378,28 @@
     </div>
     <div class="legend small">
       <span class="status-pill st-scheduled">scheduled</span> <span class="status-pill st-published">published</span>
-      <span class="status-pill st-failed">failed</span> <span class="status-pill suggestion">suggested time (not scheduled)</span>
-      <span class="muted">Times shown in {{ settings.timezone }}.</span>
+      <span class="status-pill st-failed">failed</span> <span class="status-pill job-needs_review">check platform</span> <span class="status-pill suggestion">suggested time (not scheduled)</span>
+      <span class="muted">Times shown in {{ settings.timezone }}. Drag a scheduled or approved post to another day to reschedule it.</span>
     </div>
 
-    <div *ngIf="calendarView !== 'list'" class="calendar" [class.week]="calendarView === 'week'">
+    <div *ngIf="calendarView === 'month' || calendarView === 'week'" class="calendar" [class.week]="calendarView === 'week'">
       <div *ngFor="let d of ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']" class="cal-head">{{ d }}</div>
-      <div *ngFor="let day of calendarDays()" class="cal-cell" [class.other]="isOtherMonth(day)" [class.today]="isToday(day)">
-        <div class="cal-date">{{ day.getDate() }}</div>
-        <div *ngFor="let i of itemsOn(day)" class="cal-item" [ngClass]="i.isSuggestion ? 'suggestion' : statusClass(i.status)" (click)="section = 'library'; openEditor(i)" [title]="(i.title || i.caption) + ' · ' + i.status">
+      <div *ngFor="let day of calendarDays()" class="cal-cell" [class.other]="isOtherMonth(day)" [class.today]="isToday(day)" [class.drop]="dragItem" (dragover)="onDragOver($event)" (drop)="onDrop($event, day)">
+        <button type="button" class="cal-date" (click)="openDay(day)" [attr.aria-label]="'Open ' + day.toDateString()">{{ day.getDate() }}</button>
+        <div *ngFor="let i of itemsOn(day)" class="cal-item" [ngClass]="calendarClass(i)" [attr.draggable]="canDrag(i)" (dragstart)="onDragStart($event, i)" (dragend)="dragItem = null" (click)="section = 'library'; openEditor(i)" [title]="(i.title || i.caption) + ' · ' + (i.needsReview ? 'check platform' : i.status)">
           {{ platformIcon(i.platformKey) }} {{ fmt(i.calendarAt).split(', ').pop() }} {{ i.title || (i.caption | slice:0:24) }}
         </div>
       </div>
+    </div>
+
+    <div *ngIf="calendarView === 'day'" class="day-view">
+      <div *ngFor="let i of dayItems()" class="day-item clickable" [ngClass]="calendarClass(i)" (click)="section = 'library'; openEditor(i)">
+        <span class="nowrap">{{ fmt(i.calendarAt).split(', ').pop() }}</span>
+        <span>{{ platformIcon(i.platformKey) }} {{ i.accountName || platformLabel(i.platformKey) }}</span>
+        <span class="grow">{{ i.title || (i.caption | slice:0:80) }}</span>
+        <span class="status-pill" [ngClass]="i.needsReview ? 'job-needs_review' : statusClass(i.status)">{{ i.needsReview ? 'check platform' : (i.isSuggestion ? i.status + ' (suggested time)' : i.status) }}</span>
+      </div>
+      <div *ngIf="!dayItems().length" class="empty-box">Nothing on this day.</div>
     </div>
 
     <div *ngIf="calendarView === 'list'" class="table-container">
@@ -401,7 +411,7 @@
             <td>{{ platformIcon(i.platformKey) }} {{ platformLabel(i.platformKey) }}</td>
             <td>{{ i.accountName || '—' }}</td>
             <td>{{ i.title || (i.caption | slice:0:60) }}</td>
-            <td><span class="status-pill" [ngClass]="statusClass(i.status)">{{ i.status }}</span></td>
+            <td><span class="status-pill" [ngClass]="i.needsReview ? 'job-needs_review' : statusClass(i.status)">{{ i.needsReview ? 'check platform' : i.status }}</span></td>
           </tr>
           <tr *ngIf="!calendarItems.length"><td colspan="5" class="empty-state">Nothing in this period.</td></tr>
         </tbody>
@@ -422,7 +432,7 @@
       <div class="button-row">
         <button class="chip" [class.active]="libraryView === 'grid'" (click)="libraryView = 'grid'">grid</button>
         <button class="chip" [class.active]="libraryView === 'list'" (click)="libraryView = 'list'">list</button>
-        <button class="btn btn-primary btn-sm" (click)="newContent()">＋ New post</button>
+        <button class="btn btn-primary btn-sm" (click)="newContent()">＋ Create post</button>
       </div>
     </div>
 
@@ -434,6 +444,7 @@
         </div>
         <strong>{{ c.title || 'Untitled' }}</strong>
         <p class="caption-clip">{{ c.caption }}</p>
+        <div class="small muted" *ngIf="c.mediaAssetIds?.length">📎 {{ c.mediaAssetIds.length }} media file(s)</div>
         <div class="small muted">{{ c.hashtags.join(' ') }}</div>
         <div class="small warn-text" *ngIf="c.lastError">{{ c.lastError }}</div>
         <div class="small muted">v{{ c.version }} · updated {{ fmt(c.updatedAt || c.createdAt) }}</div>
@@ -458,15 +469,21 @@
     </div>
   </div>
 
+  <!-- ===================== MEDIA LIBRARY ===================== -->
+  <div *ngIf="section === 'media'" class="section">
+    <div class="muted small">Upload images and videos once and reuse them in any post. Every file is checked by its content; each platform's size, format, dimension and duration rules are checked when you attach it to a post for that platform.</div>
+    <app-media-library mode="manage" (toast)="notify($event)"></app-media-library>
+  </div>
+
   <!-- ===================== PUBLISHING QUEUE ===================== -->
   <div *ngIf="section === 'queue'" class="section">
     <div class="toolbar">
       <div class="button-row">
-        <button *ngFor="let s of [['all','All'],['queued','Queued'],['running','Publishing'],['failed,needs_review','Needs attention'],['succeeded','Published'],['cancelled','Cancelled']]" class="chip" [class.active]="queueStatus === s[0]" (click)="queueStatus = s[0]; loadQueue()">{{ s[1] }}</button>
+        <button *ngFor="let s of [['all','All'],['queued','Queued'],['running','Publishing'],['processing','Processing'],['failed,needs_review','Needs attention'],['succeeded','Published'],['cancelled','Cancelled']]" class="chip" [class.active]="queueStatus === s[0]" (click)="queueStatus = s[0]; loadQueue()">{{ s[1] }}</button>
       </div>
       <button class="btn btn-secondary btn-sm" (click)="loadQueue()">Refresh</button>
     </div>
-    <div class="muted small">The worker publishes due jobs. "Check platform" means the request may have reached the provider; confirm on the platform before retrying so nothing is posted twice.</div>
+    <div class="muted small">The worker publishes due jobs. "Processing on platform" means the platform accepted the upload but has not finished processing it; it is marked published only when the platform reports it live. "Check platform" means the request may have reached the provider; confirm on the platform before retrying so nothing is posted twice.</div>
     <div class="table-container">
       <table class="data-table">
         <thead><tr><th>Content</th><th>Account</th><th>Scheduled ({{ settings.timezone }})</th><th>Status</th><th>Attempts</th><th>Result</th><th></th></tr></thead>
@@ -475,12 +492,13 @@
             <td class="clickable" (click)="openContentById(j.contentItemId)">{{ platformIcon(j.platformKey) }} {{ j.contentTitle || 'Untitled' }}</td>
             <td>{{ j.accountName }}</td>
             <td class="small">{{ fmt(j.scheduledFor) }}<div class="muted" *ngIf="j.scheduleTimezone !== settings.timezone">({{ j.scheduleTimezone }})</div></td>
-            <td><span class="status-pill" [ngClass]="'job-' + j.status">{{ j.status === 'needs_review' ? 'check platform' : j.status }}</span></td>
+            <td><span class="status-pill" [ngClass]="'job-' + j.status">{{ j.status === 'needs_review' ? 'check platform' : (j.status === 'processing' ? 'processing on platform' : j.status) }}</span></td>
             <td>{{ j.attemptCount }} / {{ j.maxAttempts }}</td>
             <td class="small">
               <a *ngIf="j.externalUrl" [href]="j.externalUrl" target="_blank" rel="noopener">View post ↗</a>
               <span *ngIf="j.lastError" class="warn-text">{{ j.lastErrorCode }}: {{ j.lastError }}</span>
               <span *ngIf="j.status === 'queued' && j.attemptCount > 0" class="muted"> next try {{ fmt(j.nextAttemptAt) }}</span>
+              <div *ngIf="j.note" class="muted">ℹ {{ j.note }}</div>
             </td>
             <td class="nowrap">
               <button *ngIf="['failed','needs_review'].includes(j.status)" class="btn btn-secondary btn-sm" (click)="retryJob(j)">Retry</button>
@@ -504,18 +522,32 @@
         <select class="hud-input" [(ngModel)]="analyticsFilters.campaignId"><option value="">All campaigns</option><option *ngFor="let c of campaigns" [value]="c.id">{{ c.name }}</option></select>
         <button class="btn btn-primary btn-sm" (click)="loadAnalytics()">Apply</button>
       </div>
-      <button class="btn btn-secondary btn-sm" (click)="syncAnalytics()">Sync from platforms</button>
+      <div class="button-row">
+        <button class="btn btn-secondary btn-sm" (click)="exportAnalytics()">⬇ Export CSV</button>
+        <button class="btn btn-secondary btn-sm" (click)="syncAnalytics()">Sync from platforms</button>
+      </div>
     </div>
-    <div class="muted small">All figures come from platform APIs with their collection time. <strong>Unavailable</strong> = the platform did not report it; <strong>Not collected</strong> = no sync has run for that post yet. Neither is shown as zero.</div>
+    <div class="muted small">All figures come from platform APIs with their collection time. <strong>Unavailable</strong> = the platform did not report it; <strong>Not collected</strong> = no sync has run for that post yet. Neither is shown as zero. Platforms update metrics with a delay (often hours, sometimes up to two days), and the worker collects them every {{ settings.analyticsPollMinutes || 360 }} minutes — these are not real-time figures. The CSV leaves unavailable metrics blank and names them.</div>
 
     <ng-container *ngIf="analytics">
       <div class="stat-grid">
         <div class="stat-card"><div class="stat-label">Published posts (confirmed)</div><div class="stat-value">{{ analytics.publishedCount }}</div></div>
         <div *ngFor="let k of metricKeys" class="stat-card" [title]="metricCoverage(analytics.totals[k])">
           <div class="stat-label">{{ metricLabels[k] }}</div>
-          <div class="stat-value" [class.na]="analytics.totals[k].value === null">{{ metricValue(analytics.totals[k]) }}</div>
-          <div class="stat-sub">{{ metricCoverage(analytics.totals[k]) }}</div>
+          <div class="stat-value" [class.na]="analytics.totals[k].value === null">{{ metricDisplay(k, analytics.totals[k]) }}</div>
+          <div class="stat-sub">{{ metricCoverage(analytics.totals[k]) }}{{ k === 'avg_watch_time' ? ' · average per video' : '' }}</div>
         </div>
+      </div>
+
+      <div class="card" *ngIf="analytics.trend?.length">
+        <h3>ENGAGEMENT BY PUBLISH DAY ({{ analytics.timezone }})</h3>
+        <div class="trend" role="img" [attr.aria-label]="'Engagement per publish day for ' + analytics.trend.length + ' days'">
+          <div *ngFor="let t of analytics.trend" class="trend-col" [title]="t.date + ': ' + t.posts + ' post(s), ' + (t.engagements === null ? 'engagement unavailable' : t.engagements + ' engagements (reported for ' + t.postsWithEngagement + ' of ' + t.posts + ' posts)')">
+            <div class="trend-bar" [class.na-bar]="t.engagements === null" [style.height.%]="t.engagements === null ? 4 : (t.engagements / trendMax()) * 100"></div>
+            <div class="trend-label">{{ t.date.slice(5) }}</div>
+          </div>
+        </div>
+        <div class="small muted">Engagement = likes + comments + shares + saves, counting only what each platform reported. Grey bars: no engagement data for that day's posts.</div>
       </div>
 
       <div class="two-col">
@@ -566,7 +598,7 @@
             <tr *ngFor="let p of analytics.posts">
               <td>{{ platformIcon(p.platformKey) }} <a *ngIf="p.externalUrl" [href]="p.externalUrl" target="_blank" rel="noopener">{{ p.title || 'Post' }}</a><span *ngIf="!p.externalUrl">{{ p.title || 'Post' }}</span></td>
               <td class="small">{{ fmt(p.publishedAt, false) }}</td>
-              <td *ngFor="let k of metricKeys" [class.na]="p.metrics[k].value === null" [title]="p.metrics[k].reason || (p.metrics[k].collectedAt ? 'Collected ' + fmt(p.metrics[k].collectedAt) + ' via ' + p.metrics[k].source : '')">{{ metricValue(p.metrics[k]) }}</td>
+              <td *ngFor="let k of metricKeys" [class.na]="p.metrics[k].value === null" [title]="p.metrics[k].reason || (p.metrics[k].collectedAt ? 'Collected ' + fmt(p.metrics[k].collectedAt) + ' via ' + p.metrics[k].source : '')">{{ metricDisplay(k, p.metrics[k]) }}</td>
             </tr>
             <tr *ngIf="!analytics.posts.length"><td [attr.colspan]="metricKeys.length + 2" class="empty-state">No provider-confirmed posts in this range.</td></tr>
           </table>
@@ -730,7 +762,7 @@
           <div class="form-grid">
             <label>Platform<select class="hud-input" [(ngModel)]="editorDraft.platformKey" [disabled]="!canEdit(editor)"><option *ngFor="let p of platforms" [value]="p.key">{{ p.icon }} {{ p.label }}</option></select></label>
             <label>Account<select class="hud-input" [(ngModel)]="editorDraft.socialAccountId" [disabled]="!canEdit(editor)"><option [ngValue]="null">— choose later —</option><option *ngFor="let a of accountsFor(editorDraft.platformKey)" [ngValue]="a.id">{{ a.displayName }}</option></select></label>
-            <label class="span-2">Title (internal)<input class="hud-input" [(ngModel)]="editorDraft.title" [disabled]="!canEdit(editor)" /></label>
+            <label class="span-2">Title <span class="muted">(internal; also the video title on YouTube, LinkedIn and Facebook)</span><input class="hud-input" [(ngModel)]="editorDraft.title" [disabled]="!canEdit(editor)" /></label>
             <label class="span-2">Caption
               <textarea class="hud-textarea" rows="6" [(ngModel)]="editorDraft.caption" [disabled]="!canEdit(editor)"></textarea>
               <span class="small" [class.warn-text]="captionLimit() && previewText().length > captionLimit()!">{{ previewText().length }}{{ captionLimit() ? ' / ' + captionLimit() : '' }} characters</span>
@@ -745,18 +777,26 @@
           </div>
 
           <div class="field-block">
-            <div class="small">Media ({{ editorDraft.mediaAssetIds.length }} attached)</div>
-            <div class="asset-row">
-              <div *ngFor="let a of assets" class="asset" [class.on]="editorDraft.mediaAssetIds.includes(a.id)" (click)="canEdit(editor) && toggleAsset(a.id)" [title]="a.url">
-                <img *ngIf="a.assetType === 'image'" [src]="a.url" alt="" referrerpolicy="no-referrer" />
-                <span *ngIf="a.assetType === 'video'">🎬</span>
+            <div class="small">Media ({{ editorDraft.mediaAssetIds.length }} attached{{ canEdit(editor) ? ' — select in the order they should appear; save to apply' : '' }})</div>
+            <app-media-library mode="pick" [canEdit]="canEdit(editor)" [selected]="editorDraft.mediaAssetIds" (selectedChange)="editorDraft.mediaAssetIds = $event" (assetsLoaded)="mergeAssets($event)" (toast)="notify($event)"></app-media-library>
+            <details class="small" *ngIf="canEdit(editor)">
+              <summary>Link media by public URL instead (not verified)</summary>
+              <div class="quick-row">
+                <select class="hud-input small-select" [(ngModel)]="newAssetType"><option value="image">Image</option><option value="video">Video</option></select>
+                <input class="hud-input" [(ngModel)]="newAssetUrl" placeholder="Public HTTPS media URL" />
+                <button class="btn btn-secondary btn-sm" (click)="addAsset()">Add</button>
               </div>
-            </div>
-            <div class="quick-row" *ngIf="canEdit(editor)">
-              <select class="hud-input small-select" [(ngModel)]="newAssetType"><option value="image">Image</option><option value="video">Video</option></select>
-              <input class="hud-input" [(ngModel)]="newAssetUrl" placeholder="Public HTTPS media URL" />
-              <button class="btn btn-secondary btn-sm" (click)="addAsset()">Add</button>
-            </div>
+              <div class="muted">Linked files cannot be checked for size or dimensions, and LinkedIn, YouTube and Facebook videos need an uploaded file.</div>
+            </details>
+          </div>
+
+          <div class="card inset" *ngIf="editorDraft.platformKey === 'youtube'">
+            <h3>YOUTUBE OPTIONS</h3>
+            <label class="inline">Privacy
+              <select class="hud-input small-select" [(ngModel)]="editorDraft.youtube.privacyStatus" [disabled]="!canEdit(editor)"><option value="public">Public</option><option value="unlisted">Unlisted</option><option value="private">Private</option></select>
+            </label>
+            <label class="check"><input type="checkbox" [(ngModel)]="editorDraft.youtube.madeForKids" [disabled]="!canEdit(editor)" /> Made for kids (required declaration)</label>
+            <div class="small muted">Until Google audits your API project, YouTube keeps API uploads private regardless of this setting.</div>
           </div>
 
           <div class="button-row" *ngIf="canEdit(editor)">
@@ -778,13 +818,24 @@
         <div class="drawer-side">
           <div class="preview" [ngClass]="'pv-' + editorDraft.platformKey">
             <div class="small muted">{{ platformIcon(editorDraft.platformKey) }} {{ platformLabel(editorDraft.platformKey) }} preview</div>
-            <img *ngIf="editorDraft.mediaAssetIds.length && assetById(editorDraft.mediaAssetIds[0])?.assetType === 'image'" [src]="assetById(editorDraft.mediaAssetIds[0])?.url" alt="" class="preview-img" referrerpolicy="no-referrer" />
+            <img *ngIf="editorDraft.mediaAssetIds.length && mediaSrc(assetById(editorDraft.mediaAssetIds[0]))" [src]="mediaSrc(assetById(editorDraft.mediaAssetIds[0]))" alt="" class="preview-img" referrerpolicy="no-referrer" />
+            <div class="small muted" *ngIf="editorDraft.mediaAssetIds.length > 1">+ {{ editorDraft.mediaAssetIds.length - 1 }} more {{ editorDraft.platformKey === 'instagram' ? '(carousel)' : '' }}</div>
             <div class="preview-text">{{ previewText() || 'Your post text appears here.' }}</div>
             <div class="small link-preview" *ngIf="editorDraft.linkUrl">🔗 {{ editorDraft.linkUrl }}</div>
             <button *ngIf="editorDraft.platformKey === 'x'" class="btn btn-secondary btn-sm" (click)="copyForManualPosting()">Copy for manual posting</button>
           </div>
 
           <ng-container *ngIf="editor.id">
+            <div class="card inset" *ngIf="editorDetail?.validation as v">
+              <h3>PLATFORM CHECKS</h3>
+              <div class="small ok-text" *ngIf="!v.problems.length">✓ Meets the platform's publishing requirements (saved version)</div>
+              <div class="small problem-text" *ngFor="let p of v.problems">✖ {{ p }}</div>
+              <div class="small warn-text" *ngFor="let w of v.warnings">⚠ {{ w }}</div>
+            </div>
+            <div class="card inset" *ngIf="editorDetail?.siblings?.length">
+              <h3>SAME POST ON OTHER ACCOUNTS</h3>
+              <button type="button" class="link-btn sibling" *ngFor="let sb of editorDetail.siblings" (click)="openEditor({ id: sb.id })">{{ platformIcon(sb.platformKey) }} {{ sb.accountName || platformLabel(sb.platformKey) }} · {{ sb.status }}</button>
+            </div>
             <div class="card inset">
               <h3>APPROVAL</h3>
               <ng-container *ngIf="['draft','rejected','failed'].includes(editor.status)">
@@ -836,4 +887,6 @@
       </div>
     </aside>
   </div>
+
+  <app-post-composer *ngIf="showComposer" [accounts]="accounts" [products]="products" [campaigns]="campaigns" (created)="onComposed($event)" (closed)="showComposer = false" (toast)="notify($event)"></app-post-composer>
 </section>

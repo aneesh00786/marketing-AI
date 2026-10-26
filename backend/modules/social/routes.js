@@ -21,6 +21,10 @@ const dashboardService = require('./dashboardService');
 const jobsService = require('./jobsService');
 const meta = require('./providers/meta');
 const providerAppService = require('./providerAppService');
+const mediaStore = require('./mediaStore');
+const mediaLibrary = require('./mediaLibraryService');
+const postTemplates = require('./postTemplateService');
+const aiAssist = require('./aiAssistService');
 
 const router = express.Router();
 
@@ -94,6 +98,11 @@ router.post('/webhooks/meta', wrap(async (req, res) => {
   await run('UPDATE provider_webhook_events SET processed_at = UTC_TIMESTAMP() WHERE provider_key = ? AND event_key = ?', ['meta', eventKey]);
   res.status(200).json({ success: true });
 }));
+
+// Uploaded media, fetched by platforms (Instagram downloads by URL) and shown in the app.
+// Opaque 256-bit ids; only verified image/video types are served, never executed.
+router.get('/media-files/:publicId', wrap(async (req, res) => mediaStore.serve(req, res, req.params.publicId)));
+router.head('/media-files/:publicId', wrap(async (req, res) => mediaStore.serve(req, res, req.params.publicId)));
 
 // ---------------- Authenticated routes ----------------
 router.use((req, res, next) => {
@@ -253,10 +262,11 @@ const contentFields = {
   hashtags: z.union([z.array(z.string().max(100)).max(60), z.string().max(3000)]).optional(),
   callToAction: z.string().max(255).optional().nullable(),
   linkUrl: z.string().max(500).optional().nullable(),
-  mediaAssetIds: z.array(z.number().int().positive()).max(10).optional(),
+  mediaAssetIds: z.array(z.number().int().positive()).max(20).optional(),
   imagePrompt: z.string().max(2000).optional().nullable(),
   videoScript: z.string().max(10000).optional().nullable(),
   assignedApproverId: z.number().int().positive().optional().nullable(),
+  platformOptions: z.object({ youtube: z.object({ privacyStatus: z.string().max(20).optional(), madeForKids: z.boolean().optional() }).optional() }).optional().nullable(),
   changeNote: z.string().max(255).optional()
 };
 
@@ -336,6 +346,112 @@ router.post('/assets', requireCapability('content.create'), body(z.object({
   res.json({ success: true, asset: await contentService.registerAssetUrl(req, req.valid) });
 }));
 
+// ---- Media library (uploads) ----
+const uploadName = req => String(req.query.filename || '').slice(0, 255);
+
+router.get('/media', wrap(async (req, res) => {
+  res.json({ success: true, ...(await mediaLibrary.list(ws(req), req.query)) });
+}));
+
+router.post('/media/upload', requireCapability('content.create'), wrap(async (req, res) => {
+  const thumbnailFor = req.query.thumbnailFor ? idParam({ params: { id: req.query.thumbnailFor } }) : null;
+  const received = await mediaStore.receiveUpload(req, ws(req));
+  const id = await mediaStore.commitUpload(req, received, { originalName: uploadName(req), title: req.query.title, thumbnailFor });
+  res.json({ success: true, ...(await mediaLibrary.detail(ws(req), id)) });
+}));
+
+router.get('/media/:id', wrap(async (req, res) => {
+  res.json({ success: true, ...(await mediaLibrary.detail(ws(req), idParam(req))) });
+}));
+
+router.patch('/media/:id', requireCapability('content.create'), body(z.object({
+  title: z.string().max(255).optional(),
+  altText: z.string().max(1000).optional()
+})), wrap(async (req, res) => {
+  res.json({ success: true, ...(await mediaLibrary.update(req, idParam(req), req.valid)) });
+}));
+
+router.post('/media/:id/replace', requireCapability('content.create'), wrap(async (req, res) => {
+  const id = idParam(req);
+  const received = await mediaStore.receiveUpload(req, ws(req));
+  res.json({ success: true, ...(await mediaLibrary.replace(req, id, received, { originalName: uploadName(req) })) });
+}));
+
+router.delete('/media/:id', requireCapability('content.create'), wrap(async (req, res) => {
+  res.json({ success: true, ...(await mediaLibrary.remove(req, idParam(req))) });
+}));
+
+// ---- Multi-account composer, validation, templates, AI help ----
+const composeFields = {
+  title: z.string().max(255).optional().nullable(),
+  caption: z.string().max(10000).optional(),
+  hashtags: z.union([z.array(z.string().max(100)).max(60), z.string().max(3000)]).optional(),
+  callToAction: z.string().max(255).optional().nullable(),
+  linkUrl: z.string().max(500).optional().nullable(),
+  mediaAssetIds: z.array(z.number().int().positive()).max(20).optional(),
+  platformOptions: z.object({ youtube: z.object({ privacyStatus: z.string().max(20).optional(), madeForKids: z.boolean().optional() }).optional() }).optional().nullable()
+};
+const composeBody = z.object({
+  campaignId: z.number().int().positive().optional().nullable(),
+  base: z.object(composeFields).default({}),
+  targets: z.array(z.object({
+    accountId: z.number().int().positive().optional().nullable(),
+    platformKey: z.enum(contentService.PLATFORM_KEYS).optional().nullable(),
+    ...composeFields
+  })).min(1).max(20)
+});
+
+router.post('/content/validate', body(composeBody), wrap(async (req, res) => {
+  res.json({ success: true, results: await contentService.validateTargets(ws(req), req.valid) });
+}));
+
+router.post('/content/compose', requireCapability('content.create'), body(composeBody), wrap(async (req, res) => {
+  res.json({ success: true, ...(await contentService.compose(req, req.valid)) });
+}));
+
+router.get('/templates', wrap(async (req, res) => {
+  res.json({ success: true, templates: await postTemplates.list(ws(req)) });
+}));
+
+const templateFields = {
+  name: z.string().min(1).max(150),
+  caption: z.string().max(10000).optional().nullable(),
+  hashtags: z.union([z.array(z.string().max(100)).max(60), z.string().max(3000)]).optional(),
+  callToAction: z.string().max(255).optional().nullable(),
+  linkUrl: z.string().max(500).optional().nullable()
+};
+router.post('/templates', requireCapability('content.create'), body(z.object(templateFields)), wrap(async (req, res) => {
+  res.json({ success: true, template: await postTemplates.create(req, req.valid) });
+}));
+router.patch('/templates/:id', requireCapability('content.create'), body(z.object(templateFields).partial()), wrap(async (req, res) => {
+  res.json({ success: true, template: await postTemplates.update(req, idParam(req), req.valid) });
+}));
+router.delete('/templates/:id', requireCapability('content.create'), wrap(async (req, res) => {
+  res.json({ success: true, ...(await postTemplates.remove(req, idParam(req))) });
+}));
+
+router.post('/ai/assist', requireCapability('content.create'), aiLimiter, body(z.object({
+  mode: z.enum(['caption', 'rewrite', 'repurpose', 'hashtags', 'cta', 'alt_text']),
+  text: z.string().max(10000).optional(),
+  instruction: z.string().max(1000).optional(),
+  productId: z.number().int().positive().optional().nullable(),
+  platforms: z.array(z.enum(contentService.PLATFORM_KEYS)).max(5).optional(),
+  platform: z.enum(contentService.PLATFORM_KEYS).optional().nullable(),
+  sourcePlatform: z.enum(contentService.PLATFORM_KEYS).optional().nullable(),
+  tone: z.string().max(60).optional(),
+  length: z.enum(['shorter', 'same', 'longer', 'short', 'medium', 'long']).optional(),
+  count: z.number().int().min(1).max(30).optional(),
+  assetId: z.number().int().positive().optional(),
+  contentId: z.number().int().positive().optional()
+})), wrap(async (req, res) => {
+  try {
+    res.json({ success: true, ...(await aiAssist.assist(req, req.valid)) });
+  } catch (err) {
+    if (['AI_UNAVAILABLE', 'AI_INVALID_OUTPUT', 'QUOTA_EXCEEDED'].includes(err.code)) return res.status(err.status || 503).json({ success: false, error: err.message, code: err.code });
+    throw err;
+  }
+}));
+
 // ---- Calendar & queue ----
 router.get('/calendar', wrap(async (req, res) => {
   const from = req.query.from ? new Date(req.query.from) : new Date(Date.now() - 7 * 86400000);
@@ -352,7 +468,9 @@ router.get('/calendar', wrap(async (req, res) => {
   }
   if (req.query.status) { where.push('c.status = ?'); params.push(req.query.status); }
   const rows = await all(
-    `SELECT c.*, a.display_name AS account_name FROM content_items c
+    `SELECT c.*, a.display_name AS account_name,
+       (SELECT j.status FROM publishing_jobs j WHERE j.workspace_id = c.workspace_id AND j.content_item_id = c.id ORDER BY j.id DESC LIMIT 1) AS job_status
+     FROM content_items c
      LEFT JOIN social_accounts a ON a.workspace_id = c.workspace_id AND a.id = c.social_account_id
      WHERE ${where.join(' AND ')} ORDER BY COALESCE(c.scheduled_at, c.published_at, c.suggested_publish_at) ASC LIMIT 500`,
     params
@@ -361,7 +479,7 @@ router.get('/calendar', wrap(async (req, res) => {
   res.json({
     success: true,
     timezone: settings.timezone,
-    items: rows.map(r => ({ ...contentService.present(r), accountName: r.account_name, calendarAt: r.status === 'published' ? r.published_at : (r.scheduled_at || r.suggested_publish_at || r.updated_at), isSuggestion: ['draft', 'review', 'approved'].includes(r.status) }))
+    items: rows.map(r => ({ ...contentService.present(r), accountName: r.account_name, jobStatus: r.job_status || null, needsReview: r.job_status === 'needs_review', calendarAt: r.status === 'published' ? r.published_at : (r.scheduled_at || r.suggested_publish_at || r.updated_at), isSuggestion: ['draft', 'review', 'approved'].includes(r.status) }))
   });
 }));
 
@@ -379,7 +497,16 @@ router.post('/queue/:id/cancel', requireCapability('content.publish'), wrap(asyn
 
 // ---- Analytics & Mark strategist ----
 router.get('/analytics/summary', requireCapability('analytics.view'), wrap(async (req, res) => {
-  res.json({ success: true, analytics: await analyticsService.getSummary(ws(req), req.query) });
+  const settings = await settingsService.getSettings(ws(req));
+  res.json({ success: true, analytics: await analyticsService.getSummary(ws(req), { ...req.query, timezone: settings.timezone }) });
+}));
+
+router.get('/analytics/export', requireCapability('analytics.view'), wrap(async (req, res) => {
+  const settings = await settingsService.getSettings(ws(req));
+  const summary = await analyticsService.getSummary(ws(req), { ...req.query, timezone: settings.timezone });
+  await audit(req, 'social.analytics.exported', { resourceType: 'analytics', metadata: { from: summary.range.from, to: summary.range.to, posts: summary.posts.length } });
+  res.set({ 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="social-analytics-${summary.range.from.slice(0, 10)}-to-${summary.range.to.slice(0, 10)}.csv"` });
+  res.send(analyticsService.toCsv(summary));
 }));
 
 router.post('/analytics/sync', requireCapability('analytics.view'), wrap(async (req, res) => {

@@ -1,8 +1,11 @@
 const { run, get, all, withTransaction } = require('../../db/database');
 const { audit } = require('../../lib/audit');
 const { safeFetchText, assertSafeUrl } = require('../../lib/safeFetch');
+const crypto = require('crypto');
 const { ACCOUNT_TYPES, MANUAL_PLATFORMS } = require('./capabilities');
 const settingsService = require('./settingsService');
+const platformRules = require('./platformRules');
+const mediaStore = require('./mediaStore');
 
 /**
  * Content workflow:
@@ -58,6 +61,8 @@ function present(row) {
     variantLabel: row.variant_label,
     assignedApproverId: row.assigned_approver_id,
     assumptions: parseJson(row.ai_assumptions_json, []),
+    postGroupId: row.post_group_id || null,
+    platformOptions: parseJson(row.platform_options_json, {}),
     source: row.source,
     createdBy: row.created_by,
     createdAt: row.created_at,
@@ -112,14 +117,34 @@ async function assertAccountInWorkspace(workspaceId, accountId) {
   return acct;
 }
 
-async function assertAssetsInWorkspace(workspaceId, assetIds) {
+/** Asset rows in attachment order. For new attachments (attaching=true) deleted files are refused. */
+async function assertAssetsInWorkspace(workspaceId, assetIds, { attaching = false } = {}) {
   if (!assetIds || assetIds.length === 0) return [];
+  if (new Set(assetIds).size !== assetIds.length) throw httpError(400, 'The same media file is attached twice.');
   const rows = await all(
     `SELECT * FROM assets WHERE workspace_id = ? AND id IN (${assetIds.map(() => '?').join(',')})`,
     [workspaceId, ...assetIds]
   );
-  if (rows.length !== new Set(assetIds).size) throw httpError(400, 'One or more media assets do not belong to this workspace.');
-  return rows;
+  if (rows.length !== assetIds.length) throw httpError(400, 'One or more media assets do not belong to this workspace.');
+  if (attaching && rows.some(r => r.status === 'deleted')) throw httpError(400, 'A selected media file was deleted from the library.');
+  const byId = new Map(rows.map(r => [Number(r.id), r]));
+  return assetIds.map(id => byId.get(Number(id)));
+}
+
+function normalizeOptions(options) {
+  if (options === undefined) return undefined;
+  if (options === null) return null;
+  const out = {};
+  const yt = options.youtube;
+  if (yt) {
+    out.youtube = {};
+    if (yt.privacyStatus !== undefined) {
+      if (!['public', 'unlisted', 'private'].includes(yt.privacyStatus)) throw httpError(400, 'YouTube privacy must be public, unlisted or private.');
+      out.youtube.privacyStatus = yt.privacyStatus;
+    }
+    if (yt.madeForKids !== undefined) out.youtube.madeForKids = yt.madeForKids === true;
+  }
+  return out;
 }
 
 async function assertCampaignInWorkspace(workspaceId, campaignId) {
@@ -144,21 +169,24 @@ async function createContent(ctx, input) {
   if (input.platformKey && !PLATFORM_KEYS.includes(input.platformKey)) throw httpError(400, 'Unknown platform.');
   await assertCampaignInWorkspace(workspaceId, input.campaignId);
   const acct = await assertAccountInWorkspace(workspaceId, input.socialAccountId ?? null);
-  await assertAssetsInWorkspace(workspaceId, input.mediaAssetIds || []);
+  await assertAssetsInWorkspace(workspaceId, input.mediaAssetIds || [], { attaching: true });
   const platformKey = input.platformKey || (acct ? ACCOUNT_TYPES[acct.account_type]?.platformKey : null);
+  const options = normalizeOptions(input.platformOptions);
 
   const id = await withTransaction(async (tx) => {
     const ins = await tx.run(
       `INSERT INTO content_items (workspace_id, campaign_id, content_type, title, caption_text, hashtags, call_to_action,
          platform, platform_key, social_account_id, link_url, media_asset_ids_json, image_prompt, video_script,
-         status, version, variant_group, variant_label, suggested_publish_at, ai_assumptions_json, source, created_by, created_at, updated_at)
-       VALUES (?, ?, 'post', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+         status, version, variant_group, variant_label, suggested_publish_at, ai_assumptions_json, post_group_id, platform_options_json,
+         source, created_by, created_at, updated_at)
+       VALUES (?, ?, 'post', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
       [
         workspaceId, input.campaignId || null, input.title || null, input.caption || '', splitHashtags(input.hashtags).join(' '),
         input.callToAction || null, platformKey || 'All', platformKey, acct?.id || null, normalizeLink(input.linkUrl),
         JSON.stringify(input.mediaAssetIds || []), input.imagePrompt || null, input.videoScript || null,
         input.status === 'generating' ? 'generating' : 'draft', input.variantGroup || null, input.variantLabel || null,
         input.suggestedPublishAt || null, input.assumptions ? JSON.stringify(input.assumptions) : null,
+        input.postGroupId || null, options ? JSON.stringify(options) : null,
         input.source || 'manual', ctx.auth.userId || null
       ]
     );
@@ -181,7 +209,13 @@ async function updateContent(ctx, id, input) {
   if (input.platformKey && !PLATFORM_KEYS.includes(input.platformKey)) throw httpError(400, 'Unknown platform.');
   if (input.campaignId !== undefined) await assertCampaignInWorkspace(workspaceId, input.campaignId);
   if (input.socialAccountId !== undefined) await assertAccountInWorkspace(workspaceId, input.socialAccountId);
-  if (input.mediaAssetIds !== undefined) await assertAssetsInWorkspace(workspaceId, input.mediaAssetIds);
+  if (input.mediaAssetIds !== undefined) {
+    // Files already on this post may stay (even if since deleted, so they can be removed); new ones must be live.
+    const current = new Set(parseJson(row.media_asset_ids_json, []).map(Number));
+    const rows = await assertAssetsInWorkspace(workspaceId, input.mediaAssetIds);
+    if (rows.some(r => r.status === 'deleted' && !current.has(Number(r.id)))) throw httpError(400, 'A selected media file was deleted from the library.');
+  }
+  const options = normalizeOptions(input.platformOptions);
 
   const fields = {
     title: input.title,
@@ -196,7 +230,8 @@ async function updateContent(ctx, id, input) {
     image_prompt: input.imagePrompt,
     video_script: input.videoScript,
     campaign_id: input.campaignId,
-    assigned_approver_id: input.assignedApproverId
+    assigned_approver_id: input.assignedApproverId,
+    platform_options_json: options !== undefined ? (options ? JSON.stringify(options) : null) : undefined
   };
   const sets = Object.entries(fields).filter(([, v]) => v !== undefined);
   if (sets.length === 0) return present(row);
@@ -242,6 +277,7 @@ async function duplicateContent(ctx, id) {
     imagePrompt: p.imagePrompt,
     videoScript: p.videoScript,
     variantGroup: p.variantGroup,
+    platformOptions: p.platformOptions,
     source: 'duplicate'
   });
 }
@@ -310,15 +346,27 @@ async function decide(ctx, id, decision, note) {
   return present(await getRow(workspaceId, id));
 }
 
-/** True when the current version of the content holds an approval (or approval is not required). */
-async function hasValidApproval(workspaceId, row) {
+/**
+ * Why the current version may not be published for lack of approval, or null when it may.
+ * The approval must be for this exact version, and the person who approved it must still be
+ * an active member allowed to approve (a removed or downgraded approver's decision lapses).
+ */
+async function approvalProblem(workspaceId, row) {
   const settings = await settingsService.getSettings(workspaceId);
-  if (!settings.requireApproval) return true;
-  const ok = await get(
-    "SELECT id FROM approval_requests WHERE workspace_id = ? AND resource_type = 'content' AND resource_id = ? AND resource_version = ? AND status = 'approved' LIMIT 1",
+  if (!settings.requireApproval) return null;
+  const approvals = await all(
+    "SELECT decided_by FROM approval_requests WHERE workspace_id = ? AND resource_type = 'content' AND resource_id = ? AND resource_version = ? AND status = 'approved' ORDER BY id DESC",
     [workspaceId, row.id, row.version]
   );
-  return !!ok;
+  if (!approvals.length) return 'This version of the content has not been approved.';
+  for (const a of approvals) {
+    if (a.decided_by && (await isApprover(workspaceId, a.decided_by))) return null;
+  }
+  return 'The person who approved this version can no longer approve content in this workspace. Ask a current approver to approve it again.';
+}
+
+async function hasValidApproval(workspaceId, row) {
+  return !(await approvalProblem(workspaceId, row));
 }
 
 async function cancelContent(ctx, id) {
@@ -365,58 +413,92 @@ async function getContentDetail(workspaceId, id) {
   );
   const assetIds = parseJson(row.media_asset_ids_json, []);
   const assets = assetIds.length ? await assertAssetsInWorkspace(workspaceId, assetIds) : [];
-  return { content: present(row), versions, approvals, publishingJobs: jobs, assets: assets.map(presentAsset) };
+  const siblings = row.post_group_id
+    ? await all(
+      `SELECT c.id, c.platform_key, c.status, c.social_account_id, a.display_name AS account_name FROM content_items c
+       LEFT JOIN social_accounts a ON a.workspace_id = c.workspace_id AND a.id = c.social_account_id
+       WHERE c.workspace_id = ? AND c.post_group_id = ? AND c.id <> ? ORDER BY c.id`,
+      [workspaceId, row.post_group_id, id]
+    )
+    : [];
+  const validation = await validateRow(workspaceId, row, assets);
+  return {
+    content: present(row),
+    versions,
+    approvals,
+    publishingJobs: jobs,
+    assets: assets.map(presentAsset),
+    siblings: siblings.map(s => ({ id: s.id, platformKey: s.platform_key, status: s.status, socialAccountId: s.social_account_id, accountName: s.account_name })),
+    validation
+  };
+}
+
+/** Platform validation of a stored post against its account (or its platform when no account is chosen). */
+async function validateRow(workspaceId, row, assets) {
+  const content = present(row);
+  let accountType = null;
+  if (row.social_account_id) {
+    const acct = await get('SELECT account_type FROM social_accounts WHERE workspace_id = ? AND id = ?', [workspaceId, row.social_account_id]);
+    accountType = acct?.account_type || null;
+  }
+  if (!accountType) accountType = platformAccountType(row.platform_key);
+  if (!accountType) return { problems: ['Choose a platform or account.'], warnings: [] };
+  return platformRules.evaluate(accountType, content, assets, { publicFetchProblem: mediaStore.publicFetchProblem() });
+}
+
+/** The account type used to validate a post written for a platform before an account is chosen. */
+function platformAccountType(platformKey) {
+  if (!platformKey) return null;
+  if (MANUAL_PLATFORMS[platformKey]) return platformKey;
+  return Object.entries(ACCOUNT_TYPES).find(([, t]) => t.platformKey === platformKey)?.[0] || null;
 }
 
 /** Platform rules that must hold before scheduling/publishing. Returns a list of problems. */
 function validateForAccountType(content, accountType, assets) {
-  const problems = [];
-  const type = ACCOUNT_TYPES[accountType];
-  const limits = type?.limits || {};
-  const fullText = composeText(content);
-  if (limits.captionMax && fullText.length > limits.captionMax) {
-    problems.push(`Text is ${fullText.length} characters; ${type.label} allows ${limits.captionMax}.`);
-  }
-  if (limits.hashtagMax && content.hashtags.length > limits.hashtagMax) {
-    problems.push(`${type.label} allows at most ${limits.hashtagMax} hashtags.`);
-  }
-  if (limits.requiresMedia && !assets.some(a => a.asset_type === 'image' || a.asset_type === 'video')) {
-    problems.push(`${type.label} requires an image or video.`);
-  }
-  if (assets.filter(a => a.asset_type === 'image').length > 1) {
-    problems.push('Multi-image (carousel) posts are not supported yet; attach one image.');
-  }
-  if (assets.some(a => a.public_url && !a.public_url.startsWith('https://'))) {
-    problems.push('Media must be served over HTTPS so the platform can fetch it.');
-  }
-  if (!fullText.trim() && assets.length === 0) problems.push('The post has no text or media.');
-  return problems;
+  return platformRules.evaluate(accountType, content, assets, { publicFetchProblem: mediaStore.publicFetchProblem() }).problems;
 }
 
-function composeText(content) {
-  const parts = [content.caption || ''];
-  if (content.callToAction && !String(content.caption || '').includes(content.callToAction)) parts.push(content.callToAction);
-  if (content.hashtags?.length) parts.push(content.hashtags.join(' '));
-  return parts.filter(Boolean).join('\n\n').trim();
-}
+const { composeText } = platformRules;
 
 // ---------- Assets ----------
+/**
+ * Asset for the API. Uploaded files have a public URL (used by platforms that fetch media) and a
+ * relative previewPath for the app; server paths are never exposed.
+ */
 function presentAsset(a) {
+  const uploaded = a.source === 'upload';
+  const meta = parseJson(a.metadata_json, {});
   return {
     id: a.id,
     assetType: a.asset_type,
     source: a.source,
-    url: a.public_url,
+    status: a.status || 'ready',
+    url: uploaded ? (a.status === 'deleted' ? null : mediaStore.publicUrlFor(a.public_id)) : a.public_url,
+    previewPath: uploaded && a.status !== 'deleted' ? `${mediaStore.PUBLIC_PATH}/${a.public_id}` : null,
     mimeType: a.mime_type,
-    sizeBytes: a.size_bytes,
+    format: meta.format || null,
+    sizeBytes: a.size_bytes === null || a.size_bytes === undefined ? null : Number(a.size_bytes),
+    width: a.width || null,
+    height: a.height || null,
+    durationSeconds: a.duration_seconds === null || a.duration_seconds === undefined ? null : Number(a.duration_seconds),
+    videoCodec: a.video_codec || null,
+    audioCodec: a.audio_codec || null,
+    hasAudio: meta.hasAudio ?? null,
+    frameRate: a.frame_rate === null || a.frame_rate === undefined ? null : Number(a.frame_rate),
+    thumbnailAssetId: a.thumbnail_asset_id || null,
+    role: meta.role || 'media',
+    altText: a.alt_text || '',
     title: a.title,
+    originalName: a.original_name || null,
+    verified: uploaded,
     prompt: a.prompt,
-    createdAt: a.created_at
+    createdAt: a.created_at,
+    updatedAt: a.updated_at || null
   };
 }
 
 async function listAssets(workspaceId) {
-  const rows = await all('SELECT * FROM assets WHERE workspace_id = ? ORDER BY id DESC LIMIT 200', [workspaceId]);
+  const rows = await all("SELECT * FROM assets WHERE workspace_id = ? AND status <> 'deleted' ORDER BY id DESC LIMIT 200", [workspaceId]);
   return rows.map(presentAsset);
 }
 
@@ -444,6 +526,94 @@ async function registerAssetUrl(ctx, { url, assetType, title }) {
   return presentAsset(await get('SELECT * FROM assets WHERE id = ?', [ins.lastID]));
 }
 
+// ---------- Multi-account composer ----------
+
+/** Merges shared fields with one target's overrides (a target value, even empty, wins). */
+function targetContent(base, t) {
+  const pick = (k) => (t[k] !== undefined ? t[k] : base[k]);
+  return {
+    title: pick('title'),
+    caption: pick('caption') || '',
+    hashtags: splitHashtags(pick('hashtags')),
+    callToAction: pick('callToAction'),
+    linkUrl: pick('linkUrl') || null,
+    mediaAssetIds: pick('mediaAssetIds') || [],
+    platformOptions: pick('platformOptions') || {}
+  };
+}
+
+async function resolveTarget(workspaceId, t) {
+  if (t.accountId) {
+    const acct = await get('SELECT id, account_type, status, display_name, external_account_id FROM social_accounts WHERE workspace_id = ? AND id = ?', [workspaceId, t.accountId]);
+    if (!acct) throw httpError(400, 'Selected social account does not belong to this workspace.');
+    return { accountId: acct.id, accountType: acct.account_type, platformKey: ACCOUNT_TYPES[acct.account_type]?.platformKey, account: acct };
+  }
+  if (t.platformKey && MANUAL_PLATFORMS[t.platformKey]) return { accountId: null, accountType: t.platformKey, platformKey: t.platformKey, account: null };
+  throw httpError(400, 'Each target needs a connected account (or a manual platform such as X).');
+}
+
+/** Validates every target of a composed post without saving anything. */
+async function validateTargets(workspaceId, { base = {}, targets = [] }) {
+  const results = [];
+  for (const t of targets) {
+    const target = await resolveTarget(workspaceId, t);
+    const content = targetContent(base, t);
+    const assets = await assertAssetsInWorkspace(workspaceId, content.mediaAssetIds);
+    const v = platformRules.evaluate(target.accountType, content, assets, { publicFetchProblem: mediaStore.publicFetchProblem() });
+    if (target.account && target.account.status !== 'connected') v.warnings.unshift(`${target.account.display_name} is ${target.account.status}; reconnect it before publishing.`);
+    results.push({ accountId: target.accountId, platformKey: target.platformKey, accountType: target.accountType, characters: platformRules.chars(composeText(content)), ...v });
+  }
+  return results;
+}
+
+/**
+ * Creates one draft per target (account or manual platform), linked by a shared post group so
+ * each platform version is approved, scheduled and tracked on its own. Validation problems do
+ * not stop a draft from being saved; they block scheduling until fixed.
+ */
+async function compose(ctx, { base = {}, targets = [], campaignId = null }) {
+  const workspaceId = ctx.auth.workspaceId;
+  if (!targets.length) throw httpError(400, 'Choose at least one account or platform.');
+  await assertCampaignInWorkspace(workspaceId, campaignId);
+  const seen = new Set();
+  for (const t of targets) {
+    const key = t.accountId ? `a${t.accountId}` : `p${t.platformKey}`;
+    if (seen.has(key)) throw httpError(400, 'The same account is selected twice.');
+    seen.add(key);
+  }
+  const resolved = [];
+  for (const t of targets) {
+    const target = await resolveTarget(workspaceId, t);
+    const content = targetContent(base, t);
+    await assertAssetsInWorkspace(workspaceId, content.mediaAssetIds, { attaching: true });
+    normalizeLink(content.linkUrl);
+    normalizeOptions(content.platformOptions);
+    resolved.push({ target, content });
+  }
+  const postGroupId = crypto.randomUUID();
+  const created = [];
+  for (const { target, content } of resolved) {
+    const item = await createContent(ctx, {
+      campaignId,
+      platformKey: target.platformKey,
+      socialAccountId: target.accountId,
+      title: content.title,
+      caption: content.caption,
+      hashtags: content.hashtags,
+      callToAction: content.callToAction,
+      linkUrl: content.linkUrl,
+      mediaAssetIds: content.mediaAssetIds,
+      platformOptions: content.platformOptions,
+      postGroupId,
+      source: 'composer'
+    });
+    created.push(item);
+  }
+  await audit(ctx, 'social.content.composed', { resourceType: 'post_group', resourceId: postGroupId, metadata: { contentIds: created.map(c => c.id), targets: resolved.map(r => r.target.accountId || r.target.platformKey) } });
+  const validation = await validateTargets(workspaceId, { base, targets });
+  return { postGroupId, items: created.map((c, i) => ({ content: c, validation: validation[i] })) };
+}
+
 module.exports = {
   STATUSES,
   PLATFORM_KEYS,
@@ -462,10 +632,15 @@ module.exports = {
   approve: (ctx, id, note) => decide(ctx, id, 'approved', note),
   reject: (ctx, id, note) => decide(ctx, id, 'rejected', note),
   hasValidApproval,
+  approvalProblem,
   cancelContent,
   deleteContent,
   getContentDetail,
   validateForAccountType,
+  validateRow,
+  validateTargets,
+  compose,
+  normalizeOptions,
   assertAssetsInWorkspace,
   listAssets,
   registerAssetUrl,

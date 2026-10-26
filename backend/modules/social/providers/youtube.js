@@ -1,16 +1,35 @@
 /**
  * YouTube Data API v3 adapter (Google OAuth 2.0 with PKCE).
  * Docs: https://developers.google.com/youtube/v3 , https://developers.google.com/identity/protocols/oauth2/web-server
- * This release supports channel statistics and comments; video upload is not implemented.
+ * Supports resumable video upload (videos.insert), per-video statistics, channel statistics
+ * and comments. Videos uploaded through an API project that Google has not audited are locked
+ * to private viewing by YouTube regardless of the requested privacy.
  */
 const { ProviderError, providerRequest } = require('./http');
+const { openBlob } = require('./media');
+
+const UPLOAD_TIMEOUT_MS = 60 * 60 * 1000;
 
 const API = 'https://www.googleapis.com/youtube/v3';
+
+/** Seconds until the next midnight Pacific Time, when the YouTube Data API daily quota resets. */
+function secondsUntilQuotaReset(now = new Date()) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hourCycle: 'h23', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    .formatToParts(now).filter(p => p.type !== 'literal').map(p => [p.type, parseInt(p.value, 10)]));
+  const elapsed = parts.hour * 3600 + parts.minute * 60 + parts.second;
+  return 24 * 3600 - elapsed + 120;
+}
 
 function classifyGoogle(status, body) {
   const e = body?.error || {};
   const reason = e.errors?.[0]?.reason || e.status || '';
   const msg = e.message ? `YouTube: ${e.message}` : `YouTube returned HTTP ${status}`;
+  if (/^(quotaExceeded|dailyLimitExceeded)$/.test(reason)) {
+    return { message: `${msg} The project's daily YouTube API quota is used up; it resets at midnight Pacific Time, and the upload will be retried after that.`, code: 'RATE_LIMITED', retryable: true, retryAfterSec: secondsUntilQuotaReset() };
+  }
+  if (reason === 'uploadLimitExceeded') {
+    return { message: `${msg} The channel reached YouTube's upload limit; the upload will be retried after the daily reset (midnight Pacific Time).`, code: 'RATE_LIMITED', retryable: true, retryAfterSec: secondsUntilQuotaReset() };
+  }
   if (status === 401) return { message: msg, code: 'AUTH_EXPIRED', retryable: false };
   if (status === 403 && /quota|rateLimit/i.test(reason)) return { message: msg, code: 'RATE_LIMITED', retryable: true, retryAfterSec: 3600 };
   if (status === 403) return { message: msg, code: 'PERMISSION_DENIED', retryable: false };
@@ -37,8 +56,15 @@ async function tokenRequest(form, app = envApp()) {
   return res.body;
 }
 
+/** YouTube may keep an upload private (API projects that Google has not audited); say so. */
+function privacyNote(requested, actual) {
+  if (!actual || actual === requested) return null;
+  return `YouTube set this video to ${actual} (you asked for ${requested}). Uploads from API projects that Google has not audited stay private until the project passes its audit.`;
+}
+
 const youtube = {
   key: 'youtube',
+  _secondsUntilQuotaReset: secondsUntilQuotaReset,
   usesPkce: true,
 
   buildAuthorizeUrl({ state, redirectUri, scopes, codeChallenge, app = envApp() }) {
@@ -105,12 +131,91 @@ const youtube = {
     });
   },
 
-  async publish() {
-    throw new ProviderError({ message: 'YouTube video publishing is not implemented in this release.', code: 'NOT_SUPPORTED' });
+  async publish(account, secret, { text, title, media = [], hashtags = [], options = {} }) {
+    const video = media.find(m => m.kind === 'video');
+    if (!video || !video.filePath) throw new ProviderError({ message: 'YouTube needs one uploaded video file.', code: 'INVALID_REQUEST' });
+    const yt = options.youtube || {};
+    const metadata = {
+      snippet: {
+        title: String(title || '').slice(0, 100),
+        description: text || '',
+        tags: hashtags.map(h => String(h).replace(/^#/, '')).filter(Boolean).slice(0, 30),
+        categoryId: '22'
+      },
+      status: {
+        privacyStatus: ['public', 'unlisted', 'private'].includes(yt.privacyStatus) ? yt.privacyStatus : 'public',
+        selfDeclaredMadeForKids: yt.madeForKids === true
+      }
+    };
+    // Starting a resumable session creates nothing on the channel.
+    const session = await providerRequest('https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status', {
+      method: 'POST',
+      json: metadata,
+      headers: {
+        Authorization: `Bearer ${secret.access_token}`,
+        'X-Upload-Content-Length': String(video.sizeBytes),
+        'X-Upload-Content-Type': video.mime || 'video/*'
+      },
+      classify: classifyGoogle,
+      label: 'YouTube',
+      sent: false
+    });
+    const location = session.headers.get('location');
+    let host = null;
+    try { host = new URL(location).hostname; } catch (e) { host = null; }
+    if (host !== 'www.googleapis.com') {
+      throw new ProviderError({ message: 'YouTube did not return a valid upload session.', code: 'PROVIDER_ERROR', retryable: true });
+    }
+    // Uploading the bytes creates the video, so a failure here has an unknown outcome.
+    const uploaded = await providerRequest(location, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${secret.access_token}`, 'Content-Type': video.mime || 'video/*' },
+      body: await openBlob(video),
+      classify: classifyGoogle,
+      label: 'YouTube upload',
+      timeoutMs: UPLOAD_TIMEOUT_MS
+    });
+    const id = uploaded.body?.id;
+    if (!id) throw new ProviderError({ message: 'YouTube accepted the upload but returned no video id.', code: 'PROVIDER_ERROR', outcomeUnknown: true });
+    const st = uploaded.body?.status || {};
+    const requested = metadata.status.privacyStatus;
+    const raw = { id, requestedPrivacy: requested, privacyStatus: st.privacyStatus || null, uploadStatus: st.uploadStatus || null };
+    const note = privacyNote(requested, st.privacyStatus);
+    const url = `https://www.youtube.com/watch?v=${encodeURIComponent(id)}`;
+    if (st.uploadStatus === 'failed' || st.uploadStatus === 'rejected') {
+      // Not live; the failed upload stays in YouTube Studio for the channel owner to delete.
+      throw new ProviderError({ message: `YouTube ${st.uploadStatus} the upload (${st.failureReason || st.rejectionReason || 'no reason given'}); video ${id} is not live. Delete it in YouTube Studio before retrying.`, code: 'INVALID_REQUEST' });
+    }
+    if (st.uploadStatus === 'processed') return { externalId: String(id), url, raw, note };
+    // "uploaded" (or not reported): YouTube is still processing the video.
+    return { externalId: String(id), url, raw, note: note || 'Uploaded to YouTube; waiting for YouTube to finish processing.', processing: true };
   },
 
-  async fetchPostMetrics() {
-    return [];
+  /** Follow-up check of an upload that YouTube was still processing. */
+  async checkProcessing(account, secret, externalId) {
+    const body = await api(`/videos?part=status,processingDetails&id=${encodeURIComponent(externalId)}`, secret.access_token);
+    const v = body.items?.[0];
+    if (!v) return { state: 'failed', reason: 'the video is no longer on the channel (deleted?)' };
+    const st = v.status || {};
+    if (st.uploadStatus === 'processed') return { state: 'ready', note: st.privacyStatus && st.privacyStatus !== 'public' ? `Live on YouTube as ${st.privacyStatus}.` : null };
+    if (st.uploadStatus === 'failed') return { state: 'failed', reason: `failed: ${st.failureReason || 'unknown'}` };
+    if (st.uploadStatus === 'rejected') return { state: 'failed', reason: `rejected: ${st.rejectionReason || 'unknown'}` };
+    if (st.uploadStatus === 'deleted') return { state: 'failed', reason: 'deleted' };
+    return { state: 'processing' };
+  },
+
+  async fetchPostMetrics(account, secret, externalId) {
+    const body = await api(`/videos?part=statistics&id=${encodeURIComponent(externalId)}`, secret.access_token);
+    const st = body.items?.[0]?.statistics;
+    const metric = (key, field, reason) => (st && st[field] !== undefined
+      ? { metric_key: key, value: Number(st[field]), availability: 'available', period: 'lifetime' }
+      : { metric_key: key, value: null, availability: 'unavailable', reason: st ? reason : 'The video was not found or is not visible to this channel.' });
+    return [
+      metric('views', 'viewCount', 'Views not returned.'),
+      metric('likes', 'likeCount', 'The channel hides like counts for this video.'),
+      metric('comments', 'commentCount', 'Comments are disabled or hidden for this video.'),
+      { metric_key: 'avg_watch_time', value: null, availability: 'unavailable', reason: 'Watch time needs the YouTube Analytics API (yt-analytics.readonly scope), which this integration does not request.' }
+    ];
   },
 
   async fetchAccountMetrics(account, secret) {

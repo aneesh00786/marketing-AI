@@ -7,6 +7,7 @@
  */
 const crypto = require('crypto');
 const { ProviderError, providerRequest } = require('./http');
+const { openBlob } = require('./media');
 
 const GRAPH_VERSION = () => process.env.META_GRAPH_VERSION || 'v23.0';
 const GRAPH = () => `https://graph.facebook.com/${GRAPH_VERSION()}`;
@@ -17,7 +18,7 @@ function classifyMeta(status, body) {
   const base = { message: e.message ? `Meta: ${e.message}` : `Meta returned HTTP ${status}`, providerCode: e.code ? String(e.code) : null };
   if (code === 190 || code === 102) return { ...base, code: 'AUTH_EXPIRED', retryable: false };
   if (code === 10 || (code >= 200 && code <= 299)) return { ...base, code: 'PERMISSION_DENIED', retryable: false };
-  if ([4, 17, 32, 613].includes(code) || (code >= 80001 && code <= 80014)) return { ...base, code: 'RATE_LIMITED', retryable: true, retryAfterSec: 900 };
+  if ([4, 9, 17, 32, 613].includes(code) || (code >= 80001 && code <= 80014)) return { ...base, code: 'RATE_LIMITED', retryable: true, retryAfterSec: 900 };
   if (code === 100 && status === 404) return { ...base, code: 'NOT_FOUND', retryable: false };
   if (e.is_transient || code === 1 || code === 2 || status >= 500) return { ...base, code: 'PROVIDER_ERROR', retryable: true };
   return { ...base, code: 'INVALID_REQUEST', retryable: false };
@@ -25,6 +26,77 @@ function classifyMeta(status, body) {
 
 function graph(path, opts = {}) {
   return providerRequest(`${GRAPH()}${path}`, { classify: classifyMeta, label: 'Meta', ...opts }).then(r => r.body);
+}
+
+const GRAPH_VIDEO = () => `https://graph-video.facebook.com/${GRAPH_VERSION()}`;
+const UPLOAD_TIMEOUT_MS = 30 * 60 * 1000;
+
+function graphVideo(path, opts = {}) {
+  return providerRequest(`${GRAPH_VIDEO()}${path}`, { classify: classifyMeta, label: 'Meta', ...opts }).then(r => r.body);
+}
+
+/** Runs a step that cannot have published anything: a failure is never an unknown outcome. */
+async function safeStep(fn) {
+  try {
+    return await fn();
+  } catch (err) {
+    if (err instanceof ProviderError) err.outcomeUnknown = false;
+    throw err;
+  }
+}
+
+async function uploadPhoto(page, token, img, fields) {
+  if (img.filePath) {
+    const fd = new FormData();
+    fd.append('access_token', token);
+    for (const [k, v] of Object.entries(fields)) fd.append(k, v);
+    fd.append('source', await openBlob(img), 'image');
+    return graph(`/${page}/photos`, { method: 'POST', multipart: fd, timeoutMs: 5 * 60 * 1000, sent: fields.published !== 'false' });
+  }
+  return graph(`/${page}/photos`, { method: 'POST', form: { url: img.url, ...fields, access_token: token }, sent: fields.published !== 'false' });
+}
+
+async function createContainer(ig, token, form) {
+  return safeStep(() => graph(`/${ig}/media`, { method: 'POST', form: { ...form, access_token: token }, sent: false }));
+}
+
+/** Waits until Instagram has fetched and processed a container; videos take longer. */
+async function waitForContainer(id, token, isVideo) {
+  const attempts = isVideo ? meta._videoPollAttempts : 6;
+  const delay = isVideo ? meta._videoPollDelayMs : meta._pollDelayMs;
+  for (let i = 0; i < attempts; i++) {
+    const st = await graph(`/${id}?${qs({ fields: 'status_code', access_token: token })}`);
+    if (st.status_code === 'FINISHED') return;
+    if (st.status_code === 'ERROR' || st.status_code === 'EXPIRED') {
+      throw new ProviderError({ message: `Instagram could not process the media (${st.status_code}). Check the file meets Instagram's requirements.`, code: 'INVALID_REQUEST' });
+    }
+    await new Promise(r => setTimeout(r, delay));
+  }
+  // Nothing was published (media_publish was not called); a later attempt creates a fresh container.
+  throw new ProviderError({ message: `Instagram is still processing the ${isVideo ? 'video' : 'image'}.`, code: 'PROVIDER_ERROR', retryable: true, retryAfterSec: isVideo ? 300 : 120 });
+}
+
+/**
+ * Facebook Video processing state from the Video node's "status" field:
+ * video_status "ready" = live; "error"/"expired" (or a processing_phase error) = failed; else processing.
+ */
+async function fbVideoState(videoId, token) {
+  const body = await graph(`/${videoId}?${qs({ fields: 'status', access_token: token })}`);
+  const st = body.status || {};
+  if (st.video_status === 'ready') return { state: 'ready' };
+  if (['error', 'expired'].includes(st.video_status) || st.processing_phase?.status === 'error') {
+    return { state: 'failed', reason: st.processing_phase?.errors?.[0]?.message || `video status ${st.video_status || 'error'}` };
+  }
+  return { state: 'processing' };
+}
+
+async function fbPermalink(postId, token) {
+  try {
+    const p = await graph(`/${postId}?${qs({ fields: 'permalink_url', access_token: token })}`);
+    return p.permalink_url ? (String(p.permalink_url).startsWith('/') ? `https://www.facebook.com${p.permalink_url}` : p.permalink_url) : null;
+  } catch (e) {
+    return null;
+  }
 }
 
 const envApp = () => ({ clientId: process.env.META_APP_ID, clientSecret: process.env.META_APP_SECRET });
@@ -121,79 +193,138 @@ const meta = {
     await graph(`/${secret.meta_user_id}/permissions?${qs({ access_token: secret.user_access_token })}`, { method: 'DELETE' });
   },
 
-  async publish(account, secret, { text, linkUrl, imageUrls = [] }) {
+  /**
+   * Facebook Page: text/link posts (/feed), one photo (/photos), several photos (each uploaded
+   * unpublished, then one /feed post with attached_media), one video (/videos on graph-video).
+   * Instagram: one image, one Reel, or a carousel (2-10 items) through media containers.
+   * Uploads and containers are invisible until the final call, so only that call can have an
+   * unknown outcome; earlier failures are always safe to retry.
+   */
+  async publish(account, secret, { text, title, linkUrl, media, imageUrls = [], videoUrls = [] }) {
     const token = secret.access_token;
+    const items = media && media.length
+      ? media
+      : [...imageUrls.map(url => ({ kind: 'image', url })), ...videoUrls.map(url => ({ kind: 'video', url }))];
+    const images = items.filter(m => m.kind === 'image');
+    const videos = items.filter(m => m.kind === 'video');
+
     if (account.account_type === 'facebook_page') {
+      const page = account.external_account_id;
       let created;
-      if (imageUrls.length > 0) {
-        created = await graph(`/${account.external_account_id}/photos`, {
-          method: 'POST',
-          form: { url: imageUrls[0], caption: text || '', published: 'true', access_token: token }
-        });
+      if (videos.length) {
+        const v = videos[0];
+        if (!v.filePath) throw new ProviderError({ message: 'Facebook video publishing needs an uploaded file.', code: 'INVALID_REQUEST' });
+        const fd = new FormData();
+        fd.append('access_token', token);
+        fd.append('description', text || '');
+        if (title) fd.append('title', String(title).slice(0, 255));
+        fd.append('source', await openBlob(v), 'video');
+        created = await graphVideo(`/${page}/videos`, { method: 'POST', multipart: fd, timeoutMs: UPLOAD_TIMEOUT_MS });
+        // An accepted upload is not yet a live video: check processing before reporting it published.
+        let state = { state: 'processing' };
+        for (let i = 0; i < meta._videoStatusPolls; i++) {
+          try { state = await fbVideoState(created.id, token); } catch (e) { state = { state: 'processing' }; }
+          if (state.state !== 'processing') break;
+          await new Promise(r => setTimeout(r, meta._videoPollDelayMs));
+        }
+        if (state.state === 'failed') {
+          throw new ProviderError({ message: `Facebook could not process the video (${state.reason}); it is not live.`, code: 'INVALID_REQUEST', retryable: false });
+        }
+        const url = await fbPermalink(created.id, token);
+        if (state.state === 'processing') {
+          return { externalId: String(created.id), url, raw: created, processing: true, note: 'Uploaded to Facebook; waiting for Facebook to finish processing the video.' };
+        }
+        return { externalId: String(created.id), url, raw: created };
+      } else if (images.length > 1) {
+        const ids = [];
+        for (const img of images) {
+          const photo = await safeStep(() => uploadPhoto(page, token, img, { published: 'false' }));
+          ids.push(String(photo.id));
+        }
+        const form = { message: text || '', access_token: token };
+        ids.forEach((id, i) => { form[`attached_media[${i}]`] = JSON.stringify({ media_fbid: id }); });
+        created = await graph(`/${page}/feed`, { method: 'POST', form });
+      } else if (images.length === 1) {
+        created = await uploadPhoto(page, token, images[0], { published: 'true', caption: text || '' });
       } else {
-        created = await graph(`/${account.external_account_id}/feed`, {
+        created = await graph(`/${page}/feed`, {
           method: 'POST',
           form: { message: text || '', ...(linkUrl ? { link: linkUrl } : {}), access_token: token }
         });
       }
       const postId = created.post_id || created.id;
-      let url = null;
-      try {
-        const p = await graph(`/${postId}?${qs({ fields: 'permalink_url', access_token: token })}`);
-        url = p.permalink_url || null;
-      } catch (e) { /* permalink is optional */ }
-      return { externalId: String(postId), url, raw: created };
+      return { externalId: String(postId), url: await fbPermalink(postId, token), raw: created };
     }
 
     if (account.account_type === 'instagram_business') {
-      if (imageUrls.length === 0) {
-        throw new ProviderError({ message: 'Instagram requires an image.', code: 'INVALID_REQUEST' });
+      const ig = account.external_account_id;
+      if (items.length === 0) {
+        throw new ProviderError({ message: 'Instagram requires an image or video.', code: 'INVALID_REQUEST' });
       }
-      // Creating a media container does not publish anything, so its failures are safe to retry.
-      let container;
-      try {
-        container = await graph(`/${account.external_account_id}/media`, {
-          method: 'POST',
-          form: { image_url: imageUrls[0], caption: text || '', access_token: token }
-        });
-      } catch (err) {
-        if (err instanceof ProviderError) err.outcomeUnknown = false;
-        throw err;
-      }
-      for (let i = 0; i < 6; i++) {
-        const st = await graph(`/${container.id}?${qs({ fields: 'status_code', access_token: token })}`);
-        if (st.status_code === 'FINISHED') break;
-        if (st.status_code === 'ERROR' || st.status_code === 'EXPIRED') {
-          throw new ProviderError({ message: `Instagram could not process the media (${st.status_code}).`, code: 'INVALID_REQUEST' });
+      const containerFor = (m, extra) => (m.kind === 'video'
+        ? { media_type: extra.carousel ? 'VIDEO' : 'REELS', video_url: m.url, ...(extra.carousel ? {} : { share_to_feed: 'true', ...(m.thumbnailUrl ? { cover_url: m.thumbnailUrl } : {}) }) }
+        : { image_url: m.url });
+      let containerId;
+      const raw = {};
+      if (items.length === 1) {
+        const c = await createContainer(ig, token, { ...containerFor(items[0], {}), caption: text || '' });
+        await waitForContainer(c.id, token, items[0].kind === 'video');
+        containerId = c.id;
+        raw.container = c;
+      } else {
+        const children = [];
+        for (const m of items) {
+          const c = await createContainer(ig, token, { ...containerFor(m, { carousel: true }), is_carousel_item: 'true' });
+          await waitForContainer(c.id, token, m.kind === 'video');
+          children.push(c.id);
         }
-        await new Promise(r => setTimeout(r, meta._pollDelayMs));
+        const parent = await createContainer(ig, token, { media_type: 'CAROUSEL', children: children.join(','), caption: text || '' });
+        await waitForContainer(parent.id, token, false);
+        containerId = parent.id;
+        raw.children = children;
+        raw.container = parent;
       }
-      const published = await graph(`/${account.external_account_id}/media_publish`, {
+      const published = await graph(`/${ig}/media_publish`, {
         method: 'POST',
-        form: { creation_id: container.id, access_token: token }
+        form: { creation_id: containerId, access_token: token }
       });
+      raw.published = published;
       let url = null;
       try {
         const m = await graph(`/${published.id}?${qs({ fields: 'permalink', access_token: token })}`);
         url = m.permalink || null;
       } catch (e) { /* optional */ }
-      return { externalId: String(published.id), url, raw: { container, published } };
+      return { externalId: String(published.id), url, raw };
     }
     throw new ProviderError({ message: `Unsupported Meta account type ${account.account_type}`, code: 'NOT_SUPPORTED' });
   },
 
+  /** Follow-up check for uploads reported as processing (Facebook videos). */
+  async checkProcessing(account, secret, externalId) {
+    if (account.account_type !== 'facebook_page') return { state: 'ready' };
+    const state = await fbVideoState(externalId, secret.access_token);
+    if (state.state === 'ready') state.url = await fbPermalink(externalId, secret.access_token);
+    return state;
+  },
+
   _pollDelayMs: 2000,
+  _videoStatusPolls: 6,
+  _videoPollAttempts: 36,
+  _videoPollDelayMs: 5000,
 
   /** Requests insight metrics one call at a time so one deprecated metric cannot hide the others. */
-  async _insights(objectId, token, metricMap) {
+  async _insights(objectId, token, metricMap, edge = 'insights') {
     const results = [];
-    for (const [providerMetric, metricKey] of Object.entries(metricMap)) {
+    for (const [providerMetric, target] of Object.entries(metricMap)) {
+      // A target is a metric key, or { key, scale } for unit conversion (e.g. ms -> s).
+      const metricKey = typeof target === 'string' ? target : target.key;
+      const scale = typeof target === 'string' ? 1 : target.scale;
       try {
-        const body = await graph(`/${objectId}/insights?${qs({ metric: providerMetric, access_token: token })}`);
+        const body = await graph(`/${objectId}/${edge}?${qs({ metric: providerMetric, access_token: token })}`);
         const entry = (body.data || [])[0];
         const value = entry?.values?.[0]?.value ?? entry?.total_value?.value;
         if (typeof value === 'number') {
-          results.push({ metric_key: metricKey, value, availability: 'available', period: entry.period || 'lifetime' });
+          results.push({ metric_key: metricKey, value: Math.round(value * scale * 100) / 100, availability: 'available', period: entry.period || 'lifetime' });
         } else {
           results.push({ metric_key: metricKey, value: null, availability: 'unavailable', reason: 'Metric not returned by Meta for this post.' });
         }
@@ -205,8 +336,23 @@ const meta = {
     return results;
   },
 
-  async fetchPostMetrics(account, secret, externalId) {
+  async fetchPostMetrics(account, secret, externalId, { mediaKind = null } = {}) {
     const token = secret.access_token;
+    if (account.account_type === 'facebook_page' && mediaKind === 'video') {
+      // Video posts are Video objects: engagement edges plus Video Insights.
+      const body = await graph(`/${externalId}?${qs({ fields: 'likes.summary(true).limit(0),comments.summary(true).limit(0)', access_token: token })}`);
+      const out = [
+        { metric_key: 'likes', value: body.likes?.summary?.total_count ?? null, availability: body.likes ? 'available' : 'unavailable', reason: body.likes ? null : 'Likes not returned.' },
+        { metric_key: 'comments', value: body.comments?.summary?.total_count ?? null, availability: body.comments ? 'available' : 'unavailable', reason: body.comments ? null : 'Comments not returned.' }
+      ];
+      out.push(...await meta._insights(externalId, token, {
+        total_video_views: 'views',
+        total_video_impressions: 'impressions',
+        total_video_impressions_unique: 'reach',
+        total_video_avg_time_watched: { key: 'avg_watch_time', scale: 0.001 }
+      }, 'video_insights'));
+      return out;
+    }
     if (account.account_type === 'facebook_page') {
       const out = [];
       const body = await graph(`/${externalId}?${qs({
@@ -231,7 +377,8 @@ const meta = {
         likes: 'likes',
         comments: 'comments',
         shares: 'shares',
-        saved: 'saves'
+        saved: 'saves',
+        ...(mediaKind === 'video' ? { ig_reels_avg_watch_time: { key: 'avg_watch_time', scale: 0.001 } } : {})
       });
     }
     return [];

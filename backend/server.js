@@ -105,6 +105,8 @@ app.use('/api', apiGate({
     // Unsubscribe links in product emails carry a random per-recipient token.
     /^\/api\/v1\/mail\/unsubscribe\/[a-f0-9]{40}$/,
     /^\/api\/v1\/social\/webhooks\/[a-z_]+$/,
+    // Uploaded social media files, downloaded by platforms such as Instagram (opaque, unguessable ids).
+    /^\/api\/v1\/social\/media-files\/[A-Za-z0-9_-]{43}$/,
     // Email unsubscribe links carry a random per-recipient token.
     /^\/api\/v1\/outreach\/unsubscribe\/[a-f0-9]{40}$/
   ],
