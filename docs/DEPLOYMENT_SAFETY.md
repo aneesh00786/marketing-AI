@@ -1,7 +1,8 @@
 # Deployment Safety — Marketech.ai
 
 Covers packaging, migrations, media storage, backups and the production settings the API and worker
-enforce. Platform test steps are in `SOCIAL_MEDIA_INTEGRATION_TEST_PLAN.md`.
+enforce. The staging procedure (setup, restore, neutralizing copied integrations, platform checklist) is
+`STAGING_RUNBOOK.md`; live platform test steps are in `SOCIAL_MEDIA_INTEGRATION_TEST_PLAN.md`.
 
 ## 1. Packaging
 
@@ -40,7 +41,7 @@ Where migrations run:
 | `npm run migrate` / `node db/migrate.js` | Applies pending migrations. **With `NODE_ENV=production` it refuses unless `--backup=<dump>` is a mysqldump/mariadb-dump that (a) names this database, (b) is less than 24 hours old, (c) ends with the "Dump completed" line (failed or truncated dumps are refused) and (d) records exactly the migrations applied to this database now (a dump of another copy or an older state is refused).** It does not prove the dump restores; the restore drill (section 5) does. |
 | `start.bat`, `run.bat`, `run.ps1` | Run `seed.js`, then `db/migrate.js`, then start the worker and API. In production the migration step stops the script when migrations are pending and no backup was given, so the app does not start half-migrated. |
 | `node server.js` / `npm start`, `npm run worker` | Never migrate. With `NODE_ENV=production` the API and the worker **refuse to start while migrations are pending**; otherwise they warn. |
-| `npm run migrate:status` | Read-only list of applied/pending migrations. |
+| `npm run migrate:status` | Read-only list of applied/pending migrations (never creates or changes anything, even on an empty or mistyped database). |
 
 `seed.js` creates missing tables/columns and, in production, only first-install records (workspace,
 admin user, membership, agent). Demo leads, emails, mail settings, appointments and content are seeded
@@ -77,15 +78,14 @@ copy the folders afterwards; with the API and worker stopped (or at least no upl
 every file the dump refers to is in the copy.
 
 ```bash
-# Linux (adjust paths); Windows XAMPP: C:\xampp\mysql\bin\mysqldump.exe and robocopy <src> <dst> /MIR
-STAMP=$(date -u +%Y%m%d-%H%M)
-mysqldump --single-transaction --triggers --default-character-set=utf8mb4 \
-  -u <user> -p tradesage > /backups/tradesage-$STAMP.sql \
-  || { echo "BACKUP FAILED - do not migrate"; exit 1; }
-tail -c 200 /backups/tradesage-$STAMP.sql | grep -q "Dump completed" || { echo "BACKUP INCOMPLETE"; exit 1; }
-rsync -a "$SOCIAL_MEDIA_STORAGE_DIR/" /backups/social-media-$STAMP/
-rsync -a "$MAIL_ASSET_STORAGE_DIR/"   /backups/mail-assets-$STAMP/
+cd backend      # Linux/macOS (bash). MYSQL_DEFAULTS_FILE: chmod-600 [client] option file; MARIADB_BIN_DIR: tools of the server's version
+MYSQL_DEFAULTS_FILE=/root/.marketech-backup.cnf MARIADB_BIN_DIR=<dir> scripts/backup.sh tradesage /var/backups/marketech
 ```
+
+`scripts/backup.sh` stops at the first error, keeps the dump as `.partial` until it is verified complete and for
+the right database, copies both media folders with file-count checks and writes `SHA256SUMS`. Exit status 0 is
+the only success. (Windows/XAMPP has no equivalent script: run `mysqldump.exe` with the same options, check
+`%ERRORLEVEL%`, check the file ends with "Dump completed", and `robocopy` both folders.)
 
 `--routines` is omitted on purpose: the application defines no stored procedures, functions or
 triggers, and on the current XAMPP MariaDB (10.4.28) `--routines` fails with "Column count of
@@ -98,7 +98,8 @@ every deployment) and copy them off the server.
 ## 5. Restore
 
 1. Stop the worker, then the API (nothing may publish or upload during a restore).
-2. Restore the database from the dump (into an empty database of the same name).
+2. Restore the database from the dump into an empty database (DBA; `scripts/staging-restore.sh` refuses the
+   production database by design — a production restore is a manual DBA operation with the same checks).
 3. Restore the media folders to the **same absolute paths** as `SOCIAL_MEDIA_STORAGE_DIR` /
    `MAIL_ASSET_STORAGE_DIR`, owned by the user the API and worker run as.
 4. Restore `backend/.env` with the **same** `SOCIAL_TOKEN_ENCRYPTION_KEY`.
@@ -114,27 +115,12 @@ every deployment) and copy them off the server.
 6. Start the API, then the worker. Check the Publishing Queue for `queued` jobs whose time has passed:
    they will publish as soon as the worker starts — cancel any that should not.
 
-### Staging restore drill (do this once before go-live, and after any backup-process change)
+### Staging restore drill
 
-On a **staging** server whose `backend/.env` has its own `DB_NAME` (never the production database):
-
-```bash
-# 1. Take a backup on production exactly as in section 4 (database dump + both media folders + key).
-# 2. Copy the dump, the two media folders and SOCIAL_TOKEN_ENCRYPTION_KEY to staging.
-mysql -u <user> -p -e "CREATE DATABASE tradesage_staging DEFAULT CHARACTER SET utf8mb4"
-mysql -u <user> -p tradesage_staging < tradesage-<stamp>.sql
-rsync -a social-media-<stamp>/ "$SOCIAL_MEDIA_STORAGE_DIR/"
-rsync -a mail-assets-<stamp>/  "$MAIL_ASSET_STORAGE_DIR/"
-cd backend                                   # staging .env: DB_NAME=tradesage_staging, same key
-npm run migrate:status                       # same applied list as production
-node scripts/verifyMediaStorage.js           # expect 0 missing / 0 damaged
-node scripts/verifyEncryptedSecrets.js       # expect 0 unreadable
-# 3. Compare table row counts with production (SELECT COUNT(*) per table) — expect equality.
-# 4. Optionally rehearse the deployment: npm run migrate -- --backup=<a fresh dump of tradesage_staging>
-```
-
-Do not start the worker on a staging copy of production data unless its social accounts are
-disconnected first: queued jobs would publish to the real accounts.
+Follow `STAGING_RUNBOOK.md` sections 2–5: `scripts/backup.sh` on the source, `scripts/staging-restore.sh` on
+staging (preflight, checksums, new database, media, verification), then `scripts/stagingNeutralize.js` before
+starting anything. Never start the API or worker on a staging copy that still holds production integrations;
+on staging (`DEPLOYMENT_ENV=staging`) both refuse to start until `scripts/stagingPreflight.js` passes.
 
 ## 5a. Operations: schedule, retention, rollback, roles
 

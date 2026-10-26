@@ -168,6 +168,8 @@ async function scheduleRecurring() {
 async function loop() {
   require('../lib/productionConfig').enforce('social-worker');
   await require('../lib/productionConfig').enforceMigrated('social-worker');
+  // Staging only (DEPLOYMENT_ENV=staging): never publish from a database holding non-test accounts.
+  await require('../lib/stagingGuard').enforceStaging('social-worker', { query: all });
   let lastSchedule = 0;
   log(`started (poll ${POLL_MS}ms)`);
   while (!stopping) {
@@ -197,7 +199,7 @@ process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 
 if (require.main === module) {
-  loop().then(() => process.exit(0));
+  loop().then(() => process.exit(0)).catch(err => { log('fatal:', err.message); process.exit(1); });
 }
 
 module.exports = { processPublishing, processProcessing, processBackground, processOutreach, processProductEmails, processAutomation, scheduleRecurring, HANDLERS };

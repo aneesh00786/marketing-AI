@@ -10,8 +10,11 @@ database for it.
 1. Staging server with a public HTTPS domain. Set `APP_BASE_URL=https://<staging-domain>` and `FRONTEND_URL`.
 2. Set `SOCIAL_MEDIA_STORAGE_DIR` to an absolute path outside the code folder; confirm the API and worker run as
    users that can both read and write it.
-3. `cd backend && npm run migrate:status` → check only expected migrations are pending, then `npm run migrate`.
-4. Start the API (`npm start`) and exactly one worker (`npm run worker`) under a process manager.
+3. Follow `STAGING_RUNBOOK.md` sections 1–5: `backend/.env` with `DEPLOYMENT_ENV=staging`, the test accounts'
+   external ids in `STAGING_ALLOWED_SOCIAL_ACCOUNTS`, `scripts/stagingPreflight.js` passing, and the migration
+   applied with `npm run migrate -- --backup=<fresh staging dump>`.
+4. Start the API and exactly one worker under a process manager (both refuse to start on staging while
+   non-test integrations remain).
 5. Create a test workspace with three members: Owner (publishes), Approver, Member (drafts only).
    Settings → Social: time zone `Asia/Kolkata` (no DST, easy to check), approval required.
 6. Test accounts:

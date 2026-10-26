@@ -156,12 +156,20 @@ async function migrate({ databaseName = process.env.DB_NAME || 'tradesage', stat
   const conn = await mysql.createConnection(connectionConfig(databaseName));
   try {
     await conn.query("SET time_zone = '+00:00'");
-    await conn.query(`CREATE TABLE IF NOT EXISTS schema_migrations (
-      id VARCHAR(191) NOT NULL PRIMARY KEY,
-      applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+    // A status check is read-only: it never creates the tracking table (pointing it at an empty or
+    // mistyped database must not change that database). Applying migrations creates it if needed.
+    const [[tracked]] = await conn.query(
+      "SELECT COUNT(*) AS n FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'schema_migrations'",
+      [databaseName]
+    );
+    if (!statusOnly && !Number(tracked.n)) {
+      await conn.query(`CREATE TABLE IF NOT EXISTS schema_migrations (
+        id VARCHAR(191) NOT NULL PRIMARY KEY,
+        applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+    }
 
-    const [appliedRows] = await conn.query('SELECT id FROM schema_migrations');
+    const [appliedRows] = Number(tracked.n) || !statusOnly ? await conn.query('SELECT id FROM schema_migrations') : [[]];
     const applied = new Set(appliedRows.map(r => r.id));
     const migrations = loadMigrations();
     const pending = migrations.filter(m => !applied.has(m.id));

@@ -174,3 +174,22 @@ test('mail template assets are verified with the same checks as social media', a
   assert.deepEqual(r.missing.map(m => m.assetId), [10]);
   assert.equal(r.damaged.length, 0);
 });
+
+test('a migration status check never writes to the database it inspects', async () => {
+  const mysql = require('mysql2/promise');
+  const cfg = { host: process.env.DB_HOST || '127.0.0.1', port: process.env.DB_PORT || 3306, user: process.env.DB_USER || 'root', password: process.env.DB_PASSWORD || '' };
+  const c = await mysql.createConnection(cfg);
+  const EMPTY = 'tradesage_statuscheck_test';
+  await c.query(`DROP DATABASE IF EXISTS \`${EMPTY}\``);
+  await c.query(`CREATE DATABASE \`${EMPTY}\``);
+  try {
+    const st = await migrate({ databaseName: EMPTY, statusOnly: true, log: () => {} });
+    assert.deepEqual(st.applied, []);
+    assert.ok(st.pending.includes('023_social_media_library'));
+    const [t] = await c.query('SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = ?', [EMPTY]);
+    assert.deepEqual(t, [], 'no table was created');
+  } finally {
+    await c.query(`DROP DATABASE IF EXISTS \`${EMPTY}\``);
+    await c.end();
+  }
+});

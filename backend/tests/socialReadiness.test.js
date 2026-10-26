@@ -141,7 +141,8 @@ test('Facebook video: an accepted upload is "processing" until Facebook reports 
   assert.equal(again.status, 409);
 
   state = 'ready';
-  await h.db().run('UPDATE publishing_jobs SET next_attempt_at = UTC_TIMESTAMP() WHERE id = ?', [q.jobId]);
+  // Earliest due, so the check picks this job first whatever else the shared test database holds.
+  await h.db().run('UPDATE publishing_jobs SET next_attempt_at = UTC_TIMESTAMP() - INTERVAL 1 DAY WHERE id = ?', [q.jobId]);
   mock = h.mockFetch(routes);
   try { await worker().processProcessing(); } finally { mock.restore(); }
   j = await job(q.jobId);
@@ -264,6 +265,8 @@ test('a processing check never turns a disconnected account into "expired"', asy
   try { await worker().processProcessing(); } finally { mock.restore(); }
   assert.equal((await h.db().get('SELECT status FROM social_accounts WHERE id = ?', [acct.id])).status, 'disconnected');
   assert.equal((await job(j.lastID)).status, 'processing', 'kept for a later check or the deadline');
+  // The test database persists between runs: do not leave a job that later processing checks pick up.
+  await h.db().run("UPDATE publishing_jobs SET status = 'cancelled' WHERE id = ?", [j.lastID]);
 });
 
 test('an overdue job already queued for a demo account is refused by the worker without any network call', async () => {

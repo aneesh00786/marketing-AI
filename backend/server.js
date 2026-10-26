@@ -1306,6 +1306,8 @@ async function startServer() {
     require('./lib/productionConfig').enforce('api');
     await initDatabase();
     await require('./lib/productionConfig').enforceMigrated('api');
+    // Staging only (DEPLOYMENT_ENV=staging): never serve a copy that still holds live production integrations.
+    await require('./lib/stagingGuard').enforceStaging('api', { query: all });
     app.listen(PORT, '0.0.0.0', () => {
       console.log(`====================================================`);
       console.log(`Marketech.ai — AI Marketing Workspace`);
