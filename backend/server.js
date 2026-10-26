@@ -1303,15 +1303,9 @@ if (require('fs').existsSync(ANGULAR_DIST_DIR)) {
 // Start Server & Initialize Database
 async function startServer() {
   try {
+    require('./lib/productionConfig').enforce('api');
     await initDatabase();
-    try {
-      const { pending } = await require('./db/migrate').migrate({ statusOnly: true, log: () => {} });
-      if (pending.length) {
-        console.warn(`⚠️  ${pending.length} pending migration(s): ${pending.join(', ')}. Run "npm run migrate" in backend/ — Social Media Marketing needs them.`);
-      }
-    } catch (e) {
-      console.warn('Could not check migrations:', e.message);
-    }
+    await require('./lib/productionConfig').enforceMigrated('api');
     app.listen(PORT, '0.0.0.0', () => {
       console.log(`====================================================`);
       console.log(`Marketech.ai — AI Marketing Workspace`);

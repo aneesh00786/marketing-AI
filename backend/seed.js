@@ -593,7 +593,14 @@ async function seedMySQL() {
   console.log('\n--- SEEDING FOUNDATIONAL RECORDS ---');
 
   // Seed Helper: Only insert if table is empty
+  // Production databases get only the first-install records (workspace, admin, membership,
+  // agent); demo leads, emails, mail settings, appointments and content are never inserted.
+  const PRODUCTION_BOOTSTRAP = new Set(['workspaces', 'users', 'workspace_members', 'agents']);
   async function seedIfEmpty(tableName, insertSql, rows) {
+    if (process.env.NODE_ENV === 'production' && !PRODUCTION_BOOTSTRAP.has(tableName)) {
+      console.log(`ℹ Production: demo data for '${tableName}' is not seeded.`);
+      return;
+    }
     const [countResult] = await pool.query(`SELECT COUNT(*) as count FROM \`${tableName}\``);
     const count = countResult[0]?.count || 0;
     if (count === 0) {

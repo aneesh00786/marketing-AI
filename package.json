@@ -8,6 +8,7 @@
     "build:frontend": "cd frontend && npm install && npm run build",
     "migrate": "cd backend && node db/migrate.js",
     "worker": "cd backend && node workers/socialWorker.js",
-    "test": "cd backend && npm test"
+    "test": "cd backend && npm test",
+    "package": "node backend/scripts/packageRelease.js"
   }
 }

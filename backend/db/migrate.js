@@ -102,7 +102,54 @@ function loadMigrations() {
     });
 }
 
-async function migrate({ databaseName = process.env.DB_NAME || 'tradesage', statusOnly = false, log = console.log } = {}) {
+const BACKUP_MAX_AGE_HOURS = 24;
+
+/**
+ * In production, pending migrations are applied only with a verified backup of the same database.
+ * The file must exist, be newer than BACKUP_MAX_AGE_HOURS, start with the mysqldump/mariadb-dump
+ * header naming this database, end with the dump's "Dump completed" line (a failed or truncated
+ * dump has no trailer), and record exactly the migrations applied to the target database now
+ * (appliedIds), which ties it to this database's current state rather than another copy with the
+ * same name. Returns a problem message or null. Only the header, the trailer and the
+ * schema_migrations rows are read; the file is streamed, never loaded whole.
+ */
+async function backupProblem(backupPath, databaseName, appliedIds = null) {
+  if (!backupPath) return `NODE_ENV=production: pending migrations are applied only with a verified backup. Run: npm run migrate -- --backup=<path to a mysqldump of ${databaseName}>`;
+  let stat;
+  try { stat = fs.statSync(backupPath); } catch (e) { return `Backup file not found: ${backupPath}`; }
+  if (!stat.isFile() || stat.size < 1024) return `Backup file is empty or too small: ${backupPath}`;
+  if (Date.now() - stat.mtimeMs > BACKUP_MAX_AGE_HOURS * 3600 * 1000) return `Backup file is older than ${BACKUP_MAX_AGE_HOURS} hours; take a fresh backup first.`;
+  const fd = fs.openSync(backupPath, 'r');
+  const head = Buffer.alloc(4096);
+  const n = fs.readSync(fd, head, 0, head.length, 0);
+  const tail = Buffer.alloc(Math.min(2048, stat.size));
+  fs.readSync(fd, tail, 0, tail.length, stat.size - tail.length);
+  fs.closeSync(fd);
+  const text = head.subarray(0, n).toString('utf8');
+  const escaped = databaseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (!/(MySQL|MariaDB) dump/i.test(text) || !new RegExp(`Database: ${escaped}(\\s|$)`).test(text)) {
+    return `Backup file does not look like a mysqldump/mariadb-dump of database ${databaseName}.`;
+  }
+  if (!/-- Dump completed/.test(tail.toString('utf8'))) {
+    return 'Backup file is incomplete: it has no "Dump completed" line (the dump failed or was cut short, or was made with --skip-comments). Take a new backup and check that mysqldump exits without errors.';
+  }
+  if (appliedIds) {
+    const inDump = new Set();
+    const lines = require('readline').createInterface({ input: fs.createReadStream(backupPath, { encoding: 'utf8' }), crlfDelay: Infinity });
+    for await (const line of lines) {
+      if (!line.startsWith('INSERT INTO `schema_migrations`')) continue;
+      for (const m of line.matchAll(/\('([^']+)'/g)) inDump.add(m[1]);
+    }
+    const expected = [...appliedIds].sort();
+    const found = [...inDump].sort();
+    if (expected.join('|') !== found.join('|')) {
+      return `Backup does not match the current state of ${databaseName}: it records ${found.length} applied migration(s), the database has ${expected.length}. Take a fresh backup of this database.`;
+    }
+  }
+  return null;
+}
+
+async function migrate({ databaseName = process.env.DB_NAME || 'tradesage', statusOnly = false, log = console.log, backupPath = null, env = process.env } = {}) {
   if ((process.env.DB_CLIENT || 'mysql') !== 'mysql') {
     throw new Error('Migrations require DB_CLIENT=mysql.');
   }
@@ -124,6 +171,16 @@ async function migrate({ databaseName = process.env.DB_NAME || 'tradesage', stat
       return { applied: [...applied], pending: pending.map(m => m.id) };
     }
 
+    if (pending.length && env.NODE_ENV === 'production') {
+      const problem = await backupProblem(backupPath, databaseName, [...applied]);
+      if (problem) {
+        const err = new Error(`${problem} Pending: ${pending.map(m => m.id).join(', ')}.`);
+        err.code = 'BACKUP_REQUIRED';
+        throw err;
+      }
+      log(`Verified backup ${backupPath} for ${databaseName}.`);
+    }
+
     const db = createHelpers(conn, databaseName, log);
     for (const m of pending) {
       log(`Applying ${m.id} to ${databaseName}...`);
@@ -140,7 +197,8 @@ async function migrate({ databaseName = process.env.DB_NAME || 'tradesage', stat
 
 if (require.main === module) {
   const statusOnly = process.argv.includes('--status');
-  migrate({ statusOnly })
+  const backupArg = process.argv.find(a => a.startsWith('--backup='));
+  migrate({ statusOnly, backupPath: backupArg ? backupArg.slice('--backup='.length) : null })
     .then(() => process.exit(0))
     .catch(err => {
       console.error('Migration failed:', err.message);
@@ -148,4 +206,4 @@ if (require.main === module) {
     });
 }
 
-module.exports = { migrate };
+module.exports = { migrate, backupProblem };

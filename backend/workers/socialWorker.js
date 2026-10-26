@@ -166,6 +166,8 @@ async function scheduleRecurring() {
 }
 
 async function loop() {
+  require('../lib/productionConfig').enforce('social-worker');
+  await require('../lib/productionConfig').enforceMigrated('social-worker');
   let lastSchedule = 0;
   log(`started (poll ${POLL_MS}ms)`);
   while (!stopping) {
