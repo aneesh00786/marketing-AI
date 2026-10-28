@@ -147,17 +147,15 @@ test('publishing: an account or content from another workspace is never used', a
 // ------------------------------------------------------------------ email outreach
 
 const SEQ = { steps: [{ delay_days: 0, subject: 'Routes for {{company}}', body: 'Hi {{first_name}},\n\nRouteKit plans delivery routes. Worth a short call?' }] };
-const zepto = calls => ({
-  match: u => u.startsWith('https://api.zeptomail.com/'),
-  respond: (url, init) => { calls.push(JSON.parse(init.body).to[0].email_address.address); return h.json(200, { request_id: `req-${calls.length}` }); }
-});
+// Sequences are marketing email: sent through a stubbed SMTP mailbox approved for marketing (never ZeptoMail).
+const zepto = calls => h.smtpRoute(m => calls.push(m.to));
 const aiDown = { match: u => u.startsWith('https://api.groq.com/'), respond: () => h.json(500, {}) };
 const tick = () => sender().processOutreach('auth-test-worker', { now: new Date() });
 
 async function outreachSetup(name) {
   const owner = await h.createWorkspace({ name });
   const manager = await h.addMember(owner.workspaceId, 'Marketing Manager');
-  assert.equal((await h.api('POST', '/api/v1/mail/config', { token: owner.token, body: { provider: 'zeptomail', smtp_user: 'emailapikey', smtp_pass: 'zepto-test', sender_email: 'hello@auth-test.io', sender_name: 'Auth Test' } })).status, 200);
+  await h.useMarketingSmtp(owner, 'hello@auth-test.io');
   const product = (await h.api('POST', '/api/v1/products', { token: owner.token, body: { name: 'RouteKit', tagline: 'Plan delivery routes', features: ['Driver app'] } })).data.productId;
   const leads = [];
   const mock = h.mockFetch([aiDown]);

@@ -106,8 +106,10 @@ async function processOutreach() {
 }
 
 /**
- * Product email batches: send queued emails (resumable, one claim per email) and apply
- * unsubscribe replies (the inbox sync is shared with outreach and rate-limited per workspace).
+ * Marketing email replies and product email batches. Unsubscribe replies to any marketing email
+ * with an unsubscribe token (product emails, one-to-one drafts, marketing Compose sends) are always
+ * applied; only batch sending depends on the Product Emails feature flag. The inbox sync is shared
+ * with outreach and rate-limited per workspace.
  */
 async function processProductEmails() {
   const productEmails = require('../modules/mail/productEmails/service');
@@ -117,6 +119,7 @@ async function processProductEmails() {
       await outreachSender.syncInboxes(watched);
       await productEmails.detectUnsubscribeReplies();
     }
+    if (!require('../lib/features').productEmailsEnabled()) return 0;
     return await productEmails.processBatches(WORKER_ID);
   } catch (err) {
     log('product email error:', err.message);

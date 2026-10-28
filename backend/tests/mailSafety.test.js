@@ -14,6 +14,7 @@ const nodemailer = require('nodemailer');
 let A;
 let smtpSends;
 let smtpReject = false;
+let smtpUnknown = false; // connection dropped during DATA: unknown outcome
 const savedPrivate = process.env.MAIL_ALLOW_PRIVATE_HOSTS;
 
 const key = () => ({ 'Idempotency-Key': crypto.randomBytes(16).toString('hex') });
@@ -33,6 +34,7 @@ test.before(async () => {
   nodemailer.createTransport = opts => ({
     verify: async () => true,
     sendMail: async msg => {
+      if (smtpUnknown) throw Object.assign(new Error('Connection closed during DATA'), { code: 'ETIMEDOUT', command: 'DATA' });
       if (smtpReject) throw Object.assign(new Error('550 relay denied'), { code: 'EENVELOPE', responseCode: 550 });
       smtpSends.push({ opts, msg });
       return { messageId: '<smtp-1@x>', response: '250 OK', accepted: [msg.to] }; }
@@ -76,48 +78,72 @@ test('ZeptoMail messages carry the plain-text part', async () => {
   const calls = [];
   const mock = h.mockFetch([zepto(calls)]);
   try {
-    const r = await h.api('POST', '/api/v1/emails/send-html', { token: A.token, headers: key(), body: { recipient_email: 'kim@client.io', subject: 'Hello', html_body: '<p>Hi <b>Kim</b></p>', body_text: 'Hi Kim', confirm: true } });
+    const r = await h.api('POST', '/api/v1/emails/send-html', { token: A.token, headers: key(), body: { recipient_email: 'kim@client.io', subject: 'Hello', html_body: '<p>Hi <b>Kim</b></p>', body_text: 'Hi Kim', purpose: 'transactional', confirm: true } });
     assert.equal(r.status, 200, JSON.stringify(r.data));
   } finally { mock.restore(); }
   assert.equal(calls[0].textbody, 'Hi Kim');
   assert.match(calls[0].htmlbody, /<b>Kim<\/b>/);
 });
 
-test('an unknown ZeptoMail outcome (5xx or timeout) never falls back to SMTP; the draft is held for review', async () => {
+// The ZeptoMail -> SMTP fallback rules apply to direct (Compose) sends; Mail Drafts are marketing email
+// and never use ZeptoMail (see mail.test.js / productEmails.test.js).
+const directMsg = (to = 'dana@acme.io') => ({ recipient_email: to, subject: 'Order update', body: 'Your order shipped.', purpose: 'transactional', confirm: true });
+const sendKey = () => ({ 'Idempotency-Key': `safety-${require('crypto').randomBytes(10).toString('hex')}` });
+
+test('an unknown ZeptoMail outcome (5xx or timeout) on a direct send never falls back to SMTP; the send is held for review', async () => {
   for (const respond of [() => h.json(503, { error: 'busy' }), () => Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' })]) {
-    const id = await approvedDraft();
     smtpSends.length = 0;
     const calls = [];
+    const headers = sendKey();
     const mock = h.mockFetch([zepto(calls, respond)]);
     let r;
-    try { r = await h.api('POST', `/api/v1/drafts/${id}/send`, { token: A.token, body: { confirm: true } }); } finally { mock.restore(); }
+    let again;
+    try {
+      r = await h.api('POST', '/api/v1/emails/send', { token: A.token, headers, body: directMsg() });
+      again = await h.api('POST', '/api/v1/emails/send', { token: A.token, headers, body: directMsg() });
+    } finally { mock.restore(); }
     assert.equal(r.status, 502);
     assert.equal(r.data.code, 'MAIL_OUTCOME_UNKNOWN');
-    assert.equal(calls.length, 1);
+    assert.equal(calls.length, 1, 'not retried');
     assert.equal(smtpSends.length, 0, 'no second copy through SMTP');
-    assert.equal(await draftStatus(id), 'Needs Review');
-
-    // Not resent, not re-approved, not edited until a person resolves it.
-    const again = await h.api('POST', `/api/v1/drafts/${id}/send`, { token: A.token, body: { confirm: true } });
-    assert.equal(again.data.code, 'NEEDS_REVIEW');
-    assert.equal((await h.api('PUT', `/api/v1/drafts/${id}/approve`, { token: A.token })).data.code, 'NEEDS_REVIEW');
-    assert.equal((await h.api('PATCH', `/api/v1/drafts/${id}`, { token: A.token, body: { subject: 'x' } })).status, 409);
-    const audit = await db().get("SELECT metadata_json FROM audit_logs WHERE action = 'mail.draft_outcome_unknown' AND resource_id = ? ORDER BY id DESC LIMIT 1", [String(id)]);
-    assert.ok(audit);
+    assert.equal(again.status, 409, 'the same request is not sent again while its outcome is unknown');
+    assert.equal(again.data.code, 'MAIL_OUTCOME_UNKNOWN');
+    assert.equal((await db().get('SELECT status FROM mail_send_requests WHERE workspace_id = ? AND idempotency_key = ?', [A.workspaceId, headers['Idempotency-Key']])).status, 'needs_review');
   }
 });
 
-test('a clear "not sent" failure may still use the SMTP fallback (unchanged behaviour)', async () => {
-  const id = await approvedDraft();
+test('a clear "not sent" failure on a direct send may still use the SMTP fallback (unchanged behaviour)', async () => {
   smtpSends.length = 0;
   const calls = [];
   const mock = h.mockFetch([zepto(calls, () => h.json(422, { error: 'sender not verified' }))]);
   let r;
-  try { r = await h.api('POST', `/api/v1/drafts/${id}/send`, { token: A.token, body: { confirm: true } }); } finally { mock.restore(); }
+  try { r = await h.api('POST', '/api/v1/emails/send', { token: A.token, headers: sendKey(), body: directMsg('lee@client.io') }); } finally { mock.restore(); }
   assert.equal(r.status, 200, JSON.stringify(r.data));
   assert.equal(smtpSends.length, 1);
   assert.equal(smtpSends[0].opts.tls.rejectUnauthorized, true);
-  assert.equal(await draftStatus(id), 'Sent');
+});
+
+test('a draft (marketing, SMTP) whose send outcome is unknown is held for review: not resent, not re-approved, not edited', async () => {
+  const M = await h.createWorkspace({ name: 'Mail safety SMTP' });
+  assert.equal((await h.api('POST', '/api/v1/mail/config', { token: M.token, body: { provider: 'custom_smtp', smtp_host: 'smtp.safety-co.io', smtp_port: 587, smtp_user: 'news@safety-co.io', smtp_pass: 'pw', sender_email: 'news@safety-co.io', sender_name: 'Safety Co' } })).status, 200);
+  assert.equal((await h.api('POST', '/api/v1/mail/marketing', { token: M.token, body: { approved: true, confirm: true, note: 'test' } })).status, 200);
+  const g = await h.api('POST', '/api/v1/drafts/generate', { token: M.token, body: { recipientName: 'Dana', recipientEmail: 'dana@acme.io', goal: 'Intro' } });
+  const replacements = Object.fromEntries(g.data.draft.placeholders.map(p => [p, 'Jane Doe']));
+  await h.api('PATCH', `/api/v1/drafts/${g.data.draft.id}`, { token: M.token, body: { replacements } });
+  assert.equal((await h.api('PUT', `/api/v1/drafts/${g.data.draft.id}/approve`, { token: M.token })).status, 200);
+  const id = g.data.draft.id;
+  smtpSends.length = 0;
+  smtpUnknown = true;
+  let r;
+  try { r = await h.api('POST', `/api/v1/drafts/${id}/send`, { token: M.token, body: { confirm: true } }); } finally { smtpUnknown = false; }
+  assert.equal(r.status, 502);
+  assert.equal(r.data.code, 'MAIL_OUTCOME_UNKNOWN');
+  assert.equal(await draftStatus(id), 'Needs Review');
+  const again = await h.api('POST', `/api/v1/drafts/${id}/send`, { token: M.token, body: { confirm: true } });
+  assert.equal(again.data.code, 'NEEDS_REVIEW');
+  assert.equal((await h.api('PUT', `/api/v1/drafts/${id}/approve`, { token: M.token })).data.code, 'NEEDS_REVIEW');
+  assert.equal((await h.api('PATCH', `/api/v1/drafts/${id}`, { token: M.token, body: { subject: 'x' } })).status, 409);
+  assert.ok(await db().get("SELECT 1 AS x FROM audit_logs WHERE action = 'mail.draft_outcome_unknown' AND resource_id = ?", [String(id)]));
 });
 
 test('resolving an unknown or stuck send: approvers only, explicit, and only for review/stale states', async () => {
@@ -140,7 +166,7 @@ test('resolving an unknown or stuck send: approvers only, explicit, and only for
 });
 
 test('direct sends: a key is required, a repeated key never sends twice, and a reused key with other content is refused', async () => {
-  const msg = { recipient_email: 'lee@client.io', subject: 'Order update', body: 'Your order shipped.', confirm: true };
+  const msg = { recipient_email: 'lee@client.io', subject: 'Order update', body: 'Your order shipped.', purpose: 'transactional', confirm: true };
   assert.equal((await h.api('POST', '/api/v1/emails/send', { token: A.token, body: msg })).data.code, 'IDEMPOTENCY_KEY_REQUIRED');
 
   const calls = [];
@@ -163,7 +189,7 @@ test('direct sends: a key is required, a repeated key never sends twice, and a r
 });
 
 test('direct sends: concurrent double-submits send once; an unknown outcome blocks the key; a clear failure may retry', async () => {
-  const msg = { recipient_email: 'sam@client.io', subject: 'Invoice', body: 'Attached.', confirm: true };
+  const msg = { recipient_email: 'sam@client.io', subject: 'Invoice', body: 'Attached.', purpose: 'transactional', confirm: true };
   let calls = [];
   let mock = h.mockFetch([zepto(calls, () => new Promise(r => setTimeout(() => r(h.json(200, { request_id: 'slow' })), 150)))]);
   const k = key();
@@ -227,8 +253,8 @@ test('unresolved [placeholders] block approval and sending; filling them works a
   let bad;
   let okHtml;
   try {
-    bad = await h.api('POST', '/api/v1/emails/send', { token: A.token, headers: key(), body: { recipient_email: 'kim@client.io', subject: 'Hi [Company]', body: 'x', confirm: true } });
-    okHtml = await h.api('POST', '/api/v1/emails/send-html', { token: A.token, headers: key(), body: { recipient_email: 'kim@client.io', subject: 'Hi', html_body: '<!--[if mso]><table><![endif]--><p>Hello</p><style>a[href]{color:red}</style>', confirm: true } });
+    bad = await h.api('POST', '/api/v1/emails/send', { token: A.token, headers: key(), body: { recipient_email: 'kim@client.io', subject: 'Hi [Company]', body: 'x', purpose: 'transactional', confirm: true } });
+    okHtml = await h.api('POST', '/api/v1/emails/send-html', { token: A.token, headers: key(), body: { recipient_email: 'kim@client.io', subject: 'Hi', html_body: '<!--[if mso]><table><![endif]--><p>Hello</p><style>a[href]{color:red}</style>', purpose: 'transactional', confirm: true } });
   } finally { mock.restore(); }
   assert.equal(bad.data.code, 'UNRESOLVED_PLACEHOLDERS');
   assert.equal(okHtml.status, 200, JSON.stringify(okHtml.data));

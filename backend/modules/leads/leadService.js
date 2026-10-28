@@ -30,8 +30,19 @@ const clean = v => {
   return s === '' ? null : s;
 };
 
+const PLACEHOLDER_DOMAIN_RE = /@(example\.(com|org|net)|test\.com)$/i;
+
 function isValidEmail(email) {
-  return !!email && EMAIL_RE.test(email) && !/@(example\.(com|org|net)|test\.com)$/i.test(email);
+  return !!email && EMAIL_RE.test(email) && !PLACEHOLDER_DOMAIN_RE.test(email);
+}
+
+/** Why an email cannot receive mail: 'missing', 'invalid' or 'placeholder' (reserved demo domains), or null. */
+function emailIssue(email) {
+  const e = clean(email);
+  if (!e) return 'missing';
+  if (!EMAIL_RE.test(e)) return 'invalid';
+  if (PLACEHOLDER_DOMAIN_RE.test(e)) return 'placeholder';
+  return null;
 }
 
 /**
@@ -100,6 +111,7 @@ function present(row) {
     name: row.name,
     email: row.email || null,
     hasValidEmail: isValidEmail(row.email),
+    emailIssue: emailIssue(row.email),
     phone: row.phone || null,
     companyName: row.company_name || null,
     estimatedBudget: row.estimated_budget || null,

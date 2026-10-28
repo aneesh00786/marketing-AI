@@ -2,10 +2,11 @@ import { Component, EventEmitter, Input, OnInit, Output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
-import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { apiRoot } from '../../core/api-base';
 import { ZohoCampaignsComponent } from './zoho-campaigns.component';
 import { TemplatePickerComponent } from './template-picker.component';
+import { EmailPreviewComponent } from './email-preview.component';
+import { CampaignMetricsComponent } from './campaign-metrics.component';
 
 /**
  * Email campaigns: written, validated, approved and sent from Marketech.ai; delivered by Zoho.
@@ -15,7 +16,7 @@ import { TemplatePickerComponent } from './template-picker.component';
 @Component({
   selector: 'app-email-campaigns',
   standalone: true,
-  imports: [CommonModule, FormsModule, ZohoCampaignsComponent, TemplatePickerComponent],
+  imports: [CommonModule, FormsModule, ZohoCampaignsComponent, TemplatePickerComponent, EmailPreviewComponent, CampaignMetricsComponent],
   templateUrl: './email-campaigns.component.html',
   styleUrls: ['../command/command-center.component.css', './email-campaigns.component.css']
 })
@@ -39,7 +40,7 @@ export class EmailCampaignsComponent implements OnInit {
   // 'new': create a campaign from a template; 'load': replace this campaign's content with one.
   picker: 'new' | 'load' | null = null;
 
-  constructor(private http: HttpClient, private sanitizer: DomSanitizer) {}
+  constructor(private http: HttpClient) {}
 
   ngOnInit(): void { this.load(); }
 
@@ -115,11 +116,6 @@ export class EmailCampaignsComponent implements OnInit {
 
   toggleList(key: string): void {
     this.form.listKeys.has(key) ? this.form.listKeys.delete(key) : this.form.listKeys.add(key);
-  }
-
-  get previewHtml(): SafeHtml {
-    // Rendered in a sandboxed iframe (no scripts, no same-origin access).
-    return this.sanitizer.bypassSecurityTrustHtml(this.form?.html || '');
   }
 
   save(then?: () => void): void {

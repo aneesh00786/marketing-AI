@@ -1,0 +1,282 @@
+<section class="md">
+  <header class="md-head">
+    <div>
+      <h2>{{ view === 'approvals' ? 'Approvals' : 'Drafts' }}</h2>
+      <p class="sub" *ngIf="view === 'drafts'">Review, edit and approve AI-written emails. Nothing is sent until you approve it and confirm.</p>
+      <p class="sub" *ngIf="view === 'approvals'">Drafts waiting for approval, approved drafts ready to send, and sends whose delivery is unknown. Approving and sending need the mail.send permission{{ caps && !canSend ? ', which your role does not have' : '' }}.</p>
+    </div>
+    <button type="button" class="btn btn-primary" *ngIf="view === 'drafts'" (click)="openCreate()" [disabled]="!canCompose" [title]="canCompose ? '' : 'Your role cannot create drafts'">＋ Create AI Draft</button>
+  </header>
+
+  <div class="md-grid" [class.show-detail]="mobileView === 'detail'">
+    <!-- ============ Draft queue ============ -->
+    <aside class="md-list" aria-label="Draft queue">
+      <div class="md-tools">
+        <input type="search" class="hud-input" [(ngModel)]="query" placeholder="Search subject, recipient or product" aria-label="Search drafts" />
+        <div class="md-filters" role="group" aria-label="Filter by status">
+          <button type="button" class="fchip" [class.on]="statusFilter === 'all'" (click)="statusFilter = 'all'">All <span>{{ scoped.length }}</span></button>
+          <ng-container *ngFor="let s of visibleStatuses">
+            <button type="button" *ngIf="count(s.key) || statusFilter === s.key" class="fchip" [class.on]="statusFilter === s.key" (click)="statusFilter = s.key" [title]="s.hint">{{ s.label }} <span>{{ count(s.key) }}</span></button>
+          </ng-container>
+        </div>
+      </div>
+
+      <div class="md-items">
+        <div *ngIf="loading && !drafts.length" class="md-empty">Loading drafts…</div>
+        <div *ngIf="loadError" class="md-empty warn-text">Could not load drafts: {{ loadError }} <button type="button" class="link-btn" (click)="load()">Try again</button></div>
+        <button type="button" *ngFor="let d of filtered" class="md-item" [class.on]="selected?.id === d.id" (click)="select(d)" [attr.aria-current]="selected?.id === d.id ? 'true' : null">
+          <div class="md-item-top">
+            <span class="sbadge" [ngClass]="statusClass(d.status)">{{ statusLabel(d.status) }}</span>
+            <span class="md-date">{{ when(d.updated_at || d.created_at) }}</span>
+          </div>
+          <strong class="md-subject">{{ d.subject || '(no subject)' }}</strong>
+          <span class="md-meta">{{ d.recipient_name || d.recipient_email || 'No recipient yet' }}<ng-container *ngIf="d.product_name"> · {{ d.product_name }}</ng-container></span>
+          <span class="md-flag" *ngIf="d.placeholders?.length && d.status === 'Draft'">{{ d.placeholders.length }} placeholder{{ d.placeholders.length > 1 ? 's' : '' }} to fill</span>
+        </button>
+        <div *ngIf="!loading && !loadError && view === 'approvals' && !scoped.length" class="md-empty">
+          <p><strong>Nothing waiting for approval.</strong></p>
+          <p class="muted">New drafts appear here until they are approved and sent.</p>
+        </div>
+        <div *ngIf="!loading && !loadError && view === 'drafts' && !drafts.length" class="md-empty">
+          <p><strong>No drafts yet.</strong></p>
+          <p class="muted">Create one with AI, then review and approve it before anything is sent.</p>
+          <button type="button" class="btn btn-secondary" (click)="openCreate()" [disabled]="!canCompose">＋ Create AI Draft</button>
+        </div>
+        <div *ngIf="scoped.length && !filtered.length" class="md-empty muted">No drafts match. <button type="button" class="link-btn" (click)="query = ''; statusFilter = 'all'">Clear filters</button></div>
+      </div>
+    </aside>
+
+    <!-- ============ Selected draft ============ -->
+    <article class="md-detail" *ngIf="selected; else noSelection" aria-label="Selected draft">
+      <button type="button" class="link-btn md-back" (click)="backToList()">← All drafts</button>
+
+      <div class="md-detail-head">
+        <span class="sbadge" [ngClass]="statusClass(selected.status)">{{ statusLabel(selected.status) }}</span>
+        <span class="muted small">Updated {{ when(selected.updated_at || selected.created_at) }} · Tone: {{ selected.tone || '—' }}</span>
+      </div>
+
+      <div class="callout danger" *ngIf="lastOutcome?.kind === 'error'" role="alert">{{ lastOutcome?.text }}</div>
+      <div class="callout warn" *ngIf="selected.status === 'Needs Review' || lastOutcome?.kind === 'unknown'" role="alert">
+        <strong>Delivery unknown.</strong>
+        {{ lastOutcome?.kind === 'unknown' ? lastOutcome?.text : 'The last send may or may not have reached ' + selected.recipient_email + '. Check their mailbox before sending again; it is never resent automatically.' }}
+        <div class="row-actions" *ngIf="selected.status === 'Needs Review'">
+          <button type="button" class="btn btn-secondary btn-sm" (click)="resolve('sent')" [disabled]="!canSend || busy">It was delivered</button>
+          <button type="button" class="btn btn-secondary btn-sm" (click)="resolve('not_sent')" [disabled]="!canSend || busy">It was not delivered</button>
+        </div>
+      </div>
+
+      <!-- Recipient -->
+      <div class="md-field">
+        <span class="md-label">Recipient</span>
+        <div class="rcard" [class.empty]="!selected.recipient_email && !selected.contact">
+          <ng-container *ngIf="selected.contact && !selected.contact.missing">
+            <span class="ravatar" aria-hidden="true">{{ (selected.contact.name || '?').charAt(0).toUpperCase() }}</span>
+            <span class="rinfo">
+              <strong>{{ selected.contact.name }}</strong>
+              <span>{{ selected.contact.email || 'No email address' }}</span>
+              <small *ngIf="selected.contact.company">{{ selected.contact.company }}</small>
+            </span>
+          </ng-container>
+          <ng-container *ngIf="selected.contact?.missing">
+            <span class="ravatar warn" aria-hidden="true">!</span>
+            <span class="rinfo"><strong>Contact deleted</strong><span>This draft's contact no longer exists in Leads. Choose a contact again.</span></span>
+          </ng-container>
+          <ng-container *ngIf="!selected.contact && selected.recipient_email">
+            <span class="ravatar muted-av" aria-hidden="true">&#64;</span>
+            <span class="rinfo">
+              <strong>{{ selected.recipient_name || selected.recipient_email }}</strong>
+              <span>{{ selected.recipient_email }}</span>
+              <small class="rtag">Not a contact in Leads</small>
+            </span>
+          </ng-container>
+          <ng-container *ngIf="!selected.contact && !selected.recipient_email">
+            <span class="rinfo"><strong>No recipient yet</strong><span>Select a contact before approving or sending.</span></span>
+          </ng-container>
+          <button type="button" class="btn btn-secondary btn-sm rchange" (click)="openContactPicker('detail')" [disabled]="!!recipientBlocker || !!busy || !canViewContacts"
+                  [title]="recipientBlocker || (canViewContacts ? '' : 'Your role cannot view contacts')">
+            {{ busy === 'recipient' ? 'Saving…' : (selected.recipient_email || selected.contact ? 'Change Contact' : 'Select Contact') }}
+          </button>
+        </div>
+        <p class="hint" *ngIf="selected.batch_id">The recipient of a product email comes from its lead record.</p>
+        <p class="hint">Product: {{ selected.product_name || 'none (generic draft)' }}</p>
+        <div class="callout warn" *ngIf="detailMismatch" role="status">
+          {{ selected.contact.name }} is {{ selected.contact.productId ? 'linked to ' + (productName(selected.contact.productId) || 'another product') : 'not linked to any product' }} in Leads CRM, not {{ selected.product_name || 'this draft\'s product' }}. The recipient stays as it is; use Change Contact to choose a contact linked to the product.
+        </div>
+      </div>
+
+      <!-- Subject -->
+      <label class="md-field">
+        <span class="md-label">Subject</span>
+        <input type="text" class="hud-input md-subject-input" [(ngModel)]="edit.subject" [disabled]="!!editBlocker" maxlength="255" />
+      </label>
+
+      <!-- Placeholders -->
+      <div class="md-ph" *ngIf="selected.placeholders?.length && !locked">
+        <strong>Fill in before approval</strong>
+        <p class="hint">These placeholders are still in the email. Each must be replaced before it can be approved or sent.</p>
+        <div class="md-ph-grid">
+          <label *ngFor="let p of selected.placeholders">
+            <code>{{ p }}</code>
+            <input type="text" class="hud-input" [(ngModel)]="placeholderValues[p]" maxlength="500" [attr.aria-label]="'Value for ' + p" [disabled]="!!editBlocker" />
+          </label>
+        </div>
+        <button type="button" class="btn btn-secondary btn-sm" (click)="fillPlaceholders()" [disabled]="!!editBlocker || busy === 'fill'">{{ busy === 'fill' ? 'Saving…' : 'Apply values' }}</button>
+      </div>
+
+      <!-- Body -->
+      <div class="md-field">
+        <div class="md-body-head">
+          <span class="md-label">Email body</span>
+          <div class="seg" role="group" aria-label="Body view">
+            <button type="button" [class.on]="!editingBody" (click)="editingBody = false">Preview</button>
+            <button type="button" [class.on]="editingBody" (click)="editingBody = true" [disabled]="!!editBlocker" [title]="editBlocker || 'Edit the email HTML'">Edit</button>
+          </div>
+        </div>
+        <textarea *ngIf="editingBody" class="hud-textarea md-code" [(ngModel)]="edit.body" rows="16" aria-label="Email body HTML" spellcheck="false"></textarea>
+        <p class="hint" *ngIf="editingBody">You are editing the email's HTML. Scripts and unsafe markup are removed when you save.</p>
+        <app-email-preview *ngIf="!editingBody" class="md-preview" [html]="edit.body" [contentKey]="selected.id" [title]="'Preview of ' + (edit.subject || 'draft')" emptyText="This draft has no body yet."></app-email-preview>
+      </div>
+
+      <!-- Delivery and engagement for a sent draft (read-only; never resends or changes the draft) -->
+      <div class="md-field" *ngIf="selected.status === 'Sent' || selected.status === 'Needs Review'">
+        <span class="md-label">Delivery &amp; engagement</span>
+        <app-email-tracking [draftId]="selected.id"></app-email-tracking>
+      </div>
+
+      <!-- AI rewrite -->
+      <div class="md-rewrite" *ngIf="!locked && canCompose">
+        <span class="muted small">Rewrite with AI:</span>
+        <button type="button" class="btn btn-secondary btn-sm" (click)="rewrite('More Professional')" [disabled]="!!busy">More professional</button>
+        <button type="button" class="btn btn-secondary btn-sm" (click)="rewrite('More Persuasive')" [disabled]="!!busy">More persuasive</button>
+        <button type="button" class="btn btn-secondary btn-sm" (click)="rewrite('Shorter & Punchier')" [disabled]="!!busy">Shorter</button>
+        <span class="muted small" *ngIf="busy === 'rewrite'">Rewriting…</span>
+      </div>
+
+      <!-- Actions -->
+      <footer class="md-actions">
+        <div class="md-actions-row">
+          <button type="button" class="btn btn-secondary" (click)="save()" [disabled]="!dirty || !!editBlocker || !!busy">{{ busy === 'save' ? 'Saving…' : 'Save changes' }}</button>
+          <button type="button" class="btn btn-secondary" *ngIf="dirty" (click)="discard()" [disabled]="!!busy">Discard</button>
+          <span class="spacer"></span>
+          <button type="button" class="btn btn-secondary" *ngIf="selected.status === 'Draft'" (click)="approve()" [disabled]="!!sendBlocker || !!busy">{{ busy === 'approve' ? 'Approving…' : '✓ Approve' }}</button>
+          <button type="button" class="btn btn-primary" *ngIf="selected.status === 'Draft' || selected.status === 'Approved'" (click)="send()" [disabled]="!!sendBlocker || !!deliveryBlocker || !!busy">
+            {{ busy === 'send' ? 'Sending…' : (selected.status === 'Approved' ? 'Send email' : 'Approve & Send') }}
+          </button>
+        </div>
+        <p class="hint md-why" *ngIf="sendBlocker && (selected.status === 'Draft' || selected.status === 'Approved')">{{ sendBlocker }}</p>
+        <p class="hint md-why warn-text" *ngIf="!sendBlocker && deliveryBlocker && (selected.status === 'Draft' || selected.status === 'Approved')" role="status">{{ deliveryBlocker }}</p>
+        <p class="hint md-why" *ngIf="!sendBlocker && selected.status === 'Draft'">Approving locks this version. Sending always asks you to confirm.</p>
+        <div class="md-danger">
+          <button type="button" class="btn btn-danger btn-sm" (click)="remove()" [disabled]="!canCompose || selected.status === 'Sending' || !!busy" [title]="selected.status === 'Sending' ? 'A draft being sent cannot be deleted' : ''">{{ busy === 'delete' ? 'Deleting…' : 'Delete draft' }}</button>
+        </div>
+      </footer>
+    </article>
+    <ng-template #noSelection>
+      <div class="md-detail md-none">
+        <p class="muted">Select a draft to review it, or create a new one with AI.</p>
+      </div>
+    </ng-template>
+  </div>
+</section>
+
+<!-- ============ Create AI draft modal ============ -->
+<div class="md-backdrop" *ngIf="showCreate" (click)="closeCreate()">
+  <div class="md-modal" role="dialog" aria-modal="true" aria-labelledby="md-create-title" (click)="$event.stopPropagation()">
+    <header class="md-modal-head">
+      <div>
+        <h3 id="md-create-title">Create an email draft</h3>
+        <p class="sub">AI writes a personalised draft for you to review. Generating a draft never sends anything.</p>
+      </div>
+      <button type="button" class="md-x" (click)="closeCreate()" [disabled]="generating" aria-label="Close">✕</button>
+    </header>
+
+    <div class="md-modal-body">
+      <!-- Product -->
+      <div class="md-field">
+        <span class="md-label">Product</span>
+        <p class="hint">The draft uses this product's saved details. Choose “generic” for a draft without product details.</p>
+        <input type="search" class="hud-input" [(ngModel)]="productQuery" placeholder="Search products" aria-label="Search products" />
+        <div class="md-options" role="listbox" aria-label="Products">
+          <button type="button" role="option" class="md-option" [class.on]="form.productId === null" [attr.aria-selected]="form.productId === null" (click)="setFormProduct(null)">Generic draft (no product)</button>
+          <button type="button" role="option" *ngFor="let p of filteredProducts" class="md-option" [class.on]="form.productId === p.id" [attr.aria-selected]="form.productId === p.id" (click)="setFormProduct(p.id)">{{ p.name }}</button>
+          <span class="muted small md-option-empty" *ngIf="productQuery && !filteredProducts.length">No product matches “{{ productQuery }}”.</span>
+        </div>
+      </div>
+
+      <!-- Recipient -->
+      <div class="md-field">
+        <span class="md-label">Recipient <span class="muted">(optional)</span></span>
+        <p class="hint">Choose a contact from Leads CRM; their details personalise the draft. Without one, the draft cannot be sent until you select a contact.<ng-container *ngIf="form.productId !== null"> The list starts with contacts linked to {{ productName(form.productId) }}.</ng-container></p>
+        <div class="rcard" *ngIf="contact">
+          <span class="ravatar" aria-hidden="true">{{ (contact.name || '?').charAt(0).toUpperCase() }}</span>
+          <span class="rinfo"><strong>{{ contact.name }}</strong><span>{{ contact.email }}</span><small *ngIf="contact.company">{{ contact.company }}</small></span>
+          <button type="button" class="btn btn-secondary btn-sm rchange" (click)="openContactPicker('create')">Change Contact</button>
+        </div>
+        <div class="rcard" *ngIf="!contact && manualRecipient">
+          <span class="ravatar muted-av" aria-hidden="true">&#64;</span>
+          <span class="rinfo"><strong>{{ manualRecipient.name || manualRecipient.email }}</strong><span>{{ manualRecipient.email }}</span><small class="rtag">Not a contact in Leads</small></span>
+          <button type="button" class="btn btn-secondary btn-sm rchange" (click)="openContactPicker('create')">Change</button>
+        </div>
+        <div class="md-rec-actions" *ngIf="!contact && !manualRecipient">
+          <button type="button" class="btn btn-secondary btn-sm" (click)="openContactPicker('create')" [disabled]="!canViewContacts" [title]="canViewContacts ? '' : 'Your role cannot view contacts'">Select Contact</button>
+          <span class="muted small">or create a generic draft and choose the contact later</span>
+        </div>
+        <div class="callout warn" *ngIf="contactMismatch" role="status">
+          {{ contact?.name }} is {{ contact?.productId ? 'linked to ' + (productName(contact?.productId ?? null) || 'another product') : 'not linked to any product' }} in Leads CRM, not {{ productName(form.productId) }}.
+          <ng-container *ngIf="contactDecisionNeeded">Keep this contact for the draft, or choose another one.
+            <span class="row-actions">
+              <button type="button" class="btn btn-secondary btn-sm" (click)="keepContact()">Keep this contact</button>
+              <button type="button" class="btn btn-secondary btn-sm" (click)="openContactPicker('create')">Choose another contact</button>
+            </span>
+          </ng-container>
+          <ng-container *ngIf="!contactDecisionNeeded">You chose to keep this contact.</ng-container>
+        </div>
+        <button type="button" class="link-btn" *ngIf="contact || manualRecipient" (click)="contact = null; manualRecipient = null">Remove recipient</button>
+      </div>
+
+      <div class="md-two">
+        <!-- Template -->
+        <div class="md-field">
+          <span class="md-label">Email template <span class="muted">(optional)</span></span>
+          <div class="md-chip" *ngIf="template">
+            <span>🧩 {{ template.name }}</span>
+            <button type="button" class="link-btn" (click)="template = null">Remove</button>
+          </div>
+          <button type="button" class="btn btn-secondary btn-sm" *ngIf="!template" (click)="showTemplatePicker = true">Choose a template</button>
+        </div>
+        <!-- Tone -->
+        <label class="md-field">
+          <span class="md-label">Tone of voice</span>
+          <select class="hud-input" [(ngModel)]="form.tone">
+            <option *ngFor="let t of tones" [value]="t.value">{{ t.label }}</option>
+          </select>
+        </label>
+      </div>
+
+      <!-- Goal -->
+      <label class="md-field">
+        <span class="md-label">Marketing goal</span>
+        <textarea class="hud-textarea" rows="4" [(ngModel)]="form.goal" maxlength="2000" placeholder="e.g. Introduce our school bus tracking app to transport managers, highlight live arrival alerts, and ask for a 15-minute demo next week."></textarea>
+      </label>
+
+      <div class="callout danger" *ngIf="createError" role="alert">{{ createError }}</div>
+    </div>
+
+    <footer class="md-modal-foot">
+      <span class="muted small">Creates a draft for review. Nothing is sent.</span>
+      <span class="spacer"></span>
+      <button type="button" class="btn btn-secondary" (click)="closeCreate()" [disabled]="generating">Cancel</button>
+      <button type="button" class="btn btn-primary" (click)="generate()" [disabled]="generating || contactDecisionNeeded" [attr.aria-busy]="generating" [title]="contactDecisionNeeded ? 'Keep the contact or choose another one first' : ''">
+        <span class="spinner" *ngIf="generating" aria-hidden="true"></span>{{ generating ? 'Generating…' : 'Generate Draft' }}
+      </button>
+    </footer>
+  </div>
+</div>
+
+<app-template-picker *ngIf="showTemplatePicker" subtitle="The AI draft starts from the template you choose." (picked)="onTemplatePicked($event)" (closed)="showTemplatePicker = false"></app-template-picker>
+
+<app-contact-picker *ngIf="picker" [title]="picker === 'create' ? 'Select contact for the new draft' : 'Select contact'"
+  [selectedId]="picker === 'detail' ? (selected?.contact?.id ?? null) : (contact?.id ?? null)"
+  [canCreate]="canAddContacts" [allowManual]="true" [products]="products"
+  [productId]="picker === 'create' ? form.productId : (selected?.product_id ?? null)"
+  (picked)="onContactPicked($event)" (manual)="onManualRecipient($event)" (closed)="picker = null"></app-contact-picker>

@@ -1,0 +1,65 @@
+<section class="et" aria-label="Delivery and engagement">
+  <div class="et-state" *ngIf="loading && !t">Loading tracking…</div>
+  <div class="et-state et-error" *ngIf="error" role="alert">{{ error }} <button type="button" class="et-link" (click)="load()">Try again</button></div>
+  <div class="et-state" *ngIf="!loading && !error && t && !t.tracked">Not tracked. This email was sent before tracking was available, or from a part of the app that is not tracked.</div>
+
+  <ng-container *ngIf="t?.tracked">
+    <div class="et-head">
+      <span class="et-badge" [ngClass]="'tone-' + status.tone">{{ status.label }}</span>
+      <span class="et-muted">via {{ providerLabel }}</span>
+      <button type="button" class="et-link et-refresh" (click)="load()" [disabled]="loading">{{ loading ? 'Refreshing…' : 'Refresh' }}</button>
+    </div>
+    <p class="et-hint">{{ status.hint }}</p>
+    <p class="et-failure" *ngIf="t.failure">
+      <strong>{{ t.deliveryStatus === 'deferred' ? 'Delay reason' : 'Reason' }}:</strong> {{ t.failure.reason || t.failure.code }}
+    </p>
+
+    <dl class="et-grid">
+      <div><dt>Accepted</dt><dd>{{ t.acceptedAt ? (t.acceptedAt | date:'medium') : 'Unavailable' }}</dd></div>
+      <div><dt>Delivered</dt><dd>{{ t.deliveredAt ? (t.deliveredAt | date:'medium') : deliveredText }}</dd></div>
+      <div *ngIf="t.bouncedAt"><dt>Bounced</dt><dd>{{ t.bouncedAt | date:'medium' }}</dd></div>
+      <div *ngIf="t.complainedAt"><dt>Marked as spam</dt><dd>{{ t.complainedAt | date:'medium' }}</dd></div>
+    </dl>
+
+    <h4>Opens <span class="et-tag">estimate</span></h4>
+    <p class="et-muted" *ngIf="modeText(t.opens.mode, 'opens') as m">{{ m }}</p>
+    <ng-container *ngIf="!modeText(t.opens.mode, 'opens')">
+      <dl class="et-grid">
+        <div><dt>Opened (unique)</dt><dd>{{ t.opens.uniqueOpened ? 'Yes' : 'No open recorded' }}</dd></div>
+        <div><dt>Open events (total)</dt><dd>{{ t.opens.totalEvents === null ? 'Not supported by provider' : t.opens.totalEvents }}</dd></div>
+        <div><dt>First recorded open</dt><dd>{{ t.opens.firstAt ? (t.opens.firstAt | date:'medium') : '—' }}</dd></div>
+        <div><dt>Last recorded open</dt><dd>{{ t.opens.lastAt ? (t.opens.lastAt | date:'medium') : '—' }}</dd></div>
+      </dl>
+      <p class="et-hint">{{ openNote }}</p>
+    </ng-container>
+
+    <h4>Link clicks</h4>
+    <p class="et-muted" *ngIf="modeText(t.clicks.mode, 'clicks') as m">{{ m }}</p>
+    <ng-container *ngIf="!modeText(t.clicks.mode, 'clicks')">
+      <p class="et-muted" *ngIf="!t.clicks.links.length">{{ t.provider === 'smtp' ? 'No trackable links in this email, or none clicked.' : 'No clicks recorded.' }}</p>
+      <table class="et-table" *ngIf="t.clicks.links.length">
+        <thead><tr><th>Link</th><th>Clicks</th><th>First</th><th>Last</th></tr></thead>
+        <tbody>
+          <tr *ngFor="let l of t.clicks.links">
+            <td class="et-url" [title]="l.url">{{ l.url || '(link)' }}</td>
+            <td>{{ l.clicks }}</td>
+            <td>{{ l.firstAt ? (l.firstAt | date:'short') : '—' }}</td>
+            <td>{{ l.lastAt ? (l.lastAt | date:'short') : '—' }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="et-hint">Security scanners in some mail systems open links automatically, so clicks can include automated visits.</p>
+    </ng-container>
+
+    <details class="et-history">
+      <summary>Event history ({{ t.events.length }})</summary>
+      <ol>
+        <li *ngFor="let e of t.events">
+          <span class="et-when">{{ e.occurredAt | date:'medium' }}</span>
+          <span>{{ eventLabel(e.type) }}</span>
+          <span class="et-muted" *ngIf="e.detail"> · {{ e.detail }}</span>
+        </li>
+      </ol>
+    </details>
+  </ng-container>
+</section>

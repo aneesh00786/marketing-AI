@@ -258,7 +258,7 @@ export class ApiService {
 
   // Sending requires the user's explicit confirmation; callers pass it after a confirm dialog.
   // idempotencyKey: one per compose action, reused if the same send is retried (never sends twice).
-  sendEmail(data: { recipient_email: string; recipient_name?: string; subject: string; body: string }, confirm: boolean, idempotencyKey: string): Observable<any> {
+  sendEmail(data: { recipient_email: string; recipient_name?: string; subject: string; body: string; purpose?: 'transactional' | 'marketing' | null; templateId?: number | null }, confirm: boolean, idempotencyKey: string): Observable<any> {
     return this.http.post(`${this.root}/api/emails/send`, { ...data, confirm }, { headers: { 'Idempotency-Key': idempotencyKey } });
   }
 
@@ -311,7 +311,7 @@ export class ApiService {
   }
 
   // 23. Visual HTML Email & Email AI Analysis
-  sendHtmlEmail(data: { recipient_email: string; recipient_name?: string; subject: string; html_body: string; body_text?: string }, confirm: boolean, idempotencyKey: string): Observable<any> {
+  sendHtmlEmail(data: { recipient_email: string; recipient_name?: string; subject: string; html_body: string; body_text?: string; purpose?: 'transactional' | 'marketing' | null; templateId?: number | null }, confirm: boolean, idempotencyKey: string): Observable<any> {
     return this.http.post(`${this.root}/api/emails/send-html`, { ...data, confirm }, { headers: { 'Idempotency-Key': idempotencyKey } });
   }
 
@@ -339,6 +339,43 @@ export class ApiService {
     return this.http.post(`${this.root}/api/drafts/generate`, data);
   }
 
+  /** Whether this workspace can send marketing email (an SMTP mailbox approved for marketing). */
+  getMarketingDelivery(): Observable<any> {
+    return this.http.get(`${this.baseUrl}/mail/marketing`);
+  }
+
+  /** Compose send report (Owners/Admins): purpose records, masked recipients, no content. */
+  getComposeReport(params: { from?: string; to?: string; purpose?: string; page?: number }): Observable<any> {
+    const p: Record<string, string> = {};
+    for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null && v !== '') p[k] = String(v);
+    return this.http.get(`${this.baseUrl}/mail/compose-report`, { params: p });
+  }
+
+  // ---------- Email tracking (delivery, opens, clicks) ----------
+  getMailTrackingSettings(): Observable<any> {
+    return this.http.get(`${this.baseUrl}/mail/tracking/settings`);
+  }
+
+  updateMailTrackingSettings(body: { trackOpens: boolean; trackClicks: boolean }): Observable<any> {
+    return this.http.put(`${this.baseUrl}/mail/tracking/settings`, body);
+  }
+
+  updateZeptoWebhook(body: { authKey?: string; enabled?: boolean; rotateUrl?: boolean }): Observable<any> {
+    return this.http.put(`${this.baseUrl}/mail/tracking/zeptomail-webhook`, body);
+  }
+
+  getEmailTracking(emailId: number): Observable<any> {
+    return this.http.get(`${this.baseUrl}/mail/tracking/emails/${emailId}`);
+  }
+
+  getDraftTracking(draftId: number): Observable<any> {
+    return this.http.get(`${this.baseUrl}/mail/tracking/drafts/${draftId}`);
+  }
+
+  getCampaignRecipients(campaignId: number, activity: string, page = 1): Observable<any> {
+    return this.http.get(`${this.baseUrl}/mail/campaigns/${campaignId}/recipients`, { params: { activity, page: String(page) } });
+  }
+
   rewriteMailDraft(id: number, instruction: string): Observable<any> {
     return this.http.post(`${this.root}/api/drafts/${id}/rewrite`, { instruction });
   }
@@ -351,7 +388,7 @@ export class ApiService {
     return this.http.post(`${this.root}/api/drafts/${id}/send`, { confirm });
   }
 
-  updateMailDraft(id: number, data: { recipient_email?: string; recipient_name?: string; subject?: string; replacements?: Record<string, string> }): Observable<any> {
+  updateMailDraft(id: number, data: { recipient_email?: string; recipient_name?: string; subject?: string; body_html?: string; replacements?: Record<string, string> }): Observable<any> {
     return this.http.patch(`${this.root}/api/drafts/${id}`, data);
   }
 

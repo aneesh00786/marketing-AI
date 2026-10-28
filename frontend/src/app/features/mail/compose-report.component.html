@@ -1,0 +1,58 @@
+<section class="cr" aria-labelledby="cr-title">
+  <button type="button" class="cr-toggle" (click)="toggle()" [attr.aria-expanded]="open" aria-controls="cr-body">
+    <span><strong id="cr-title">Compose send log</strong><small>Purpose of each Compose email (Owners and Admins)</small></span>
+    <span aria-hidden="true">{{ open ? '▴' : '▾' }}</span>
+  </button>
+  <div class="cr-body" id="cr-body" *ngIf="open">
+    <form class="cr-filters" (ngSubmit)="load(1)">
+      <label>From <input type="date" class="hud-input" name="from" [(ngModel)]="filters.from" /></label>
+      <label>To <input type="date" class="hud-input" name="to" [(ngModel)]="filters.to" /></label>
+      <label>Purpose
+        <select class="hud-input" name="purpose" [(ngModel)]="filters.purpose">
+          <option value="">All</option>
+          <option value="transactional">Transactional</option>
+          <option value="marketing">Marketing</option>
+          <option value="not_recorded">Not recorded</option>
+        </select>
+      </label>
+      <button type="submit" class="btn btn-secondary btn-sm" [disabled]="loading">Show</button>
+    </form>
+    <p class="cr-note">Recipients are masked and no message content is stored. Sends before purpose recording started show "Not recorded".</p>
+    <div class="note error" *ngIf="error" role="alert">{{ error }}</div>
+    <p class="cr-note" *ngIf="loading">Loading…</p>
+    <ng-container *ngIf="data && !error">
+      <p class="cr-note">{{ data.range.from }} to {{ data.range.to }}</p>
+      <div class="table-wrap" *ngIf="data.sends.length; else noSends">
+        <table class="cr-table">
+          <thead><tr><th>Time</th><th>Sender</th><th>Recipient</th><th>Status</th><th>Declared</th><th>Applied</th><th>Why</th></tr></thead>
+          <tbody>
+            <tr *ngFor="let s of data.sends" [class.reclassified]="s.declaredPurpose && s.declaredPurpose !== s.appliedPurpose">
+              <td>{{ s.at | date:'short' }}</td>
+              <td>{{ s.sender?.name || (s.sender ? 'User #' + s.sender.userId : '—') }}</td>
+              <td>{{ s.recipient || '—' }}</td>
+              <td>{{ s.status }}</td>
+              <td>{{ purposeLabel(s.declaredPurpose) }}</td>
+              <td><span class="cr-tag" [ngClass]="'p-' + s.appliedPurpose">{{ purposeLabel(s.appliedPurpose) }}</span></td>
+              <td>{{ reasonsText(s.reasons) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <ng-template #noSends><p class="cr-note">No Compose sends in this range.</p></ng-template>
+      <div class="cr-pager" *ngIf="page > 1 || data.hasMore">
+        <button type="button" class="btn btn-secondary btn-sm" (click)="load(page - 1)" [disabled]="page <= 1 || loading">Previous</button>
+        <span class="cr-note">Page {{ page }}</span>
+        <button type="button" class="btn btn-secondary btn-sm" (click)="load(page + 1)" [disabled]="!data.hasMore || loading">Next</button>
+      </div>
+      <ng-container *ngIf="data.refused?.length">
+        <h4>Refused attempts</h4>
+        <p class="cr-note">{{ data.refusedTruncated ? 'Showing the latest 50 refused attempts in this range; there are more. Choose a shorter date range to see the rest.' : 'Refused attempts in this range (up to 50, newest first).' }}</p>
+        <ul class="cr-refused">
+          <li *ngFor="let r of data.refused">
+            <span>{{ r.at | date:'short' }}</span> · {{ r.sender?.name || '—' }} · {{ label(r.reason) }}<ng-container *ngIf="r.appliedPurpose"> (as {{ purposeLabel(r.appliedPurpose) | lowercase }})</ng-container>
+          </li>
+        </ul>
+      </ng-container>
+    </ng-container>
+  </div>
+</section>

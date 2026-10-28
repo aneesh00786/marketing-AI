@@ -107,7 +107,8 @@
             <button class="btn btn-sm" [class.btn-primary]="viewport === 'desktop'" [class.btn-secondary]="viewport !== 'desktop'" (click)="viewport = 'desktop'">Desktop</button>
             <button class="btn btn-sm" [class.btn-primary]="viewport === 'mobile'" [class.btn-secondary]="viewport !== 'mobile'" (click)="viewport = 'mobile'">Mobile</button>
           </div>
-          <iframe class="frame" [class.mobile]="viewport === 'mobile'" sandbox="" title="Template preview" [srcdoc]="previewHtml"></iframe>
+          <app-email-preview class="frame" [html]="editing.html" [contentKey]="editing.id" [viewport]="viewport" [title]="'Preview of ' + (editing.name || 'template')"
+            emptyText="No HTML yet. Paste or import HTML to see the preview."></app-email-preview>
         </div>
       </div>
 

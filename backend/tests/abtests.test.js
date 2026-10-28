@@ -16,7 +16,8 @@ const api = (ws, method, path, body) => h.api(method, `/api/v1/ab-tests${path}`,
 const tick = (maxPerTick) => require('../modules/outreach/outreachSender').processOutreach('test-worker', { maxPerTick });
 const aiDown = { match: u => u.startsWith('https://api.groq.com/'), respond: () => h.json(500, {}) };
 const groq = obj => h.groqRoute(() => JSON.stringify(obj));
-const zepto = calls => ({ match: u => u.startsWith('https://api.zeptomail.com/'), respond: (url, init) => { const b = JSON.parse(init.body); calls.push({ to: b.to[0].email_address.address, subject: b.subject }); return h.json(200, { request_id: `r${calls.length}` }); } });
+// Sequences are marketing email: sent through a stubbed SMTP mailbox approved for marketing (never ZeptoMail).
+const zepto = calls => h.smtpRoute(m => calls.push({ to: m.to, subject: m.subject }));
 
 async function emailSequence(ws, { leads = 0, name = `Seq ${Date.now()}` } = {}) {
   const created = await h.api('POST', '/api/v1/outreach/campaigns', { token: ws.token, body: { name, productId: ws === A ? prodA : null, sendDays: [1, 2, 3, 4, 5, 6, 7], sendStartHour: 0, sendEndHour: 24, dailyLimit: 500 } });
@@ -43,7 +44,7 @@ test.before(async () => {
   await db().run("UPDATE outreach_campaigns SET status = 'stopped' WHERE status = 'running'");
   A = await h.createWorkspace({ name: 'AB A' });
   B = await h.createWorkspace({ name: 'AB B' });
-  assert.equal((await h.api('POST', '/api/v1/mail/config', { token: A.token, body: { provider: 'zeptomail', smtp_user: 'emailapikey', smtp_pass: 'zepto-A', sender_email: 'hello@a-co.io' } })).status, 200);
+  await h.useMarketingSmtp(A, 'hello@a-co.io');
   prodA = (await h.api('POST', '/api/v1/products', { token: A.token, body: { name: 'RouteKit', tagline: 'Plan delivery routes', features: ['Driver app'] } })).data.productId;
 });
 test.after(() => h.shutdown());

@@ -346,9 +346,9 @@ test('Compose & Send: template HTML with unfilled {{tokens}} is not sent; filled
   const mock = h.mockFetch([{ match: u => u.startsWith('https://api.zeptomail.com/'), respond: (u, init) => { calls.push(JSON.parse(init.body)); return h.json(200, { request_id: 'r1' }); } }]);
   const key = { 'Idempotency-Key': crypto.randomBytes(16).toString('hex') };
   try {
-    const blocked = await h.api('POST', '/api/v1/emails/send-html', { token: A.token, headers: key, body: { recipient_email: 'kim@client.io', subject: 'Hi', html_body: tpl.html, confirm: true } });
+    const blocked = await h.api('POST', '/api/v1/emails/send-html', { token: A.token, headers: key, body: { recipient_email: 'kim@client.io', subject: 'Hi', html_body: tpl.html, purpose: 'transactional', templateId: tpl.id, confirm: true } });
     assert.equal(blocked.data.code, 'UNRESOLVED_PLACEHOLDERS');
-    const sent = await h.api('POST', '/api/v1/emails/send-html', { token: A.token, headers: key, body: { recipient_email: 'kim@client.io', subject: 'Hi', html_body: tpl.html.replace('{{first_name}}', 'Kim'), confirm: true } });
+    const sent = await h.api('POST', '/api/v1/emails/send-html', { token: A.token, headers: key, body: { recipient_email: 'kim@client.io', subject: 'Hi', html_body: tpl.html.replace('{{first_name}}', 'Kim'), purpose: 'transactional', templateId: tpl.id, confirm: true } });
     assert.equal(sent.status, 200, JSON.stringify(sent.data));
   } finally { mock.restore(); }
   assert.equal(calls.length, 1);

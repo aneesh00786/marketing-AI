@@ -17,7 +17,9 @@
 .content { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 textarea.code { font-family: ui-monospace, Menlo, monospace; font-size: 12px; resize: vertical; }
 .preview { display: flex; flex-direction: column; gap: 4px; }
-.preview iframe { width: 100%; min-height: 300px; border: 1px solid var(--border); border-radius: 8px; background: #fff; }
+.preview { min-width: 0; }
+.ec-preview { height: 460px; }
+@media (max-width: 900px) { .ec-preview { height: 380px; } }
 .tag { display: inline-block; font-size: 11px; border-radius: 6px; padding: 2px 6px; background: var(--surface-hover); margin-right: 6px; }
 .tag.ok { background: var(--success-soft); color: var(--success-text); }
 .tag.warn { background: var(--warning-soft); color: var(--warning-text); }

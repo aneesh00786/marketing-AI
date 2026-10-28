@@ -95,6 +95,21 @@ export class MembersComponent implements OnInit {
     });
   }
 
+  grantHeading(capability: string): string {
+    return capability === 'mail.send_transactional' ? 'Transactional email' : capability;
+  }
+
+  /** Grant or revoke a per-member permission (the server checks role eligibility and audits it). */
+  setGrant(m: any, g: { capability: string; label: string }, on: boolean): void {
+    if (on && !confirm(`Allow ${m.displayName || m.email} to send transactional email from Compose? Transactional email can reach contacts who opted out of marketing.`)) { this.load(); return; }
+    this.busy = 'grant';
+    const url = `${this.base}/members/${m.userId}/grants/${encodeURIComponent(g.capability)}`;
+    (on ? this.http.put<any>(url, {}) : this.http.delete<any>(url)).subscribe({
+      next: () => { this.busy = ''; this.toast.emit(`${g.label}: ${on ? 'granted to' : 'removed from'} ${m.displayName || m.email}.`); this.load(); },
+      error: e => { this.busy = ''; this.toast.emit(this.err(e)); this.load(); }
+    });
+  }
+
   remove(m: any): void {
     if (!confirm(`Remove ${m.displayName || m.email} from this workspace? They lose access immediately.`)) return;
     this.http.delete<any>(`${this.base}/members/${m.userId}`).subscribe({

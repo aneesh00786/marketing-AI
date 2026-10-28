@@ -37,7 +37,7 @@
     <h3 class="sub">Members ({{ data.members.length }})</h3>
     <div class="table-wrap">
       <table class="tbl">
-        <thead><tr><th>Member</th><th>Role</th><th>Status</th><th>Joined</th><th *ngIf="data.canManage"></th></tr></thead>
+        <thead><tr><th>Member</th><th>Role</th><th>Status</th><th>Joined</th><th *ngFor="let g of data.grantable" [title]="g.label">{{ grantHeading(g.capability) }}</th><th *ngIf="data.canManage"></th></tr></thead>
         <tbody>
           <tr *ngFor="let m of data.members" [class.dim]="m.status !== 'Active'">
             <td><b>{{ m.displayName || m.email }}</b><span class="you" *ngIf="m.isYou">You</span><div class="muted small">{{ m.email }}</div></td>
@@ -49,6 +49,15 @@
             </td>
             <td><span class="tag" [class.ok]="m.status === 'Active'">{{ m.status }}</span></td>
             <td>{{ m.joinedAt | date:'mediumDate' }}</td>
+            <!-- Per-member permission grants (Owners/Admins only): only for roles that can already send mail. -->
+            <td *ngFor="let g of data.grantable">
+              <ng-container [ngSwitch]="m.grants?.[g.capability]">
+                <span *ngSwitchCase="'role'" class="muted small">Included in role</span>
+                <label *ngSwitchCase="'granted'" class="grant"><input type="checkbox" checked [disabled]="!canEdit(m) || busy === 'grant'" (change)="setGrant(m, g, false)" [attr.aria-label]="g.label + ' for ' + m.email" /> Granted</label>
+                <label *ngSwitchCase="'eligible'" class="grant"><input type="checkbox" [disabled]="!canEdit(m) || busy === 'grant'" (change)="setGrant(m, g, true)" [attr.aria-label]="g.label + ' for ' + m.email" /> Not granted</label>
+                <span *ngSwitchDefault class="muted small" title="This role cannot send mail">—</span>
+              </ng-container>
+            </td>
             <td *ngIf="data.canManage" class="right">
               <button *ngIf="canEdit(m)" class="btn btn-danger btn-sm" type="button" (click)="remove(m)">Remove</button>
             </td>

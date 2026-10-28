@@ -24,7 +24,9 @@ const DATA_CENTERS = {
 // Documented minimum scopes: campaign.CREATE (createCampaign), campaign.UPDATE (sendcampaign),
 // campaign.READ (details, reports, recent campaigns), contact.READ (mailing lists, topics).
 const SCOPES = ['ZohoCampaigns.campaign.CREATE', 'ZohoCampaigns.campaign.READ', 'ZohoCampaigns.campaign.UPDATE', 'ZohoCampaigns.contact.READ'];
-const READ_ENDPOINTS = new Set(['recentcampaigns', 'getcampaigndetails', 'campaignreports', 'getmailinglists', 'topics']);
+const READ_ENDPOINTS = new Set(['recentcampaigns', 'getcampaigndetails', 'campaignreports', 'getmailinglists', 'topics', 'getcampaignrecipientsdata']);
+// Reads Zoho documents as POST (form body). Still reads: a failure is a plain error, never "outcome unknown".
+const READ_POST_ENDPOINTS = new Set(['getcampaignrecipientsdata']);
 // Write calls whose outcome can be unknown after a timeout; never retried automatically.
 const WRITE_ENDPOINTS = new Set(['createCampaign', 'sendcampaign']);
 const TIMEOUT_MS = 20000;
@@ -139,13 +141,14 @@ async function call(dc, accessToken, endpoint, params = {}) {
   const isSend = WRITE_ENDPOINTS.has(endpoint);
   if (!isSend && !READ_ENDPOINTS.has(endpoint)) throw new Error(`Zoho endpoint "${endpoint}" is not allowed.`);
   const query = new URLSearchParams({ resfmt: 'JSON', ...params });
-  const url = `${dc.campaigns}/api/v1.1/${endpoint}${isSend ? '' : `?${query}`}`;
+  const usePost = isSend || READ_POST_ENDPOINTS.has(endpoint);
+  const url = `${dc.campaigns}/api/v1.1/${endpoint}${usePost ? '' : `?${query}`}`;
   let res;
   try {
     res = await fetch(url, {
-      method: isSend ? 'POST' : 'GET',
-      headers: { Authorization: `Zoho-oauthtoken ${accessToken}`, ...(isSend ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {}) },
-      body: isSend ? query.toString() : undefined,
+      method: usePost ? 'POST' : 'GET',
+      headers: { Authorization: `Zoho-oauthtoken ${accessToken}`, ...(usePost ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {}) },
+      body: usePost ? query.toString() : undefined,
       signal: AbortSignal.timeout(TIMEOUT_MS)
     });
   } catch (err) {

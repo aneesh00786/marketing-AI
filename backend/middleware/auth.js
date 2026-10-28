@@ -37,7 +37,8 @@ async function resolveAuth(token) {
     role: member.role,
     email: member.email,
     displayName: member.display_name,
-    capabilities: capabilitiesForRole(member.role)
+    // Role capabilities plus per-member grants the role currently qualifies for (fails closed).
+    capabilities: await require('../lib/capabilityGrants').effectiveCapabilities(member.workspace_id, member.user_id, member.role)
   };
 }
 

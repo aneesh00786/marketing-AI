@@ -27,8 +27,7 @@
 textarea.code { font-family: ui-monospace, Menlo, monospace; font-size: 12px; resize: vertical; min-height: 360px; }
 .preview { display: flex; flex-direction: column; gap: 6px; align-items: center; }
 .preview-bar { align-self: stretch; }
-.frame { width: 100%; height: 420px; border: 1px solid var(--border); border-radius: 8px; background: #fff; }
-.frame.mobile { width: 375px; max-width: 100%; }
+.frame { height: 460px; }
 .checks { font-size: 13px; }
 .warnings li { color: var(--warning-text); margin: 2px 0; }
 label.disabled { opacity: 0.6; pointer-events: none; }

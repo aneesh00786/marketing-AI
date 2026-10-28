@@ -264,3 +264,28 @@ test('voice tool track_lead uses the same validated, workspace-scoped logic', as
   assert.match(row.product_review_note, /not linked to a product/);
   assert.equal(row.estimated_budget, null);
 });
+
+test('mail contact picker semantics: product filter combines with name/email/company search; unusable emails say why', async () => {
+  const stamp = Date.now();
+  const linked = await create(A.token, { name: `Picker Linked ${stamp}`, email: `linked.${stamp}@acme.io`, companyName: `PickCo ${stamp}`, productId: prodA });
+  await create(A.token, { name: `Picker Other ${stamp}`, email: `other.${stamp}@acme.io`, companyName: `PickCo ${stamp}`, productId: prodA2 });
+  const q = async (params) => (await h.api('GET', `/api/v1/leads?${new URLSearchParams(params)}`, { token: A.token })).data.leads.map(l => l.id);
+  for (const term of [`Picker Linked ${stamp}`, `linked.${stamp}`, `PickCo ${stamp}`]) {
+    const ids = await q({ productId: prodA, q: term });
+    assert.deepEqual(ids, [linked.data.lead.id], `searching "${term}" within the product`);
+  }
+  assert.equal((await q({ q: `PickCo ${stamp}` })).length, 2, 'without a product, all matching contacts');
+  assert.deepEqual(await q({ productId: prodA, q: `Picker Linked ${stamp}` }).then(ids => ids.length), 1);
+  const bOnly = await h.api('GET', `/api/v1/leads?q=${encodeURIComponent(`PickCo ${stamp}`)}`, { token: B.token });
+  assert.equal(bOnly.data.leads.length, 0, 'another workspace sees none of them');
+
+  const placeholder = await create(A.token, { name: 'Demo Person', email: `demo.${stamp}@example.com` });
+  assert.equal(placeholder.data.lead.hasValidEmail, false);
+  assert.equal(placeholder.data.lead.emailIssue, 'placeholder');
+  assert.equal((await create(A.token, { name: 'No Mail' })).data.lead.emailIssue, 'missing');
+  assert.equal((await create(A.token, { name: 'Bad Mail', email: 'not an email' })).status, 400, 'Leads CRM refuses malformed emails on create');
+  const legacy = await h.db().run("INSERT INTO leads (workspace_id, name, email, status, created_at) VALUES (?, 'Legacy Bad', 'not an email', 'New', UTC_TIMESTAMP())", [A.workspaceId]);
+  const legacyLead = (await h.api('GET', `/api/v1/leads/${legacy.lastID}`, { token: A.token })).data.lead;
+  assert.equal(legacyLead.emailIssue, 'invalid', 'older rows with malformed emails say why');
+  assert.equal(linked.data.lead.emailIssue, null);
+});

@@ -203,7 +203,7 @@ describe('TemplatePickerComponent', () => {
     const frame = fixture.nativeElement.querySelector('iframe');
     expect(frame.getAttribute('sandbox')).toBe('');
     expect(fixture.nativeElement.querySelector('#tpl-content')).toBeNull();
-    (fixture.nativeElement.querySelector('.modal-footer .btn-primary') as HTMLButtonElement).click();
+    (fixture.nativeElement.querySelector('.tp-foot .btn-primary') as HTMLButtonElement).click();
     expect(picked.id).toBe(1);
     http.verify();
   });

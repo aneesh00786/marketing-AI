@@ -1,0 +1,113 @@
+<div class="cp-backdrop" (click)="closed.emit()">
+  <div class="cp" role="dialog" aria-modal="true" aria-labelledby="cp-title" (click)="$event.stopPropagation()">
+    <header class="cp-head">
+      <div>
+        <h3 id="cp-title">{{ mode === 'create' ? 'Add new contact' : (mode === 'manual' ? 'Use an address that is not a contact' : title) }}</h3>
+        <p class="cp-sub" *ngIf="mode === 'search'">Contacts come from Leads CRM.</p>
+        <p class="cp-sub" *ngIf="mode === 'create'">Saved to Leads CRM. Adding a contact does not record marketing consent.</p>
+        <p class="cp-sub" *ngIf="mode === 'manual'">The draft is not linked to a contact in Leads. Use this only for one-off emails.</p>
+      </div>
+      <button type="button" class="cp-x" (click)="closed.emit()" aria-label="Close">✕</button>
+    </header>
+
+    <!-- ===== Search ===== -->
+    <ng-container *ngIf="mode === 'search'">
+      <div class="cp-body">
+        <div class="cp-filters">
+          <label class="cp-filter">
+            <span>Product</span>
+            <select class="hud-input" [ngModel]="productFilter" (ngModelChange)="setProductFilter($event)" aria-label="Filter contacts by product">
+              <option [ngValue]="'all'">All contacts</option>
+              <option *ngFor="let p of products" [ngValue]="p.id">{{ p.name }}</option>
+              <option [ngValue]="'none'">No product</option>
+            </select>
+          </label>
+          <input #searchBox type="search" class="hud-input" [(ngModel)]="query" (ngModelChange)="search()" placeholder="Search by name, email or company" aria-label="Search contacts" aria-controls="cp-results" />
+        </div>
+        <p class="cp-scope" *ngIf="productFilter !== 'all'">Showing contacts linked to <strong>{{ productFilter === 'none' ? 'no product' : productName(productFilter) }}</strong> in Leads CRM. Choose “All contacts” to see everyone.</p>
+        <div class="cp-note warn" *ngIf="noneUsable" role="status">None of these contacts has an email address that can receive mail, so none can be selected. Update their emails in Leads, or add a new contact.</div>
+        <div class="cp-list" id="cp-results" role="listbox" aria-label="Contacts" [attr.aria-busy]="loading">
+          <div class="cp-state" *ngIf="loading && !results.length"><span class="cp-spin" aria-hidden="true"></span> Loading contacts…</div>
+          <div class="cp-state warn-text" *ngIf="error" role="alert">{{ error }} <button type="button" class="link-btn" (click)="search(true)">Try again</button></div>
+          <div class="cp-state muted" *ngIf="!loading && !error && !results.length">
+            {{ query.trim() ? 'No contacts match “' + query.trim() + '”' + (productFilter !== 'all' ? ' for this product.' : '.') : (productFilter !== 'all' ? 'No contacts are linked to this product.' : 'No contacts yet.') }}
+          </div>
+          <button type="button" *ngFor="let l of results" role="option" class="cp-item" [class.on]="isSelected(l)" [attr.aria-selected]="isSelected(l)"
+                  [disabled]="!l.hasValidEmail" (click)="choose(l)" (dblclick)="choose(l); confirm()" (keydown)="onListKey($event, l)">
+            <span class="cp-radio" aria-hidden="true"></span>
+            <span class="cp-main">
+              <strong>{{ l.name }}</strong>
+              <small>{{ l.hasValidEmail ? l.email : unusableReason(l) }}</small>
+            </span>
+            <span class="cp-side">
+              <span class="cp-company" *ngIf="l.companyName">{{ l.companyName }}</span>
+              <span class="cp-product" *ngIf="l.productId && productFilter === 'all'">{{ productName(l.productId) }}</span>
+            </span>
+          </button>
+        </div>
+        <div class="cp-alt">
+          <button type="button" class="btn btn-secondary btn-sm" (click)="openCreate()" [disabled]="!canCreate" [title]="canCreate ? '' : 'Your role cannot add contacts'">＋ Add New Contact</button>
+          <button type="button" class="link-btn" *ngIf="allowManual" (click)="mode = 'manual'; manualError = null">Use an address that is not a contact</button>
+        </div>
+      </div>
+      <footer class="cp-foot">
+        <button type="button" class="btn btn-secondary" (click)="closed.emit()">Cancel</button>
+        <button type="button" class="btn btn-primary" (click)="confirm()" [disabled]="!choice">Select</button>
+      </footer>
+    </ng-container>
+
+    <!-- ===== Add new contact ===== -->
+    <ng-container *ngIf="mode === 'create'">
+      <form class="cp-body" (ngSubmit)="create()" novalidate>
+        <label class="cp-field">Name <span class="req">*</span>
+          <input type="text" class="hud-input" name="cpName" [(ngModel)]="draft.name" maxlength="255" required autocomplete="off" />
+        </label>
+        <label class="cp-field">Email address <span class="req">*</span>
+          <input type="email" class="hud-input" name="cpEmail" [(ngModel)]="draft.email" maxlength="255" required autocomplete="off" (ngModelChange)="duplicate = null" />
+        </label>
+        <label class="cp-field">Company <span class="muted">(optional)</span>
+          <input type="text" class="hud-input" name="cpCompany" [(ngModel)]="draft.company" maxlength="255" autocomplete="off" />
+        </label>
+        <label class="cp-check" *ngIf="assignableProductId !== null">
+          <input type="checkbox" name="cpAssign" [(ngModel)]="draft.assignProduct" />
+          Link this contact to <strong>{{ productName(assignableProductId) }}</strong> in Leads CRM
+        </label>
+        <div class="cp-note warn" *ngIf="duplicate" role="alert">
+          <strong>{{ duplicate.name }}</strong> already uses this email address{{ duplicate.companyName ? ' (' + duplicate.companyName + ')' : '' }}.
+          <button type="button" class="btn btn-secondary btn-sm" (click)="useExisting(duplicate)">Use this contact</button>
+        </div>
+        <div class="cp-note warn" *ngIf="sameName" role="alert">
+          A contact named <strong>{{ sameName.name }}</strong> already exists{{ sameName.email ? ' (' + sameName.email + ')' : '' }}.
+          <span class="cp-note-acts">
+            <button type="button" class="btn btn-secondary btn-sm" (click)="useExisting(sameName)" [disabled]="!sameName.hasValidEmail">Use that contact</button>
+            <button type="button" class="btn btn-secondary btn-sm" (click)="createAnyway()">Create a new contact anyway</button>
+          </span>
+        </div>
+        <div class="cp-note danger" *ngIf="createError" role="alert">{{ createError }}</div>
+      </form>
+      <footer class="cp-foot">
+        <button type="button" class="btn btn-secondary" (click)="mode = 'search'" [disabled]="creating">Back</button>
+        <button type="button" class="btn btn-primary" (click)="create()" [disabled]="creating || !!duplicate">
+          <span class="cp-spin light" *ngIf="creating" aria-hidden="true"></span>{{ creating ? 'Saving…' : 'Add contact' }}
+        </button>
+      </footer>
+    </ng-container>
+
+    <!-- ===== Address without a contact ===== -->
+    <ng-container *ngIf="mode === 'manual'">
+      <div class="cp-body">
+        <label class="cp-field">Name <span class="muted">(optional)</span>
+          <input type="text" class="hud-input" [(ngModel)]="manualForm.name" maxlength="255" />
+        </label>
+        <label class="cp-field">Email address <span class="req">*</span>
+          <input type="email" class="hud-input" [(ngModel)]="manualForm.email" maxlength="255" />
+        </label>
+        <div class="cp-note danger" *ngIf="manualError" role="alert">{{ manualError }}</div>
+      </div>
+      <footer class="cp-foot">
+        <button type="button" class="btn btn-secondary" (click)="mode = 'search'">Back</button>
+        <button type="button" class="btn btn-primary" (click)="useManual()">Use this address</button>
+      </footer>
+    </ng-container>
+  </div>
+</div>

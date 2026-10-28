@@ -2,8 +2,9 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const h = require('./helpers');
 
-// Email outreach campaigns. AI and ZeptoMail are mocked; unmatched requests fail loudly,
-// so no real email can be sent. The sender is driven directly (one tick per call).
+// Email outreach campaigns. AI is mocked and SMTP is stubbed (sequences are marketing email: only an
+// SMTP mailbox approved for marketing, never ZeptoMail), so no real email can be sent. The sender is
+// driven directly (one tick per call).
 let A;
 let B;
 let C;
@@ -14,14 +15,31 @@ const sender = () => require('../modules/outreach/outreachSender');
 const db = () => h.db();
 const tick = (opts = {}) => sender().processOutreach('test-worker', { now: new Date(), ...opts });
 
+/**
+ * Stubbed SMTP mailbox. respond(body) gets the same shape as before ({ to: [{ email_address: { address } }] })
+ * and may return h.json(4xx, { error }) for a rejection (the message is kept, e.g. a 550 bounce).
+ * Each call records { auth: SMTP user, to, subject, html, headers }.
+ */
+const nodemailer = require('nodemailer');
 const zepto = (calls, respond) => ({
-  match: u => u.startsWith('https://api.zeptomail.com/'),
-  respond: (url, init) => {
-    const body = JSON.parse(init.body);
-    calls.push({ auth: init.headers.Authorization, to: body.to[0].email_address.address, subject: body.subject, html: body.htmlbody });
-    return respond ? respond(body) : h.json(200, { request_id: `req-${calls.length}` });
+  __smtp: true,
+  install() {
+    const original = nodemailer.createTransport;
+    nodemailer.createTransport = opts => ({
+      sendMail: async m => {
+        calls.push({ auth: opts?.auth?.user, to: m.to, subject: m.subject, html: m.html, headers: m.headers || {} });
+        const out = respond ? respond({ to: [{ email_address: { address: m.to } }] }) : null;
+        if (out && out.status >= 400) {
+          const e = out.json?.error;
+          throw Object.assign(new Error(typeof e === 'string' ? e : (e?.message || `rejected ${out.status}`)), { code: 'EENVELOPE', responseCode: out.status });
+        }
+        return { messageId: `<m${calls.length}@a-co.io>`, response: '250 OK', accepted: [m.to] };
+      }
+    });
+    return { restore: () => { nodemailer.createTransport = original; } };
   }
 });
+const mockFetch = routes => (routes[0] && routes[0].__smtp ? routes[0].install() : h.mockFetch(routes));
 const groq = content => h.groqRoute(() => (typeof content === 'string' ? content : JSON.stringify(content)));
 const aiDown = { match: u => u.startsWith('https://api.groq.com/'), respond: () => h.json(500, {}) };
 
@@ -65,11 +83,12 @@ test.before(async () => {
   A = await h.createWorkspace({ name: 'Outreach A' });
   B = await h.createWorkspace({ name: 'Outreach B' });
   C = await h.createWorkspace({ name: 'Outreach C (no mail)' });
-  for (const [ws, token, sender] of [[A, 'zepto-A', 'hello@a-co.io'], [C, null, null]]) {
-    if (!token) continue;
-    const r = await h.api('POST', '/api/v1/mail/config', { token: ws.token, body: { provider: 'zeptomail', smtp_user: 'emailapikey', smtp_pass: token, sender_email: sender, sender_name: 'A Co' } });
-    assert.equal(r.status, 200);
-  }
+  process.env.MAIL_ALLOW_PRIVATE_HOSTS = 'true'; // no DNS lookups of the stubbed SMTP host
+  // A: an SMTP mailbox approved for marketing (sequences never go through ZeptoMail). C: no mail.
+  const r = await h.api('POST', '/api/v1/mail/config', { token: A.token, body: { provider: 'custom_smtp', smtp_host: 'smtp.a-co.io', smtp_port: 587, smtp_user: 'hello@a-co.io', smtp_pass: 'pw', sender_email: 'hello@a-co.io', sender_name: 'A Co' } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const ok = await h.api('POST', '/api/v1/mail/marketing', { token: A.token, body: { approved: true, confirm: true, note: 'Provider allows marketing (test)' } });
+  assert.equal(ok.status, 200, JSON.stringify(ok.data));
   prodA = (await h.api('POST', '/api/v1/products', { token: A.token, body: { name: 'RouteKit', tagline: 'Plan delivery routes', features: ['Driver app'] } })).data.productId;
   leads.dana = await addLead(A, { name: 'Dana Smith', email: 'dana@fleetco.io', companyName: 'FleetCo', status: 'Contacted' });
   leads.lee = await addLead(A, { name: 'Lee Wong', email: 'lee@fleetco.io' });
@@ -156,13 +175,13 @@ test('approval needs confirmation, a configured mailbox, filled placeholders and
 test('the sender sends each step once, in order, from the caller mailbox', async () => {
   const id = await runningCampaign(A, [leads.dana, leads.lee]);
   const calls = [];
-  const mock = h.mockFetch([zepto(calls)]);
+  const mock = mockFetch([zepto(calls)]);
   try {
     await tick();
     await tick(); // nothing new: next steps are 3 days away
   } finally { mock.restore(); }
   assert.equal(calls.length, 2);
-  assert.ok(calls.every(c => c.auth === 'zepto-A'));
+  assert.ok(calls.every(c => c.auth === 'hello@a-co.io'), 'sent from the caller workspace mailbox');
   const dana = calls.find(c => c.to === 'dana@fleetco.io');
   assert.equal(dana.subject, 'Routes for FleetCo');
   assert.match(dana.html, /Hi Dana,/);
@@ -178,7 +197,7 @@ test('the sender sends each step once, in order, from the caller mailbox', async
   // Step 2 becomes due: sent once, then the sequence completes.
   await db().run('UPDATE outreach_recipients SET next_send_at = DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 MINUTE) WHERE campaign_id = ?', [id]);
   const calls2 = [];
-  const mock2 = h.mockFetch([zepto(calls2)]);
+  const mock2 = mockFetch([zepto(calls2)]);
   try { await tick(); await tick(); } finally { mock2.restore(); }
   assert.equal(calls2.length, 2);
   assert.ok(calls2.every(c => c.subject === 'Following up'));
@@ -190,7 +209,7 @@ test('the sender sends each step once, in order, from the caller mailbox', async
 test('replies, unsubscribe replies and unsubscribe links stop the sequence', async () => {
   const id = await runningCampaign(A, [leads.dana, leads.lee, leads.kim]);
   const calls = [];
-  let mock = h.mockFetch([zepto(calls)]);
+  let mock = mockFetch([zepto(calls)]);
   try { await tick(); } finally { mock.restore(); }
   assert.equal(calls.length, 3);
   const [rDana, rLee, rKim] = await recipients(id);
@@ -207,7 +226,7 @@ test('replies, unsubscribe replies and unsubscribe links stop the sequence', asy
   assert.equal((await h.api('GET', '/api/v1/outreach/unsubscribe/' + 'f'.repeat(40))).status, 404);
 
   const calls2 = [];
-  mock = h.mockFetch([zepto(calls2)]);
+  mock = mockFetch([zepto(calls2)]);
   try { await tick(); } finally { mock.restore(); }
   assert.equal(calls2.length, 0, 'no follow-up to anyone who replied or unsubscribed');
   const after = Object.fromEntries((await recipients(id)).map(r => [r.email, r.status]));
@@ -221,7 +240,7 @@ test('replies, unsubscribe replies and unsubscribe links stop the sequence', asy
 test('bounces suppress the address; other failures wait for a confirmed retry', async () => {
   const id = await runningCampaign(A, [leads.dana, leads.lee]);
   const calls = [];
-  let mock = h.mockFetch([zepto(calls, body => body.to[0].email_address.address === 'dana@fleetco.io'
+  let mock = mockFetch([zepto(calls, body => body.to[0].email_address.address === 'dana@fleetco.io'
     ? h.json(400, { error: { message: '550 5.1.1 mailbox unavailable' } })
     : h.json(422, { error: 'sender address not verified' }))]);
   try { await tick(); await tick(); } finally { mock.restore(); }
@@ -235,7 +254,7 @@ test('bounces suppress the address; other failures wait for a confirmed retry', 
   assert.equal((await api(A, 'POST', `/campaigns/${id}/recipients/${lee.id}/retry`, {})).status, 400, 'retry needs confirmation');
   assert.equal((await api(A, 'POST', `/campaigns/${id}/recipients/${lee.id}/retry`, { confirm: true })).status, 200);
   const calls2 = [];
-  mock = h.mockFetch([zepto(calls2)]);
+  mock = mockFetch([zepto(calls2)]);
   try { await tick(); } finally { mock.restore(); }
   assert.equal(calls2.length, 1);
   assert.equal((await sends(id)).filter(s => s.status === 'sent').length, 1);
@@ -249,7 +268,7 @@ test('sending respects the window, the daily limit, pause and stop', async () =>
   const closed = await runningCampaign(A, [leads.dana], { sendDays: [1, 2, 3, 4, 5, 6, 7].filter(d => d !== today), timezone: 'UTC' });
   const limited = await runningCampaign(A, [leads.lee, leads.kim, leads.sam], { dailyLimit: 1 });
   const calls = [];
-  const mock = h.mockFetch([zepto(calls)]);
+  const mock = mockFetch([zepto(calls)]);
   try { await tick(); await tick(); } finally { mock.restore(); }
   assert.equal(calls.filter(c => c.to === 'dana@fleetco.io').length, 0, 'closed sending day');
   assert.equal((await sends(limited)).length, 1, 'daily limit of 1');
@@ -257,7 +276,7 @@ test('sending respects the window, the daily limit, pause and stop', async () =>
   assert.equal((await api(A, 'POST', `/campaigns/${limited}/pause`)).status, 200);
   await db().run('UPDATE outreach_sends SET created_at = DATE_SUB(created_at, INTERVAL 2 DAY) WHERE campaign_id = ?', [limited]);
   const calls2 = [];
-  const mock2 = h.mockFetch([zepto(calls2)]);
+  const mock2 = mockFetch([zepto(calls2)]);
   try { await tick(); } finally { mock2.restore(); }
   assert.equal(calls2.length, 0, 'paused campaigns do not send');
   assert.equal((await api(A, 'POST', `/campaigns/${limited}/stop`)).status, 200);
@@ -271,7 +290,7 @@ test('a send interrupted by a crash is flagged for review, never resent', async 
   const step = await db().get('SELECT id FROM outreach_steps WHERE campaign_id = ? AND step_order = 1', [id]);
   await db().run("INSERT INTO outreach_sends (workspace_id, campaign_id, recipient_id, step_id, step_order, status, created_at) VALUES (?, ?, ?, ?, 1, 'sending', DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 HOUR))", [A.workspaceId, id, r.id, step.id]);
   const calls = [];
-  const mock = h.mockFetch([zepto(calls)]);
+  const mock = mockFetch([zepto(calls)]);
   try { await tick(); await tick(); } finally { mock.restore(); }
   assert.equal(calls.length, 0);
   assert.equal((await recipients(id))[0].status, 'needs_review');
@@ -288,4 +307,48 @@ test('campaigns are private to their workspace', async () => {
   assert.ok(!(await api(B, 'GET', '/campaigns')).data.campaigns.some(x => x.id === c.id));
   assert.equal((await api(A, 'POST', '/campaigns', { name: 'Bad product', productId: 999999999 })).status, 404);
   assert.equal((await h.api('GET', '/api/v1/outreach/campaigns')).status, 401);
+});
+
+test('a lead who withdrew consent after being added is suppressed at send time (not marked as bounced); nothing is sent to them', async () => {
+  const id = await runningCampaign(A, [leads.dana, leads.lee]);
+  await db().run("UPDATE leads SET marketing_consent = 'withdrawn' WHERE id = ?", [leads.dana]);
+  const calls = [];
+  const mock = mockFetch([zepto(calls)]);
+  try { await tick(); } finally { mock.restore(); }
+  const st = Object.fromEntries((await recipients(id)).map(r => [r.email, r.status]));
+  assert.equal(st['dana@fleetco.io'], 'suppressed');
+  assert.ok(!calls.some(c => c.to === 'dana@fleetco.io'), 'nothing sent to the withdrawn lead');
+  assert.equal(await db().get("SELECT 1 AS x FROM email_suppressions WHERE workspace_id = ? AND email = 'dana@fleetco.io' AND reason = 'bounced'", [A.workspaceId]) ?? null, null, 'not recorded as a bounce');
+  await db().run("UPDATE leads SET marketing_consent = 'unknown' WHERE id = ?", [leads.dana]);
+  await api(A, 'POST', `/campaigns/${id}/stop`);
+});
+
+test('sequences are marketing email: a ZeptoMail-only workspace pauses with the reason and nothing reaches ZeptoMail; sends carry List-Unsubscribe', async () => {
+  const Z = await h.createWorkspace({ name: 'Outreach ZeptoMail only' });
+  assert.equal((await h.api('POST', '/api/v1/mail/config', { token: Z.token, body: { provider: 'zeptomail', smtp_user: 'emailapikey', smtp_pass: 'zepto-Z', sender_email: 'hello@z-co.io', sender_name: 'Z' } })).status, 200);
+  const prodZ = (await h.api('POST', '/api/v1/products', { token: Z.token, body: { name: 'RouteKit', tagline: 'Plan delivery routes', features: ['Driver app'] } })).data.productId;
+  const zl = await addLead(Z, { name: 'Zed Doe', email: 'zed@fleetco.io', companyName: 'FleetCo' });
+  const c = (await api(Z, 'POST', '/campaigns', { name: 'Z seq', productId: prodZ, sendDays: [1, 2, 3, 4, 5, 6, 7], sendStartHour: 0, sendEndHour: 24 })).data.campaign;
+  let mock = h.mockFetch([groq(SEQ)]);
+  try { assert.equal((await api(Z, 'POST', `/campaigns/${c.id}/generate`, { steps: 2 })).status, 200); } finally { mock.restore(); }
+  assert.equal((await api(Z, 'POST', `/campaigns/${c.id}/recipients`, { leadIds: [zl] })).status, 200);
+  assert.equal((await api(Z, 'POST', `/campaigns/${c.id}/approve`, { confirm: true })).status, 200);
+  const zcalls = [];
+  mock = h.mockFetch([{ match: u => u.startsWith('https://api.zeptomail.com/'), respond: () => { zcalls.push(1); return h.json(200, { request_id: 'r' }); } }]);
+  try { await tick(); } finally { mock.restore(); }
+  assert.equal(zcalls.length, 0, 'never through ZeptoMail');
+  const camp = await db().get('SELECT status, last_error FROM outreach_campaigns WHERE id = ?', [c.id]);
+  assert.equal(camp.status, 'paused');
+  assert.match(camp.last_error, /ZeptoMail/);
+  assert.equal((await recipients(c.id))[0].status === 'bounced', false, 'not recorded as a bounce');
+
+  // The approved SMTP mailbox (workspace A) sends with List-Unsubscribe.
+  const id = await runningCampaign(A, [leads.kim]);
+  const calls = [];
+  mock = mockFetch([zepto(calls)]);
+  try { await tick(); } finally { mock.restore(); }
+  const kim = calls.find(x => x.to === 'kim@shipit.io');
+  assert.ok(kim, 'sent');
+  assert.match(kim.headers['List-Unsubscribe'] || '', /mailto:hello@a-co\.io\?subject=unsubscribe/);
+  await api(A, 'POST', `/campaigns/${id}/stop`);
 });

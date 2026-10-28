@@ -77,7 +77,8 @@ test.before(async () => {
   await db().run("UPDATE outreach_campaigns SET status = 'stopped' WHERE status = 'running'");
   A = await h.createWorkspace({ name: 'Command A' });
   B = await h.createWorkspace({ name: 'Command B' });
-  assert.equal((await h.api('POST', '/api/v1/mail/config', { token: A.token, body: { provider: 'zeptomail', smtp_user: 'emailapikey', smtp_pass: 'zepto-A', sender_email: 'hello@a-co.io' } })).status, 200);
+  // Sequences are marketing email: an SMTP mailbox approved for marketing (never ZeptoMail).
+  await h.useMarketingSmtp(A, 'hello@a-co.io');
   prodA = (await h.api('POST', '/api/v1/products', { token: A.token, body: { name: 'RouteKit', tagline: 'Plan delivery routes', features: ['Driver app'] } })).data.productId;
   prodB = (await h.api('POST', '/api/v1/products', { token: B.token, body: { name: 'B Secret Product', tagline: 'B only' } })).data.productId;
   leads.dana = await addLead(A, { name: 'Dana Smith', email: 'dana@fleetco.io', companyName: 'FleetCo', status: 'Contacted', productId: prodA });
@@ -245,7 +246,7 @@ test('overview shows approvals, scheduled activity, failures and real metrics ag
   await db().run('UPDATE outreach_campaigns SET send_days = ?, send_start_hour = 0, send_end_hour = 24 WHERE id = ?', ['1,2,3,4,5,6,7', emailId]);
   assert.equal((await h.api('POST', `/api/v1/outreach/campaigns/${emailId}/approve`, { token: A.token, body: { confirm: true } })).status, 200);
   const calls = [];
-  mock = h.mockFetch([{ match: u => u.startsWith('https://api.zeptomail.com/'), respond: () => { calls.push(1); return h.json(200, { request_id: 'r1' }); } }]);
+  mock = h.mockFetch([h.smtpRoute(() => calls.push(1))]);
   try { await require('../modules/outreach/outreachSender').processOutreach('test-worker'); } finally { mock.restore(); }
   assert.equal(calls.length, 1);
   await db().run("UPDATE campaigns SET generation_status = 'failed', generation_error = 'AI quota reached' WHERE id = ?", [socialId]);

@@ -1,0 +1,45 @@
+<section class="cm" aria-label="Campaign results">
+  <div class="cm-head">
+    <strong>Results from Zoho</strong>
+    <span class="cm-muted" *ngIf="zohoStatus">Zoho status: {{ zohoStatus }}</span>
+  </div>
+  <p class="cm-muted" *ngIf="!report">{{ sent ? 'No report yet. Use "Refresh status" to read the latest figures from Zoho.' : 'Results appear after the campaign is sent.' }}</p>
+  <div class="cm-grid" *ngIf="report">
+    <div class="cm-tile" *ngFor="let m of metrics" [class.na]="m.unavailable" [title]="m.hint || ''">
+      <span>{{ m.label }}</span>
+      <b>{{ m.value }}</b>
+      <small *ngIf="m.hint">{{ m.hint }}</small>
+    </div>
+  </div>
+  <p class="cm-note" *ngIf="report">Totals as reported by Zoho Campaigns when last refreshed. Opens are an estimate: image blocking, caching and privacy features distort them.</p>
+
+  <ng-container *ngIf="sent">
+    <div class="cm-recips" *ngIf="canViewRecipients">
+      <button type="button" class="btn btn-secondary btn-sm" *ngIf="!showRecipients" (click)="openRecipients()">Show recipient activity</button>
+      <ng-container *ngIf="showRecipients">
+        <div class="cm-recips-bar">
+          <label>Activity
+            <select class="hud-input" [(ngModel)]="activity" (ngModelChange)="loadRecipients(1)" aria-label="Recipient activity">
+              <option *ngFor="let a of activities" [value]="a.key">{{ a.label }}</option>
+            </select>
+          </label>
+          <button type="button" class="link-btn" (click)="showRecipients = false">Hide</button>
+        </div>
+        <p class="cm-muted" *ngIf="loading">Loading from Zoho…</p>
+        <div class="note error" *ngIf="error" role="alert">{{ error }} <button type="button" class="link-btn" (click)="loadRecipients(page)">Try again</button></div>
+        <p class="cm-muted" *ngIf="!loading && !error && notSent">Zoho has no recipient data for this campaign yet.</p>
+        <p class="cm-muted" *ngIf="!loading && !error && !notSent && !recipients.length">No recipients in this group{{ page > 1 ? ' on this page' : '' }}.</p>
+        <ul class="cm-list" *ngIf="recipients.length">
+          <li *ngFor="let r of recipients"><span>{{ r.email }}</span><small *ngIf="r.name">{{ r.name }}</small></li>
+        </ul>
+        <div class="cm-pager" *ngIf="page > 1 || hasMore">
+          <button type="button" class="btn btn-secondary btn-sm" (click)="loadRecipients(page - 1)" [disabled]="page <= 1 || loading">Previous</button>
+          <span class="cm-muted">Page {{ page }}</span>
+          <button type="button" class="btn btn-secondary btn-sm" (click)="loadRecipients(page + 1)" [disabled]="!hasMore || loading">Next</button>
+        </div>
+        <p class="cm-note">Read from Zoho when you open this list; not stored in Marketech.ai. Zoho does not report when each recipient opened or clicked.</p>
+      </ng-container>
+    </div>
+    <p class="cm-note" *ngIf="!canViewRecipients">Recipient-level activity is visible to owners, admins, marketing managers and approvers.</p>
+  </ng-container>
+</section>

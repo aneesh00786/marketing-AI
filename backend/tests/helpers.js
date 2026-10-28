@@ -27,6 +27,35 @@ process.env.FRONTEND_URL = 'http://localhost:4200';
 const crypto = require('crypto');
 const mysql = require('mysql2/promise');
 
+// No test may reach a real host. Unmocked requests to providers (AI, ZeptoMail, Zoho, social APIs),
+// SMTP/IMAP connections and DNS lookups of public names fail as unreachable instead; only local
+// addresses (the test server and database) resolve. Tests mock what they need with mockFetch.
+(function blockNetwork() {
+  const dns = require('dns');
+  const isLocal = host => /^(localhost|127\.\d+\.\d+\.\d+|::1|0\.0\.0\.0)$/i.test(String(host || ''));
+  const refused = host => Object.assign(new Error(`Tests never contact external hosts (${host}).`), { code: 'ENOTFOUND' });
+  const lookup = dns.lookup;
+  dns.lookup = function (host, opts, cb) {
+    if (typeof opts === 'function') { cb = opts; opts = {}; }
+    if (isLocal(host) || require('net').isIP(String(host))) return lookup.call(dns, host, opts, cb);
+    process.nextTick(() => cb(refused(host)));
+  };
+  const plookup = dns.promises.lookup;
+  dns.promises.lookup = async (host, opts) => {
+    if (isLocal(host) || require('net').isIP(String(host))) return plookup(host, opts);
+    throw refused(host);
+  };
+  const realFetch = globalThis.fetch;
+  globalThis.__realFetch = realFetch;
+  globalThis.fetch = async (input, init) => {
+    const url = typeof input === 'string' ? input : input.url;
+    let host = '';
+    try { host = new URL(url).hostname; } catch { /* relative or malformed */ }
+    if (!isLocal(host.replace(/^\[|\]$/g, ''))) throw Object.assign(new TypeError('fetch failed'), { cause: refused(host) });
+    return realFetch(input, init);
+  };
+})();
+
 let prepared = null;
 
 async function prepareDatabase() {
@@ -131,7 +160,11 @@ async function createAccount(workspaceId, { accountType = 'facebook_page', provi
  * Replaces global fetch with a router. Each route: { match: (url, init) => bool, respond: (url, init) => ({ status, json, headers }) | Error }.
  * Unmatched requests fail loudly so no test can reach a real provider.
  */
-function mockFetch(routes) {
+function mockFetch(allRoutes) {
+  // SMTP routes (smtpRoute below) stub nodemailer instead of fetch.
+  const smtp = allRoutes.filter(r => r && r.smtp);
+  const routes = allRoutes.filter(r => !(r && r.smtp));
+  const smtpRestore = smtp.length ? installSmtp(smtp[0]) : () => {};
   const original = globalThis.fetch;
   const calls = [];
   globalThis.fetch = async (input, init = {}) => {
@@ -144,10 +177,52 @@ function mockFetch(routes) {
     const headers = new Headers(out.headers || {});
     return new Response(out.json !== undefined ? JSON.stringify(out.json) : (out.text || ''), { status: out.status || 200, headers });
   };
-  return { calls, restore: () => { globalThis.fetch = original; } };
+  return { calls, restore: () => { globalThis.fetch = original; smtpRestore(); } };
 }
 
 const json = (status, body, headers) => ({ status, json: body, headers });
+
+/**
+ * Stubbed SMTP mailbox for mockFetch (marketing email goes only through an approved SMTP mailbox,
+ * never ZeptoMail). record(msg) gets { auth: SMTP user, from, to, subject, html, text, headers };
+ * respond(msg) may return json(5xx) (connection dropped during DATA: unknown outcome) or json(4xx,
+ * { error }) (clear rejection, message kept). The stubbed host is allowed only while installed.
+ */
+function smtpRoute(record, respond) {
+  return { smtp: true, record, respond };
+}
+function installSmtp(route) {
+  const nodemailer = require('nodemailer');
+  const original = nodemailer.createTransport;
+  const hosts = process.env.MAIL_ALLOW_PRIVATE_HOSTS;
+  process.env.MAIL_ALLOW_PRIVATE_HOSTS = 'true'; // no DNS lookups of the stubbed SMTP host
+  nodemailer.createTransport = opts => ({
+    sendMail: async m => {
+      const msg = { auth: opts?.auth?.user, from: m.from, to: m.to, subject: m.subject, html: m.html, text: m.text, headers: m.headers || {} };
+      if (route.record) route.record(msg);
+      const out = route.respond ? await route.respond(msg) : null;
+      if (out && out.status >= 500) throw Object.assign(new Error('Connection closed during DATA'), { code: 'ETIMEDOUT', command: 'DATA' });
+      if (out && out.status >= 400) {
+        const e = out.json?.error;
+        throw Object.assign(new Error(typeof e === 'string' ? e : (e?.message || `Recipient rejected (${out.status})`)), { code: 'EENVELOPE', responseCode: out.status });
+      }
+      return { messageId: `<stub-${Date.now()}-${Math.random().toString(16).slice(2)}@smtp.test>`, response: '250 OK', accepted: [m.to] };
+    }
+  });
+  return () => {
+    nodemailer.createTransport = original;
+    if (hosts === undefined) delete process.env.MAIL_ALLOW_PRIVATE_HOSTS; else process.env.MAIL_ALLOW_PRIVATE_HOSTS = hosts;
+  };
+}
+
+/** Configures an SMTP mailbox for the workspace and approves it for marketing (Owner/Admin token). */
+async function useMarketingSmtp(ws, sender, extra = {}) {
+  const host = `smtp.${String(sender).split('@')[1] || 'mail.test'}`;
+  const r = await api('POST', '/api/v1/mail/config', { token: ws.token, body: { provider: 'custom_smtp', smtp_host: host, smtp_port: 587, smtp_user: sender, smtp_pass: 'pw', sender_email: sender, sender_name: 'Test', ...extra } });
+  if (r.status !== 200) throw new Error(`mail config failed: ${JSON.stringify(r.data)}`);
+  const ok = await api('POST', '/api/v1/mail/marketing', { token: ws.token, body: { approved: true, confirm: true, note: 'Provider allows marketing (test)' } });
+  if (ok.status !== 200) throw new Error(`marketing approval failed: ${JSON.stringify(ok.data)}`);
+}
 
 /** Mocked Groq chat completion returning `content`. */
 function groqRoute(contentFn) {
@@ -180,7 +255,6 @@ async function api(method, pathName, { token, body: reqBody, headers = {} } = {}
   try { data = JSON.parse(text); } catch (e) { data = text; }
   return { status: res.status, data, headers: res.headers };
 }
-globalThis.__realFetch = globalThis.fetch;
 
 async function shutdown() {
   if (server) await new Promise(r => server.close(r));
@@ -194,6 +268,8 @@ module.exports = {
   addMember,
   createAccount,
   mockFetch,
+  smtpRoute,
+  useMarketingSmtp,
   json,
   groqRoute,
   api,

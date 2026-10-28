@@ -21,6 +21,9 @@ const CAPABILITIES = [
   'mail.view',
   'mail.compose',
   'mail.send',
+  // Send a Compose email as transactional/direct (may reach contacts who opted out of marketing).
+  // Least privilege: Owners and Admins only; other roles send Compose email as marketing.
+  'mail.send_transactional',
   'mail.configure',
   'settings.manage',
   'billing.manage',

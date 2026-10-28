@@ -42,14 +42,7 @@
       </div>
       <div class="note error" *ngIf="selected.status === 'failed' && selected.providerMessage">{{ selected.providerMessage }}</div>
 
-      <div class="report" *ngIf="selected.report as r">
-        <div><span>Zoho status</span><b>{{ selected.zohoStatus || '—' }}</b></div>
-        <div><span>Sent</span><b>{{ r.emails_sent_count ?? '—' }}</b></div>
-        <div><span>Delivered</span><b>{{ r.delivered_count ?? '—' }}</b></div>
-        <div><span>Opens</span><b>{{ r.opens_count ?? '—' }}</b></div>
-        <div><span>Bounces</span><b>{{ r.bounces_count ?? '—' }}</b></div>
-        <div><span>Unsubscribes</span><b>{{ r.unsub_count ?? '—' }}</b></div>
-      </div>
+      <app-campaign-metrics [campaignId]="selected.id" [report]="selected.report" [zohoStatus]="selected.zohoStatus" [status]="selected.status" [canViewRecipients]="canSend"></app-campaign-metrics>
 
       <div class="ec-form">
         <label>Campaign name <input class="hud-input" [(ngModel)]="form.name" maxlength="150" [disabled]="!editable" /></label>
@@ -82,7 +75,8 @@
           </label>
           <div class="preview">
             <span class="muted small">Preview</span>
-            <iframe sandbox="" title="Campaign preview" [srcdoc]="previewHtml"></iframe>
+            <app-email-preview class="ec-preview" [html]="form.html" [contentKey]="selected.id" [title]="'Preview of ' + (form.name || 'campaign')"
+              emptyText="No HTML content yet. Write HTML or choose a template to see the preview."></app-email-preview>
           </div>
         </div>
         <p class="muted small">Include <code>$[LI:UNSUBSCRIBE]$</code> for the unsubscribe link (Zoho requires one). Use https:// image URLs.</p>
@@ -95,5 +89,5 @@
       </div>
     </div>
   </div>
-  <app-template-picker *ngIf="picker" [title]="picker === 'new' ? 'New campaign from a template' : 'Load a template into this campaign'" (picked)="onTemplatePicked($event)" (closed)="picker = null"></app-template-picker>
+  <app-template-picker *ngIf="picker" [subtitle]="picker === 'new' ? 'A new campaign is created from the template you choose.' : 'Replaces this campaign\'s HTML content. Nothing changes until you click Use This Template.'" (picked)="onTemplatePicked($event)" (closed)="picker = null"></app-template-picker>
 </section>

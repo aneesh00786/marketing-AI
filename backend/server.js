@@ -86,7 +86,10 @@ const authLimiter = rateLimit({
   message: 'Too many sign-in attempts. Please wait and try again.'
 });
 app.use(['/api/v1/auth/login', '/api/auth/login', '/api/v1/auth/register', '/api/auth/register'], authLimiter);
-app.use('/api', rateLimit({ windowMs: 60 * 1000, max: 300, keyFn: req => req.headers.authorization || req.ip }));
+// Email tracking (/api/v1/mail/t/...) has its own limits: recipients' link clicks must never be refused,
+// and provider webhooks arrive in bursts from a few IP addresses.
+const globalApiLimit = rateLimit({ windowMs: 60 * 1000, max: 300, keyFn: req => req.headers.authorization || req.ip });
+app.use('/api', (req, res, next) => (req.path.startsWith('/v1/mail/t/') ? next() : globalApiLimit(req, res, next)));
 app.use('/api', apiGate({
   publicPaths: [
     '/api/v1/auth/login', '/api/auth/login',
@@ -104,6 +107,11 @@ app.use('/api', apiGate({
     /^\/api\/v1\/mail\/assets\/[A-Za-z0-9_-]{43}$/,
     // Unsubscribe links in product emails carry a random per-recipient token.
     /^\/api\/v1\/mail\/unsubscribe\/[a-f0-9]{40}$/,
+    // Email tracking: open pixel and tracked links (opaque per-email/per-link tokens) and the
+    // ZeptoMail webhook (signature-verified; off unless ZEPTOMAIL_WEBHOOKS_ENABLED=1).
+    /^\/api\/v1\/mail\/t\/o\/[a-f0-9]{32}\.gif$/,
+    /^\/api\/v1\/mail\/t\/c\/[a-f0-9]{32}$/,
+    /^\/api\/v1\/mail\/t\/webhooks\/zeptomail\/[a-f0-9]{32}$/,
     /^\/api\/v1\/social\/webhooks\/[a-z_]+$/,
     // Uploaded social media files, downloaded by platforms such as Instagram (opaque, unguessable ids).
     /^\/api\/v1\/social\/media-files\/[A-Za-z0-9_-]{43}$/,
@@ -135,8 +143,13 @@ app.use('/api/v1/mail/templates', mailTemplateRoutes.templates);
 app.use('/api/v1/mail/assets', mailTemplateRoutes.assets);
 // Product -> Leads -> personalized emails (batches of drafts) and their unsubscribe links.
 const productEmailRoutes = require('./modules/mail/productEmails/routes');
-app.use('/api/v1/mail/product-emails', productEmailRoutes.router);
+// Hidden unless PRODUCT_EMAILS_ENABLED=1 (lib/features.js); unsubscribe links always stay active.
+app.use('/api/v1/mail/product-emails', require('./lib/features').requireProductEmails, productEmailRoutes.router);
 app.use('/api/v1/mail/unsubscribe', productEmailRoutes.unsubscribe);
+// Email delivery/open/click tracking for Mail Center emails (public pixel, links and webhook; authenticated views).
+const mailTrackingRoutes = require('./modules/mail/tracking/routes');
+app.use('/api/v1/mail/t', mailTrackingRoutes.publicRouter);
+app.use('/api/v1/mail/tracking', mailTrackingRoutes.router);
 app.use(['/api/v1/mail', '/api/mail'], mailRoutes.settings);
 app.use(mailRoutes.tools);
 // Tenant-aware Business Playbooks ("AI Campaigns").
@@ -991,7 +1004,8 @@ app.get(['/api/status'], (req, res) => {
     voice_engine: 'ElevenLabs Conversational AI',
     agent_id: process.env.ELEVENLABS_AGENT_ID,
     lan_ip: lanIp,
-    mobile_url: `http://${lanIp}:${PORT}`
+    mobile_url: `http://${lanIp}:${PORT}`,
+    features: { productEmails: require('./lib/features').productEmailsEnabled() }
   });
 });
 
@@ -1308,6 +1322,8 @@ async function startServer() {
     await require('./lib/productionConfig').enforceMigrated('api');
     // Staging only (DEPLOYMENT_ENV=staging): never serve a copy that still holds live production integrations.
     await require('./lib/stagingGuard').enforceStaging('api', { query: all });
+    // Deletes tracking events and tracked links past MAIL_TRACKING_RETENTION_DAYS.
+    require('./modules/mail/tracking/trackingService').startRetention();
     app.listen(PORT, '0.0.0.0', () => {
       console.log(`====================================================`);
       console.log(`Marketech.ai — AI Marketing Workspace`);

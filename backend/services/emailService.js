@@ -78,7 +78,7 @@ async function assertSafeMailHost(host) {
  * workspace only.
  */
 
-async function sendZeptoMail({ to, recipientName = '', subject, html, text = '', fromAddress, fromName, replyTo, token }) {
+async function sendZeptoMail({ to, recipientName = '', subject, html, text = '', fromAddress, fromName, replyTo, token, tracking = null }) {
   // The caller resolves the token for its own workspace; there is no shared fallback here.
   const authToken = token;
   if (!authToken) {
@@ -99,7 +99,10 @@ async function sendZeptoMail({ to, recipientName = '', subject, html, text = '',
         subject: subject,
         htmlbody: html || `<p>${text || ''}</p>`,
         // Plain-text part for clients that do not show HTML.
-        textbody: text || undefined
+        textbody: text || undefined,
+        // Tracked Mail Center emails: our opaque reference, and ZeptoMail's open/click tracking set
+        // explicitly from the workspace policy (off unless enabled and reportable).
+        ...(tracking ? { client_reference: tracking.clientReference, track_opens: !!tracking.trackOpens, track_clicks: !!tracking.trackClicks } : {})
       }),
       signal: AbortSignal.timeout(ZEPTO_TIMEOUT_MS)
     });
@@ -403,10 +406,22 @@ async function sendRealEmail(workspaceId, {
   // Marketing emails: { url, mailto } for List-Unsubscribe; url (https) also enables RFC 8058 one-click.
   listUnsubscribe = null,
   // 'marketing': never through ZeptoMail, only an SMTP mailbox approved for marketing (no fallback).
-  purpose = 'transactional'
+  purpose = 'transactional',
+  // Mail Center sends opt in: { draftId?, consentOk? }. Tracking only records; it never changes how or whether the email is sent.
+  track = null,
+  // Who may receive it (lib/mailSuppression.js). Marketing email is always checked as marketing;
+  // a caller may only make a transactional send stricter, never a marketing one looser.
+  suppressionPolicy = null
 }) {
   const recipient = String(to || '').trim();
   if (!isValidRecipient(recipient)) throw mailError('A valid recipient email address is required (placeholder domains such as example.com are not accepted).', 400, 'INVALID_RECIPIENT');
+  const policy = purpose === 'marketing' || suppressionPolicy === 'marketing' ? 'marketing' : 'transactional';
+  const blocked = await require('../lib/mailSuppression').suppressionBlock(workspaceId, recipient, policy);
+  if (blocked) {
+    const err = mailError(`Not sent: ${blocked.message}`, 409, 'RECIPIENT_SUPPRESSED');
+    err.suppressionReason = blocked.reason;
+    throw err;
+  }
   if (!String(subject || '').trim()) throw mailError('A subject is required.', 400, 'VALIDATION_ERROR');
   html = html || `<p>${String(text || '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))}</p>`;
 
@@ -438,6 +453,8 @@ async function sendRealEmail(workspaceId, {
   let smtpStatus = null;
   let deliveryDetails = null;
   let lastError = null;
+  let provider = null;
+  const tracker = track ? await require('../modules/mail/tracking/trackingService').begin(workspaceId, track) : null;
 
   // 1. ZeptoMail with this workspace's token (transactional email only).
   if (purpose !== 'marketing' && usesZepto(workspaceId, config)) {
@@ -447,15 +464,20 @@ async function sendRealEmail(workspaceId, {
         fromAddress: senderEmail,
         fromName: config.sender_name || senderEmail,
         replyTo: replyTo || senderEmail,
-        token: zeptoToken(workspaceId, config)
+        token: zeptoToken(workspaceId, config),
+        tracking: tracker ? tracker.zeptoOptions() : null
       });
       sent = true;
+      provider = 'zeptomail';
       messageId = zeptoResult.messageId;
       smtpStatus = 'Sent via ZeptoMail';
       deliveryDetails = zeptoResult.data;
     } catch (zeptoErr) {
       // Possibly delivered: never fall back to SMTP, which could deliver a second copy.
-      if (zeptoErr.outcomeUnknown) throw zeptoErr;
+      if (zeptoErr.outcomeUnknown) {
+        if (tracker) await tracker.unknown(zeptoErr.code);
+        throw zeptoErr;
+      }
       lastError = zeptoErr;
       console.warn('ZeptoMail dispatch error:', zeptoErr.message);
     }
@@ -467,16 +489,22 @@ async function sendRealEmail(workspaceId, {
     if (transporter) {
       try {
         await assertSafeMailHost(config.smtp_host);
+        const smtpHtml = tracker ? await tracker.instrumentSmtp(html) : html;
         const info = await transporter.sendMail({
-          from: fromAddress, to: recipient, subject, text: plain, html, replyTo: replyTo || senderEmail,
+          from: fromAddress, to: recipient, subject, text: plain, html: smtpHtml, replyTo: replyTo || senderEmail,
           ...(unsubHeaders ? { headers: unsubHeaders } : {})
         });
         sent = true;
+        provider = 'smtp';
         messageId = info.messageId || null;
         smtpStatus = 'Sent via SMTP';
         deliveryDetails = { response: info.response, accepted: info.accepted };
       } catch (err) {
-        if (smtpOutcomeUnknown(err)) throw outcomeUnknownError(`the SMTP connection failed while sending (${err.code || err.message})`, err);
+        if (smtpOutcomeUnknown(err)) {
+          const unknownErr = outcomeUnknownError(`the SMTP connection failed while sending (${err.code || err.message})`, err);
+          if (tracker) await tracker.unknown(unknownErr.code);
+          throw unknownErr;
+        }
         lastError = err;
         console.warn('SMTP dispatch error:', err.message);
       }
@@ -484,6 +512,7 @@ async function sendRealEmail(workspaceId, {
   }
 
   if (!sent) {
+    if (tracker) await tracker.failed(lastError?.code || 'MAIL_NOT_CONFIGURED', lastError ? 'The email was not sent.' : 'Mail is not configured for this workspace.');
     if (lastError) throw mailError(`Email was not sent: ${lastError.message}`, lastError.status === 400 ? 400 : 502, lastError.code || 'MAIL_SEND_FAILED');
     throw mailError('Email was not sent: mail is not configured for this workspace. Add SMTP or ZeptoMail settings in Mail Settings.', 503, 'MAIL_NOT_CONFIGURED');
   }
@@ -505,10 +534,13 @@ async function sendRealEmail(workspaceId, {
   } catch (dbErr) {
     // Delivered but not recorded: callers must not send it again.
     console.error('Email sent but not recorded:', dbErr.message);
+    if (tracker) await tracker.accepted({ provider, messageId, emailId: null });
     const err = mailError(`The email was accepted (${smtpStatus}) but could not be recorded. Do not send it again.`, 500, 'MAIL_SENT_NOT_RECORDED');
     err.outcomeUnknown = true;
     throw err;
   }
+
+  if (tracker) await tracker.accepted({ provider, messageId, emailId: insertRes.lastID });
 
   return {
     success: true,

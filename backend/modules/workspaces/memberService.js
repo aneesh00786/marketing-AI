@@ -5,6 +5,7 @@ const { audit } = require('../../lib/audit');
 const { ROLES } = require('../../lib/permissions');
 const emailService = require('../../services/emailService');
 const authService = require('../../services/authService');
+const grants = require('../../lib/capabilityGrants');
 
 /**
  * Workspace members and invitations. The workspace is always the caller's session workspace;
@@ -69,8 +70,20 @@ async function listMembers(ctx) {
       `SELECT i.*, u.display_name AS inviter_name, u.email AS inviter_email FROM workspace_invitations i
        LEFT JOIN users u ON u.id = i.invited_by WHERE i.workspace_id = ? AND i.status = 'pending' ORDER BY i.id DESC`, [ws(ctx)])).map(presentInvitation);
   }
+  // Per-member grants (Owners/Admins only): state per grantable capability for each active member.
+  const grantRows = manage ? await all('SELECT user_id, capability FROM workspace_member_capability_grants WHERE workspace_id = ?', [ws(ctx)]).catch(() => []) : [];
+  const grantsOf = userId => {
+    const out = {};
+    for (const cap of Object.keys(grants.GRANTABLE)) {
+      const m = members.find(x => x.user_id === userId);
+      const e = m && m.status === 'Active' ? grants.eligibility(m.role, cap) : 'not_eligible';
+      out[cap] = e === 'eligible' && grantRows.some(r => r.user_id === userId && r.capability === cap) ? 'granted' : e;
+    }
+    return out;
+  };
   return {
-    members: members.map(m => ({ userId: m.user_id, email: m.email, displayName: m.display_name, role: m.role, status: m.status, joinedAt: m.created_at, isYou: m.user_id === ctx.auth.userId })),
+    members: members.map(m => ({ userId: m.user_id, email: m.email, displayName: m.display_name, role: m.role, status: m.status, joinedAt: m.created_at, isYou: m.user_id === ctx.auth.userId, ...(manage ? { grants: grantsOf(m.user_id) } : {}) })),
+    grantable: manage ? Object.entries(grants.GRANTABLE).map(([capability, g]) => ({ capability, label: g.label, requires: g.requires })) : [],
     invitations,
     roles: ROLES,
     canManage: manage,
@@ -186,6 +199,8 @@ async function changeRole(ctx, rawUserId, input) {
   if (m.role === OWNER && await ownersLeftAfter(ws(ctx), m.user_id) < 1) throw httpError(409, 'A workspace must keep at least one Owner.', 'LAST_OWNER');
   await run("UPDATE workspace_members SET role = ? WHERE workspace_id = ? AND user_id = ? AND status = 'Active'", [role, ws(ctx), m.user_id]);
   await audit(ctx, 'workspace.member_role_changed', { resourceType: 'workspace_member', resourceId: m.user_id, metadata: { from: m.role, to: role } });
+  // Grants the new role no longer qualifies for are removed (they were already ignored at sign-in checks).
+  await dropIneligibleGrants(ctx, m.user_id, role, 'role_changed');
   return { userId: m.user_id, role };
 }
 
@@ -194,7 +209,44 @@ async function removeMember(ctx, rawUserId) {
   if (m.role === OWNER && await ownersLeftAfter(ws(ctx), m.user_id) < 1) throw httpError(409, 'A workspace must keep at least one Owner.', 'LAST_OWNER');
   await run("UPDATE workspace_members SET status = 'Removed' WHERE workspace_id = ? AND user_id = ? AND status = 'Active'", [ws(ctx), m.user_id]);
   await audit(ctx, 'workspace.member_removed', { resourceType: 'workspace_member', resourceId: m.user_id, metadata: { role: m.role } });
+  await dropIneligibleGrants(ctx, m.user_id, null, 'member_removed');
   return { removed: true };
+}
+
+// ---------------------------------------------------------------- capability grants (Owners/Admins)
+
+/** Removes grants the member's role does not qualify for (role null: all of them), with an audit entry each. */
+async function dropIneligibleGrants(ctx, userId, role, why) {
+  const rows = await all('SELECT id, capability FROM workspace_member_capability_grants WHERE workspace_id = ? AND user_id = ?', [ws(ctx), userId]).catch(() => []);
+  for (const r of rows) {
+    if (role && grants.eligibility(role, r.capability) === 'eligible') continue;
+    const del = await run('DELETE FROM workspace_member_capability_grants WHERE id = ? AND workspace_id = ?', [r.id, ws(ctx)]);
+    if (del.changes) await audit(ctx, 'workspace.capability_revoked', { resourceType: 'workspace_member', resourceId: userId, metadata: { capability: r.capability, reason: why } });
+  }
+}
+
+async function requireGrantTarget(ctx, rawUserId, capability) {
+  if (!grants.GRANTABLE[capability]) throw httpError(400, 'This permission cannot be granted individually.', 'NOT_GRANTABLE');
+  return requireOtherMember(ctx, rawUserId);
+}
+
+/** Grants a grantable capability to an eligible member (role includes the prerequisite). Idempotent. */
+async function grantCapability(ctx, rawUserId, capability) {
+  const m = await requireGrantTarget(ctx, rawUserId, capability);
+  const e = grants.eligibility(m.role, capability);
+  if (e === 'role') throw httpError(409, `The ${m.role} role already includes this permission.`, 'ALREADY_IN_ROLE');
+  if (e !== 'eligible') throw httpError(409, `The ${m.role} role cannot send mail, so this permission cannot be granted.`, 'NOT_ELIGIBLE');
+  const ins = await run('INSERT IGNORE INTO workspace_member_capability_grants (workspace_id, user_id, capability, granted_by, granted_at) VALUES (?, ?, ?, ?, UTC_TIMESTAMP())',
+    [ws(ctx), m.user_id, capability, ctx.auth.userId]);
+  if (ins.changes) await audit(ctx, 'workspace.capability_granted', { resourceType: 'workspace_member', resourceId: m.user_id, metadata: { capability, role: m.role } });
+  return { userId: m.user_id, capability, granted: true };
+}
+
+async function revokeCapability(ctx, rawUserId, capability) {
+  const m = await requireGrantTarget(ctx, rawUserId, capability);
+  const del = await run('DELETE FROM workspace_member_capability_grants WHERE workspace_id = ? AND user_id = ? AND capability = ?', [ws(ctx), m.user_id, capability]);
+  if (del.changes) await audit(ctx, 'workspace.capability_revoked', { resourceType: 'workspace_member', resourceId: m.user_id, metadata: { capability, reason: 'revoked' } });
+  return { userId: m.user_id, capability, granted: false };
 }
 
 // ---------------------------------------------------------------- the invited person
@@ -298,4 +350,4 @@ async function decline(ctx, input) {
   return { declined: true };
 }
 
-module.exports = { listMembers, invite, resend, cancel, changeRole, removeMember, myInvitations, preview, accept, decline, hashToken, OWNER };
+module.exports = { listMembers, invite, resend, cancel, changeRole, removeMember, grantCapability, revokeCapability, myInvitations, preview, accept, decline, hashToken, OWNER };

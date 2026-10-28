@@ -16,3 +16,5 @@ tr.dim td { opacity: 0.6; }
   .invite-form { grid-template-columns: 1fr; }
   .link-row { flex-wrap: wrap; }
 }
+
+.grant { display: inline-flex; gap: 6px; align-items: center; font-size: 0.82rem; white-space: nowrap; }

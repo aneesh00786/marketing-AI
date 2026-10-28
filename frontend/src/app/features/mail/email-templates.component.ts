@@ -2,8 +2,8 @@ import { Component, EventEmitter, HostListener, OnInit, Output } from '@angular/
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
-import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { apiRoot } from '../../core/api-base';
+import { EmailPreviewComponent } from './email-preview.component';
 
 export type TemplateUseTarget = 'email' | 'campaign' | 'draft';
 
@@ -15,7 +15,7 @@ export type TemplateUseTarget = 'email' | 'campaign' | 'draft';
 @Component({
   selector: 'app-email-templates',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, EmailPreviewComponent],
   templateUrl: './email-templates.component.html',
   styleUrls: ['../command/command-center.component.css', './email-templates.component.css']
 })
@@ -47,7 +47,7 @@ export class EmailTemplatesComponent implements OnInit {
   original = '';
   viewport: 'desktop' | 'mobile' = 'desktop';
 
-  constructor(private http: HttpClient, private sanitizer: DomSanitizer) {}
+  constructor(private http: HttpClient) {}
 
   ngOnInit(): void {
     // Permissions come from the template API itself (not from any other module's status).
@@ -70,10 +70,6 @@ export class EmailTemplatesComponent implements OnInit {
   get tokenList(): string { return this.tokens.map(t => `{{${t}}}`).join(', '); }
   get pages(): number { return Math.max(1, Math.ceil(this.total / this.pageSize)); }
   get dirty(): boolean { return !!this.editing && JSON.stringify(this.snapshot()) !== this.original; }
-  get previewHtml(): SafeHtml {
-    // Rendered only inside <iframe sandbox="">: no scripts, no access to the app, cookies or tokens.
-    return this.sanitizer.bypassSecurityTrustHtml(this.editing?.html || '');
-  }
 
   private snapshot(): any {
     const e = this.editing || {};

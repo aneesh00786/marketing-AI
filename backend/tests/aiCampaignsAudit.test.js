@@ -19,19 +19,12 @@ const aiDown = { match: u => u.startsWith('https://api.groq.com/'), respond: () 
 const groq = content => h.groqRoute(() => JSON.stringify(content));
 const day = n => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
 
-const zepto = (calls, respond) => ({
-  match: u => u.startsWith('https://api.zeptomail.com/'),
-  respond: (url, init) => {
-    const body = JSON.parse(init.body);
-    calls.push(body.to[0].email_address.address);
-    return respond ? respond(body) : h.json(200, { request_id: `req-${calls.length}` });
-  }
-});
+// Sequences are marketing email: sent through a stubbed SMTP mailbox approved for marketing (never ZeptoMail).
+const zepto = (calls, respond) => h.smtpRoute(m => calls.push(m.to), respond ? m => respond({ to: [{ email_address: { address: m.to } }] }) : null);
 
 async function workspaceWithMail(name) {
   const ws = await h.createWorkspace({ name });
-  const r = await h.api('POST', '/api/v1/mail/config', { token: ws.token, body: { provider: 'zeptomail', smtp_user: 'emailapikey', smtp_pass: `zepto-${ws.workspaceId}`, sender_email: `hello@ws${ws.workspaceId}.io`, imap_host: 'imap.mailhost.io', imap_user: `in@ws${ws.workspaceId}.io`, imap_pass: 'x' } });
-  assert.equal(r.status, 200, JSON.stringify(r.data));
+  await h.useMarketingSmtp(ws, `hello@ws${ws.workspaceId}.io`, { imap_host: 'imap.mailhost.io', imap_user: `in@ws${ws.workspaceId}.io`, imap_pass: 'x' });
   await db().run('UPDATE mail_configurations SET last_synced_at = UTC_TIMESTAMP() WHERE workspace_id = ?', [ws.workspaceId]);
   return ws;
 }

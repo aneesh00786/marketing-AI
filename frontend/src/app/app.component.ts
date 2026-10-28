@@ -1,7 +1,6 @@
 import { Component, OnInit, OnDestroy, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import * as XLSX from 'xlsx';
 import { ApiService } from './services/api.service';
 import { SpeechService } from './services/speech.service';
@@ -14,35 +13,34 @@ import { IconComponent } from './shared/icon.component';
 import { DashboardComponent, DashboardNavigation } from './features/dashboard/dashboard.component';
 import { LeadDiscoveryComponent } from './features/leads/lead-discovery.component';
 import { MembersComponent } from './features/members/members.component';
-import { EmailCampaignsComponent } from './features/mail/email-campaigns.component';
-import { EmailTemplatesComponent } from './features/mail/email-templates.component';
 import type { TemplateUseTarget } from './features/mail/email-templates.component';
 import { TemplatePickerComponent } from './features/mail/template-picker.component';
-import { ProductEmailsComponent } from './features/mail/product-emails.component';
+import { MailCenterComponent } from './features/mail/mail-center.component';
+import { DataState, MailSection, mailSectionFromLink } from './features/mail/mail-nav';
+import { EmailPreviewComponent } from './features/mail/email-preview.component';
+import { EmailTrackingComponent } from './features/mail/email-tracking.component';
+import { textToPreviewHtml } from './features/mail/email-preview';
 import { findTokens, fillTokens, defaultTokenValues } from './features/mail/template-utils';
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [CommonModule, FormsModule, LoginComponent, SocialHubComponent, CommandCenterComponent, IconComponent, DashboardComponent, LeadDiscoveryComponent, MembersComponent, EmailCampaignsComponent, EmailTemplatesComponent, TemplatePickerComponent, ProductEmailsComponent],
+  imports: [CommonModule, FormsModule, LoginComponent, SocialHubComponent, CommandCenterComponent, IconComponent, DashboardComponent, LeadDiscoveryComponent, MembersComponent, TemplatePickerComponent, MailCenterComponent, EmailPreviewComponent, EmailTrackingComponent],
   templateUrl: './app.component.html',
   styleUrls: ['./app.component.css']
 })
 export class AppComponent implements OnInit, OnDestroy {
   // Navigation: Directly accessible HUD
-  // Email campaigns panel in Mail Center (Zoho delivery), and the result of returning from Zoho sign-in.
-  showZohoPanel = false;
-  // Email Templates panel; template picker for Compose or Drafts; template handed to Campaigns.
-  showTemplatesPanel = false;
-  // Product → Leads → personalized emails panel.
-  showProductEmailsPanel = false;
-  templatePickerFor: 'compose' | 'draft' | null = null;
+  // Mail Center section (Overview, Drafts, Approvals, Product Emails, Campaigns, Email Templates).
+  mailSection: MailSection = 'overview';
+  // Template picker for Compose; template handed to Campaigns or Drafts; result of returning from Zoho sign-in.
+  templatePickerFor: 'compose' | null = null;
   campaignStartTemplate: { id: number; name: string } | null = null;
   draftTemplate: { id: number; name: string } | null = null;
   composeTemplateName = '';
   composeTokenValues: Record<string, string> = {};
   zohoOauthResult: { zoho?: string; reason?: string } | null = null;
-  currentRoute: 'dashboard' | 'products' | 'leads' | 'emails' | 'drafts' | 'businesses' | 'social' | 'voice' | 'appointments' | 'members' = 'dashboard';
+  currentRoute: 'dashboard' | 'products' | 'leads' | 'emails' | 'businesses' | 'social' | 'voice' | 'appointments' | 'members' = 'dashboard';
 
   // ---------- App shell (sidebar, top bar, menus) ----------
   readonly navGroups: { label: string; items: { route: AppComponent['currentRoute']; label: string; icon: string; subtitle: string }[] }[] = [
@@ -63,8 +61,7 @@ export class AppComponent implements OnInit, OnDestroy {
     {
       label: 'Communicate',
       items: [
-        { route: 'emails', label: 'Mail Center', icon: 'mail', subtitle: 'Inbox, visual HTML mail and AI smart replies' },
-        { route: 'drafts', label: 'Mail Drafts', icon: 'drafts', subtitle: 'AI drafts, rewrites and approval before sending' }
+        { route: 'emails', label: 'Mail Center', icon: 'mail', subtitle: 'Mailbox, drafts, approvals, campaigns and templates' }
       ]
     },
     {
@@ -104,18 +101,22 @@ export class AppComponent implements OnInit, OnDestroy {
       products: this.digitalProducts.length,
       leads: this.leadTotal || this.leads.length,
       emails: this.emails.length,
-      drafts: this.drafts.length,
       appointments: this.appointments.length
     };
     return route in counts ? counts[route] : null;
   }
 
-  navigate(route: AppComponent['currentRoute']): void {
-    // Sidebar navigation opens a module at its default view.
+  /**
+   * Sidebar navigation opens a module at its default view. 'drafts' is the former Mail Drafts page:
+   * it now opens Mail Center's Drafts section, so links to it from elsewhere keep working.
+   */
+  navigate(route: AppComponent['currentRoute'] | 'drafts', mailSection: MailSection = 'overview'): void {
     this.socialSection = null;
     this.socialCampaignId = null;
     this.socialLibraryStatus = null;
     this.showPlaybooks = false;
+    if (route === 'drafts') { route = 'emails'; mailSection = 'drafts'; }
+    if (route === 'emails') this.mailSection = mailSection;
     this.currentRoute = route;
     this.mobileNavOpen = false;
     this.openMenu = null;
@@ -289,12 +290,12 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   /** Notifications derived from data the app has already loaded (no extra API calls). */
-  get notifications(): { icon: string; title: string; detail: string; route: AppComponent['currentRoute']; tone: 'danger' | 'warning' | 'info' }[] {
-    const out: { icon: string; title: string; detail: string; route: AppComponent['currentRoute']; tone: 'danger' | 'warning' | 'info' }[] = [];
+  get notifications(): { icon: string; title: string; detail: string; route: AppComponent['currentRoute']; mailSection?: MailSection; tone: 'danger' | 'warning' | 'info' }[] {
+    const out: { icon: string; title: string; detail: string; route: AppComponent['currentRoute']; mailSection?: MailSection; tone: 'danger' | 'warning' | 'info' }[] = [];
     const urgent = this.emails.filter(e => (e.is_urgent === 1 || e.ai_priority === 'Urgent') && !e.is_read);
     if (urgent.length) out.push({ icon: 'mail', title: `${urgent.length} urgent email${urgent.length > 1 ? 's' : ''}`, detail: urgent[0].subject || 'Needs a reply', route: 'emails', tone: 'danger' });
     const pendingDrafts = this.drafts.filter(d => d.status === 'Draft' || d.status === 'Pending Approval');
-    if (pendingDrafts.length) out.push({ icon: 'drafts', title: `${pendingDrafts.length} draft${pendingDrafts.length > 1 ? 's' : ''} awaiting approval`, detail: pendingDrafts[0].subject || 'Review before sending', route: 'drafts', tone: 'warning' });
+    if (pendingDrafts.length) out.push({ icon: 'drafts', title: `${pendingDrafts.length} draft${pendingDrafts.length > 1 ? 's' : ''} awaiting approval`, detail: pendingDrafts[0].subject || 'Review before sending', route: 'emails', mailSection: 'approvals', tone: 'warning' });
     const hot = this.leads.filter(l => l.category === 'Hot');
     if (hot.length) out.push({ icon: 'leads', title: `${hot.length} hot lead${hot.length > 1 ? 's' : ''}`, detail: hot[0].name || 'High purchase intent', route: 'leads', tone: 'info' });
     if (this.appointments.length) out.push({ icon: 'calendar', title: `${this.appointments.length} scheduled demo${this.appointments.length > 1 ? 's' : ''}`, detail: this.appointments[0].customer_name || this.appointments[0].contact_name || 'Upcoming', route: 'appointments', tone: 'info' });
@@ -320,6 +321,7 @@ export class AppComponent implements OnInit, OnDestroy {
   onEscape(): void {
     this.openMenu = null;
     this.mobileNavOpen = false;
+    this.trackingEmail = null;
   }
 
   // Social Media Marketing hub deep-link (e.g. returning from an OAuth provider)
@@ -460,47 +462,20 @@ export class AppComponent implements OnInit, OnDestroy {
     is_html: true
   };
 
-  // 4. Mail Drafts & Approvals Workflow (Human-in-the-loop)
+  // 4. Mail Drafts: the page itself is MailDraftsComponent; the shell keeps the list for counts and
+  // hands over a product or template chosen elsewhere ("Create AI Email Draft", "Use in a draft").
   drafts: any[] = [];
-  selectedDraft: any = null;
-  draftRecipientEdit = { name: '', email: '' };
-  isGeneratingDraft: boolean = false;
-  isRewritingDraft: boolean = false;
-  // Draft generator recipient: a lead of this workspace (the server reads its name and email).
-  draftLead: { id: number; name: string; email: string } | null = null;
-  draftLeadQuery = '';
-  draftLeadResults: any[] = [];
-  draftManualRecipient = false;
-  private draftLeadTimer: any = null;
+  /** Sent mailbox email whose delivery/open/click tracking is shown. */
+  trackingEmail: any = null;
+  draftsState: DataState = 'loading';
+  emailsState: DataState = 'loading';
+  draftProduct: { id: number } | null = null;
 
-  searchDraftLeads(): void {
-    clearTimeout(this.draftLeadTimer);
-    const q = this.draftLeadQuery.trim();
-    if (!q) { this.draftLeadResults = []; return; }
-    this.draftLeadTimer = setTimeout(() => {
-      this.apiService.getLeads({ q, limit: 20 }).subscribe({
-        next: (res) => this.draftLeadResults = res.leads || [],
-        error: () => this.draftLeadResults = []
-      });
-    }, 250);
+  /** "Create AI Email Draft" on a product card: Mail Center's Drafts section with the generator open. */
+  openDraftForProduct(productId: number): void {
+    this.draftProduct = { id: productId };
+    this.navigate('emails', 'drafts');
   }
-
-  pickDraftLead(l: any): void {
-    if (!l.hasValidEmail) return;
-    this.draftLead = { id: l.id, name: l.name, email: l.email };
-    this.draftLeadResults = [];
-    this.draftLeadQuery = '';
-  }
-
-  clearDraftLead(): void { this.draftLead = null; }
-
-  newDraftForm = {
-    productId: null as any,
-    recipientName: '',
-    recipientEmail: '',
-    goal: '',
-    tone: 'Professional'
-  };
 
   // 5. Connected Businesses & Dynamic Marketing Playbooks
   connectedBusinesses: any[] = [];
@@ -547,8 +522,7 @@ export class AppComponent implements OnInit, OnDestroy {
     public apiService: ApiService,
     public speechService: SpeechService,
     public auth: AuthStateService,
-    public theme: ThemeService,
-    private sanitizer: DomSanitizer
+    public theme: ThemeService
   ) {}
 
   ngOnInit(): void {
@@ -576,11 +550,13 @@ export class AppComponent implements OnInit, OnDestroy {
       try { sessionStorage.setItem(this.INVITE_KEY, invite); } catch { /* storage unavailable */ }
       window.history.replaceState({}, '', window.location.pathname);
     }
-    // Return from Zoho sign-in (/?view=mail&section=zoho&zoho=connected|error&reason=...).
-    if (params.get('view') === 'mail') {
+    // Mail Center links: /?view=mail&section=<section>, the Zoho sign-in return
+    // (/?view=mail&section=zoho&zoho=connected|error&reason=...) and the former Mail Drafts page (/?view=drafts).
+    const mailSection = mailSectionFromLink(params.get('view'), params.get('section'));
+    if (mailSection) {
       this.currentRoute = 'emails';
-      this.showZohoPanel = params.get('section') === 'zoho';
-      this.zohoOauthResult = { zoho: params.get('zoho') || undefined, reason: params.get('reason') || undefined };
+      this.mailSection = mailSection;
+      if (params.get('zoho')) this.zohoOauthResult = { zoho: params.get('zoho') || undefined, reason: params.get('reason') || undefined };
       window.history.replaceState({}, '', window.location.pathname);
     }
     if (params.get('view') === 'social') {
@@ -659,6 +635,11 @@ export class AppComponent implements OnInit, OnDestroy {
 
   private loadWorkspaceData(): void {
     this.loadStatus();
+    this.myCaps = null;
+    this.apiService.getMe().subscribe({
+      next: (me: any) => { this.myCaps = Array.isArray(me?.capabilities) ? new Set(me.capabilities) : null; },
+      error: () => { this.myCaps = null; }
+    });
     this.loadDigitalProducts();
     this.loadLeads();
     this.loadEmails();
@@ -686,9 +667,8 @@ export class AppComponent implements OnInit, OnDestroy {
     this.toastTimeout = setTimeout(() => this.toastMessage = '', 4000);
   }
 
-  getSafeHtml(html: string): SafeHtml {
-    return this.sanitizer.bypassSecurityTrustHtml(html || '');
-  }
+  /** Plain-text emails in the mailbox viewer are shown as text, never interpreted as HTML. */
+  readonly textToPreviewHtml = textToPreviewHtml;
 
   // ==========================================
   // 1. STATUS & ELEVENLABS REAL-TIME VOICE
@@ -1299,6 +1279,8 @@ export class AppComponent implements OnInit, OnDestroy {
       next: (res) => {
         const d = res.draft;
         this.composeEmail = { recipient_email: d.to, recipient_name: d.recipientName, subject: d.subject, body: d.body, html_body: d.html, is_html: true };
+        this.composePurpose = null; // an email to a lead: the sender must choose the purpose
+        this.composeTemplate = null;
         this.composeTab = 'visual';
         this.showComposeModal = true;
       },
@@ -1313,8 +1295,9 @@ export class AppComponent implements OnInit, OnDestroy {
     this.apiService.getEmails().subscribe({
       next: (res) => {
         this.emails = res.emails || [];
+        this.emailsState = 'ready';
       },
-      error: (err) => console.warn('Error loading emails:', err)
+      error: (err) => { this.emailsState = 'error'; console.warn('Error loading emails:', err); }
     });
   }
 
@@ -1337,10 +1320,29 @@ export class AppComponent implements OnInit, OnDestroy {
   // so the server never sends it twice; changed content gets a new key.
   private composeSend: { fingerprint: string; key: string } | null = null;
   isSendingCompose = false;
+  /**
+   * Required purpose of a Compose email. The server validates it against the content and template:
+   * promotional content or a marketing template is always sent as marketing (approved SMTP mailbox,
+   * unsubscribe link, marketing opt-outs respected); without a purpose the server uses marketing.
+   */
+  composePurpose: 'transactional' | 'marketing' | null = null;
+  /** Template the email was loaded from (its category decides whether transactional is possible). */
+  composeTemplate: { id: number; category: string } | null = null;
+
+  /** Capabilities of the signed-in member (null = unknown; the server still decides). */
+  myCaps: Set<string> | null = null;
+  /** Sending Compose email as transactional needs mail.send_transactional (Owners/Admins by default). */
+  get canSendTransactional(): boolean { return this.myCaps === null || this.myCaps.has('mail.send_transactional'); }
+
+  /** Templates whose category is not Transactional, Welcome or Custom are marketing (as on the server). */
+  get composeTemplateIsMarketing(): boolean {
+    const cat = String(this.composeTemplate?.category || '').trim().toLowerCase();
+    return !!this.composeTemplate && !['transactional', 'welcome', 'custom'].includes(cat);
+  }
 
   private composeKey(): string {
     const c = this.composeEmail;
-    const fingerprint = JSON.stringify([c.recipient_email, c.recipient_name, c.subject, c.body, c.is_html ? c.html_body : '']);
+    const fingerprint = JSON.stringify([c.recipient_email, c.recipient_name, c.subject, c.body, c.is_html ? c.html_body : '', this.composePurpose, this.composeTemplate?.id ?? null]);
     if (!this.composeSend || this.composeSend.fingerprint !== fingerprint) {
       const key = typeof crypto !== 'undefined' && 'randomUUID' in crypto
         ? crypto.randomUUID()
@@ -1364,12 +1366,11 @@ export class AppComponent implements OnInit, OnDestroy {
     if (e.target === 'email') this.composeFromTemplate(e.template);
     if (e.target === 'draft') {
       this.draftTemplate = { id: e.template.id, name: e.template.name };
-      this.navigate('drafts');
+      this.mailSection = 'drafts';
       this.showToast(`Draft generator will start from "${e.template.name}".`);
     }
     if (e.target === 'campaign') {
-      this.showTemplatesPanel = false;
-      this.showZohoPanel = true;
+      this.mailSection = 'campaigns';
       this.campaignStartTemplate = { id: e.template.id, name: e.template.name };
     }
   }
@@ -1378,7 +1379,6 @@ export class AppComponent implements OnInit, OnDestroy {
     const target = this.templatePickerFor;
     this.templatePickerFor = null;
     if (target === 'compose') this.composeFromTemplate(t, true);
-    if (target === 'draft') this.draftTemplate = { id: t.id, name: t.name };
   }
 
   /** Loads a copy of the template into Compose; editing it never changes the saved template. */
@@ -1389,6 +1389,9 @@ export class AppComponent implements OnInit, OnDestroy {
     this.composeEmail.is_html = true;
     this.composeTab = 'visual';
     this.composeTemplateName = t.name;
+    this.composeTemplate = t.id ? { id: t.id, category: t.category || 'Custom' } : null;
+    if (this.composeTemplateIsMarketing) this.composePurpose = 'marketing';
+    else if (!keepRecipient) this.composePurpose = null;
     this.composeTokenValues = defaultTokenValues(findTokens(t.html), this.composeEmail.recipient_name);
     this.composeSend = null;
     this.showComposeModal = true;
@@ -1420,13 +1423,20 @@ export class AppComponent implements OnInit, OnDestroy {
       this.showToast('Recipient email and subject are required');
       return;
     }
-    if (!confirm(`Send "${this.composeEmail.subject}" to ${this.composeEmail.recipient_email} now?`)) return;
+    if (!this.composePurpose) {
+      this.showToast('Choose the email purpose: Transactional / Direct or Marketing.');
+      return;
+    }
+    const asMarketing = this.composePurpose === 'marketing' ? ' as marketing (with an unsubscribe link)' : '';
+    if (!confirm(`Send "${this.composeEmail.subject}" to ${this.composeEmail.recipient_email}${asMarketing} now?`)) return;
 
     const key = this.composeKey();
     const done = {
       next: (res: any) => {
         this.isSendingCompose = false;
         this.composeSend = null;
+        this.composePurpose = null;
+        this.composeTemplate = null;
         this.showToast(res.message);
         this.showComposeModal = false;
         this.loadEmails();
@@ -1443,10 +1453,12 @@ export class AppComponent implements OnInit, OnDestroy {
         recipient_name: this.composeEmail.recipient_name,
         subject: this.composeEmail.subject,
         html_body: this.composeEmail.html_body,
-        body_text: this.composeEmail.body
+        body_text: this.composeEmail.body,
+        purpose: this.composePurpose,
+        templateId: this.composeTemplate?.id ?? null
       }, true, key).subscribe(done);
     } else {
-      this.apiService.sendEmail(this.composeEmail, true, key).subscribe(done);
+      this.apiService.sendEmail({ ...this.composeEmail, purpose: this.composePurpose, templateId: this.composeTemplate?.id ?? null }, true, key).subscribe(done);
     }
   }
 
@@ -1477,6 +1489,9 @@ export class AppComponent implements OnInit, OnDestroy {
       html_body: '',
       is_html: false
     };
+    // A reply to an inbound email: direct by default when allowed (the sender can change it; the server re-checks).
+    this.composePurpose = this.canSendTransactional ? 'transactional' : null;
+    this.composeTemplate = null;
     this.composeTab = 'visual';
     this.showComposeModal = true;
   }
@@ -1493,6 +1508,9 @@ export class AppComponent implements OnInit, OnDestroy {
       html_body: '',
       is_html: false
     };
+    // A reply to an inbound email: direct by default when allowed (the sender can change it; the server re-checks).
+    this.composePurpose = this.canSendTransactional ? 'transactional' : null;
+    this.composeTemplate = null;
     this.composeTab = 'visual';
     this.showComposeModal = true;
   }
@@ -1506,151 +1524,14 @@ export class AppComponent implements OnInit, OnDestroy {
   // ==========================================
   loadDrafts(): void {
     this.apiService.getMailDrafts().subscribe({
-      next: (res) => {
-        this.drafts = res.drafts || [];
-        if (this.drafts.length > 0 && !this.selectedDraft) {
-          this.selectDraft(this.drafts[0]);
-        }
-      },
-      error: (err) => console.warn('Error loading drafts:', err)
-    });
-  }
-
-  generateNewDraft(): void {
-    this.isGeneratingDraft = true;
-    const recipient = this.draftLead
-      ? { leadId: this.draftLead.id, recipientName: '', recipientEmail: '' }
-      : (this.draftManualRecipient ? {} : { recipientName: '', recipientEmail: '' });
-    this.apiService.generateMailDraft({ ...this.newDraftForm, ...recipient, templateId: this.draftTemplate?.id || null }).subscribe({
-      next: (res) => {
-        this.isGeneratingDraft = false;
-        this.showToast(res.message);
-        this.loadDrafts();
-        this.selectDraft(res.draft);
-      },
-      error: (err) => {
-        this.isGeneratingDraft = false;
-        this.showToast(`Error generating draft: ${err.message}`);
-      }
-    });
-  }
-
-  rewriteDraft(draft: any, instruction: string): void {
-    this.isRewritingDraft = true;
-    this.apiService.rewriteMailDraft(draft.id, instruction).subscribe({
-      next: (res) => {
-        this.isRewritingDraft = false;
-        this.showToast(res.message);
-        this.selectDraft(res.draft);
-        this.loadDrafts();
-      },
-      error: (err) => {
-        this.isRewritingDraft = false;
-        this.showToast(`Rewrite error: ${err.message}`);
-      }
-    });
-  }
-
-  selectDraft(draft: any): void {
-    this.selectedDraft = draft;
-    this.draftRecipientEdit = { name: draft?.recipient_name || '', email: draft?.recipient_email || '' };
-    this.placeholderValues = Object.fromEntries((draft?.placeholders || []).map((p: string) => [p, '']));
-  }
-
-  // Values typed for the draft's [placeholders]; they must be filled before approval or sending.
-  placeholderValues: Record<string, string> = {};
-  get filledPlaceholders(): Record<string, string> {
-    return Object.fromEntries(Object.entries(this.placeholderValues).map(([k, v]) => [k, v.trim()]).filter(([, v]) => v));
-  }
-
-  fillDraftPlaceholders(draft: any): void {
-    const replacements = this.filledPlaceholders;
-    if (!Object.keys(replacements).length) { this.showToast('Type a value for each placeholder first.'); return; }
-    this.apiService.updateMailDraft(draft.id, { replacements }).subscribe({
-      next: (res) => { this.showToast('Placeholders filled. Approve the draft again before sending.'); this.selectDraft(res.draft); this.loadDrafts(); },
-      error: (err) => this.showToast(`Not saved: ${this.apiError(err)}`)
-    });
-  }
-
-  /** A send with an unknown outcome (or stuck): the user says whether it arrived. */
-  resolveDraft(draft: any, outcome: 'sent' | 'not_sent'): void {
-    const q = outcome === 'sent'
-      ? `Mark "${draft.subject}" as sent? Only if you confirmed it reached ${draft.recipient_email}.`
-      : `Mark "${draft.subject}" as NOT sent? Only if you checked it did not reach ${draft.recipient_email}. You can then send it again.`;
-    if (!confirm(q)) return;
-    this.apiService.resolveMailDraft(draft.id, outcome).subscribe({
-      next: (res) => { this.showToast(res.message); this.selectDraft(res.draft); this.loadDrafts(); },
-      error: (err) => this.showToast(this.apiError(err))
+      next: (res) => { this.drafts = res.drafts || []; this.draftsState = 'ready'; },
+      error: (err) => { this.draftsState = 'error'; console.warn('Error loading drafts:', err); }
     });
   }
 
   /** Server error text (e.g. "Approve the draft before sending it.") rather than the generic HTTP message. */
   apiError(err: any): string {
     return err?.error?.error || err?.message || 'Request failed';
-  }
-
-  saveDraftRecipient(draft: any): void {
-    this.apiService.updateMailDraft(draft.id, { recipient_name: this.draftRecipientEdit.name.trim(), recipient_email: this.draftRecipientEdit.email.trim() }).subscribe({
-      next: (res) => {
-        this.showToast(res.message);
-        this.selectDraft(res.draft);
-        this.loadDrafts();
-      },
-      error: (err) => this.showToast(`Recipient not saved: ${this.apiError(err)}`)
-    });
-  }
-
-  approveDraft(draft: any): void {
-    this.apiService.approveMailDraft(draft.id).subscribe({
-      next: (res) => {
-        this.showToast(res.message);
-        this.loadDrafts();
-        if (this.selectedDraft?.id === draft.id) this.selectDraft(res.draft);
-      },
-      error: (err) => this.showToast(`Approval error: ${this.apiError(err)}`)
-    });
-  }
-
-  // Sending always asks for explicit confirmation; an unapproved draft is approved first.
-  sendApprovedDraft(draft: any): void {
-    if (!draft.recipient_email) {
-      this.showToast('Add a recipient email address before sending.');
-      return;
-    }
-    if (!confirm(`Send "${draft.subject}" to ${draft.recipient_email} now? This cannot be undone.`)) return;
-    const send = () => this.apiService.sendMailDraft(draft.id, true).subscribe({
-      next: (res) => {
-        this.showToast(res.message);
-        this.loadDrafts();
-        this.loadEmails();
-        if (this.selectedDraft?.id === draft.id) this.selectedDraft.status = 'Sent';
-      },
-      error: (err) => {
-        this.showToast(this.sendErrorText(err));
-        this.loadDrafts();
-        if (this.selectedDraft?.id === draft.id && err?.error?.code === 'MAIL_OUTCOME_UNKNOWN') this.selectedDraft.status = 'Needs Review';
-      }
-    });
-    if (draft.status === 'Approved') {
-      send();
-      return;
-    }
-    this.apiService.approveMailDraft(draft.id).subscribe({
-      next: () => send(),
-      error: (err) => this.showToast(`Email not sent: ${this.apiError(err)}`)
-    });
-  }
-
-  deleteDraft(draftId: number): void {
-    if (!confirm('Are you sure you want to delete this email draft?')) return;
-    this.apiService.deleteMailDraft(draftId).subscribe({
-      next: () => {
-        this.showToast('Draft deleted');
-        this.loadDrafts();
-        this.selectedDraft = null;
-      },
-      error: (err) => this.showToast(`Error: ${err.message}`)
-    });
   }
 
   // ==========================================

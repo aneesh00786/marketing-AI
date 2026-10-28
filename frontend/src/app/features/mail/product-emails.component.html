@@ -157,7 +157,7 @@
       </div>
       <div class="pv" *ngIf="preview">
         <div class="muted small">To {{ preview.recipientEmail }} · Subject: <b>{{ preview.subject }}</b></div>
-        <iframe sandbox="" title="Email preview" [srcdoc]="previewHtml"></iframe>
+        <app-email-preview class="pv-frame" [html]="preview.bodyHtml" [contentKey]="preview.id" [title]="'Email to ' + preview.recipientEmail" emptyText="This email has no HTML body."></app-email-preview>
         <p class="muted small" *ngIf="preview.placeholders?.length">Fill {{ preview.placeholders.join(', ') }} for this recipient in Mail Drafts (or remove the recipient by deleting the draft), then approve again.</p>
       </div>
     </div>
@@ -171,5 +171,5 @@
     <p class="muted small" *ngIf="!caps.send">An Approver, Manager, Admin or Owner approves and sends.</p>
   </div>
 
-  <app-template-picker *ngIf="showPicker" title="Template for these emails" (picked)="onTemplate($event)" (closed)="showPicker = false"></app-template-picker>
+  <app-template-picker *ngIf="showPicker" subtitle="Template for these product emails." (picked)="onTemplate($event)" (closed)="showPicker = false"></app-template-picker>
 </section>

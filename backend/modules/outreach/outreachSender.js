@@ -199,7 +199,14 @@ async function sendOne(campaign, recipient, workerId) {
   const sender = cfg.sender_email || cfg.smtp_user || 'our team';
   const msg = render(content, recipient, campaign, sender);
   try {
-    const res = await emailService.sendRealEmail(recipient.workspace_id, { to: recipient.email, recipientName: recipient.name || '', subject: msg.subject, html: msg.html, text: msg.text, campaignId: null });
+    // Sequences are marketing email: only through an SMTP mailbox approved for marketing (never
+    // ZeptoMail), with List-Unsubscribe; unsubscribes, withdrawn consent, hard bounces and complaints all block.
+    const base = (process.env.APP_BASE_URL || '').replace(/\/$/, '');
+    const unsubUrl = /^https:\/\//i.test(base) && !/localhost|127\.0\.0\.1|\.local\b/i.test(base) ? `${base}/api/v1/outreach/unsubscribe/${recipient.unsubscribe_token}` : null;
+    const res = await emailService.sendRealEmail(recipient.workspace_id, {
+      to: recipient.email, recipientName: recipient.name || '', subject: msg.subject, html: msg.html, text: msg.text, campaignId: null,
+      purpose: 'marketing', suppressionPolicy: 'marketing', listUnsubscribe: { url: unsubUrl, mailtoSelf: true }
+    });
     await run("UPDATE outreach_sends SET status = 'sent', email_id = ?, provider_message_id = ?, sent_at = UTC_TIMESTAMP() WHERE id = ?", [res.emailId, String(res.messageId || '').slice(0, 255), sendId]);
     const next = steps.find(s => s.step_order === step.step_order + 1);
     const nextAt = next ? dbTime(new Date(Date.now() + next.delay_days * 86400000)) : null;
@@ -218,8 +225,14 @@ async function sendOne(campaign, recipient, workerId) {
       return 'needs_review';
     }
     await run("UPDATE outreach_sends SET status = 'failed', error = ? WHERE id = ?", [message, sendId]);
-    if (err.code === 'MAIL_NOT_CONFIGURED') {
-      // Nothing can be sent for this workspace: pause the whole campaign with the reason.
+    if (err.code === 'RECIPIENT_SUPPRESSED') {
+      // Refused before sending (suppression list or withdrawn consent): not a bounce, nothing was sent.
+      await run("UPDATE outreach_recipients SET status = 'suppressed', next_send_at = NULL, last_error = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?", [`Suppressed: ${err.suppressionReason || 'policy'}`, recipient.id]);
+      return 'suppressed';
+    }
+    if (err.code === 'MAIL_NOT_CONFIGURED' || err.marketingBlocked) {
+      // Nothing can be sent for this workspace (no mailbox, or none approved for marketing): pause the
+      // whole campaign with the reason; this recipient is retried when it is resumed.
       await run("UPDATE outreach_sends SET status = 'retry' WHERE id = ?", [sendId]);
       await run("UPDATE outreach_campaigns SET status = 'paused', last_error = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?", [message, campaign.id]);
       return 'paused';

@@ -64,7 +64,7 @@ async function withEligibility(workspaceId, leads) {
     const reasons = [];
     if (!email) reasons.push('No email address');
     else if (!emailService.isValidRecipient(email)) reasons.push('Invalid or placeholder email address');
-    else if (suppressed.has(email.toLowerCase())) reasons.push(suppressed.get(email.toLowerCase()) === 'bounced' ? 'Email bounced earlier' : 'Unsubscribed');
+    else if (suppressed.has(email.toLowerCase())) reasons.push({ bounced: 'Email bounced earlier', complaint: 'Marked an earlier email as spam' }[suppressed.get(email.toLowerCase())] || 'Unsubscribed');
     const consent = l.marketing_consent || 'unknown';
     if (consent === 'withdrawn') reasons.push('Marketing consent withdrawn');
     else if (consent === 'granted' && !(l.marketing_consent_method && l.marketing_consent_evidence)) {
@@ -235,7 +235,7 @@ async function detectUnsubscribeReplies({ workspaceId = null, limit = 200 } = {}
   const { isUnsubscribeRequest } = require('../../outreach/outreachSender');
   const rows = await all(
     `SELECT d.id, d.workspace_id, d.lead_id, d.recipient_email, d.sent_at FROM email_drafts d
-     WHERE d.batch_id IS NOT NULL AND d.status = 'Sent' AND d.sent_at IS NOT NULL AND d.sent_at >= UTC_TIMESTAMP() - INTERVAL ${REPLY_MONITOR_DAYS} DAY
+     WHERE (d.batch_id IS NOT NULL OR d.unsubscribe_token IS NOT NULL) AND d.status = 'Sent' AND d.sent_at IS NOT NULL AND d.sent_at >= UTC_TIMESTAMP() - INTERVAL ${REPLY_MONITOR_DAYS} DAY
        ${workspaceId ? 'AND d.workspace_id = ?' : ''}
        AND EXISTS (SELECT 1 FROM emails e WHERE e.workspace_id = d.workspace_id AND LOWER(e.sender_email) = LOWER(d.recipient_email)
                    AND e.smtp_status LIKE 'Received%' AND e.received_at > d.sent_at)
@@ -256,7 +256,8 @@ async function detectUnsubscribeReplies({ workspaceId = null, limit = 200 } = {}
 
 /** Workspaces whose product emails may still get replies (for the inbox sync). */
 async function monitoredWorkspaces() {
-  return (await all(`SELECT DISTINCT workspace_id FROM email_drafts WHERE batch_id IS NOT NULL AND status = 'Sent' AND sent_at >= UTC_TIMESTAMP() - INTERVAL ${REPLY_MONITOR_DAYS} DAY`)).map(r => r.workspace_id);
+  // Marketing email with an unsubscribe token: batch emails, one-to-one drafts and marketing Compose sends.
+  return (await all(`SELECT DISTINCT workspace_id FROM email_drafts WHERE (batch_id IS NOT NULL OR unsubscribe_token IS NOT NULL) AND status = 'Sent' AND sent_at >= UTC_TIMESTAMP() - INTERVAL ${REPLY_MONITOR_DAYS} DAY`)).map(r => r.workspace_id);
 }
 
 // ------------------------------------------------------------------ batches
@@ -567,6 +568,6 @@ async function unsubscribeByToken(token, { apply }) {
 
 module.exports = {
   CONSENT_METHODS, listRecipients, recordConsent, createBatch, getBatch, listBatches, approveBatch, sendBatch, retryFailed,
-  processBatches, recoverStaleBatches, recheckRecipient, unsubscribeByToken, unsubscribeLink, applyUnsubscribe,
+  processBatches, recoverStaleBatches, recheckRecipient, unsubscribeByToken, unsubscribeLink, footer, applyUnsubscribe,
   detectUnsubscribeReplies, monitoredWorkspaces, personalize, withEligibility
 };

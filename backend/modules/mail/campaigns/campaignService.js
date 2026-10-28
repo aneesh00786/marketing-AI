@@ -421,4 +421,52 @@ async function contentByToken(token) {
   return row ? row.html_content : null;
 }
 
-module.exports = { list, getOne, create, update, remove, zohoAudiences, validate, approve, send, refresh, resolve, contentByToken };
+/**
+ * Per-recipient activity for a sent campaign, read from Zoho on demand (getcampaignrecipientsdata,
+ * campaign.READ scope, which the connection already has). Nothing is stored. Only addresses and
+ * names Zoho returns are passed on; Zoho does not document per-recipient event times here, so
+ * none are invented. The route allows this to roles with mail.send only.
+ */
+const RECIPIENT_ACTIONS = {
+  sent: 'sentcontacts', opened: 'openedcontacts', unopened: 'unopenedcontacts', clicked: 'clickedcontacts',
+  hard_bounced: 'senthardbounce', soft_bounced: 'sentsoftbounce', unsubscribed: 'optoutcontacts', spam: 'spamcontacts'
+};
+const PAGE_SIZE = 50;
+
+function contactsIn(data) {
+  // Zoho's JSON shape for this call is not fully documented: accept a few known containers.
+  const pools = [data?.list_of_details, data?.contacts, data?.['contact-details'], data?.campaign_details?.contacts, data?.response?.contacts];
+  const list = pools.find(Array.isArray) || [];
+  return list.flatMap(c => (c && Array.isArray(c.contact) ? c.contact : [c])).map(c => {
+    // Documented JSON field: contactemailaddress (others kept for older/XML-converted shapes).
+    const email = c?.contactemailaddress || c?.contact_email || c?.contactemail || c?.email || c?.['Contact Email'] || null;
+    if (!email || typeof email !== 'string') return null;
+    const first = c.firstname || c.contact_fn || c['First Name'] || '';
+    const last = c.lastname || c.contact_ln || c['Last Name'] || '';
+    return { email: email.slice(0, 255), name: `${first} ${last}`.trim().slice(0, 200) || null };
+  }).filter(Boolean);
+}
+
+async function recipientActivity(ctx, id, { activity, page = 1 } = {}) {
+  const action = RECIPIENT_ACTIONS[activity];
+  if (!action) throw httpError(400, `Unknown activity. Use one of: ${Object.keys(RECIPIENT_ACTIONS).join(', ')}.`, 'VALIDATION_ERROR');
+  const row = await requireRow(ctx, id);
+  if (!row.zoho_campaign_key || !['submitted', 'needs_review'].includes(row.status)) {
+    return { available: false, reason: 'not_sent', recipients: [], page: 1, pageSize: PAGE_SIZE };
+  }
+  const p = Math.max(1, Math.min(1000, parseInt(page, 10) || 1));
+  let data;
+  try {
+    data = await zoho.readCall(ws(ctx), 'getcampaignrecipientsdata', { campaignkey: row.zoho_campaign_key, action, fromindex: String((p - 1) * PAGE_SIZE + 1), range: String(PAGE_SIZE) });
+  } catch (err) {
+    // 6002: invalid key or not sent yet; 6303: no contacts for this activity.
+    if (err.providerCode === '6303') return { available: true, recipients: [], page: p, pageSize: PAGE_SIZE, hasMore: false };
+    if (err.providerCode === '6002') return { available: false, reason: 'not_sent', recipients: [], page: p, pageSize: PAGE_SIZE };
+    throw err;
+  }
+  const recipients = contactsIn(data);
+  await audit(ctx, 'mail.campaign_recipients_viewed', { resourceType: 'mail_campaign', resourceId: row.id, metadata: { activity, page: p, count: recipients.length } });
+  return { available: true, recipients, page: p, pageSize: PAGE_SIZE, hasMore: recipients.length === PAGE_SIZE };
+}
+
+module.exports = { list, getOne, create, update, remove, zohoAudiences, validate, approve, send, refresh, resolve, contentByToken, recipientActivity, RECIPIENT_ACTIONS, contactsIn };

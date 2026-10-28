@@ -1,79 +1,63 @@
-import { Component, EventEmitter, Input, OnInit, Output } from '@angular/core';
+import { AfterViewInit, Component, ElementRef, EventEmitter, HostListener, Input, OnDestroy, OnInit, Output, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
-import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { apiRoot } from '../../core/api-base';
+import { EmailPreviewComponent } from './email-preview.component';
 
 /**
- * Pick a saved template (search, preview, use). Emits the full template; the caller copies its
- * HTML into an email, draft or campaign, so later edits never change the template.
+ * Modal for picking a saved template (search, preview, use). Emits the full template only when the
+ * user clicks "Use This Template"; the caller copies its HTML into an email, draft or campaign, so
+ * nothing changes before that and later edits never change the template. The modal carries its own
+ * styles, so it looks the same wherever it is used.
  */
 @Component({
   selector: 'app-template-picker',
   standalone: true,
-  imports: [CommonModule, FormsModule],
-  template: `
-    <div class="modal-backdrop" (click)="closed.emit()">
-      <div class="modal-card wide-modal picker" (click)="$event.stopPropagation()" role="dialog" aria-modal="true" aria-label="Choose a template">
-        <div class="modal-header">
-          <h3>{{ title }}</h3>
-          <button class="close-btn" (click)="closed.emit()" aria-label="Close">✕</button>
-        </div>
-        <div class="modal-body picker-body">
-          <div class="picker-list">
-            <input class="hud-input" [(ngModel)]="q" (ngModelChange)="search()" placeholder="Search templates" aria-label="Search templates" />
-            <p class="muted small" *ngIf="!loading && !templates.length">No templates yet. Create one in Mail Center → Email Templates.</p>
-            <button *ngFor="let t of templates" class="picker-item" [class.active]="selected?.id === t.id" (click)="preview(t)">
-              <b>{{ t.name }}</b><small>{{ t.category }} · {{ t.updatedAt | date:'mediumDate' }}</small>
-            </button>
-          </div>
-          <div class="picker-preview">
-            <ng-container *ngIf="selected; else none">
-              <iframe sandbox="" title="Template preview" [srcdoc]="previewHtml"></iframe>
-              <p class="muted small" *ngIf="selected.placeholders?.length">Placeholders: {{ selected.placeholders.join(', ') }}</p>
-            </ng-container>
-            <ng-template #none><p class="muted small">Select a template to preview it.</p></ng-template>
-          </div>
-        </div>
-        <div class="modal-footer">
-          <button class="btn btn-secondary" (click)="closed.emit()">Cancel</button>
-          <button class="btn btn-primary" [disabled]="!selected" (click)="picked.emit(selected)">Use this template</button>
-        </div>
-      </div>
-    </div>
-  `,
-  styles: [`
-    .picker-body { display: grid; grid-template-columns: minmax(200px, 280px) 1fr; gap: 12px; }
-    .picker-list { display: flex; flex-direction: column; gap: 6px; max-height: 60vh; overflow: auto; }
-    .picker-item { text-align: left; border: 1px solid var(--border); border-radius: 8px; padding: 8px; background: var(--surface); color: var(--text); cursor: pointer; display: flex; flex-direction: column; gap: 2px; font: inherit; }
-    .picker-item.active { border-color: var(--accent); }
-    .picker-item small, .muted { color: var(--text-muted); }
-    .small { font-size: 12px; }
-    .picker-preview iframe { width: 100%; height: 55vh; border: 1px solid var(--border); border-radius: 8px; background: #fff; }
-    @media (max-width: 760px) { .picker-body { grid-template-columns: 1fr; } }
-  `]
+  imports: [CommonModule, FormsModule, EmailPreviewComponent],
+  templateUrl: './template-picker.component.html',
+  styleUrls: ['../command/command-center.component.css', './template-picker.component.css']
 })
-export class TemplatePickerComponent implements OnInit {
-  @Input() title = 'Choose a template';
+export class TemplatePickerComponent implements OnInit, AfterViewInit, OnDestroy {
+  @Input() title = 'Choose an Email Template';
+  /** What the chosen template will be used for (shown under the title). */
+  @Input() subtitle = '';
   @Output() picked = new EventEmitter<any>();
   @Output() closed = new EventEmitter<void>();
+  @ViewChild('searchBox') searchBox?: ElementRef<HTMLInputElement>;
 
   private base = `${apiRoot()}/api/v1/mail/templates`;
   q = '';
   templates: any[] = [];
-  selected: any = null;
   loading = false;
+  loadError: string | null = null;
+  /** The highlighted card, and its full template once loaded (the list has no HTML). */
+  selectedId: number | null = null;
+  selected: any = null;
+  previewLoading = false;
+  previewError: string | null = null;
   private timer: any = null;
+  private listSeq = 0;
+  private previewSeq = 0;
 
-  constructor(private http: HttpClient, private sanitizer: DomSanitizer) {}
+  constructor(private http: HttpClient) {}
 
   ngOnInit(): void { this.load(); }
+  ngAfterViewInit(): void { setTimeout(() => this.searchBox?.nativeElement.focus()); }
+  ngOnDestroy(): void { clearTimeout(this.timer); }
 
-  get previewHtml(): SafeHtml {
-    // Shown only inside a sandboxed iframe (no scripts, no same-origin access).
-    return this.sanitizer.bypassSecurityTrustHtml(this.selected?.html || '');
+  /** "Use This Template" works only once the highlighted template has loaded. */
+  get canUse(): boolean { return !!this.selected && this.selected.id === this.selectedId; }
+
+  @HostListener('document:keydown.escape', ['$event'])
+  onEscape(ev: Event): void {
+    ev.stopImmediatePropagation(); // a modal underneath (e.g. the draft generator) stays open
+    this.close();
   }
+
+  close(): void { this.closed.emit(); }
+
+  use(): void { if (this.canUse) this.picked.emit(this.selected); }
 
   search(): void {
     clearTimeout(this.timer);
@@ -81,14 +65,46 @@ export class TemplatePickerComponent implements OnInit {
   }
 
   load(): void {
+    const seq = ++this.listSeq;
     this.loading = true;
-    this.http.get<any>(this.base, { params: { q: this.q, pageSize: '50' } }).subscribe({
-      next: r => { this.loading = false; this.templates = r.templates; },
-      error: () => { this.loading = false; this.templates = []; }
+    this.loadError = null;
+    this.http.get<any>(this.base, { params: { q: this.q.trim(), pageSize: '50' } }).subscribe({
+      next: r => { if (seq !== this.listSeq) return; this.loading = false; this.templates = r.templates || []; },
+      error: e => {
+        if (seq !== this.listSeq) return;
+        this.loading = false;
+        this.templates = [];
+        this.loadError = e?.status === 403 ? 'Your role cannot view email templates.' : (e?.error?.error || 'Templates could not be loaded.');
+      }
     });
   }
 
-  preview(t: any): void {
-    this.http.get<any>(`${this.base}/${t.id}`).subscribe({ next: r => this.selected = r.template });
+  choose(t: any): void {
+    if (this.selectedId === t.id && (this.selected || this.previewLoading)) return;
+    const seq = ++this.previewSeq;
+    this.selectedId = t.id;
+    this.selected = null;
+    this.previewError = null;
+    this.previewLoading = true;
+    this.http.get<any>(`${this.base}/${t.id}`).subscribe({
+      next: r => { if (seq !== this.previewSeq) return; this.previewLoading = false; this.selected = r.template; },
+      error: e => { if (seq !== this.previewSeq) return; this.previewLoading = false; this.previewError = e?.error?.error || 'This template could not be loaded.'; }
+    });
+  }
+
+  /** Kept for callers and tests that preview a template directly. */
+  preview(t: any): void { this.choose(t); }
+
+  /** Arrow keys move between cards; Enter/Space selects (native button behaviour). */
+  onCardKey(ev: KeyboardEvent): void {
+    if (ev.key !== 'ArrowDown' && ev.key !== 'ArrowUp') return;
+    ev.preventDefault();
+    const cards = Array.from((ev.currentTarget as HTMLElement).parentElement?.querySelectorAll<HTMLButtonElement>('.tp-card') || []);
+    const i = cards.indexOf(ev.currentTarget as HTMLButtonElement);
+    cards[ev.key === 'ArrowDown' ? Math.min(cards.length - 1, i + 1) : Math.max(0, i - 1)]?.focus();
+  }
+
+  sourceLabel(s: string): string {
+    return ({ zip: 'ZIP import', html: 'HTML import', manual: 'Written here', ai: 'AI' } as Record<string, string>)[s] || '';
   }
 }

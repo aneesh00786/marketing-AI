@@ -1,0 +1,111 @@
+<section class="mc" aria-labelledby="mc-title">
+  <header class="mc-head">
+    <div>
+      <h2 id="mc-title">Mail Center</h2>
+      <p class="sub">Your mailbox, drafts, approvals and email campaigns. Nothing is sent without approval and confirmation.</p>
+    </div>
+    <div class="mc-create">
+      <button #createBtn type="button" class="btn btn-primary" (click)="toggleCreateMenu($event)" [disabled]="!canCompose"
+              aria-haspopup="menu" [attr.aria-expanded]="createMenuOpen" aria-controls="mc-create-menu"
+              [title]="canCompose ? '' : 'Your role cannot create emails'">＋ Create Email <span aria-hidden="true">▾</span></button>
+      <div class="mc-menu" id="mc-create-menu" role="menu" aria-label="Create Email" *ngIf="createMenuOpen" (click)="$event.stopPropagation()" (keydown)="onMenuKey($event)">
+        <button type="button" role="menuitem" (click)="create('ai')">
+          <strong>Generate with AI</strong><small>Describe the goal; AI writes a draft for you to review.</small>
+        </button>
+        <button type="button" role="menuitem" (click)="create('template')">
+          <strong>Start from a template</strong><small>Pick a saved template; AI fills it in as a draft.</small>
+        </button>
+        <p class="mc-menu-note">Both create a draft. Nothing is sent until it is approved and you confirm.</p>
+      </div>
+    </div>
+  </header>
+
+  <div class="mc-tabs" role="tablist" aria-label="Mail Center sections">
+    <button *ngFor="let s of sections" type="button" role="tab" [id]="'mc-tab-' + s.key" [class.on]="active === s.key"
+            [attr.aria-selected]="active === s.key" [attr.tabindex]="active === s.key ? 0 : -1" aria-controls="mc-panel"
+            [title]="s.hint" (click)="go(s.key)" (keydown)="onTabKey($event)">
+      {{ s.label }}
+      <span class="mc-badge" *ngIf="s.key === 'approvals' && draftsState === 'ready' && (draftCount('Draft') + draftCount('Approved') + draftCount('Needs Review'))">{{ draftCount('Draft') + draftCount('Approved') + draftCount('Needs Review') }}</span>
+    </button>
+  </div>
+
+  <div class="mc-panel" id="mc-panel" role="tabpanel" [attr.aria-labelledby]="'mc-tab-' + active">
+    <div class="callout warn" *ngIf="!canView" role="alert">Your role cannot view mail in this workspace. Ask a workspace admin for access.</div>
+
+    <ng-container *ngIf="canView" [ngSwitch]="active">
+      <!-- ===== Overview ===== -->
+      <div *ngSwitchCase="'overview'" class="mc-overview">
+        <div class="mc-metrics" aria-label="Mail at a glance">
+          <button type="button" class="mc-metric" (click)="go('approvals', { status: 'Draft' })" [disabled]="draftsState !== 'ready'">
+            <span class="mc-metric-label">Waiting for approval</span>
+            <strong>{{ draftsState === 'ready' ? draftCount('Draft') : '—' }}</strong>
+            <small>Drafts not yet approved</small>
+          </button>
+          <button type="button" class="mc-metric" (click)="go('approvals', { status: 'Approved' })" [disabled]="draftsState !== 'ready'">
+            <span class="mc-metric-label">Ready to send</span>
+            <strong>{{ draftsState === 'ready' ? draftCount('Approved') : '—' }}</strong>
+            <small>Approved, not sent yet</small>
+          </button>
+          <button type="button" class="mc-metric" [class.warn]="draftCount('Needs Review')" (click)="go('approvals', { status: 'Needs Review' })" [disabled]="draftsState !== 'ready'">
+            <span class="mc-metric-label">Delivery unknown</span>
+            <strong>{{ draftsState === 'ready' ? draftCount('Needs Review') : '—' }}</strong>
+            <small>Check before sending again</small>
+          </button>
+          <button type="button" class="mc-metric" (click)="go('drafts', { status: 'Sent' })" [disabled]="draftsState !== 'ready'">
+            <span class="mc-metric-label">Drafts sent</span>
+            <strong>{{ draftsState === 'ready' ? draftCount('Sent') : '—' }}</strong>
+            <small>Of {{ draftsState === 'ready' ? drafts.length : '—' }} drafts in total</small>
+          </button>
+          <div class="mc-metric static">
+            <span class="mc-metric-label">Mailbox</span>
+            <strong>{{ emailsState === 'ready' ? emails.length : '—' }}</strong>
+            <small *ngIf="emailsState === 'ready'">Latest messages · {{ urgentUnreadCount }} urgent unread · {{ notSentCount }} not sent</small>
+            <small *ngIf="emailsState !== 'ready'">{{ emailsState === 'error' ? 'Could not load messages' : 'Loading…' }}</small>
+          </div>
+        </div>
+        <p class="muted small" *ngIf="draftsState === 'loading'">Loading drafts…</p>
+        <div class="callout warn" *ngIf="draftsState === 'error'" role="alert">Draft counts could not be loaded. Open Drafts to try again.</div>
+
+        <div class="mc-attention" *ngIf="draftsState === 'ready'">
+          <h3>Needs attention</h3>
+          <p class="muted small" *ngIf="!attention.length">No drafts need attention.</p>
+          <button type="button" *ngFor="let a of attention" class="mc-attn-item" (click)="go(a.section, { draftId: a.draft.id })">
+            <strong>{{ a.draft.subject || '(no subject)' }}</strong>
+            <small>{{ a.reason }}</small>
+          </button>
+        </div>
+
+        <app-mail-tracking-settings (toast)="toast.emit($event)"></app-mail-tracking-settings>
+        <!-- Owners/Admins only (the server enforces mail.configure too). -->
+        <app-compose-report *ngIf="caps?.has('mail.configure')"></app-compose-report>
+
+        <!-- Company mailbox (provided by the app shell). -->
+        <ng-content></ng-content>
+      </div>
+
+      <!-- ===== Drafts / Approvals (one component, so approval and sending logic is not duplicated) ===== -->
+      <app-mail-drafts *ngSwitchCase="'drafts'" view="drafts" [products]="products"
+        [initialStatus]="draftStatus" [openDraftId]="draftId"
+        [startAction]="draftAction" (actionConsumed)="draftAction = null"
+        [startTemplate]="draftTemplate" (templateConsumed)="templateConsumed.emit()"
+        [startProduct]="draftProduct" (productConsumed)="productConsumed.emit()"
+        (toast)="toast.emit($event)" (changed)="draftsChanged.emit()" (sent)="mailSent.emit()"></app-mail-drafts>
+
+      <ng-container *ngSwitchCase="'approvals'">
+        <app-mail-drafts view="approvals" [products]="products" [initialStatus]="draftStatus" [openDraftId]="draftId"
+          (toast)="toast.emit($event)" (changed)="draftsChanged.emit()" (sent)="mailSent.emit()"></app-mail-drafts>
+        <p class="muted small mc-elsewhere">
+          Campaigns<ng-container *ngIf="productEmailsEnabled"> and product email batches</ng-container> have their own approval step:
+          <button type="button" class="link-btn" (click)="go('campaigns')">Campaigns</button><ng-container *ngIf="productEmailsEnabled"> ·
+          <button type="button" class="link-btn" (click)="go('product-emails')">Product Emails</button></ng-container>
+        </p>
+      </ng-container>
+
+      <app-product-emails *ngSwitchCase="'product-emails'" (toast)="toast.emit($event)"></app-product-emails>
+
+      <app-email-campaigns *ngSwitchCase="'campaigns'" [oauthResult]="zohoOauthResult" [startTemplate]="campaignStartTemplate" (toast)="toast.emit($event)"></app-email-campaigns>
+
+      <app-email-templates *ngSwitchCase="'templates'" (toast)="toast.emit($event)" (use)="templateUse.emit($event)"></app-email-templates>
+    </ng-container>
+  </div>
+</section>

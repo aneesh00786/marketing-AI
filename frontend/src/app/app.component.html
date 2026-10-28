@@ -104,7 +104,7 @@
           </button>
           <div class="dropdown dropdown-wide" *ngIf="openMenu === 'notifications'" (click)="$event.stopPropagation()" role="menu">
             <div class="dropdown-label">Notifications</div>
-            <button class="dropdown-item" *ngFor="let n of notifications" (click)="navigate(n.route)">
+            <button class="dropdown-item" *ngFor="let n of notifications" (click)="navigate(n.route, n.mailSection)">
               <span class="notif-icon" [ngClass]="'tone-' + n.tone"><app-icon [name]="n.icon" [size]="16"></app-icon></span>
               <span class="grow"><strong>{{ n.title }}</strong><small>{{ n.detail }}</small></span>
             </button>
@@ -236,7 +236,7 @@
           <button class="btn btn-accent btn-sm" (click)="askRogerAboutProduct(prod)">
             🤖 Ask AI About Features
           </button>
-          <button class="btn btn-primary btn-sm" (click)="currentRoute = 'drafts'; newDraftForm.productId = prod.id">
+          <button class="btn btn-primary btn-sm" (click)="openDraftForProduct(prod.id)">
             📝 Create AI Email Draft
           </button>
           <button class="btn btn-secondary btn-sm" (click)="currentRoute = 'businesses'">
@@ -366,283 +366,108 @@
   </section>
 
   <!-- =================================================================== -->
-  <!-- TAB 3: EMAIL COMMAND CENTER (VISUAL HTML DISPLAY & SMART REPLIES) -->
+  <!-- MAIL CENTER: overview + mailbox, drafts, approvals, product emails, campaigns, templates -->
   <!-- =================================================================== -->
-  <section *ngIf="currentRoute === 'emails'" class="hud-panel full-width-panel">
-    <div class="panel-header">
-      <div>
-        <h2>Email command center</h2>
-        <p class="subtitle">Real Company Email: Send authentic visual HTML outreach via SMTP and sync live inbox replies via IMAP with automatic AI priority screening.</p>
-      </div>
-      <div class="header-actions">
-        <button class="btn btn-secondary" (click)="showMailConfigModal = true">⚙️ Company Mail Auth (SMTP/IMAP)</button>
-        <button class="btn btn-secondary" (click)="syncCompanyMail()" [disabled]="isSyncingMail">
-          {{ isSyncingMail ? 'Syncing...' : '🔄 Sync Mailbox via IMAP' }}
-        </button>
-        <button class="btn btn-secondary" (click)="showProductEmailsPanel = !showProductEmailsPanel" [attr.aria-expanded]="showProductEmailsPanel">🎯 Product Emails</button>
-        <button class="btn btn-secondary" (click)="showTemplatesPanel = !showTemplatesPanel" [attr.aria-expanded]="showTemplatesPanel">🧩 Email Templates</button>
-        <button class="btn btn-secondary" (click)="showZohoPanel = !showZohoPanel" [attr.aria-expanded]="showZohoPanel">📣 Email Campaigns</button>
-        <button class="btn btn-primary" (click)="showComposeModal = true">✉️ Compose & Send Email</button>
-      </div>
-    </div>
+  <!-- Loaded on first use (keeps the initial bundle small). The former Mail Drafts page is its Drafts section. -->
+  <ng-container *ngIf="currentRoute === 'emails'">
+    @defer (on immediate) {
+      <app-mail-center class="hud-panel full-width-panel" [(section)]="mailSection" [productEmailsEnabled]="!!serverStatus?.features?.productEmails"
+        [products]="digitalProducts" [drafts]="drafts" [draftsState]="draftsState" [emails]="emails" [emailsState]="emailsState"
+        [draftTemplate]="draftTemplate" (templateConsumed)="draftTemplate = null" [draftProduct]="draftProduct" (productConsumed)="draftProduct = null"
+        [campaignStartTemplate]="campaignStartTemplate" [zohoOauthResult]="zohoOauthResult" (templateUse)="onTemplateUse($event)"
+        (toast)="showToast($event)" (draftsChanged)="loadDrafts()" (mailSent)="loadEmails()">
+        <section class="mc-mailbox" aria-labelledby="mailbox-title">
+          <div class="panel-header">
+            <div>
+              <h3 id="mailbox-title">Company mailbox</h3>
+              <p class="subtitle">Send visual HTML email through the company mail service and sync replies via IMAP with AI priority screening.</p>
+            </div>
+            <div class="header-actions">
+              <button class="btn btn-secondary" (click)="showMailConfigModal = true">⚙️ Company Mail Auth (SMTP/IMAP)</button>
+              <button class="btn btn-secondary" (click)="syncCompanyMail()" [disabled]="isSyncingMail">
+                {{ isSyncingMail ? 'Syncing...' : '🔄 Sync Mailbox via IMAP' }}
+              </button>
+              <button class="btn btn-secondary" (click)="showComposeModal = true">✉️ Compose &amp; Send Email</button>
+            </div>
+          </div>
 
-    <!-- Loaded on first use (keeps the initial bundle small). -->
-    <ng-container *ngIf="showProductEmailsPanel">
-      @defer (on immediate) {
-        <app-product-emails (toast)="showToast($event)"></app-product-emails>
-      } @loading { <p class="helper-text">Loading product emails…</p> }
-    </ng-container>
-    <ng-container *ngIf="showTemplatesPanel">
-      @defer (on immediate) {
-        <app-email-templates (toast)="showToast($event)" (use)="onTemplateUse($event)"></app-email-templates>
-      } @loading { <p class="helper-text">Loading templates…</p> }
-    </ng-container>
-    <ng-container *ngIf="showZohoPanel">
-      @defer (on immediate) {
-        <app-email-campaigns [oauthResult]="zohoOauthResult" [startTemplate]="campaignStartTemplate" (toast)="showToast($event)"></app-email-campaigns>
-      } @loading { <p class="helper-text">Loading campaigns…</p> }
-    </ng-container>
-
-    <!-- Company Mail Status Bar -->
-    <div class="mail-auth-status-bar" [class.connected]="mailConfig.status === 'Connected'">
-      <div class="status-left">
-        <span class="status-dot green"></span>
-        <span>
-          COMPANY MAIL: <strong>{{ mailConfig.sender_email || 'support@thrivewoo.com' }}</strong>
-          &bull; Outbound: <span class="badge badge-hot">✓ ZeptoMail Connected</span>
-          &bull; Inbound: <span class="badge" [class.badge-hot]="mailConfig.has_imap_auth">{{ mailConfig.has_imap_auth ? 'IMAP Synced' : 'IMAP Standby' }}</span>
-        </span>
-        <span *ngIf="mailConfig.last_synced_at" class="sync-time">Last Synced: {{ mailConfig.last_synced_at }}</span>
-      </div>
-      <div class="status-right">
-        <button class="btn btn-secondary btn-sm" (click)="showMailConfigModal = true">⚙️ Mail Auth Settings</button>
-        <button class="btn btn-primary btn-sm" (click)="syncCompanyMail()" [disabled]="isSyncingMail">
-          {{ isSyncingMail ? 'Syncing...' : '🔄 Sync IMAP' }}
-        </button>
-      </div>
-    </div>
-
-    <!-- Email Items Grid / Cards -->
-    <div class="emails-cards-list">
-      <div *ngFor="let em of emails" class="email-summary-card">
-        <div class="email-card-top">
-          <div class="email-header-meta">
-            <span class="chip" [class.calling]="em.ai_priority === 'Urgent' || em.is_urgent === 1" [class.active]="em.status === 'Sent'">
-              {{ (em.ai_priority || (em.is_urgent === 1 ? 'Urgent' : 'Normal')).toUpperCase() }}
+        <!-- Company Mail Status Bar -->
+        <div class="mail-auth-status-bar" [class.connected]="mailConfig.status === 'Connected'">
+          <div class="status-left">
+            <span class="status-dot green"></span>
+            <span>
+              COMPANY MAIL: <strong>{{ mailConfig.sender_email || 'support@thrivewoo.com' }}</strong>
+              &bull; Outbound: <span class="badge badge-hot">✓ ZeptoMail Connected</span>
+              &bull; Inbound: <span class="badge" [class.badge-hot]="mailConfig.has_imap_auth">{{ mailConfig.has_imap_auth ? 'IMAP Synced' : 'IMAP Standby' }}</span>
             </span>
-            <span class="chip chip-not-sent" *ngIf="em.status === 'Not Sent'" [title]="em.smtp_status || 'This email was never sent'">NOT SENT</span>
-            <span class="email-sender">From: <strong>{{ em.sender || em.sender_email || '—' }}</strong> &rarr; To: <strong>{{ em.recipient_name || em.recipient_email }}</strong></span>
+            <span *ngIf="mailConfig.last_synced_at" class="sync-time">Last Synced: {{ mailConfig.last_synced_at }}</span>
           </div>
-          <span class="email-date">{{ em.sent_at || em.received_at || 'Today' }}</span>
-        </div>
-
-        <h3 class="email-card-subject">{{ em.subject }}</h3>
-
-        <!-- AI Summary Badge -->
-        <div class="ai-summary-banner" *ngIf="em.ai_summary">
-          <span class="ai-icon">⚡ AI Summary:</span> {{ em.ai_summary }}
-        </div>
-
-        <!-- Snippet / Body Text -->
-        <p class="email-snippet-text">{{ em.snippet || em.body }}</p>
-
-        <!-- Visual HTML Indicator -->
-        <div *ngIf="em.html_body" class="html-rendered-preview-bar">
-          <span class="badge badge-accent">📄 Visual HTML Template Included</span>
-          <button class="btn btn-secondary btn-sm" (click)="openVisualEmailModal(em)">
-            👁️ View Rendered Email Page
-          </button>
-        </div>
-
-        <!-- 1-Click AI Smart Reply Suggestions -->
-        <div class="smart-replies-row" *ngIf="em.ai_replies && em.ai_replies.length > 0">
-          <span class="replies-label">💡 1-Click AI Reply Suggestions:</span>
-          <button *ngFor="let rep of em.ai_replies" class="smart-reply-chip" (click)="applySmartReply(rep, em)">
-            {{ rep.label || rep }}
-          </button>
-        </div>
-
-        <!-- Email Actions Footer -->
-        <div class="email-actions-footer">
-          <button class="btn btn-secondary btn-sm" (click)="replyToEmail(em)">✉️ Reply</button>
-          <button class="btn btn-secondary btn-sm" (click)="analyzeEmail(em)" [disabled]="isAnalyzingEmail">
-            ⚡ Re-Analyze with AI
-          </button>
-        </div>
-      </div>
-
-      <div *ngIf="emails.length === 0" class="empty-state-box">
-        No email records available. Click "✉️ Compose & Send HTML Email" to dispatch your first outreach.
-      </div>
-    </div>
-  </section>
-
-  <!-- =================================================================== -->
-  <!-- TAB 4: MAIL DRAFTS & USER APPROVAL WORKFLOW (HUMAN-IN-THE-LOOP) -->
-  <!-- =================================================================== -->
-  <section *ngIf="currentRoute === 'drafts'" class="hud-panel full-width-panel">
-    <div class="panel-header">
-      <div>
-        <h2>AI mail drafts & approvals</h2>
-        <p class="subtitle">Generate, personalize, and rewrite professional email drafts. Strictly requires your explicit approval before any email can be sent.</p>
-      </div>
-    </div>
-
-    <!-- Draft Generator Bar -->
-    <div class="draft-generator-box">
-      <div class="section-title-row">
-        <h3>⚡ Generate High-Converting Email Draft with AI</h3>
-        <span class="badge badge-accent">Telnyx Llama 3.1 Synthesis</span>
-      </div>
-      <div class="generator-grid">
-        <div class="form-group">
-          <label>Target Digital Product</label>
-          <select class="hud-input" [(ngModel)]="newDraftForm.productId">
-            <option [ngValue]="null">No product (generic draft, no product details)</option>
-            <option *ngFor="let p of digitalProducts" [ngValue]="p.id">{{ p.name }}</option>
-          </select>
-        </div>
-        <div class="form-group draft-lead-picker">
-          <label>Recipient (lead)</label>
-          <div *ngIf="draftLead" class="lead-chip">
-            <span><b>{{ draftLead.name }}</b> · {{ draftLead.email }}</span>
-            <button class="btn btn-secondary btn-sm" (click)="clearDraftLead()">Change</button>
+          <div class="status-right">
+            <button class="btn btn-secondary btn-sm" (click)="showMailConfigModal = true">⚙️ Mail Auth Settings</button>
+            <button class="btn btn-primary btn-sm" (click)="syncCompanyMail()" [disabled]="isSyncingMail">
+              {{ isSyncingMail ? 'Syncing...' : '🔄 Sync IMAP' }}
+            </button>
           </div>
-          <ng-container *ngIf="!draftLead && !draftManualRecipient">
-            <input type="search" class="hud-input" [(ngModel)]="draftLeadQuery" (ngModelChange)="searchDraftLeads()" placeholder="Search leads by name, email or company" aria-label="Search leads" />
-            <div class="lead-results" *ngIf="draftLeadResults.length">
-              <button *ngFor="let l of draftLeadResults" type="button" class="lead-option" [disabled]="!l.hasValidEmail" (click)="pickDraftLead(l)">
-                <b>{{ l.name }}</b>
-                <small>{{ l.hasValidEmail ? l.email : (l.email ? 'Invalid email address: ' + l.email : 'No email address') }}{{ l.companyName ? ' · ' + l.companyName : '' }}</small>
+        </div>
+
+        <!-- Email Items Grid / Cards -->
+        <div class="emails-cards-list">
+          <div *ngFor="let em of emails" class="email-summary-card">
+            <div class="email-card-top">
+              <div class="email-header-meta">
+                <span class="chip" [class.calling]="em.ai_priority === 'Urgent' || em.is_urgent === 1" [class.active]="em.status === 'Sent'">
+                  {{ (em.ai_priority || (em.is_urgent === 1 ? 'Urgent' : 'Normal')).toUpperCase() }}
+                </span>
+                <span class="chip chip-not-sent" *ngIf="em.status === 'Not Sent'" [title]="em.smtp_status || 'This email was never sent'">NOT SENT</span>
+                <span class="email-sender">From: <strong>{{ em.sender || em.sender_email || '—' }}</strong> &rarr; To: <strong>{{ em.recipient_name || em.recipient_email }}</strong></span>
+              </div>
+              <span class="email-date">{{ em.sent_at || em.received_at || 'Today' }}</span>
+            </div>
+
+            <h3 class="email-card-subject">{{ em.subject }}</h3>
+
+            <!-- AI Summary Badge -->
+            <div class="ai-summary-banner" *ngIf="em.ai_summary">
+              <span class="ai-icon">⚡ AI Summary:</span> {{ em.ai_summary }}
+            </div>
+
+            <!-- Snippet / Body Text -->
+            <p class="email-snippet-text">{{ em.snippet || em.body }}</p>
+
+            <!-- Visual HTML Indicator -->
+            <div *ngIf="em.html_body" class="html-rendered-preview-bar">
+              <span class="badge badge-accent">📄 Visual HTML Template Included</span>
+              <button class="btn btn-secondary btn-sm" (click)="openVisualEmailModal(em)">
+                👁️ View Rendered Email Page
               </button>
             </div>
-            <button type="button" class="link-btn" (click)="draftManualRecipient = true">or enter an address manually</button>
-          </ng-container>
-          <ng-container *ngIf="!draftLead && draftManualRecipient">
-            <input type="text" class="hud-input" [(ngModel)]="newDraftForm.recipientName" placeholder="Recipient name" aria-label="Recipient name" />
-            <input type="email" class="hud-input" [(ngModel)]="newDraftForm.recipientEmail" placeholder="name@company.com" aria-label="Recipient email" />
-            <button type="button" class="link-btn" (click)="draftManualRecipient = false">choose a lead instead</button>
-          </ng-container>
-        </div>
-        <div class="form-group">
-          <label>Tone of Voice</label>
-          <select class="hud-input" [(ngModel)]="newDraftForm.tone">
-            <option value="Professional">💼 Professional & Direct</option>
-            <option value="Persuasive">🎯 High-Converting & Persuasive</option>
-            <option value="Short">⚡ Short & Punchy</option>
-            <option value="Executive">👔 Executive Briefing</option>
-          </select>
-        </div>
-      </div>
-      <div class="form-group draft-template-row" style="margin-top: 10px;">
-        <label>Start from a template (optional)</label>
-        <div>
-          <span *ngIf="draftTemplate" class="badge">🧩 {{ draftTemplate.name }}</span>
-          <button class="btn btn-secondary btn-sm" (click)="templatePickerFor = 'draft'">{{ draftTemplate ? 'Change' : 'Choose template' }}</button>
-          <button *ngIf="draftTemplate" class="btn btn-secondary btn-sm" (click)="draftTemplate = null">Clear</button>
-        </div>
-      </div>
-      <div class="form-group" style="margin-top: 10px;">
-        <label>Marketing Goal / Offer Angle</label>
-        <input type="text" class="hud-input" [(ngModel)]="newDraftForm.goal" placeholder="e.g. Introduce our product and ask for a short call" />
-      </div>
-      <div style="text-align: right; margin-top: 15px;">
-        <button class="btn btn-primary" (click)="generateNewDraft()" [disabled]="isGeneratingDraft">
-          {{ isGeneratingDraft ? 'Synthesizing Draft...' : '⚡ Generate Email Draft' }}
-        </button>
-      </div>
-    </div>
 
-    <!-- Drafts Split Workspace -->
-    <div class="drafts-workspace-split">
-      <!-- Left: Drafts List -->
-      <div class="drafts-list-col">
-        <div class="section-title-row">
-          <h3>Drafts queue ({{ drafts.length }})</h3>
-        </div>
-        <div class="drafts-scroll-list">
-          <div *ngFor="let d of drafts" class="draft-item-card" [class.selected]="selectedDraft?.id === d.id" (click)="selectDraft(d)">
-            <div class="draft-status-badge-row">
-              <span class="chip" [class.calling]="d.status === 'Draft'" [class.active]="d.status === 'Approved'" [style.background]="d.status === 'Sent' ? '#10b981' : ''">
-                {{ d.status.toUpperCase() }}
-              </span>
-              <span class="draft-date">{{ d.updated_at?.substring(0, 10) || 'Recent' }}</span>
+            <!-- 1-Click AI Smart Reply Suggestions -->
+            <div class="smart-replies-row" *ngIf="em.ai_replies && em.ai_replies.length > 0">
+              <span class="replies-label">💡 1-Click AI Reply Suggestions:</span>
+              <button *ngFor="let rep of em.ai_replies" class="smart-reply-chip" (click)="applySmartReply(rep, em)">
+                {{ rep.label || rep }}
+              </button>
             </div>
-            <h4 class="draft-title">{{ d.subject }}</h4>
-            <p class="draft-target">To: <strong>{{ d.recipient_name || d.recipient_email }}</strong> &bull; Product: {{ d.product_name }}</p>
-          </div>
-          <div *ngIf="drafts.length === 0" class="empty-state">
-            No drafts generated yet. Use the generator box above!
-          </div>
-        </div>
-      </div>
 
-      <!-- Right: Draft Inspector & Approval Console -->
-      <div class="draft-inspector-col" *ngIf="selectedDraft">
-        <div class="inspector-header">
-          <div>
-            <div class="approval-status-tag" [class.approved]="selectedDraft.status === 'Approved'" [class.sent]="selectedDraft.status === 'Sent'">
-              STATUS: {{ selectedDraft.status }}
-            </div>
-            <h2>{{ selectedDraft.subject }}</h2>
-            <p class="inspector-meta">Recipient: <strong>{{ selectedDraft.recipient_name || '—' }}</strong> ({{ selectedDraft.recipient_email || 'no email address' }}) &bull; Product: <strong>{{ selectedDraft.product_name || 'None (generic draft)' }}</strong> &bull; Tone: <em>{{ selectedDraft.tone }}</em></p>
-            <div class="draft-review-box" *ngIf="selectedDraft.status === 'Needs Review'" role="alert">
-              <strong>Delivery unknown.</strong> The last send may or may not have reached {{ selectedDraft.recipient_email }}. Check before sending again.
-              <div class="button-group">
-                <button class="btn btn-secondary btn-sm" (click)="resolveDraft(selectedDraft, 'sent')">It was delivered</button>
-                <button class="btn btn-secondary btn-sm" (click)="resolveDraft(selectedDraft, 'not_sent')">It was not delivered</button>
-              </div>
-            </div>
-            <div class="draft-placeholders" *ngIf="selectedDraft.placeholders?.length && selectedDraft.status !== 'Sent' && selectedDraft.status !== 'Sending' && selectedDraft.status !== 'Needs Review'">
-              <strong>Fill in before sending:</strong>
-              <label *ngFor="let p of selectedDraft.placeholders">{{ p }}
-                <input type="text" class="hud-input" [(ngModel)]="placeholderValues[p]" maxlength="500" [attr.aria-label]="'Value for ' + p" />
-              </label>
-              <button class="btn btn-secondary btn-sm" (click)="fillDraftPlaceholders(selectedDraft)">Save values</button>
-            </div>
-            <p class="helper-text" *ngIf="selectedDraft.batch_id">Recipient comes from the lead. To change it, update the lead and prepare a new product email.</p>
-            <div class="draft-recipient-edit" *ngIf="!selectedDraft.batch_id && selectedDraft.status !== 'Sent' && selectedDraft.status !== 'Sending' && selectedDraft.status !== 'Needs Review'">
-              <input type="text" class="hud-input" [(ngModel)]="draftRecipientEdit.name" placeholder="Recipient name" aria-label="Recipient name" />
-              <input type="email" class="hud-input" [(ngModel)]="draftRecipientEdit.email" placeholder="name@company.com" aria-label="Recipient email" />
-              <button class="btn btn-secondary btn-sm" (click)="saveDraftRecipient(selectedDraft)">Save recipient</button>
+            <!-- Email Actions Footer -->
+            <div class="email-actions-footer">
+              <button class="btn btn-secondary btn-sm" (click)="replyToEmail(em)">✉️ Reply</button>
+              <button *ngIf="em.sent_at && em.status !== 'Received'" class="btn btn-secondary btn-sm" (click)="trackingEmail = em">📊 Delivery &amp; tracking</button>
+              <button class="btn btn-secondary btn-sm" (click)="analyzeEmail(em)" [disabled]="isAnalyzingEmail">
+                ⚡ Re-Analyze with AI
+              </button>
             </div>
           </div>
-          <div class="approval-main-actions">
-            <button *ngIf="selectedDraft.status === 'Draft'" class="btn btn-accent" [disabled]="selectedDraft.placeholders?.length" (click)="approveDraft(selectedDraft)">
-              ✓ Approve Draft
-            </button>
-            <button class="btn btn-primary" *ngIf="selectedDraft.status !== 'Sent' && selectedDraft.status !== 'Needs Review' && selectedDraft.status !== 'Sending'" [disabled]="selectedDraft.placeholders?.length" (click)="sendApprovedDraft(selectedDraft)">
-              🚀 {{ selectedDraft.status === 'Approved' ? 'Send Approved Email' : 'Approve & Send' }}
-            </button>
-            <button class="btn btn-secondary btn-sm" (click)="deleteDraft(selectedDraft.id)">✕ Delete</button>
-          </div>
-        </div>
 
-        <!-- 1-Click AI Tone Rewriters -->
-        <div class="rewrite-bar">
-          <span class="rewrite-label">⚡ AI Rewrite:</span>
-          <button class="btn btn-secondary btn-sm" (click)="rewriteDraft(selectedDraft, 'More Professional')" [disabled]="isRewritingDraft">
-            💼 More Professional
-          </button>
-          <button class="btn btn-secondary btn-sm" (click)="rewriteDraft(selectedDraft, 'More Persuasive')" [disabled]="isRewritingDraft">
-            🎯 More Persuasive
-          </button>
-          <button class="btn btn-secondary btn-sm" (click)="rewriteDraft(selectedDraft, 'Shorter & Punchier')" [disabled]="isRewritingDraft">
-            ⚡ Shorter & Punchier
-          </button>
-        </div>
-
-        <!-- Visual Rendered Page Container -->
-        <div class="rendered-email-container">
-          <div class="rendered-label-bar">
-            <span>VISUAL PAGE LAYOUT (What the recipient actually sees)</span>
-            <span class="badge">Safe HTML Sandbox</span>
+          <div *ngIf="emails.length === 0" class="empty-state-box">
+            No email records yet. Use “Compose &amp; Send Email” to send one, or sync the mailbox.
           </div>
-          <iframe class="email-render-frame" sandbox="" title="Email preview" [srcdoc]="getSafeHtml(selectedDraft.body_html)"></iframe>
         </div>
-      </div>
-    </div>
-  </section>
+        </section>
+      </app-mail-center>
+    } @loading { <p class="helper-text">Loading Mail Center…</p> }
+  </ng-container>
 
   <!-- =================================================================== -->
   <!-- TAB 4: SOCIAL MEDIA MARKETING STUDIO -->
@@ -1173,6 +998,22 @@
           <input type="text" class="hud-input" [(ngModel)]="composeEmail.subject" placeholder="e.g. Accelerate Wholesale Ordering with ThriveWoo B2B" />
         </div>
 
+        <!-- Required email purpose (validated again by the server against the content and template) -->
+        <fieldset class="compose-purpose">
+          <legend>Email purpose <span class="req" aria-hidden="true">*</span><span class="sr-only">(required)</span></legend>
+          <label class="purpose-opt" [class.disabled]="composeTemplateIsMarketing || !canSendTransactional">
+            <input type="radio" name="composePurpose" value="transactional" [(ngModel)]="composePurpose" [disabled]="composeTemplateIsMarketing || !canSendTransactional" />
+            <span><strong>Transactional / Direct</strong><small>A reply, receipt, notification or one-to-one service message. Sent through your transactional mail service.</small></span>
+          </label>
+          <label class="purpose-opt">
+            <input type="radio" name="composePurpose" value="marketing" [(ngModel)]="composePurpose" />
+            <span><strong>Marketing</strong><small>Promotions, newsletters or offers. Needs an SMTP mailbox approved for marketing; adds an unsubscribe link; unsubscribed or opted-out contacts are not emailed.</small></span>
+          </label>
+          <p class="purpose-note" *ngIf="composeTemplateIsMarketing">This email uses a {{ composeTemplate?.category }} template, so it is sent as marketing.</p>
+          <p class="purpose-note" *ngIf="!canSendTransactional">Your role sends Compose email as marketing. Workspace Owners and Admins can send transactional email.</p>
+          <p class="purpose-note">Emails with promotional content are always sent as marketing, whatever is selected.</p>
+        </fieldset>
+
         <!-- Mode Toggle: Visual Page vs HTML Code -->
         <div class="compose-tab-bar">
           <div class="tab-buttons">
@@ -1203,7 +1044,7 @@
 
         <!-- Visual Rendered Preview -->
         <div *ngIf="composeTab === 'visual'" class="rendered-compose-view">
-          <iframe *ngIf="composeEmail.html_body" class="email-render-frame" sandbox="" title="Email preview" [srcdoc]="getSafeHtml(composeEmail.html_body)"></iframe>
+          <app-email-preview *ngIf="composeEmail.html_body" class="email-render-frame" [html]="composeEmail.html_body" title="Email preview"></app-email-preview>
           <div *ngIf="!composeEmail.html_body" class="plain-text-preview">
             <p style="white-space: pre-wrap;">{{ composeEmail.body || 'No message content entered yet.' }}</p>
           </div>
@@ -1216,20 +1057,39 @@
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" (click)="showComposeModal = false">Cancel</button>
-        <button class="btn btn-primary" (click)="sendOutboundEmail()" [disabled]="isSendingCompose">{{ isSendingCompose ? "Sending…" : "🚀 Dispatch Email" }}</button>
+        <button class="btn btn-primary" (click)="sendOutboundEmail()" [disabled]="isSendingCompose || !composePurpose" [title]="composePurpose ? '' : 'Choose the email purpose first'">{{ isSendingCompose ? "Sending…" : "🚀 Dispatch Email" }}</button>
       </div>
     </div>
   </div>
 
   <ng-container *ngIf="templatePickerFor">
     @defer (on immediate) {
-      <app-template-picker [title]="templatePickerFor === 'draft' ? 'Start the draft from a template' : 'Choose a template for this email'" (picked)="onTemplatePicked($event)" (closed)="templatePickerFor = null"></app-template-picker>
+      <app-template-picker subtitle="Loads a copy of the template into this email." (picked)="onTemplatePicked($event)" (closed)="templatePickerFor = null"></app-template-picker>
     }
   </ng-container>
 
   <!-- =================================================================== -->
   <!-- MODAL 3: VIEW RENDERED EMAIL PAGE POPUP -->
   <!-- =================================================================== -->
+  <!-- Delivery and engagement tracking for one sent email (read-only). -->
+  <div *ngIf="trackingEmail" class="modal-backdrop" (click)="trackingEmail = null">
+    <div class="modal-card wide-modal" (click)="$event.stopPropagation()" role="dialog" aria-modal="true" aria-labelledby="tracking-title">
+      <div class="modal-header">
+        <div>
+          <h3 id="tracking-title">Delivery &amp; tracking</h3>
+          <p class="subtitle" style="margin: 0;">{{ trackingEmail.subject }} &bull; To: {{ trackingEmail.recipient_email }}</p>
+        </div>
+        <button class="close-btn" (click)="trackingEmail = null" aria-label="Close">✕</button>
+      </div>
+      <div class="modal-body">
+        <app-email-tracking [emailId]="trackingEmail.id"></app-email-tracking>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" (click)="trackingEmail = null">Close</button>
+      </div>
+    </div>
+  </div>
+
   <div *ngIf="viewingEmailVisual" class="modal-backdrop" (click)="viewingEmailVisual = null">
     <div class="modal-card wide-modal" (click)="$event.stopPropagation()">
       <div class="modal-header">
@@ -1241,7 +1101,7 @@
       </div>
       <div class="modal-body">
         <div class="rendered-email-container">
-          <iframe class="email-render-frame" sandbox="" title="Email content" [srcdoc]="getSafeHtml(viewingEmailVisual.html_body || viewingEmailVisual.body)"></iframe>
+          <app-email-preview class="email-render-frame" [html]="viewingEmailVisual.html_body || textToPreviewHtml(viewingEmailVisual.body)" [contentKey]="viewingEmailVisual.id" [title]="'Email: ' + (viewingEmailVisual.subject || '')" emptyText="This email has no content."></app-email-preview>
         </div>
       </div>
       <div class="modal-footer">

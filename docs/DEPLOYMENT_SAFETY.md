@@ -29,8 +29,36 @@ powershell -File create_zip.ps1      # Windows; runs the same script
 | `JWT_SECRET` | ≥ 32 random characters | API and worker refuse to start |
 | `SOCIAL_TOKEN_ENCRYPTION_KEY` | 32 random bytes, base64 (or 64 hex); **never change after go-live** | API and worker refuse to start if missing or malformed; `node scripts/verifyEncryptedSecrets.js` proves it is the *right* key |
 | `DB_*` | production database | — |
+| `TRUST_PROXY` | `1` only behind exactly one reverse proxy you control (see 2a); empty when the API is reached directly | — |
+| `ZEPTOMAIL_WEBHOOKS_ENABLED` | **empty** until the ZeptoMail event format is signed off on staging (`docs/EMAIL_TRACKING_STAGING.md`) | webhook answers 404 while empty |
+| `MAIL_TRACKING_RETENTION_DAYS` | optional; default 395 | — |
 
 Both processes print `Social media storage: <absolute path>` at startup; the two lines must match.
+
+## 2a. Reverse proxy, client IP and rate limits
+
+- **Client IP.** `TRUST_PROXY=1` makes the API take the client address from the one proxy directly in
+  front of it (Express `trust proxy = 1`). Verified behaviour (Express 4):
+  - unset: `X-Forwarded-For` is ignored; behind a proxy every visitor then shares the proxy's address,
+    so all per-IP limits become one shared limit;
+  - `1` with one proxy: the address that proxy appends is used; a client-supplied `X-Forwarded-For`
+    prefix cannot spoof it;
+  - `1` with two hops (CDN or load balancer + nginx): every client appears as the CDN — **not supported**
+    without a code change. Never trust arbitrary forwarded headers.
+- **Only the proxy may reach the API port.** Bind the API to localhost/private network or firewall it;
+  otherwise a client could connect directly and send its own `X-Forwarded-For`.
+- The proxy must overwrite (not append to) `X-Forwarded-For` from untrusted clients, or append the real
+  peer address (nginx: `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` with no other
+  proxy in front), and set `X-Forwarded-Proto https`.
+- **Check after deployment:** sign in from two different networks and confirm the audit log
+  (`audit_logs.ip_address`) shows each real public address, not the proxy's.
+- **Rate limits** (`backend/lib/rateLimit.js`) are fixed-window counters **in memory, per API process**.
+  One API process: correct. Several instances or a cluster: each has its own counters (limits multiply
+  and reset on restart) — move them to a shared store (e.g. Redis) before scaling out.
+- Email tracking paths `/api/v1/mail/t/...` are outside the general per-IP API limit (300/min) so
+  recipients' link clicks are never refused and provider webhook bursts are not dropped. They keep
+  their own limits: pixels/clicks a 3000/min per-IP ceiling (above 120/min per IP the hit is still
+  served but not recorded); ZeptoMail webhook 600/min per workspace endpoint (429 above that).
 
 ## 3. Migrations
 
@@ -180,7 +208,10 @@ These scopes are the ones the code requests today; they were not changed in this
 - [ ] Worker and API stopped; `npm run migrate -- --backup=<dump>`; status shows nothing pending.
 - [ ] Under each service account: `sudo -u <api-user> node scripts/checkProductionConfig.js` and the same for the
       worker account — both print the same storage folder and "OK" (permissions are checked as that account).
+- [ ] `TRUST_PROXY` matches the proxy topology (section 2a); the API port is not reachable except through the proxy.
+- [ ] `ZEPTOMAIL_WEBHOOKS_ENABLED` is empty unless the staging sign-off in `docs/EMAIL_TRACKING_STAGING.md` is recorded.
 - [ ] API and worker started; both log the same storage folder and no configuration errors.
+- [ ] After start: audit log shows real client IPs (section 2a), not the proxy address.
 - [ ] `node scripts/verifyMediaStorage.js` reports 0 missing.
 - [ ] Publishing Queue reviewed for overdue `queued` jobs.
 - [ ] **Requires manual approval / live staging:** platform approvals (section 6), and the integration test

@@ -50,6 +50,10 @@ router.post('/:id/validate', requireCapability('mail.view'), wrap(async (req, re
 router.post('/:id/approve', requireCapability('mail.send'), wrap(async (req, res) => res.json({ success: true, campaign: await svc.approve(req, req.params.id) })));
 router.post('/:id/send', requireCapability('mail.send'), wrap(async (req, res) => res.json({ success: true, campaign: await svc.send(req, req.params.id, req.body || {}) })));
 router.post('/:id/refresh', requireCapability('mail.view'), wrap(async (req, res) => res.json({ success: true, campaign: await svc.refresh(req, req.params.id) })));
+// Per-recipient activity from Zoho (addresses): Owner, Admin, Marketing Manager and Approver only.
+// Limited per workspace: Zoho allows 500 calls per 5 minutes and then locks the account for 30 minutes.
+const recipientsLimit = require('../../../lib/rateLimit').rateLimit({ windowMs: 60 * 1000, max: 30, keyFn: req => `zoho-recipients:${req.auth.workspaceId}`, message: 'Too many recipient lookups. Wait a minute and try again.' });
+router.get('/:id/recipients', requireCapability('mail.send'), recipientsLimit, wrap(async (req, res) => res.json({ success: true, ...(await svc.recipientActivity(req, req.params.id, { activity: String(req.query.activity || ''), page: req.query.page })) })));
 router.post('/:id/resolve', requireCapability('mail.send'), wrap(async (req, res) => res.json({ success: true, campaign: await svc.resolve(req, req.params.id, req.body || {}) })));
 
 module.exports = router;

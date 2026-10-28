@@ -1,5 +1,10 @@
 
 --------------------------------------------------------------------------------
+Package: @angular/platform-browser
+License: "MIT"
+
+
+--------------------------------------------------------------------------------
 Package: xlsx
 License: "Apache-2.0"
 
@@ -410,11 +415,6 @@ License: "Apache-2.0"
       defend, and hold each Contributor harmless for any liability
       incurred by, or claims asserted against, such Contributor by reason
       of your accepting any such warranty or additional liability.
-
---------------------------------------------------------------------------------
-Package: @angular/platform-browser
-License: "MIT"
-
 
 --------------------------------------------------------------------------------
 Package: @angular/core

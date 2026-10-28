@@ -1,0 +1,70 @@
+<section class="ts" aria-labelledby="ts-title">
+  <button type="button" class="ts-toggle" (click)="open = !open" [attr.aria-expanded]="open" aria-controls="ts-body">
+    <span>
+      <strong id="ts-title">Delivery &amp; engagement tracking</strong>
+      <small *ngIf="s">{{ summary }}</small>
+      <small *ngIf="!s && loading">Loading…</small>
+    </span>
+    <span aria-hidden="true">{{ open ? '▴' : '▾' }}</span>
+  </button>
+
+  <div class="ts-body" id="ts-body" *ngIf="open">
+    <div class="callout warn" *ngIf="error" role="alert">{{ error }} <button type="button" class="link-btn" (click)="load()">Try again</button></div>
+    <ng-container *ngIf="s">
+      <p class="ts-note">Applies to emails sent from Mail Center (drafts and Compose). AI Campaigns sequences are not tracked. Product emails are tracked only for leads with verified consent. Delivery outcomes are recorded whenever the provider reports them.</p>
+      <div class="callout warn" *ngIf="!s.configured">Set up Company Mail first; tracking settings belong to the workspace's mail configuration.</div>
+
+      <fieldset class="ts-policy" [disabled]="!canConfigure || !s.configured || busy === 'policy'">
+        <legend>Open and click tracking <span class="muted">(off by default)</span></legend>
+        <label class="ts-check"><input type="checkbox" [(ngModel)]="form.trackOpens" /> Track opens (estimate: image blocking and privacy features distort it)</label>
+        <label class="ts-check"><input type="checkbox" [(ngModel)]="form.trackClicks" /> Track link clicks (unsubscribe, sign-in, reset and other sensitive links are never tracked)</label>
+        <p class="ts-note">Only turn these on if your privacy notice and your recipients' consent allow it.</p>
+        <p class="ts-warn" *ngIf="(form.trackOpens || form.trackClicks) && !s.publicLinksAvailable">For emails sent through your SMTP server, opens and clicks need a public https address for this app (APP_BASE_URL). Until then they are not added.</p>
+        <div class="ts-actions" *ngIf="canConfigure">
+          <button type="button" class="btn btn-primary btn-sm" (click)="savePolicy()" [disabled]="!policyDirty || busy === 'policy'">{{ busy === 'policy' ? 'Saving…' : 'Save' }}</button>
+        </div>
+        <p class="ts-note" *ngIf="!canConfigure">Only workspace owners and admins can change tracking.</p>
+      </fieldset>
+
+      <section class="ts-zepto" aria-labelledby="ts-zepto-title">
+        <h4 id="ts-zepto-title">ZeptoMail delivery events (webhook)</h4>
+        <p class="ts-note">ZeptoMail can report delivery, bounces, spam complaints, the first open and link clicks. A verified hard bounce or spam complaint adds the address to this workspace's suppression list.</p>
+        <div class="callout warn" *ngIf="!s.zeptomail.serverAllowsWebhook">
+          Not available yet on this server. ZeptoMail webhooks stay off until their event format has been confirmed with a test event from your ZeptoMail account (server setting ZEPTOMAIL_WEBHOOKS_ENABLED). Until then ZeptoMail emails show "Accepted by provider" only.
+        </div>
+        <ng-container *ngIf="s.zeptomail.endpoint as ep">
+          <div class="ts-url" *ngIf="ep.url">
+            <code>{{ ep.url }}</code>
+            <button type="button" class="btn btn-secondary btn-sm" (click)="copy(ep.url)">Copy</button>
+          </div>
+          <p class="ts-note">Status: <strong>{{ ep.enabled ? 'On' : 'Off' }}</strong> · Key {{ ep.hasKey ? 'saved' : 'not saved' }}<ng-container *ngIf="ep.lastEventAt"> · Last event {{ ep.lastEventAt | date:'medium' }}</ng-container></p>
+        </ng-container>
+        <ng-container *ngIf="canConfigure">
+          <div class="ts-actions" *ngIf="!s.zeptomail.endpoint">
+            <button type="button" class="btn btn-secondary btn-sm" (click)="webhook({}, 'Webhook URL created. Add it in ZeptoMail.')" [disabled]="busy === 'webhook'">Create webhook URL</button>
+          </div>
+          <label class="ts-field">Authentication key from ZeptoMail
+            <input type="password" class="hud-input" [(ngModel)]="authKey" autocomplete="off" placeholder="Paste the key (it is stored encrypted and never shown again)" />
+          </label>
+          <div class="ts-actions">
+            <button type="button" class="btn btn-secondary btn-sm" (click)="saveKey()" [disabled]="busy === 'webhook' || !authKey.trim()">Save key</button>
+            <button type="button" class="btn btn-secondary btn-sm" *ngIf="!s.zeptomail.endpoint?.enabled" (click)="webhook({ enabled: true }, 'ZeptoMail webhook turned on.')" [disabled]="busy === 'webhook' || !s.zeptomail.serverAllowsWebhook || !s.zeptomail.endpoint?.hasKey">Turn on</button>
+            <button type="button" class="btn btn-secondary btn-sm" *ngIf="s.zeptomail.endpoint?.enabled" (click)="webhook({ enabled: false }, 'ZeptoMail webhook turned off.')" [disabled]="busy === 'webhook'">Turn off</button>
+            <button type="button" class="link-btn" *ngIf="s.zeptomail.endpoint" (click)="webhook({ rotateUrl: true }, 'New webhook URL created.')" [disabled]="busy === 'webhook'">New URL</button>
+          </div>
+          <details class="ts-steps">
+            <summary>Setup steps in ZeptoMail</summary>
+            <ol>
+              <li>Create this workspace's webhook URL here and copy it.</li>
+              <li>In ZeptoMail, open the Mail Agent you send with → Webhooks → Add webhook, and paste the URL.</li>
+              <li>Select the events: Delivered, Soft bounce, Hard bounce, Open, Click, Feedback loop (spam).</li>
+              <li>Turn on authentication; copy the Authentication Key and save it here.</li>
+              <li>Use "Send test" in ZeptoMail and confirm the event is received before relying on it.</li>
+            </ol>
+          </details>
+        </ng-container>
+      </section>
+      <p class="ts-note">Tracking events and link records are kept for {{ s.retentionDays }} days.</p>
+    </ng-container>
+  </div>
+</section>

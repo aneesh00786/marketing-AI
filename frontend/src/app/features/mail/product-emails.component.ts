@@ -2,10 +2,10 @@ import { Component, EventEmitter, OnDestroy, OnInit, Output } from '@angular/cor
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
-import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { apiRoot } from '../../core/api-base';
 import { AuthStateService } from '../../core/auth-state.service';
 import { TemplatePickerComponent } from './template-picker.component';
+import { EmailPreviewComponent } from './email-preview.component';
 
 /**
  * Mail Center → Product emails: Product → Leads → personalized emails → preview → send.
@@ -17,7 +17,7 @@ import { TemplatePickerComponent } from './template-picker.component';
 @Component({
   selector: 'app-product-emails',
   standalone: true,
-  imports: [CommonModule, FormsModule, TemplatePickerComponent],
+  imports: [CommonModule, FormsModule, EmailPreviewComponent, TemplatePickerComponent],
   templateUrl: './product-emails.component.html',
   styleUrls: ['../command/command-center.component.css', './product-emails.component.css']
 })
@@ -73,7 +73,7 @@ export class ProductEmailsComponent implements OnInit, OnDestroy {
   busy = '';
   error = '';
 
-  constructor(private http: HttpClient, private sanitizer: DomSanitizer, private auth: AuthStateService) {}
+  constructor(private http: HttpClient, private auth: AuthStateService) {}
 
   ngOnDestroy(): void { clearTimeout(this.poll); }
 
@@ -183,10 +183,6 @@ export class ProductEmailsComponent implements OnInit, OnDestroy {
   }
 
   get preview(): any { return this.drafts.find(d => d.id === this.previewId) || null; }
-  get previewHtml(): SafeHtml {
-    // Sandboxed iframe only: no scripts, no access to the app.
-    return this.sanitizer.bypassSecurityTrustHtml(this.preview?.bodyHtml || '');
-  }
   get readyCount(): number { return this.drafts.filter(d => d.status === 'Approved' && !d.outcome).length; }
   get failedCount(): number { return this.drafts.filter(d => d.outcome === 'failed').length; }
   get sending(): boolean { return ['queued', 'sending'].includes(this.batch?.status); }

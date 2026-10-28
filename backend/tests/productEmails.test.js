@@ -7,6 +7,7 @@ const h = require('./helpers');
 // Marketing goes only through an SMTP mailbox approved for marketing (workspace A); workspace B
 // uses ZeptoMail (transactional only). SMTP is stubbed and ZeptoMail mocked; nothing is sent.
 process.env.APP_BASE_URL = 'https://app.marketech.test'; // unsubscribe links need a public https base
+process.env.PRODUCT_EMAILS_ENABLED = '1'; // the feature is off by default (lib/features.js)
 const db = () => h.db();
 const svc = () => require('../modules/mail/productEmails/service');
 let A;
@@ -517,7 +518,7 @@ test('Mail Drafts generator: choosing a lead fills the recipient from the lead (
   assert.equal((await h.api('POST', '/api/v1/drafts/generate', { token: B.token, body: { leadId: l } })).status, 404);
 });
 
-test('transactional email unchanged: manual drafts and direct sends still go through ZeptoMail', async () => {
+test('direct sends (Compose) still go through ZeptoMail without marketing headers; one-to-one drafts are marketing and never use ZeptoMail', async () => {
   const g = await h.api('POST', '/api/v1/drafts/generate', { token: B.token, body: { recipientEmail: 'manual@person.io', recipientName: 'Manual', goal: 'Hi' } });
   assert.equal(g.status, 200);
   assert.equal(g.data.draft.batch_id, null);
@@ -525,12 +526,12 @@ test('transactional email unchanged: manual drafts and direct sends still go thr
   const mock = h.mockFetch([zepto(calls)]);
   let r;
   try {
-    r = await h.api('POST', '/api/v1/emails/send', { token: B.token, headers: { 'Idempotency-Key': `manual-${uid()}-abcdefgh` }, body: { recipient_email: 'manual@person.io', subject: 'Hi', body: 'Hello', confirm: true } });
+    r = await h.api('POST', '/api/v1/emails/send', { token: B.token, headers: { 'Idempotency-Key': `manual-${uid()}-abcdefgh` }, body: { recipient_email: 'manual@person.io', subject: 'Hi', body: 'Hello', purpose: 'transactional', confirm: true } });
   } finally { mock.restore(); }
   assert.equal(r.status, 200, JSON.stringify(r.data));
-  assert.equal(calls.length, 1, 'sent through ZeptoMail');
+  assert.equal(calls.length, 1, 'direct send through ZeptoMail');
   assert.equal(calls[0].mime_headers, undefined, 'no marketing headers on one-off emails');
-  // A regular (non-batch) draft is transactional too: approved and sent through ZeptoMail.
+  // A regular (non-batch) draft is marketing: a ZeptoMail-only workspace cannot send it, and nothing reaches ZeptoMail.
   const fill = Object.fromEntries((g.data.draft.placeholders || []).map(x => [x, 'Jane']));
   await h.api('PATCH', `/api/v1/drafts/${g.data.draft.id}`, { token: B.token, body: { replacements: fill } });
   assert.equal((await h.api('PUT', `/api/v1/drafts/${g.data.draft.id}/approve`, { token: B.token })).status, 200);
@@ -538,6 +539,62 @@ test('transactional email unchanged: manual drafts and direct sends still go thr
   const mock2 = h.mockFetch([zepto(calls2)]);
   let sent;
   try { sent = await h.api('POST', `/api/v1/drafts/${g.data.draft.id}/send`, { token: B.token, body: { confirm: true } }); } finally { mock2.restore(); }
+  assert.equal(sent.status, 409);
+  assert.equal(sent.data.code, 'MARKETING_PROVIDER_BLOCKED');
+  assert.equal(calls2.length, 0);
+});
+
+test('a one-to-one marketing draft carries a one-click unsubscribe link (header and footer); using it suppresses the address and later drafts are refused', async () => {
+  const to = `una-${uid()}@acme.io`;
+  const mk = async () => {
+    const r = await db().run(`INSERT INTO email_drafts (workspace_id, recipient_email, recipient_name, subject, body_html, body_text, tone, status, created_at, updated_at)
+      VALUES (?, ?, 'Una', 'Hello', '<p>Hello Una</p>', 'Hello Una', 'Professional', 'Approved', UTC_TIMESTAMP(), UTC_TIMESTAMP())`, [A.workspaceId, to]);
+    return r.lastID;
+  };
+  const id = await mk();
+  const calls = [];
+  const m = smtpMock(calls);
+  let sent;
+  try { sent = await h.api('POST', `/api/v1/drafts/${id}/send`, { token: A.token, body: { confirm: true } }); } finally { m.restore(); }
   assert.equal(sent.status, 200, JSON.stringify(sent.data));
-  assert.equal(calls2.length, 1);
+  const token = (await db().get('SELECT unsubscribe_token FROM email_drafts WHERE id = ?', [id])).unsubscribe_token;
+  assert.match(token, /^[a-f0-9]{40}$/);
+  assert.match(calls[0].mime_headers['List-Unsubscribe'], new RegExp(`/api/v1/mail/unsubscribe/${token}>`));
+  assert.equal(calls[0].mime_headers['List-Unsubscribe-Post'], 'List-Unsubscribe=One-Click');
+  assert.match(calls[0].htmlbody, new RegExp(`unsubscribe/${token}`), 'visible link in the body');
+  assert.equal((await h.api('POST', `/api/v1/mail/unsubscribe/${token}`)).status, 200);
+  assert.equal((await db().get('SELECT reason FROM email_suppressions WHERE workspace_id = ? AND email = ?', [A.workspaceId, to])).reason, 'unsubscribed');
+  const next = await mk();
+  const calls2 = [];
+  const m2 = smtpMock(calls2);
+  let refused;
+  try { refused = await h.api('POST', `/api/v1/drafts/${next}/send`, { token: A.token, body: { confirm: true } }); } finally { m2.restore(); }
+  assert.equal(refused.status, 409);
+  assert.equal(calls2.length, 0);
+});
+
+// ------------------------------------------------------------------ tracking (migration 024)
+
+test('with tracking on, a product email to a lead with verified consent is tracked; unsubscribe links are never rewritten', async () => {
+  assert.equal((await h.api('PUT', '/api/v1/mail/tracking/settings', { token: A.token, body: { trackOpens: true, trackClicks: true } })).status, 200);
+  try {
+    const x = await lead(A, { name: 'Tia Ng', email: `tia-${uid()}@acme.io`, company: 'Acme', consent: 'granted' });
+    const c = await pe(A, 'POST', '/batches', { productId: product, leadIds: [x], goal: 'Intro', senderName: 'Jane' });
+    await pe(A, 'POST', `/batches/${c.data.batch.id}/approve`, {});
+    assert.equal((await pe(A, 'POST', `/batches/${c.data.batch.id}/send`, { confirm: true })).data.batch.status, 'queued');
+    const calls = [];
+    const mock = smtpMock(calls);
+    try { await work(); } finally { mock.restore(); }
+    const mine = calls.filter(cl => /^tia-/.test(cl.to[0].email_address.address));
+    assert.equal(mine.length, 1);
+    const html = mine[0].htmlbody;
+    assert.match(html, /\/api\/v1\/mail\/t\/o\/[a-f0-9]{32}\.gif/, 'open pixel');
+    assert.match(html, /https:\/\/app\.marketech\.test\/api\/v1\/mail\/unsubscribe\/[a-f0-9]{40}/, 'unsubscribe link kept as is');
+    assert.match(mine[0].mime_headers['List-Unsubscribe'], /\/api\/v1\/mail\/unsubscribe\/[a-f0-9]{40}>/);
+    const d = await db().get('SELECT id, lead_id FROM email_drafts WHERE batch_id = ?', [c.data.batch.id]);
+    const t = await db().get('SELECT track_opens, track_clicks, provider FROM mail_message_tracking WHERE draft_id = ?', [d.id]);
+    assert.deepEqual([t.track_opens, t.track_clicks, t.provider], [1, 1, 'smtp']);
+  } finally {
+    await h.api('PUT', '/api/v1/mail/tracking/settings', { token: A.token, body: { trackOpens: false, trackClicks: false } });
+  }
 });

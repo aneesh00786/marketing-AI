@@ -1,0 +1,49 @@
+:host { display: contents; }
+.cp-backdrop { position: fixed; inset: 0; z-index: 1100; background: var(--scrim, rgba(2, 6, 23, 0.6)); backdrop-filter: blur(3px); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.cp { width: min(560px, 100%); max-height: calc(100vh - 32px); display: flex; flex-direction: column; background: var(--surface); color: var(--text); border: 1px solid var(--border-strong); border-radius: 16px; box-shadow: var(--shadow-lg, 0 20px 50px rgba(0, 0, 0, 0.35)); font-family: var(--font); }
+.cp-head { display: flex; justify-content: space-between; gap: 12px; padding: 18px 20px 10px; border-bottom: 1px solid var(--border); }
+.cp-head h3 { margin: 0; font-size: 1.05rem; font-weight: 650; }
+.cp-sub { margin: 4px 0 0; color: var(--text-muted); font-size: 0.85rem; }
+.cp-x { background: none; border: none; color: var(--text-muted); font-size: 1rem; cursor: pointer; padding: 4px 6px; border-radius: 6px; align-self: flex-start; }
+.cp-x:hover { background: var(--surface-2); color: var(--text); }
+.cp-body { padding: 14px 20px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
+.cp-list { display: flex; flex-direction: column; gap: 4px; min-height: 120px; max-height: 340px; overflow-y: auto; border: 1px solid var(--border); border-radius: 10px; padding: 4px; }
+.cp-item { display: flex; align-items: center; gap: 10px; text-align: left; background: none; border: 1px solid transparent; border-radius: 8px; padding: 8px 10px; color: var(--text); font: inherit; cursor: pointer; }
+.cp-item:hover:not(:disabled) { background: var(--surface-2); }
+.cp-item.on { background: var(--accent-soft); border-color: var(--accent-ring, var(--accent)); }
+.cp-item:disabled { opacity: 0.55; cursor: not-allowed; }
+.cp-item:focus-visible, .cp-x:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.cp-radio { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--border-strong); flex: none; }
+.cp-item.on .cp-radio { border-color: var(--accent); background: radial-gradient(var(--accent) 45%, transparent 50%); }
+.cp-main { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.cp-main strong { font-size: 0.92rem; }
+.cp-main small { color: var(--text-muted); font-size: 0.8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-company { font-size: 0.78rem; color: var(--text-muted); white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.cp-state { padding: 18px 10px; text-align: center; font-size: 0.88rem; }
+.cp-alt { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.cp-field { display: flex; flex-direction: column; gap: 5px; font-size: 0.82rem; color: var(--text-muted); font-weight: 600; }
+.req { color: var(--danger-text); }
+.cp-note { border-radius: 10px; padding: 10px 12px; font-size: 0.86rem; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.cp-note.warn { border: 1px solid rgba(245, 158, 11, 0.5); background: var(--warning-soft, rgba(245, 158, 11, 0.08)); }
+.cp-note.danger { border: 1px solid rgba(239, 68, 68, 0.45); background: rgba(239, 68, 68, 0.08); color: var(--danger-text); }
+.cp-note-acts { display: flex; gap: 8px; flex-wrap: wrap; }
+.cp-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 20px; border-top: 1px solid var(--border); }
+.btn-sm { padding: 6px 11px; font-size: 0.8rem; border-radius: 8px; }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+.link-btn { background: none; border: none; padding: 0; color: var(--info-text, var(--accent)); text-decoration: underline; cursor: pointer; font: inherit; font-size: 0.85rem; }
+.cp-spin { width: 13px; height: 13px; border: 2px solid var(--border-strong); border-top-color: var(--accent); border-radius: 50%; display: inline-block; animation: cp-spin 0.8s linear infinite; vertical-align: -2px; }
+.cp-spin.light { border-color: rgba(255, 255, 255, 0.45); border-top-color: #fff; }
+@keyframes cp-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .cp-spin { animation-duration: 2.4s; } }
+@media (max-width: 640px) {
+  .cp { max-height: calc(100vh - 16px); }
+}
+
+.cp-filters { display: grid; grid-template-columns: minmax(150px, 0.8fr) 1.2fr; gap: 8px; align-items: end; }
+.cp-filter { display: flex; flex-direction: column; gap: 4px; font-size: 0.78rem; font-weight: 600; color: var(--text-muted); }
+.cp-scope { margin: 0; font-size: 0.82rem; color: var(--text-muted); }
+.cp-side { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; max-width: 40%; min-width: 0; }
+.cp-product { font-size: 0.72rem; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.cp-item:disabled small { white-space: normal; }
+.cp-check { display: flex; gap: 8px; align-items: center; font-size: 0.85rem; color: var(--text); }
+@media (max-width: 640px) { .cp-filters { grid-template-columns: 1fr; } .cp-side { display: none; } }

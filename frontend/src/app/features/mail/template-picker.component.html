@@ -1,0 +1,63 @@
+<div class="tp-backdrop" (click)="close()">
+  <div class="tp" role="dialog" aria-modal="true" aria-labelledby="tp-title" [attr.aria-describedby]="subtitle ? 'tp-sub' : null" (click)="$event.stopPropagation()">
+    <header class="tp-head">
+      <div>
+        <h3 id="tp-title">{{ title }}</h3>
+        <p class="tp-sub" id="tp-sub" *ngIf="subtitle">{{ subtitle }}</p>
+      </div>
+      <button type="button" class="tp-x" (click)="close()" aria-label="Close">✕</button>
+    </header>
+
+    <div class="tp-body">
+      <!-- Left: search and template cards -->
+      <section class="tp-list-col" aria-label="Templates">
+        <input #searchBox type="search" class="hud-input tp-search" [(ngModel)]="q" (ngModelChange)="search()"
+               placeholder="Search templates by name or category" aria-label="Search templates" aria-controls="tp-list" />
+        <div class="tp-list" id="tp-list" role="listbox" aria-label="Email templates" [attr.aria-busy]="loading">
+          <div class="tp-state" *ngIf="loading && !templates.length"><span class="tp-spin" aria-hidden="true"></span> Loading templates…</div>
+          <div class="tp-state warn" *ngIf="loadError" role="alert">{{ loadError }} <button type="button" class="tp-link" (click)="load()">Try again</button></div>
+          <div class="tp-state" *ngIf="!loading && !loadError && !templates.length">
+            {{ q.trim() ? 'No templates match “' + q.trim() + '”.' : 'No templates yet. Create one in Mail Center → Email Templates.' }}
+          </div>
+          <button type="button" *ngFor="let t of templates" class="tp-card" role="option" [class.on]="selectedId === t.id"
+                  [attr.aria-selected]="selectedId === t.id" (click)="choose(t)" (keydown)="onCardKey($event)">
+            <span class="tp-card-top">
+              <strong>{{ t.name }}</strong>
+              <span class="tp-check" *ngIf="selectedId === t.id" aria-hidden="true">✓</span>
+            </span>
+            <small class="tp-desc" *ngIf="t.description">{{ t.description }}</small>
+            <span class="tp-meta">
+              <span class="tp-chip" *ngIf="t.category">{{ t.category }}</span>
+              <span *ngIf="sourceLabel(t.source)">{{ sourceLabel(t.source) }}</span>
+              <span *ngIf="t.updatedAt">Updated {{ t.updatedAt | date:'mediumDate' }}</span>
+            </span>
+          </button>
+        </div>
+      </section>
+
+      <!-- Right: preview of the selected template's HTML (sandboxed) -->
+      <section class="tp-preview-col" aria-label="Template preview" aria-live="polite">
+        <div class="tp-empty" *ngIf="!selectedId">
+          <span class="tp-empty-icon" aria-hidden="true">🧩</span>
+          <p><strong>Select a template</strong></p>
+          <p class="muted">Its preview appears here. Nothing changes until you click “Use This Template”.</p>
+        </div>
+        <div class="tp-empty" *ngIf="selectedId && previewLoading"><span class="tp-spin" aria-hidden="true"></span> Loading preview…</div>
+        <div class="tp-empty warn" *ngIf="selectedId && previewError" role="alert">{{ previewError }}</div>
+        <ng-container *ngIf="canUse">
+          <div class="tp-preview-head">
+            <strong>{{ selected.name }}</strong>
+            <span class="muted small" *ngIf="selected.placeholders?.length">Placeholders: {{ selected.placeholders.join(', ') }}</span>
+          </div>
+          <app-email-preview class="tp-frame" [html]="selected.html" [contentKey]="selected.id" [title]="'Preview of ' + selected.name" emptyText="This template has no HTML."></app-email-preview>
+        </ng-container>
+      </section>
+    </div>
+
+    <footer class="tp-foot">
+      <span class="muted small tp-foot-note">{{ canUse ? 'Selected: ' + selected.name : 'No template selected' }}</span>
+      <button type="button" class="btn btn-secondary" (click)="close()">Cancel</button>
+      <button type="button" class="btn btn-primary" (click)="use()" [disabled]="!canUse">Use This Template</button>
+    </footer>
+  </div>
+</div>
