@@ -1324,7 +1324,8 @@ async function startServer() {
     await require('./lib/stagingGuard').enforceStaging('api', { query: all });
     // Deletes tracking events and tracked links past MAIL_TRACKING_RETENTION_DAYS.
     require('./modules/mail/tracking/trackingService').startRetention();
-    app.listen(PORT, '0.0.0.0', () => {
+    // LISTEN_HOST=127.0.0.1 behind a reverse proxy on the same server keeps the API port off the network.
+    app.listen(PORT, process.env.LISTEN_HOST || '0.0.0.0', () => {
       console.log(`====================================================`);
       console.log(`Marketech.ai — AI Marketing Workspace`);
       console.log(`Running on: http://localhost:${PORT}`);

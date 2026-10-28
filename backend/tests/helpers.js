@@ -240,7 +240,8 @@ async function startApp() {
   return server;
 }
 
-async function api(method, pathName, { token, body: reqBody, headers = {} } = {}) {
+// rawBody: send a non-JSON body as is (set its Content-Type in headers).
+async function api(method, pathName, { token, body: reqBody, rawBody, headers = {} } = {}) {
   const s = await startApp();
   const { port } = s.address();
   const original = globalThis.__realFetch || globalThis.fetch;
@@ -248,7 +249,7 @@ async function api(method, pathName, { token, body: reqBody, headers = {} } = {}
     method,
     redirect: 'manual',
     headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(reqBody ? { 'Content-Type': 'application/json' } : {}), ...headers },
-    body: reqBody ? JSON.stringify(reqBody) : undefined
+    body: rawBody !== undefined ? rawBody : (reqBody ? JSON.stringify(reqBody) : undefined)
   });
   const text = await res.text();
   let data = null;

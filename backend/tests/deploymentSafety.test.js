@@ -57,6 +57,22 @@ test('with NODE_ENV=production and no backup, pending migrations are not applied
   assert.ok(status.pending.includes('023_social_media_library'));
 });
 
+test('--until: unknown or empty ids are refused (never "apply everything"), and it never bypasses the production backup check', async () => {
+  // SCRATCH_DB exists and is empty (previous test).
+  await assert.rejects(migrate({ databaseName: SCRATCH_DB, until: 'no_such_migration', log: () => {} }), /Unknown migration/);
+  await assert.rejects(migrate({ databaseName: SCRATCH_DB, until: '', log: () => {} }), /--until needs a migration id/);
+  await assert.rejects(
+    migrate({ databaseName: SCRATCH_DB, until: '001_social_marketing_hub', env: { NODE_ENV: 'production' }, log: () => {} }),
+    err => err.code === 'BACKUP_REQUIRED' && /Pending: 001_social_marketing_hub\./.test(err.message),
+    'production still needs a verified backup, and only the migrations up to --until are pending'
+  );
+  const cli = require('child_process').spawnSync('node', ['db/migrate.js', '--until='], { cwd: path.join(__dirname, '..'), env: { ...process.env, DB_NAME: SCRATCH_DB, NODE_ENV: '' }, encoding: 'utf8' });
+  assert.equal(cli.status, 1, 'the CLI fails on an empty --until=');
+  assert.match(cli.stderr, /--until needs a migration id/);
+  const status = await migrate({ databaseName: SCRATCH_DB, statusOnly: true, log: () => {} });
+  assert.deepEqual(status.applied, [], 'nothing was applied');
+});
+
 const SECRETS = { JWT_SECRET: 'j'.repeat(40), SOCIAL_TOKEN_ENCRYPTION_KEY: Buffer.alloc(32, 3).toString('base64'), MAIL_ASSET_STORAGE_DIR: path.join(TMP, 'mail-assets') };
 
 test('production configuration requires the JWT secret and a valid 32-byte encryption key', () => {

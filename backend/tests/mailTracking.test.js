@@ -213,6 +213,26 @@ test('webhook authentication: missing, wrong, stale, tampered or wrong-algorithm
   assert.equal((await trackingRow(s.emailId)).delivery_status, 'accepted', 'nothing applied');
 });
 
+test('a form-encoded webhook (as in ZeptoMail\'s sample code) is verified and applied; future-dated or replayed requests are not', async () => {
+  const s = await zeptoSent(A);
+  const ep = await endpointOf(A);
+  const json = JSON.stringify(zeptoEvent('delivered', s.requestId, [{ time: Date.now() }], { webhookId: `wh-form-${uid()}` }));
+  // Signed over the decoded value of the single form field, as ZeptoMail's sample code does.
+  const send = async (ts, body) => {
+    const sig = crypto.createHmac('sha256', KEY_A).update(json).digest('base64');
+    return h.api('POST', `/api/v1/mail/t/webhooks/zeptomail/${ep}`, { rawBody: body, headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'producer-signature': `ts=${ts};s=${encodeURIComponent(sig)};s-algorithm=HmacSHA256` } });
+  };
+  const form = `payload=${encodeURIComponent(json)}`;
+  const future = await send(Date.now() + 10 * 60 * 1000, form);
+  assert.equal(future.status, 401, 'a timestamp far in the future is refused');
+  const ok = await send(Date.now(), form);
+  assert.equal(ok.status, 200, JSON.stringify(ok.data));
+  assert.equal(ok.data.applied, 1);
+  assert.equal((await trackingRow(s.emailId)).delivery_status, 'delivered');
+  const replay = await send(Date.now(), form);
+  assert.equal(replay.data.duplicates, 1, 'a replayed request inside the time window changes nothing');
+});
+
 test('malformed or unrecognized payloads are rejected without changes', async () => {
   const ep = await endpointOf(A);
   assert.equal((await postWebhook(ep, { hello: 'world' }, KEY_A)).status, 400);

@@ -4,6 +4,9 @@ Covers packaging, migrations, media storage, backups and the production settings
 enforce. The staging procedure (setup, restore, neutralizing copied integrations, platform checklist) is
 `STAGING_RUNBOOK.md`; live platform test steps are in `SOCIAL_MEDIA_INTEGRATION_TEST_PLAN.md`.
 
+EC2 step-by-step release (including migrations 024–025): `docs/EC2_DEPLOYMENT.md`. Local rehearsal on a
+disposable database: `cd backend && node scripts/localVerify.js --db mt_rehearsal_<suffix>`.
+
 ## 1. Packaging
 
 ```bash
@@ -30,6 +33,7 @@ powershell -File create_zip.ps1      # Windows; runs the same script
 | `SOCIAL_TOKEN_ENCRYPTION_KEY` | 32 random bytes, base64 (or 64 hex); **never change after go-live** | API and worker refuse to start if missing or malformed; `node scripts/verifyEncryptedSecrets.js` proves it is the *right* key |
 | `DB_*` | production database | — |
 | `TRUST_PROXY` | `1` only behind exactly one reverse proxy you control (see 2a); empty when the API is reached directly | — |
+| `LISTEN_HOST` | `127.0.0.1` when nginx runs on the same server (API port not on the network); default all interfaces | — |
 | `ZEPTOMAIL_WEBHOOKS_ENABLED` | **empty** until the ZeptoMail event format is signed off on staging (`docs/EMAIL_TRACKING_STAGING.md`) | webhook answers 404 while empty |
 | `MAIL_TRACKING_RETENTION_DAYS` | optional; default 395 | — |
 

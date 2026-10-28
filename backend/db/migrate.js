@@ -149,7 +149,8 @@ async function backupProblem(backupPath, databaseName, appliedIds = null) {
   return null;
 }
 
-async function migrate({ databaseName = process.env.DB_NAME || 'tradesage', statusOnly = false, log = console.log, backupPath = null, env = process.env } = {}) {
+// until: apply pending migrations only up to and including this id (rehearsals: reproduce an older schema).
+async function migrate({ databaseName = process.env.DB_NAME || 'tradesage', statusOnly = false, log = console.log, backupPath = null, env = process.env, until = null } = {}) {
   if ((process.env.DB_CLIENT || 'mysql') !== 'mysql') {
     throw new Error('Migrations require DB_CLIENT=mysql.');
   }
@@ -172,7 +173,13 @@ async function migrate({ databaseName = process.env.DB_NAME || 'tradesage', stat
     const [appliedRows] = Number(tracked.n) || !statusOnly ? await conn.query('SELECT id FROM schema_migrations') : [[]];
     const applied = new Set(appliedRows.map(r => r.id));
     const migrations = loadMigrations();
-    const pending = migrations.filter(m => !applied.has(m.id));
+    let pending = migrations.filter(m => !applied.has(m.id));
+    if (until !== null && until !== undefined) {
+      if (!String(until).trim()) throw new Error('--until needs a migration id (e.g. --until=023_social_media_library).');
+      const stop = migrations.findIndex(m => m.id === until);
+      if (stop < 0) throw new Error(`Unknown migration "${until}" in --until.`);
+      pending = pending.filter(m => migrations.indexOf(m) <= stop);
+    }
 
     if (statusOnly) {
       for (const m of migrations) log(`${applied.has(m.id) ? '[applied]' : '[pending]'} ${m.id}`);
@@ -206,7 +213,9 @@ async function migrate({ databaseName = process.env.DB_NAME || 'tradesage', stat
 if (require.main === module) {
   const statusOnly = process.argv.includes('--status');
   const backupArg = process.argv.find(a => a.startsWith('--backup='));
-  migrate({ statusOnly, backupPath: backupArg ? backupArg.slice('--backup='.length) : null })
+  const untilArg = process.argv.find(a => a.startsWith('--until='));
+  // An empty --until= is an error (never "no limit"), so a typo cannot apply every pending migration.
+  migrate({ statusOnly, backupPath: backupArg ? backupArg.slice('--backup='.length) : null, until: untilArg !== undefined ? untilArg.slice('--until='.length) : null })
     .then(() => process.exit(0))
     .catch(err => {
       console.error('Migration failed:', err.message);
