@@ -344,11 +344,33 @@ export class ApiService {
     return this.http.get(`${this.baseUrl}/mail/marketing`);
   }
 
+  /** Owner/Admin: approve (or withdraw) this workspace's SMTP mailbox for marketing email. */
+  setMarketingApproval(approved: boolean, note?: string): Observable<any> {
+    return this.http.post(`${this.baseUrl}/mail/marketing`, { approved, confirm: true, ...(note ? { note } : {}) });
+  }
+
   /** Compose send report (Owners/Admins): purpose records, masked recipients, no content. */
   getComposeReport(params: { from?: string; to?: string; purpose?: string; page?: number }): Observable<any> {
     const p: Record<string, string> = {};
     for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null && v !== '') p[k] = String(v);
     return this.http.get(`${this.baseUrl}/mail/compose-report`, { params: p });
+  }
+
+  // ---------- Mail activity: Overview charts, email log, campaign log (read-only) ----------
+  getMailActivitySummary(days: 7 | 30 | 90 = 30): Observable<any> {
+    return this.http.get(`${this.baseUrl}/mail/activity/summary`, { params: { days: String(days) } });
+  }
+
+  getEmailLog(params: { direction?: string; q?: string; page?: number } = {}): Observable<any> {
+    const p: Record<string, string> = {};
+    for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null && v !== '') p[k] = String(v);
+    return this.http.get(`${this.baseUrl}/mail/activity/emails`, { params: p });
+  }
+
+  getCampaignLog(params: { type?: string; page?: number } = {}): Observable<any> {
+    const p: Record<string, string> = {};
+    for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null && v !== '') p[k] = String(v);
+    return this.http.get(`${this.baseUrl}/mail/activity/campaigns`, { params: p });
   }
 
   // ---------- Email tracking (delivery, opens, clicks) ----------

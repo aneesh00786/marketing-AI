@@ -251,6 +251,16 @@ button.chip { cursor: pointer; }
 .badge-accent { background: var(--accent-soft); color: var(--accent-text); border-color: var(--accent-ring); }
 .badge-owner { background: var(--warning-soft) !important; color: var(--warning-text) !important; border-color: rgba(245, 158, 11, 0.35) !important; }
 .badge-hot { background: var(--danger-soft); color: var(--danger-text); border-color: rgba(239, 68, 68, 0.35); }
+/* Mailbox: delivery status of sent emails (label text carries the meaning; colour supports it) */
+.delivery-chip.d-delivered, .delivery-chip.d-opened, .delivery-chip.d-clicked { background: var(--success-soft); color: var(--success-text); border-color: rgba(34, 197, 94, 0.35); }
+.delivery-chip.d-bounced { background: var(--danger-soft); color: var(--danger-text); border-color: rgba(239, 68, 68, 0.35); }
+.delivery-chip.d-sent, .delivery-chip.d-accepted { background: var(--surface-2); color: var(--text-muted); }
+.delivery-line { margin: -4px 0 0; font-size: 0.8rem; color: var(--text-muted); display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.delivery-line .done { color: var(--success-text); font-weight: 600; }
+.delivery-line .bad { color: var(--danger-text); font-weight: 600; }
+/* Mail status: set up (green) / not set up (amber); text label carries the meaning too */
+.badge-ok { background: var(--success-soft); color: var(--success-text); border-color: rgba(34, 197, 94, 0.35); }
+.badge-off { background: var(--warning-soft); color: var(--warning-text); border-color: rgba(245, 158, 11, 0.35); }
 .score-pill { display: inline-block; font: 700 0.78rem var(--font); padding: 3px 10px; border-radius: 999px; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); text-align: center; }
 .score-hot { background: var(--danger-soft); color: var(--danger-text); border-color: rgba(239, 68, 68, 0.35); }
 .score-warm { background: var(--warning-soft); color: var(--warning-text); border-color: rgba(245, 158, 11, 0.35); }
@@ -681,3 +691,5 @@ button.dropdown-item:disabled { opacity: 0.6; cursor: default; }
 .purpose-opt.disabled { opacity: 0.55; cursor: not-allowed; }
 .purpose-note { margin: 0; font-size: 0.78rem; color: var(--text-muted); }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* Marketing email approval inside the mail settings popup */

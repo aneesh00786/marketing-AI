@@ -1,4 +1,4 @@
-import { Component, EventEmitter, OnInit, Output } from '@angular/core';
+import { Component, EventEmitter, OnInit, Output, Input } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../services/api.service';
@@ -17,6 +17,8 @@ import { ApiService } from '../../services/api.service';
 })
 export class MailTrackingSettingsComponent implements OnInit {
   @Output() toast = new EventEmitter<string>();
+  /** Show the settings expanded (in Mail Center → Settings) instead of collapsed. */
+  @Input() startOpen = false;
 
   s: any = null;
   loading = false;
@@ -30,6 +32,7 @@ export class MailTrackingSettingsComponent implements OnInit {
   constructor(private api: ApiService) {}
 
   ngOnInit(): void {
+    this.open = this.startOpen;
     this.load();
     this.api.getMe().subscribe({
       next: (me: any) => { if (Array.isArray(me?.capabilities)) this.caps = new Set(me.capabilities); },

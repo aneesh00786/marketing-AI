@@ -1,0 +1,75 @@
+/* Series colours: validated categorical slots 1–2 (blue, orange) for the light and dark surfaces. */
+:host { display: block; --s1: #2a78d6; --s2: #eb6834; --chart-grid: var(--border); }
+:host-context([data-theme='dark']) { --s1: #3987e5; --s2: #d95926; }
+
+.ma { display: flex; flex-direction: column; gap: 12px; color: var(--text); font-family: var(--font); }
+.ma-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+.ma-head h3 { margin: 0; font-size: 0.95rem; font-weight: 650; }
+.ma-sub { margin: 2px 0 0; color: var(--text-muted); font-size: 0.8rem; }
+.ma-controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.ma-range { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.ma-range button { background: none; border: none; padding: 5px 10px; font: inherit; font-size: 0.8rem; color: var(--text-muted); cursor: pointer; }
+.ma-range button + button { border-left: 1px solid var(--border); }
+.ma-range button.on { background: var(--surface-2); color: var(--text); font-weight: 600; }
+.ma-link { background: none; border: none; padding: 0; color: var(--accent-text, var(--accent)); font: inherit; font-size: 0.82rem; cursor: pointer; }
+.ma-link:hover { text-decoration: underline; }
+.ma button:focus-visible, .ma-col:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ma-error { background: var(--danger-soft); color: var(--danger-text); border-radius: 8px; padding: 9px 12px; font-size: 0.84rem; }
+
+.ma-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+.ma-stat { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.ma-stat span { font-size: 0.74rem; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase; color: var(--text-muted); }
+.ma-stat strong { font-size: 1.5rem; font-weight: 700; line-height: 1.15; }
+.ma-stat small { color: var(--text-muted); font-size: 0.78rem; }
+.ma-stat.bad { border-color: rgba(239, 68, 68, 0.45); }
+.ma-stat.bad small { color: var(--danger-text); }
+
+.ma-charts { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 12px; }
+.ma-card { margin: 0; padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.ma-card figcaption { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 0.88rem; }
+.ma-legend { display: inline-flex; gap: 12px; flex-wrap: wrap; color: var(--text-muted); font-size: 0.78rem; }
+.ma-legend span, .ma-tip span { display: inline-flex; align-items: center; gap: 5px; }
+.sw { width: 10px; height: 10px; border-radius: 3px; display: inline-block; flex: none; }
+.sw.s1, .seg.s1, .fill.s1 { background: var(--s1); }
+.sw.s2, .seg.s2 { background: var(--s2); }
+.ma-empty { margin: 0; color: var(--text-muted); font-size: 0.84rem; line-height: 1.45; }
+
+/* Stacked columns: baseline-anchored, 4px rounded top, 2px surface gap between segments */
+.ma-plot { position: relative; height: 190px; margin: 4px 0 22px 26px; }
+.ma-grid span { position: absolute; left: 0; right: 0; border-top: 1px dashed var(--chart-grid); }
+.ma-grid span.base { border-top-style: solid; }
+.ma-grid em { position: absolute; right: calc(100% + 6px); top: -0.6em; font-style: normal; font-size: 0.7rem; color: var(--text-subtle, var(--text-muted)); }
+.ma-cols { position: absolute; inset: 0; display: flex; align-items: stretch; gap: 3px; }
+.ma-cols.dense { gap: 1px; }
+.ma-col { flex: 1 1 0; min-width: 0; display: flex; align-items: flex-end; cursor: default; border-radius: 4px 4px 0 0; }
+.ma-col.on { background: var(--surface-2); }
+.ma-stack { width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; }
+.seg { width: 100%; min-height: 2px; }
+.seg.top { border-radius: 4px 4px 0 0; }
+.seg.gap { box-shadow: 0 -2px 0 var(--surface); }
+.ma-x span { position: absolute; top: calc(100% + 6px); transform: translateX(-50%); font-size: 0.72rem; color: var(--text-muted); white-space: nowrap; }
+.ma-x span:first-child { transform: none; left: 0 !important; }
+.ma-x span:last-child { transform: translateX(-100%); left: 100% !important; }
+.ma-tip { position: absolute; top: -6px; transform: translate(-50%, -100%); z-index: 5; pointer-events: none; display: flex; flex-direction: column; gap: 3px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--surface); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18); font-size: 0.78rem; white-space: nowrap; }
+.ma-tip.l { transform: translate(-12px, -100%); }
+.ma-tip.r { transform: translate(calc(-100% + 12px), -100%); }
+.ma-tip b { margin-left: auto; padding-left: 10px; font-weight: 650; }
+.ma-tip .muted { color: var(--text-muted); }
+
+/* Horizontal bars for delivery (one hue; labels in text colours) */
+.ma-bars { display: flex; flex-direction: column; gap: 10px; }
+.ma-bar { display: grid; grid-template-columns: 70px minmax(0, 1fr) auto; align-items: center; gap: 8px; font-size: 0.82rem; }
+.ma-bar .track { height: 10px; border-radius: 0 4px 4px 0; background: var(--surface-2); overflow: hidden; }
+.ma-bar .fill { display: block; height: 100%; border-radius: 0 4px 4px 0; min-width: 2px; }
+.ma-bar .val { font-weight: 650; }
+.ma-bar .val small { color: var(--text-muted); font-weight: 400; }
+.ma-status { margin: 0; color: var(--danger-text); font-size: 0.8rem; }
+
+.ma-table-wrap { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 12px; align-items: start; }
+.ma-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.ma-table caption { text-align: left; font-weight: 650; padding: 0 0 6px; }
+.ma-table th, .ma-table td { padding: 6px 10px; border-bottom: 1px solid var(--border); text-align: left; }
+.ma-table thead th { color: var(--text-muted); font-weight: 600; background: var(--surface-2); }
+.ma-table tbody th { font-weight: 500; }
+
+@media (max-width: 860px) { .ma-charts, .ma-table-wrap { grid-template-columns: 1fr; } }

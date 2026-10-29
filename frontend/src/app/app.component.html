@@ -375,40 +375,36 @@
         [products]="digitalProducts" [drafts]="drafts" [draftsState]="draftsState" [emails]="emails" [emailsState]="emailsState"
         [draftTemplate]="draftTemplate" (templateConsumed)="draftTemplate = null" [draftProduct]="draftProduct" (productConsumed)="draftProduct = null"
         [campaignStartTemplate]="campaignStartTemplate" [zohoOauthResult]="zohoOauthResult" (templateUse)="onTemplateUse($event)"
-        (toast)="showToast($event)" (draftsChanged)="loadDrafts()" (mailSent)="loadEmails()">
-        <section class="mc-mailbox" aria-labelledby="mailbox-title">
-          <div class="panel-header">
-            <div>
-              <h3 id="mailbox-title">Company mailbox</h3>
-              <p class="subtitle">Send visual HTML email through the company mail service and sync replies via IMAP with AI priority screening.</p>
-            </div>
-            <div class="header-actions">
-              <button class="btn btn-secondary" (click)="showMailConfigModal = true">⚙️ Company Mail Auth (SMTP/IMAP)</button>
-              <button class="btn btn-secondary" (click)="syncCompanyMail()" [disabled]="isSyncingMail">
-                {{ isSyncingMail ? 'Syncing...' : '🔄 Sync Mailbox via IMAP' }}
-              </button>
-              <button class="btn btn-secondary" (click)="showComposeModal = true">✉️ Compose &amp; Send Email</button>
-            </div>
-          </div>
-
-        <!-- Company Mail Status Bar -->
-        <div class="mail-auth-status-bar" [class.connected]="mailConfig.status === 'Connected'">
+        (toast)="showToast($event)" (draftsChanged)="loadDrafts()" (mailSent)="loadEmails()" (settingsChanged)="loadMailConfig(); loadEmails()">
+        <div mcStatus class="mail-auth-status-bar" [class.connected]="mailConfig.has_smtp_auth">
           <div class="status-left">
-            <span class="status-dot green"></span>
+            <span class="status-dot" [class.green]="mailConfig.has_smtp_auth"></span>
             <span>
-              COMPANY MAIL: <strong>{{ mailConfig.sender_email || 'support@thrivewoo.com' }}</strong>
-              &bull; Outbound: <span class="badge badge-hot">✓ ZeptoMail Connected</span>
-              &bull; Inbound: <span class="badge" [class.badge-hot]="mailConfig.has_imap_auth">{{ mailConfig.has_imap_auth ? 'IMAP Synced' : 'IMAP Standby' }}</span>
+              From: <strong>{{ mailConfig.sender_email || 'not set' }}</strong>
+              &bull; Sending: <span class="badge" [class.badge-ok]="mailConfig.has_smtp_auth" [class.badge-off]="!mailConfig.has_smtp_auth">{{ !mailConfig.has_smtp_auth ? 'Not set up' : (mailConfig.provider === 'zeptomail' ? '✓ ZeptoMail' : '✓ SMTP mailbox') }}</span>
+              &bull; Replies: <span class="badge" [class.badge-ok]="mailConfig.has_imap_auth" [class.badge-off]="!mailConfig.has_imap_auth">{{ mailConfig.has_imap_auth ? '✓ IMAP set up' : 'IMAP not set up' }}</span>
             </span>
-            <span *ngIf="mailConfig.last_synced_at" class="sync-time">Last Synced: {{ mailConfig.last_synced_at }}</span>
           </div>
           <div class="status-right">
-            <button class="btn btn-secondary btn-sm" (click)="showMailConfigModal = true">⚙️ Mail Auth Settings</button>
-            <button class="btn btn-primary btn-sm" (click)="syncCompanyMail()" [disabled]="isSyncingMail">
-              {{ isSyncingMail ? 'Syncing...' : '🔄 Sync IMAP' }}
+            <button class="btn btn-sm" [class.btn-primary]="!mailConfig.has_smtp_auth" [class.btn-secondary]="mailConfig.has_smtp_auth" type="button" (click)="mailSection = 'settings'">
+              {{ mailConfig.has_smtp_auth ? '⚙️ Mail settings' : 'Set up sending →' }}
             </button>
           </div>
         </div>
+
+        <section class="mc-mailbox" aria-labelledby="mailbox-title">
+          <div class="panel-header">
+            <div>
+              <h3 id="mailbox-title">Inbox &amp; sent mail</h3>
+              <p class="subtitle">Latest emails sent from and received by the company mailbox.<ng-container *ngIf="mailConfig.last_synced_at"> Last synced {{ mailConfig.last_synced_at }}.</ng-container></p>
+            </div>
+            <div class="header-actions">
+              <button class="btn btn-primary" (click)="showComposeModal = true" title="Write one email and send it directly">✉️ Compose &amp; Send Email</button>
+              <button class="btn btn-secondary" (click)="syncCompanyMail()" [disabled]="isSyncingMail" *ngIf="mailConfig.has_imap_auth">
+                {{ isSyncingMail ? 'Syncing...' : '🔄 Sync inbox' }}
+              </button>
+            </div>
+          </div>
 
         <!-- Email Items Grid / Cards -->
         <div class="emails-cards-list">
@@ -419,12 +415,24 @@
                   {{ (em.ai_priority || (em.is_urgent === 1 ? 'Urgent' : 'Normal')).toUpperCase() }}
                 </span>
                 <span class="chip chip-not-sent" *ngIf="em.status === 'Not Sent'" [title]="em.smtp_status || 'This email was never sent'">NOT SENT</span>
+                <!-- Delivery status of a sent email (from delivery tracking; "Sent" when this email was not tracked) -->
+                <span class="chip delivery-chip" *ngIf="em.delivery && em.delivery !== 'not_sent'" [ngClass]="'d-' + em.delivery" [title]="deliveryHint(em)">{{ deliveryLabel(em.delivery) }}</span>
                 <span class="email-sender">From: <strong>{{ em.sender || em.sender_email || '—' }}</strong> &rarr; To: <strong>{{ em.recipient_name || em.recipient_email }}</strong></span>
               </div>
               <span class="email-date">{{ em.sent_at || em.received_at || 'Today' }}</span>
             </div>
 
             <h3 class="email-card-subject">{{ em.subject }}</h3>
+
+            <!-- Delivery timeline for tracked emails -->
+            <p class="delivery-line" *ngIf="em.delivery_detail?.tracked">
+              <span [class.done]="em.delivery_detail.deliveredAt || em.delivery_detail.firstOpenAt">✓ Delivered<ng-container *ngIf="em.delivery_detail.deliveredAt"> {{ em.delivery_detail.deliveredAt | date:'MMM d, h:mm a' }}</ng-container></span>
+              <ng-container *ngIf="em.delivery_detail.opensTracked">
+                &rarr; <span [class.done]="em.delivery_detail.firstOpenAt">{{ em.delivery_detail.firstOpenAt ? '✓ Opened ' + (em.delivery_detail.firstOpenAt | date:'MMM d, h:mm a') + (em.delivery_detail.opens > 1 ? ' (' + em.delivery_detail.opens + '×)' : '') : 'Not opened yet' }}</span>
+              </ng-container>
+              <ng-container *ngIf="em.delivery_detail.firstClickAt"> &rarr; <span class="done">✓ Clicked {{ em.delivery_detail.firstClickAt | date:'MMM d, h:mm a' }}</span></ng-container>
+              <span class="bad" *ngIf="em.delivery_detail.bouncedAt">⚠ Bounced{{ em.delivery_detail.failureReason ? ': ' + em.delivery_detail.failureReason : '' }}</span>
+            </p>
 
             <!-- AI Summary Badge -->
             <div class="ai-summary-banner" *ngIf="em.ai_summary">
@@ -483,7 +491,7 @@
   <!-- TAB 5: AI CAMPAIGNS & MULTI-BUSINESS PLAYBOOKS -->
   <!-- =================================================================== -->
   <app-command-center *ngIf="currentRoute === 'businesses' && !showPlaybooks" (toast)="showToast($event)" (openPlaybooks)="showPlaybooks = true"
-                      (openMailSettings)="showMailConfigModal = true" (openSocialCampaign)="onDashboardNavigate({ route: 'social', section: 'campaigns', campaignId: $event })"></app-command-center>
+                      (openMailSettings)="navigate('emails', 'settings')" (openSocialCampaign)="onDashboardNavigate({ route: 'social', section: 'campaigns', campaignId: $event })"></app-command-center>
   <section *ngIf="currentRoute === 'businesses' && showPlaybooks" class="hud-panel full-width-panel">
     <button class="btn btn-secondary btn-sm" style="align-self: flex-start; margin-bottom: 10px;" (click)="showPlaybooks = false">← AI Campaigns</button>
     <div class="panel-header">
@@ -1288,149 +1296,6 @@
       <div class="modal-footer">
         <button class="btn btn-secondary" (click)="showBookingModal = false">Cancel</button>
         <button class="btn btn-primary" (click)="submitBooking()">Confirm Booking</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- =================================================================== -->
-  <!-- MODAL: COMPANY MAIL AUTHORIZATION & SMTP/IMAP CREDENTIALS -->
-  <!-- =================================================================== -->
-  <div class="modal-backdrop" *ngIf="showMailConfigModal">
-    <div class="modal-dialog wide-modal">
-      <div class="modal-header">
-        <div>
-          <span class="badge badge-accent">AUTHENTIC COMPANY MAIL</span>
-          <h3>⚙️ Company mail authorization (SMTP / IMAP)</h3>
-          <p class="subtitle" style="margin: 4px 0 0; color: var(--text-muted); font-size: 0.85rem;">
-            Configure your corporate email (info&#64;thrivewoo.com or your business mail). Sends live authentic emails over SMTP and receives client replies over IMAP.
-          </p>
-        </div>
-        <button class="modal-close-btn" (click)="showMailConfigModal = false">✕</button>
-      </div>
-
-      <div class="modal-body" style="max-height: 520px; overflow-y: auto;">
-        <!-- Test Result Alert (if any) -->
-        <div *ngIf="smtpTestResult" class="ai-summary-banner" [style.border-color]="smtpTestResult.success ? '#22c55e' : '#ef4444'" style="margin-bottom: 14px;">
-          <span class="ai-icon">{{ smtpTestResult.success ? '✓' : '⚠️' }}</span>
-          <span>{{ smtpTestResult.message || smtpTestResult.error }}</span>
-        </div>
-
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
-          <div class="form-group">
-            <label>Mail Provider Profile</label>
-            <select class="hud-input" [(ngModel)]="mailConfig.provider">
-              <option value="custom_smtp">Custom Company SMTP / IMAP</option>
-              <option value="gmail">Google Workspace / Gmail</option>
-              <option value="office365">Microsoft 365 / Outlook</option>
-              <option value="zoho">Zoho Mail</option>
-            </select>
-          </div>
-
-          <div class="form-group">
-            <label>Sender Display Name</label>
-            <input type="text" class="hud-input" [(ngModel)]="mailConfig.sender_name" placeholder="ThriveWoo Executive Sales" />
-          </div>
-        </div>
-
-        <div class="form-group">
-          <label>Company Email Address (From Address)</label>
-          <input type="email" class="hud-input" [(ngModel)]="mailConfig.sender_email" placeholder="e.g. info@thrivewoo.com" />
-        </div>
-
-        <!-- ZeptoMail Active Banner -->
-        <div *ngIf="mailConfig.provider === 'zeptomail' || mailConfig.sender_email?.includes('thrivewoo.com')" 
-             style="background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 8px; padding: 10px 14px; margin-top: 10px; display: flex; align-items: center; justify-content: space-between;">
-          <div style="font-size: 0.82rem; color: var(--success-text);">
-            <strong style="color: var(--success-text);">✓ ZeptoMail Outbound Connected:</strong> Dispatches all live emails from <strong>{{ mailConfig.sender_email || 'support@thrivewoo.com' }}</strong>.
-          </div>
-          <span class="chip active" style="margin: 0; background: #059669; color: white;">READY TO SEND</span>
-        </div>
-
-        <!-- Section 1: SMTP Outbound (Sending) -->
-        <div style="background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; margin-top: 14px;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-            <h4 style="margin: 0; color: var(--accent-text);">📤 Outbound SMTP Authorization (Send Real Emails)</h4>
-            <button class="btn btn-secondary btn-sm" (click)="testSmtp()" [disabled]="isTestingSmtp">
-              {{ isTestingSmtp ? 'Testing...' : '🔌 Test SMTP Handshake' }}
-            </button>
-          </div>
-
-          <div style="display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 12px;">
-            <div class="form-group" style="margin: 0;">
-              <label style="font-size: 0.8rem; color: var(--text-muted);">SMTP Host</label>
-              <input type="text" class="hud-input" [(ngModel)]="mailConfig.smtp_host" placeholder="smtp.gmail.com or mail.yourcompany.com" />
-            </div>
-            <div class="form-group" style="margin: 0;">
-              <label style="font-size: 0.8rem; color: var(--text-muted);">SMTP Port</label>
-              <input type="number" class="hud-input" [(ngModel)]="mailConfig.smtp_port" placeholder="587" />
-            </div>
-            <div class="form-group" style="margin: 0; display: flex; flex-direction: column; justify-content: center;">
-              <label style="font-size: 0.8rem; color: var(--text-muted);">SSL (Port 465)</label>
-              <label style="cursor: pointer; display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 0.85rem;">
-                <input type="checkbox" [(ngModel)]="mailConfig.smtp_secure" /> Secure SSL
-              </label>
-            </div>
-          </div>
-
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px;">
-            <div class="form-group" style="margin: 0;">
-              <label style="font-size: 0.8rem; color: var(--text-muted);">SMTP Username / Email</label>
-              <input type="text" class="hud-input" [(ngModel)]="mailConfig.smtp_user" placeholder="e.g. info@thrivewoo.com" />
-            </div>
-            <div class="form-group" style="margin: 0;">
-              <label style="font-size: 0.8rem; color: var(--text-muted);">SMTP Password / App Password</label>
-              <input type="password" class="hud-input" [(ngModel)]="mailConfig.smtp_pass" placeholder="••••••••" />
-            </div>
-          </div>
-        </div>
-
-        <!-- Section 2: IMAP Inbound (Receiving) -->
-        <div style="background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; margin-top: 14px;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-            <h4 style="margin: 0; color: var(--accent-text);">📥 Inbound IMAP Authorization (Fetch & Sync Live Emails)</h4>
-            <button class="btn btn-secondary btn-sm" (click)="syncCompanyMail()" [disabled]="isSyncingMail">
-              {{ isSyncingMail ? 'Syncing...' : '🔄 Sync Mailbox Now' }}
-            </button>
-          </div>
-          <p style="font-size: 0.78rem; color: var(--text-muted); margin: 0 0 10px 0;">
-            ℹ️ <em>ZeptoMail is strictly an outbound delivery engine. To pull incoming customer replies from your Zoho inbox into this Hub, enter your Zoho Mail App Password below. (Outbound sending works independently).</em>
-          </p>
-
-          <div style="display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 12px;">
-            <div class="form-group" style="margin: 0;">
-              <label style="font-size: 0.8rem; color: var(--text-muted);">IMAP Host</label>
-              <input type="text" class="hud-input" [(ngModel)]="mailConfig.imap_host" placeholder="imap.gmail.com or mail.yourcompany.com" />
-            </div>
-            <div class="form-group" style="margin: 0;">
-              <label style="font-size: 0.8rem; color: var(--text-muted);">IMAP Port</label>
-              <input type="number" class="hud-input" [(ngModel)]="mailConfig.imap_port" placeholder="993" />
-            </div>
-            <div class="form-group" style="margin: 0; display: flex; flex-direction: column; justify-content: center;">
-              <label style="font-size: 0.8rem; color: var(--text-muted);">TLS (Port 993)</label>
-              <label style="cursor: pointer; display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 0.85rem;">
-                <input type="checkbox" [(ngModel)]="mailConfig.imap_tls" /> Use TLS
-              </label>
-            </div>
-          </div>
-
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px;">
-            <div class="form-group" style="margin: 0;">
-              <label style="font-size: 0.8rem; color: var(--text-muted);">IMAP Username / Email</label>
-              <input type="text" class="hud-input" [(ngModel)]="mailConfig.imap_user" placeholder="e.g. info@thrivewoo.com" />
-            </div>
-            <div class="form-group" style="margin: 0;">
-              <label style="font-size: 0.8rem; color: var(--text-muted);">IMAP Password / App Password</label>
-              <input type="password" class="hud-input" [(ngModel)]="mailConfig.imap_pass" placeholder="••••••••" />
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="modal-footer">
-        <button class="btn btn-secondary" (click)="showMailConfigModal = false">Close</button>
-        <button class="btn btn-primary" (click)="saveMailConfig()" [disabled]="isSavingMailConfig">
-          {{ isSavingMailConfig ? 'Saving...' : '💾 Save Authorization Settings' }}
-        </button>
       </div>
     </div>
   </div>

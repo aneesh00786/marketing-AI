@@ -1,0 +1,102 @@
+<section class="ml" aria-labelledby="ml-title">
+  <header class="ml-head">
+    <h2 id="ml-title">Logs</h2>
+    <p class="sub">A record of the email this workspace has sent and received, and of every campaign.</p>
+  </header>
+
+  <div class="ml-tabs" role="tablist" aria-label="Logs">
+    <button *ngFor="let t of tabs" type="button" role="tab" [id]="'ml-tab-' + t.id" [attr.aria-selected]="tab === t.id"
+      [tabindex]="tab === t.id ? 0 : -1" [class.on]="tab === t.id" (click)="select(t.id)">{{ t.label }}</button>
+  </div>
+
+  <div class="ml-panel" role="tabpanel" [attr.aria-labelledby]="'ml-tab-' + tab" [ngSwitch]="tab">
+
+    <!-- Email log -->
+    <ng-container *ngSwitchCase="'emails'">
+      <form class="ml-filters" (ngSubmit)="loadEmails(1)">
+        <label>Show
+          <select class="hud-input" name="direction" [(ngModel)]="emailFilters.direction" (ngModelChange)="loadEmails(1)">
+            <option value="">All emails</option>
+            <option value="sent">Sent</option>
+            <option value="not_sent">Not sent</option>
+            <option value="received">Received</option>
+          </select>
+        </label>
+        <label class="grow">Search <input class="hud-input" name="q" [(ngModel)]="emailFilters.q" maxlength="120" placeholder="Subject or email address" /></label>
+        <button type="submit" class="btn btn-secondary btn-sm" [disabled]="emailsLoading">Search</button>
+      </form>
+      <div class="note error" *ngIf="emailsError" role="alert">{{ emailsError }}</div>
+      <p class="muted small" *ngIf="emailsLoading">Loading…</p>
+      <ng-container *ngIf="emails && !emailsError">
+        <p class="muted small" *ngIf="!emails.emails.length">No emails match.</p>
+        <div class="table-wrap" *ngIf="emails.emails.length">
+          <table class="ml-table">
+            <thead><tr><th>Time</th><th>Direction</th><th>From → To</th><th>Subject</th><th>Source</th><th>Status</th></tr></thead>
+            <tbody>
+              <tr *ngFor="let e of emails.emails">
+                <td class="nowrap">{{ e.at ? (e.at | date:'MMM d, y, h:mm a') : '—' }}</td>
+                <td>{{ e.direction === 'received' ? '↙ Received' : '↗ Sent' }}</td>
+                <td class="addr"><span>{{ e.from || '—' }}</span><span class="muted">→ {{ e.toName ? e.toName + ' · ' : '' }}{{ e.to || '—' }}</span></td>
+                <td class="subj">{{ e.subject || '(no subject)' }}</td>
+                <td>{{ sourceLabel(e.source) }}</td>
+                <td><span class="chip" [ngClass]="'t-' + tone(e.delivery)" [title]="e.detail || ''">{{ deliveryLabel(e.delivery) }}</span><small class="detail" *ngIf="e.detail">{{ e.detail }}</small></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="ml-pager" *ngIf="emailPage > 1 || emails.hasMore">
+          <button type="button" class="btn btn-secondary btn-sm" (click)="loadEmails(emailPage - 1)" [disabled]="emailPage <= 1 || emailsLoading">← Newer</button>
+          <span class="muted small">Page {{ emailPage }}</span>
+          <button type="button" class="btn btn-secondary btn-sm" (click)="loadEmails(emailPage + 1)" [disabled]="!emails.hasMore || emailsLoading">Older →</button>
+        </div>
+      </ng-container>
+    </ng-container>
+
+    <!-- Campaign log -->
+    <ng-container *ngSwitchCase="'campaigns'">
+      <div class="ml-filters">
+        <label>Show
+          <select class="hud-input" name="ctype" [(ngModel)]="campaignType" (ngModelChange)="loadCampaigns(1)">
+            <option value="">All campaigns</option>
+            <option value="ai">AI Campaigns (sequences)</option>
+            <option value="zoho">Zoho Campaigns</option>
+          </select>
+        </label>
+        <button type="button" class="ml-link" (click)="openSection.emit('campaigns')">Open Campaigns →</button>
+      </div>
+      <div class="note error" *ngIf="campaignsError" role="alert">{{ campaignsError }}</div>
+      <p class="muted small" *ngIf="campaignsLoading">Loading…</p>
+      <ng-container *ngIf="campaigns && !campaignsError">
+        <p class="muted small" *ngIf="!campaigns.campaigns.length">No campaigns yet.</p>
+        <div class="table-wrap" *ngIf="campaigns.campaigns.length">
+          <table class="ml-table">
+            <thead><tr><th>Campaign</th><th>Type</th><th>Status</th><th class="num">Recipients</th><th class="num">Sent</th><th class="num">Opened</th><th class="num">Replied</th><th class="num">Bounced</th><th class="num">Failed</th><th>Last activity</th></tr></thead>
+            <tbody>
+              <tr *ngFor="let c of campaigns.campaigns">
+                <td class="subj"><strong>{{ c.name }}</strong><small class="detail" *ngIf="c.note">{{ c.note }}</small></td>
+                <td>{{ c.type === 'ai' ? 'AI Campaign' : 'Zoho' }}</td>
+                <td><span class="chip" [ngClass]="'t-' + tone(c.status)">{{ statusLabel(c.status) }}</span></td>
+                <td class="num">{{ n(c.recipients) }}</td>
+                <td class="num">{{ n(c.sent) }}</td>
+                <td class="num">{{ n(c.opened) }}</td>
+                <td class="num">{{ n(c.replied) }}</td>
+                <td class="num">{{ n(c.bounced) }}</td>
+                <td class="num" [class.bad]="c.failed">{{ n(c.failed) }}</td>
+                <td class="nowrap">{{ c.lastActivityAt ? (c.lastActivityAt | date:'MMM d, y') : '—' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="muted small">“—” means the number is not available for that campaign type (Zoho reports opens; AI campaigns record replies).</p>
+        <div class="ml-pager" *ngIf="campaignPage > 1 || campaigns.hasMore">
+          <button type="button" class="btn btn-secondary btn-sm" (click)="loadCampaigns(campaignPage - 1)" [disabled]="campaignPage <= 1 || campaignsLoading">← Newer</button>
+          <span class="muted small">Page {{ campaignPage }}</span>
+          <button type="button" class="btn btn-secondary btn-sm" (click)="loadCampaigns(campaignPage + 1)" [disabled]="!campaigns.hasMore || campaignsLoading">Older →</button>
+        </div>
+      </ng-container>
+    </ng-container>
+
+    <!-- Compose purpose audit (Owners/Admins) -->
+    <app-compose-report *ngSwitchCase="'audit'" [startOpen]="true"></app-compose-report>
+  </div>
+</section>

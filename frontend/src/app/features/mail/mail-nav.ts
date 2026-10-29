@@ -2,7 +2,7 @@
 export type DataState = 'loading' | 'ready' | 'error';
 
 /** Sections of the Mail Center. Each maps to existing functionality; none adds new sending paths. */
-export type MailSection = 'overview' | 'drafts' | 'approvals' | 'product-emails' | 'campaigns' | 'templates';
+export type MailSection = 'overview' | 'drafts' | 'approvals' | 'product-emails' | 'campaigns' | 'templates' | 'logs' | 'settings';
 
 export const MAIL_SECTIONS: { key: MailSection; label: string; hint: string }[] = [
   { key: 'overview', label: 'Overview', hint: 'Mail at a glance and the company mailbox' },
@@ -10,7 +10,9 @@ export const MAIL_SECTIONS: { key: MailSection; label: string; hint: string }[] 
   { key: 'approvals', label: 'Approvals', hint: 'Drafts waiting for approval, ready to send, or with unknown delivery' },
   { key: 'product-emails', label: 'Product Emails', hint: 'Personalised emails to a product\'s leads' },
   { key: 'campaigns', label: 'Campaigns', hint: 'Email campaigns delivered through Zoho Campaigns' },
-  { key: 'templates', label: 'Email Templates', hint: 'Reusable HTML email templates' }
+  { key: 'templates', label: 'Email Templates', hint: 'Reusable HTML email templates' },
+  { key: 'logs', label: 'Logs', hint: 'Email log and campaign log: everything sent and received' },
+  { key: 'settings', label: 'Settings', hint: 'Mailbox, marketing approval, tracking and Zoho: all mail settings in one place' }
 ];
 
 /** Draft statuses that need someone with mail.send: approve, send, or confirm an unknown delivery. */

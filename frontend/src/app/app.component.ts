@@ -334,8 +334,7 @@ export class AppComponent implements OnInit, OnDestroy {
   // Set when another tab switched workspace, signed out or signed in: this tab must reload.
   sessionChange: { title: string; message: string } | null = null;
 
-  // Company Mail Authorization State (SMTP & IMAP)
-  showMailConfigModal: boolean = false;
+  // Company mailbox status for the Mail Center status bar (edited in Mail Center → Settings)
   // AI Campaigns opens on email campaigns; the older idea playbooks are one click away.
   showPlaybooks = false;
   mailConfig: any = {
@@ -356,10 +355,7 @@ export class AppComponent implements OnInit, OnDestroy {
     has_smtp_auth: false,
     has_imap_auth: false
   };
-  isSavingMailConfig: boolean = false;
-  isTestingSmtp: boolean = false;
   isSyncingMail: boolean = false;
-  smtpTestResult: { success?: boolean; message?: string; error?: string } | null = null;
 
   // Voice Dictation into Quick Chat input
   isListeningQuickChat: boolean = false;
@@ -1698,53 +1694,15 @@ export class AppComponent implements OnInit, OnDestroy {
     });
   }
 
-  saveMailConfig(): void {
-    this.isSavingMailConfig = true;
-    this.apiService.saveMailConfig({
-      ...this.mailConfig,
-      smtp_secure: this.mailConfig.smtp_secure ? 1 : 0,
-      imap_tls: this.mailConfig.imap_tls ? 1 : 0
-    }).subscribe({
-      next: (res) => {
-        this.isSavingMailConfig = false;
-        this.mailConfig = {
-          ...this.mailConfig,
-          ...res.config,
-          smtp_secure: !!res.config.smtp_secure,
-          imap_tls: !!res.config.imap_tls
-        };
-        this.showToast('Company mail authorization saved successfully.');
-      },
-      error: (err) => {
-        this.isSavingMailConfig = false;
-        this.showToast(`Error saving mail config: ${err.message}`);
-      }
-    });
+  /** Mailbox card: label and tooltip for a sent email's delivery status. */
+  deliveryLabel(d: string): string {
+    return ({ sent: 'SENT', accepted: 'ACCEPTED', delivered: 'DELIVERED', opened: 'OPENED', clicked: 'CLICKED', bounced: 'BOUNCED' } as Record<string, string>)[d] || d.toUpperCase();
   }
-
-  testSmtp(): void {
-    this.isTestingSmtp = true;
-    this.smtpTestResult = null;
-    this.apiService.testSmtp({
-      ...this.mailConfig,
-      smtp_secure: this.mailConfig.smtp_secure ? 1 : 0
-    }).subscribe({
-      next: (res) => {
-        this.isTestingSmtp = false;
-        this.smtpTestResult = res;
-        if (res.success) {
-          this.showToast('SMTP handshake verified! Company email is ready to send.');
-          this.mailConfig.status = 'Connected';
-        } else {
-          this.showToast(`SMTP test failed: ${res.error}`);
-        }
-      },
-      error: (err) => {
-        this.isTestingSmtp = false;
-        this.smtpTestResult = { success: false, error: err.message };
-        this.showToast(`SMTP connection error: ${err.message}`);
-      }
-    });
+  deliveryHint(em: any): string {
+    if (em.delivery === 'sent') return 'Sent. Delivery is not tracked for this email (tracking covers ZeptoMail sends with tracking on).';
+    if (em.delivery === 'accepted') return 'Accepted by the mail service; no delivery event received yet.';
+    if (em.delivery === 'bounced') return em.delivery_detail?.failureReason || 'The recipient\'s server rejected this email.';
+    return 'Open "Delivery & tracking" for the full timeline.';
   }
 
   syncCompanyMail(): void {

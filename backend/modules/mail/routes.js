@@ -390,8 +390,22 @@ drafts.delete('/:id', requireCapability('mail.compose'), wrap(async (req, res) =
 const emails = express.Router();
 
 emails.get('/', requireCapability('mail.view'), wrap(async (req, res) => {
-  const rows = await all('SELECT * FROM emails WHERE workspace_id = ? ORDER BY is_urgent DESC, id DESC LIMIT 50', [ws(req)]);
-  res.json({ success: true, emails: rows.map(presentEmail) });
+  // Each sent email carries its delivery status (delivered / opened / clicked / bounced …) for the mailbox.
+  const { deliveryOf, TRACKING_COLUMNS, TRACKING_JOIN } = require('./activity/routes');
+  const rows = await all(`SELECT e.*, ${TRACKING_COLUMNS}, t.last_open_at AS t_last_open_at, t.open_events AS t_open_events FROM emails e ${TRACKING_JOIN} WHERE e.workspace_id = ? ORDER BY e.is_urgent DESC, e.id DESC LIMIT 50`, [ws(req)]);
+  res.json({
+    success: true,
+    emails: rows.map(r => {
+      const { t_delivery_status, t_delivered_at, t_bounced_at, t_first_open_at, t_first_click_at, t_failure_reason, t_track_opens, t_last_open_at, t_open_events, ...e } = r;
+      return {
+        ...presentEmail(e),
+        delivery: deliveryOf(r),
+        delivery_detail: r.status === 'Sent'
+          ? { tracked: !!t_delivery_status, opensTracked: !!t_track_opens, deliveredAt: t_delivered_at || null, firstOpenAt: t_first_open_at || null, lastOpenAt: t_last_open_at || null, opens: Number(t_open_events) || 0, firstClickAt: t_first_click_at || null, bouncedAt: t_bounced_at || null, failureReason: t_failure_reason || null }
+          : null
+      };
+    })
+  });
 }));
 
 const sendSchema = z.object({

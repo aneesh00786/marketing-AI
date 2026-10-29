@@ -7,8 +7,9 @@ import { MailDraftsComponent } from './mail-drafts.component';
 import { ProductEmailsComponent } from './product-emails.component';
 import { EmailCampaignsComponent } from './email-campaigns.component';
 import { EmailTemplatesComponent } from './email-templates.component';
-import { MailTrackingSettingsComponent } from './mail-tracking-settings.component';
-import { ComposeReportComponent } from './compose-report.component';
+import { MailSettingsComponent } from './mail-settings.component';
+import { MailActivityChartsComponent } from './mail-activity-charts.component';
+import { MailLogsComponent } from './mail-logs.component';
 
 // The hosted sections are tested in their own specs; here they are stand-ins that record their inputs.
 @Component({ selector: 'app-mail-drafts', standalone: true, template: '<p class="stub-drafts">{{ view }}</p>' })
@@ -26,10 +27,16 @@ class ProductEmailsStub { @Output() toast = new EventEmitter<string>(); }
 class CampaignsStub { @Input() oauthResult: any; @Input() startTemplate: any; @Output() toast = new EventEmitter<string>(); }
 @Component({ selector: 'app-email-templates', standalone: true, template: '<p class="stub-templates">templates</p>' })
 class TemplatesStub { @Output() toast = new EventEmitter<string>(); @Output() use = new EventEmitter<any>(); }
-@Component({ selector: 'app-mail-tracking-settings', standalone: true, template: '<p class="stub-tracking">tracking settings</p>' })
-class TrackingSettingsStub { @Output() toast = new EventEmitter<string>(); }
-@Component({ selector: 'app-compose-report', standalone: true, template: '<p class="stub-report">report</p>' })
-class ComposeReportStub {}
+@Component({ selector: 'app-mail-activity-charts', standalone: true, template: '<p class="stub-charts">charts</p>' })
+class ChartsStub { static last: ChartsStub | null = null; @Output() openLogs = new EventEmitter<void>(); constructor() { ChartsStub.last = this; } }
+@Component({ selector: 'app-mail-logs', standalone: true, template: '<p class="stub-logs">logs</p>' })
+class LogsStub { static last: LogsStub | null = null; @Input() canViewAudit = false; @Output() openSection = new EventEmitter<string>(); constructor() { LogsStub.last = this; } }
+@Component({ selector: 'app-mail-settings', standalone: true, template: '<p class="stub-settings">settings</p>' })
+class SettingsStub {
+  static last: SettingsStub | null = null;
+  @Output() toast = new EventEmitter<string>(); @Output() changed = new EventEmitter<void>(); @Output() openSection = new EventEmitter<string>();
+  constructor() { SettingsStub.last = this; }
+}
 
 const d = (id: number, status: string, o: any = {}) => ({ id, status, subject: `Draft ${id}`, recipient_email: 'a@acme.io', placeholders: [], ...o });
 
@@ -65,8 +72,8 @@ describe('MailCenterComponent', () => {
     DraftsStub.last = null;
     TestBed.configureTestingModule({ imports: [MailCenterComponent], providers: [provideHttpClient(), provideHttpClientTesting()] });
     TestBed.overrideComponent(MailCenterComponent, {
-      remove: { imports: [MailDraftsComponent, ProductEmailsComponent, EmailCampaignsComponent, EmailTemplatesComponent, MailTrackingSettingsComponent, ComposeReportComponent] },
-      add: { imports: [DraftsStub, ProductEmailsStub, CampaignsStub, TemplatesStub, TrackingSettingsStub, ComposeReportStub] }
+      remove: { imports: [MailDraftsComponent, ProductEmailsComponent, EmailCampaignsComponent, EmailTemplatesComponent, MailSettingsComponent, MailActivityChartsComponent, MailLogsComponent] },
+      add: { imports: [DraftsStub, ProductEmailsStub, CampaignsStub, TemplatesStub, SettingsStub, ChartsStub, LogsStub] }
     });
     http = TestBed.inject(HttpTestingController);
   });
@@ -78,7 +85,7 @@ describe('MailCenterComponent', () => {
 
   it('shows one set of sections; Product Emails only while its feature is on', () => {
     init();
-    expect(tabs().map(t => t.textContent!.trim().replace(/\s*\d+$/, ''))).toEqual(['Overview', 'Drafts', 'Approvals', 'Campaigns', 'Email Templates']);
+    expect(tabs().map(t => t.textContent!.trim().replace(/\s*\d+$/, ''))).toEqual(['Overview', 'Drafts', 'Approvals', 'Campaigns', 'Email Templates', 'Logs', 'Settings']);
     fixture.destroy();
     init({ productEmails: true });
     expect(tab('Product Emails')).toBeTruthy();
@@ -104,7 +111,7 @@ describe('MailCenterComponent', () => {
 
   it('tabs follow the keyboard pattern: arrows, Home and End move and open; only the active tab is in the tab order', fakeAsync(() => {
     init();
-    expect(tabs().map(t => t.tabIndex)).toEqual([0, -1, -1, -1, -1]);
+    expect(tabs().map(t => t.tabIndex)).toEqual([0, -1, -1, -1, -1, -1, -1]);
     tab('Overview').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
     fixture.detectChanges();
     tick();
@@ -113,8 +120,8 @@ describe('MailCenterComponent', () => {
     tab('Drafts').dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
     fixture.detectChanges();
     tick();
-    expect(comp.active).toBe('templates');
-    tab('Email Templates').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    expect(comp.active).toBe('settings');
+    tab('Settings').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
     fixture.detectChanges();
     tick();
     expect(comp.active).toBe('overview', 'wraps around');
@@ -131,7 +138,7 @@ describe('MailCenterComponent', () => {
     const metrics = Array.from(el().querySelectorAll('.mc-metric')).map(m => m.querySelector('strong')!.textContent!.trim());
     expect(metrics).toEqual(['2', '1', '1', '1', '2']);
     expect(el().textContent).toContain('1 urgent unread · 1 not sent');
-    expect(el().querySelector('.stub-tracking')).withContext('tracking settings on the overview').toBeTruthy();
+    expect(el().querySelector('.stub-settings')).withContext('settings live in their own tab').toBeNull();
     (el().querySelector('.mc-metric') as HTMLButtonElement).click();
     fixture.detectChanges();
     expect(sections).toEqual(['approvals']);
@@ -211,11 +218,48 @@ describe('MailCenterComponent', () => {
     expect(el().querySelector('.mc-metrics')).toBeTruthy();
   });
 
-  it('the Compose send log is shown to Owners/Admins (mail.configure) only', () => {
+  it('the overview shows the activity charts (no admin report); its log link opens Logs', () => {
     init();
-    expect(el().querySelector('.stub-report')).toBeNull();
+    expect(el().querySelector('.stub-charts')).toBeTruthy();
+    expect(el().querySelector('app-compose-report')).toBeNull();
+    ChartsStub.last!.openLogs.emit();
+    fixture.detectChanges();
+    expect(sections).toEqual(['logs']);
+    expect(el().querySelector('.stub-logs')).toBeTruthy();
+  });
+
+  it('Logs offers the Compose audit to Owners/Admins (mail.configure) only, and can open Campaigns', () => {
+    init({ section: 'logs' });
+    expect(LogsStub.last!.canViewAudit).toBeFalse();
+    LogsStub.last!.openSection.emit('campaigns');
+    fixture.detectChanges();
+    expect(sections).toEqual(['campaigns']);
     fixture.destroy();
-    init({ caps: ['mail.view', 'mail.compose', 'mail.send', 'mail.configure'] });
-    expect(el().querySelector('.stub-report')).toBeTruthy();
+    init({ caps: ['mail.view', 'mail.compose', 'mail.send', 'mail.configure'], section: 'logs' });
+    expect(LogsStub.last!.canViewAudit).toBeTrue();
+  });
+
+  it('Needs attention appears only when a draft needs someone', () => {
+    init({ drafts: [d(1, 'Approved')] });
+    expect(el().querySelector('.mc-attention')).toBeNull();
+    fixture.destroy();
+    init({ drafts: [d(2, 'Needs Review')] });
+    expect(el().querySelector('.mc-attention')!.textContent).toContain('Delivery unknown');
+  });
+
+  it('all mail settings are in the Settings tab; it can send the user to Campaigns and reports saved changes', () => {
+    init();
+    let changed = 0;
+    comp.settingsChanged.subscribe(() => changed++);
+    tab('Settings').click();
+    fixture.detectChanges();
+    expect(sections).toEqual(['settings']);
+    expect(el().querySelector('.stub-settings')).toBeTruthy();
+    SettingsStub.last!.changed.emit();
+    expect(changed).toBe(1);
+    SettingsStub.last!.openSection.emit('campaigns');
+    fixture.detectChanges();
+    expect(sections).toEqual(['settings', 'campaigns']);
+    expect(el().querySelector('.stub-campaigns')).toBeTruthy();
   });
 });

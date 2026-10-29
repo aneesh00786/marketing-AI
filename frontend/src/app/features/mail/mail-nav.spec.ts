@@ -9,6 +9,7 @@ describe('Mail Center navigation links', () => {
     expect(mailSectionFromLink('mail', null)).toBe('overview');
     expect(mailSectionFromLink('mail', 'approvals')).toBe('approvals');
     expect(mailSectionFromLink('mail', 'templates')).toBe('templates');
+    expect(mailSectionFromLink('mail', 'settings')).toBe('settings');
     expect(mailSectionFromLink('mail', 'zoho')).toBe('campaigns');
     expect(mailSectionFromLink('mail', 'nonsense')).toBe('overview');
   });
@@ -19,7 +20,7 @@ describe('Mail Center navigation links', () => {
   });
 
   it('Product Emails is listed only while its feature is enabled', () => {
-    expect(visibleMailSections({ productEmails: false })).toEqual(['overview', 'drafts', 'approvals', 'campaigns', 'templates']);
+    expect(visibleMailSections({ productEmails: false })).toEqual(['overview', 'drafts', 'approvals', 'campaigns', 'templates', 'logs', 'settings']);
     expect(visibleMailSections({ productEmails: true })).toContain('product-emails');
   });
 });

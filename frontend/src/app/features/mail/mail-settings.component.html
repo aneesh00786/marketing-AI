@@ -1,0 +1,109 @@
+<section class="ms" aria-labelledby="ms-title">
+  <header class="ms-head">
+    <h2 id="ms-title">Mail settings</h2>
+    <p class="sub">Everything that decides how this workspace sends and tracks email. Changes apply to emails sent from now on.</p>
+  </header>
+
+  <div class="ms-tabs" role="tablist" aria-label="Mail settings" (keydown)="onTabKey($event)">
+    <button *ngFor="let t of tabs" type="button" role="tab" [id]="'ms-tab-' + t.id" [attr.aria-controls]="'ms-panel-' + t.id"
+      [attr.aria-selected]="tab === t.id" [tabindex]="tab === t.id ? 0 : -1" [class.on]="tab === t.id" (click)="select(t.id)">
+      {{ t.label }}
+      <span class="ms-dot" *ngIf="t.id === 'sending' && !forbidden && !loading" [class.ok]="config.has_smtp_auth" [attr.title]="config.has_smtp_auth ? 'Set up' : 'Not set up'"></span>
+      <span class="ms-dot" *ngIf="t.id === 'replies' && !forbidden && !loading" [class.ok]="config.has_imap_auth" [attr.title]="config.has_imap_auth ? 'Connected' : 'Not connected'"></span>
+    </button>
+  </div>
+
+  <div class="ms-panel" role="tabpanel" [id]="'ms-panel-' + tab" [attr.aria-labelledby]="'ms-tab-' + tab" [ngSwitch]="tab">
+
+    <!-- Sending + Replies: the same mailbox settings form, split by direction -->
+    <ng-container *ngIf="tab === 'sending' || tab === 'replies'">
+      <p class="sub" *ngIf="loading">Loading…</p>
+      <div class="note error" *ngIf="loadError" role="alert">{{ loadError }} <button type="button" class="link-btn" (click)="load()">Try again</button></div>
+      <div class="note info" *ngIf="forbidden">Only workspace Owners and Admins can view and change the mailbox connection.</div>
+
+      <form *ngIf="!forbidden && !loading && !loadError" (ngSubmit)="save()" class="ms-form" autocomplete="off">
+        <ng-container *ngIf="tab === 'sending'">
+          <div class="ms-card-head">
+            <p class="sub">Who emails come from and how they are sent.</p>
+            <span class="ms-badge" [class.ok]="config.has_smtp_auth">{{ config.has_smtp_auth ? 'Sending set up' : 'Not set up' }}</span>
+          </div>
+          <fieldset>
+            <legend>Sender</legend>
+            <div class="ms-grid">
+              <label>From name <input class="hud-input" name="sender_name" [(ngModel)]="config.sender_name" maxlength="255" placeholder="e.g. Acme Sales" /></label>
+              <label>From address <input class="hud-input" type="email" name="sender_email" [(ngModel)]="config.sender_email" maxlength="255" placeholder="e.g. hello@yourcompany.com" /></label>
+            </div>
+          </fieldset>
+
+          <fieldset>
+            <legend>Sending service</legend>
+            <label>Service
+              <select class="hud-input" name="provider" [(ngModel)]="config.provider">
+                <option value="zeptomail">ZeptoMail (transactional email only)</option>
+                <option value="custom_smtp">Your SMTP server</option>
+                <option value="gmail">Google Workspace / Gmail (SMTP)</option>
+                <option value="office365">Microsoft 365 / Outlook (SMTP)</option>
+                <option value="zoho">Zoho Mail (SMTP)</option>
+              </select>
+            </label>
+            <p class="hint" *ngIf="isZepto">ZeptoMail sends transactional and direct emails. Marketing email (Mail Drafts, marketing Compose, AI Campaigns sequences, Product Emails) needs your own SMTP mailbox instead.</p>
+            <p class="hint" *ngIf="!isZepto">Your own mailbox can send every kind of email. Marketing email also needs approval in the <button type="button" class="link-btn" (click)="select('marketing')">Marketing email</button> tab.</p>
+            <div class="ms-grid three" *ngIf="!isZepto">
+              <label>SMTP host <input class="hud-input" name="smtp_host" [(ngModel)]="config.smtp_host" placeholder="smtp.yourcompany.com" /></label>
+              <label>Port <input class="hud-input" type="number" name="smtp_port" [(ngModel)]="config.smtp_port" placeholder="587" /></label>
+              <label class="ms-check"><input type="checkbox" name="smtp_secure" [(ngModel)]="config.smtp_secure" /> SSL (port 465)</label>
+            </div>
+            <div class="ms-grid">
+              <label>{{ isZepto ? 'Username' : 'SMTP username' }} <input class="hud-input" name="smtp_user" [(ngModel)]="config.smtp_user" [placeholder]="isZepto ? 'emailapikey' : 'e.g. hello@yourcompany.com'" /></label>
+              <label>{{ isZepto ? 'ZeptoMail Send Mail token' : 'SMTP password / app password' }} <input class="hud-input" type="password" name="smtp_pass" [(ngModel)]="config.smtp_pass" placeholder="Leave as is to keep the saved one" /></label>
+            </div>
+            <div class="ms-actions">
+              <button type="button" class="btn btn-secondary btn-sm" (click)="test()" [disabled]="testing">{{ testing ? 'Testing…' : 'Test connection' }}</button>
+              <span class="ms-result" *ngIf="testResult" [class.ok]="testResult.success" [class.bad]="!testResult.success" role="status">{{ testResult.success ? (testResult.message || 'Connection works.') : (testResult.error || testResult.message || 'Connection failed.') }}</span>
+            </div>
+          </fieldset>
+        </ng-container>
+
+        <ng-container *ngIf="tab === 'replies'">
+          <div class="ms-card-head">
+            <p class="sub">Optional. Replies are synced from this mailbox so unsubscribe replies are honoured and conversations show in the Overview inbox.</p>
+            <span class="ms-badge" [class.ok]="config.has_imap_auth">{{ config.has_imap_auth ? 'Connected' : 'Not connected' }}</span>
+          </div>
+          <div class="note info" *ngIf="config.imap_host && !config.has_imap_auth">Replies are not set up yet. The saved values look like samples or are incomplete: enter your mailbox's IMAP server, username and password, then save.</div>
+          <fieldset>
+            <legend>Inbound mailbox (IMAP)</legend>
+            <div class="ms-grid three">
+              <label>IMAP host <input class="hud-input" name="imap_host" [(ngModel)]="config.imap_host" placeholder="imap.yourcompany.com" /></label>
+              <label>Port <input class="hud-input" type="number" name="imap_port" [(ngModel)]="config.imap_port" placeholder="993" /></label>
+              <label class="ms-check"><input type="checkbox" name="imap_tls" [(ngModel)]="config.imap_tls" /> TLS (port 993)</label>
+            </div>
+            <div class="ms-grid">
+              <label>IMAP username <input class="hud-input" name="imap_user" [(ngModel)]="config.imap_user" /></label>
+              <label>IMAP password / app password <input class="hud-input" type="password" name="imap_pass" [(ngModel)]="config.imap_pass" placeholder="Leave as is to keep the saved one" /></label>
+            </div>
+            <div class="ms-actions">
+              <button type="button" class="btn btn-secondary btn-sm" (click)="sync()" [disabled]="syncing">{{ syncing ? 'Syncing…' : 'Sync inbox now' }}</button>
+              <span class="muted small" *ngIf="config.last_synced_at">Last synced {{ config.last_synced_at }}</span>
+            </div>
+          </fieldset>
+        </ng-container>
+
+        <div class="ms-save">
+          <button type="submit" class="btn btn-primary" [disabled]="saving">{{ saving ? 'Saving…' : 'Save mailbox settings' }}</button>
+          <span class="muted small">Saves Sending and Replies together. Saving a different SMTP account clears its marketing approval.</span>
+        </div>
+      </form>
+    </ng-container>
+
+    <app-marketing-delivery *ngSwitchCase="'marketing'" [refreshKey]="version" (toast)="toast.emit($event)"></app-marketing-delivery>
+
+    <app-mail-tracking-settings *ngSwitchCase="'tracking'" [startOpen]="true" (toast)="toast.emit($event)"></app-mail-tracking-settings>
+
+    <div *ngSwitchCase="'zoho'" class="ms-card">
+      <div class="ms-card-head">
+        <p class="sub">Large email campaigns are delivered by Zoho Campaigns to your Zoho mailing lists. Connect or disconnect your Zoho account where you create campaigns.</p>
+        <button type="button" class="btn btn-secondary btn-sm" (click)="openSection.emit('campaigns')">Open Campaigns</button>
+      </div>
+    </div>
+  </div>
+</section>

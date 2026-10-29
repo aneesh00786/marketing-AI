@@ -150,6 +150,8 @@ app.use('/api/v1/mail/unsubscribe', productEmailRoutes.unsubscribe);
 const mailTrackingRoutes = require('./modules/mail/tracking/routes');
 app.use('/api/v1/mail/t', mailTrackingRoutes.publicRouter);
 app.use('/api/v1/mail/tracking', mailTrackingRoutes.router);
+// Mail Center charts, email log and campaign log (read-only).
+app.use('/api/v1/mail/activity', require('./modules/mail/activity/routes').router);
 app.use(['/api/v1/mail', '/api/mail'], mailRoutes.settings);
 app.use(mailRoutes.tools);
 // Tenant-aware Business Playbooks ("AI Campaigns").

@@ -7,11 +7,12 @@ import { EmailCampaignsComponent } from './email-campaigns.component';
 import { EmailTemplatesComponent } from './email-templates.component';
 import type { TemplateUseTarget } from './email-templates.component';
 import { DataState, MAIL_SECTIONS, MailSection, visibleMailSections } from './mail-nav';
-import { MailTrackingSettingsComponent } from './mail-tracking-settings.component';
-import { ComposeReportComponent } from './compose-report.component';
+import { MailSettingsComponent } from './mail-settings.component';
+import { MailActivityChartsComponent } from './mail-activity-charts.component';
+import { MailLogsComponent } from './mail-logs.component';
 
 /**
- * Mail Center: one place for the mailbox, drafts, approvals, product emails, campaigns and templates.
+ * Mail Center: one place for the mailbox, drafts, approvals, product emails, campaigns, templates, logs and settings.
  * It only arranges the existing mail components; drafting, approval and sending stay in those
  * components and on the server, which enforces permissions. Every count shown comes from data the
  * app has loaded (drafts list, latest mailbox messages); nothing is estimated.
@@ -19,7 +20,7 @@ import { ComposeReportComponent } from './compose-report.component';
 @Component({
   selector: 'app-mail-center',
   standalone: true,
-  imports: [CommonModule, MailDraftsComponent, ProductEmailsComponent, EmailCampaignsComponent, EmailTemplatesComponent, MailTrackingSettingsComponent, ComposeReportComponent],
+  imports: [CommonModule, MailDraftsComponent, ProductEmailsComponent, EmailCampaignsComponent, EmailTemplatesComponent, MailSettingsComponent, MailActivityChartsComponent, MailLogsComponent],
   templateUrl: './mail-center.component.html',
   styleUrls: ['../command/command-center.component.css', './mail-center.component.css']
 })
@@ -44,6 +45,8 @@ export class MailCenterComponent implements OnInit {
   @Output() toast = new EventEmitter<string>();
   @Output() draftsChanged = new EventEmitter<void>();
   @Output() mailSent = new EventEmitter<void>();
+  /** Mailbox settings saved or the inbox synced in Settings. */
+  @Output() settingsChanged = new EventEmitter<void>();
   @ViewChild('createBtn') createBtn?: ElementRef<HTMLButtonElement>;
 
   // Capabilities of the signed-in member (null = unknown: the server still decides).

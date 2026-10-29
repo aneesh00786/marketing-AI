@@ -1,4 +1,4 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, Input } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../services/api.service';
@@ -34,6 +34,8 @@ export const PURPOSE_REASON_LABELS: Record<string, string> = {
   styleUrls: ['../command/command-center.component.css', './compose-report.component.css']
 })
 export class ComposeReportComponent implements OnInit {
+  /** Show the log expanded and loaded (in Mail Center → Logs). */
+  @Input() startOpen = false;
   open = false;
   filters = { from: '', to: '', purpose: '' };
   page = 1;
@@ -44,7 +46,7 @@ export class ComposeReportComponent implements OnInit {
 
   constructor(private api: ApiService) {}
 
-  ngOnInit(): void {}
+  ngOnInit(): void { if (this.startOpen) this.toggle(); }
 
   toggle(): void {
     this.open = !this.open;

@@ -1,0 +1,107 @@
+<section class="ma" aria-labelledby="ma-title">
+  <header class="ma-head">
+    <div>
+      <h3 id="ma-title">Activity</h3>
+      <p class="ma-sub" *ngIf="data">{{ short(data.range.from) }} – {{ short(data.range.to) }} (UTC)</p>
+    </div>
+    <div class="ma-controls">
+      <div class="ma-range" role="group" aria-label="Time range">
+        <button type="button" *ngFor="let r of ranges" [class.on]="days === r" [attr.aria-pressed]="days === r" (click)="setRange(r)">{{ r }} days</button>
+      </div>
+      <button type="button" class="ma-link" (click)="showTable = !showTable" [attr.aria-pressed]="showTable">{{ showTable ? 'Show charts' : 'Show as table' }}</button>
+      <button type="button" class="ma-link" (click)="openLogs.emit()">Email log →</button>
+    </div>
+  </header>
+
+  <p class="ma-sub" *ngIf="loading && !data">Loading…</p>
+  <div class="ma-error" *ngIf="error" role="alert">{{ error }} <button type="button" class="ma-link" (click)="load()">Try again</button></div>
+
+  <ng-container *ngIf="data && !error">
+    <!-- Headline numbers for the range -->
+    <div class="ma-stats">
+      <div class="ma-stat"><span>Sent</span><strong>{{ totalSent }}</strong><small>{{ data.totals.sentMailbox }} mailbox · {{ data.totals.sentCampaigns }} AI campaigns</small></div>
+      <div class="ma-stat"><span>Received</span><strong>{{ data.totals.received }}</strong><small>Synced replies and messages</small></div>
+      <div class="ma-stat" [class.bad]="data.totals.notSent + data.totals.campaignFailed">
+        <span>Not sent</span><strong>{{ data.totals.notSent + data.totals.campaignFailed }}</strong>
+        <small><ng-container *ngIf="data.totals.notSent + data.totals.campaignFailed; else allOk">⚠ {{ data.totals.notSent }} mailbox · {{ data.totals.campaignFailed }} AI campaigns</ng-container><ng-template #allOk>Nothing failed</ng-template></small>
+      </div>
+    </div>
+
+    <div class="ma-charts" *ngIf="!showTable">
+      <!-- Chart 1: emails sent per day, stacked by channel -->
+      <figure class="ma-card">
+        <figcaption>
+          <strong>Emails sent per day</strong>
+          <span class="ma-legend" aria-hidden="true">
+            <span><i class="sw s1"></i>Mailbox (Compose &amp; drafts)</span>
+            <span><i class="sw s2"></i>AI campaigns</span>
+          </span>
+        </figcaption>
+        <p class="ma-empty" *ngIf="!totalSent">No emails were sent in this period.</p>
+        <div class="ma-plot" *ngIf="totalSent" (mouseleave)="hover = null">
+          <div class="ma-grid" aria-hidden="true">
+            <span [style.bottom.%]="100"><em>{{ yMax }}</em></span>
+            <span [style.bottom.%]="50"><em>{{ yMax / 2 }}</em></span>
+            <span class="base" [style.bottom.%]="0"><em>0</em></span>
+          </div>
+          <div class="ma-cols" [class.dense]="daily.length > 40">
+            <div class="ma-col" *ngFor="let d of daily; let i = index" tabindex="0"
+                 [attr.aria-label]="short(d.date) + ': ' + d.mailbox + ' mailbox, ' + d.campaigns + ' AI campaign emails sent'"
+                 (mouseenter)="hover = i" (focus)="hover = i" (blur)="hover = null" [class.on]="hover === i">
+              <div class="ma-stack">
+                <div class="seg s2" *ngIf="d.campaigns" [style.height.%]="h(d.campaigns)" [class.top]="true"></div>
+                <div class="seg s1" *ngIf="d.mailbox" [style.height.%]="h(d.mailbox)" [class.top]="!d.campaigns" [class.gap]="!!d.campaigns"></div>
+              </div>
+            </div>
+          </div>
+          <div class="ma-tip" *ngIf="hover !== null && daily[hover]" [style.left.%]="left(hover)" [class.l]="left(hover) < 20" [class.r]="left(hover) > 80" role="status">
+            <strong>{{ short(daily[hover].date) }}</strong>
+            <span><i class="sw s1"></i>Mailbox <b>{{ daily[hover].mailbox }}</b></span>
+            <span><i class="sw s2"></i>AI campaigns <b>{{ daily[hover].campaigns }}</b></span>
+            <span class="muted">Received <b>{{ daily[hover].received }}</b></span>
+          </div>
+          <div class="ma-x" aria-hidden="true">
+            <span *ngFor="let l of xLabels" [style.left.%]="left(l.i)">{{ l.text }}</span>
+          </div>
+        </div>
+      </figure>
+
+      <!-- Chart 2: what happened to tracked emails -->
+      <figure class="ma-card">
+        <figcaption><strong>Delivery of tracked emails</strong></figcaption>
+        <p class="ma-empty" *ngIf="!data.delivery.tracked">No tracked emails in this period. Delivery tracking applies to emails sent through ZeptoMail with tracking on (Mail settings → Tracking &amp; privacy).</p>
+        <ng-container *ngIf="data.delivery.tracked">
+          <p class="ma-sub">{{ data.delivery.tracked }} tracked email{{ data.delivery.tracked === 1 ? '' : 's' }}</p>
+          <div class="ma-bars">
+            <div class="ma-bar" *ngFor="let r of delivery" [title]="r.hint">
+              <span class="lbl">{{ r.label }}</span>
+              <span class="track"><span class="fill s1" [style.width.%]="pct(r.value)"></span></span>
+              <span class="val">{{ r.value }} <small>({{ pct(r.value) }}%)</small></span>
+            </div>
+          </div>
+          <p class="ma-status" *ngIf="data.delivery.bounced || data.delivery.complained">
+            ⚠ {{ data.delivery.bounced }} bounced<ng-container *ngIf="data.delivery.complained"> · {{ data.delivery.complained }} marked as spam</ng-container>
+          </p>
+        </ng-container>
+      </figure>
+    </div>
+
+    <!-- Table view of the same numbers -->
+    <div class="ma-table-wrap" *ngIf="showTable">
+      <table class="ma-table">
+        <caption>Emails per day</caption>
+        <thead><tr><th scope="col">Date</th><th scope="col">Mailbox sent</th><th scope="col">AI campaigns sent</th><th scope="col">Received</th></tr></thead>
+        <tbody>
+          <tr *ngFor="let d of daily.slice().reverse()"><th scope="row">{{ short(d.date) }}</th><td>{{ d.mailbox }}</td><td>{{ d.campaigns }}</td><td>{{ d.received }}</td></tr>
+        </tbody>
+      </table>
+      <table class="ma-table" *ngIf="data.delivery.tracked">
+        <caption>Delivery of {{ data.delivery.tracked }} tracked emails</caption>
+        <tbody>
+          <tr *ngFor="let r of delivery"><th scope="row">{{ r.label }}</th><td>{{ r.value }} ({{ pct(r.value) }}%)</td></tr>
+          <tr><th scope="row">Bounced</th><td>{{ data.delivery.bounced }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </ng-container>
+</section>

@@ -1,0 +1,25 @@
+<section class="md-panel" aria-labelledby="mkt-title">
+  <div class="md-row">
+    <div>
+      <strong id="mkt-title">Marketing email</strong>
+      <p class="md-sub">Mail Drafts, marketing Compose emails, AI Campaigns sequences and Product Emails are marketing email. They are sent only through your own SMTP mailbox once it is approved for marketing, never through ZeptoMail, and they include an unsubscribe link.</p>
+    </div>
+    <span class="md-badge" *ngIf="status" [class.ok]="status.allowed" [class.warn]="!status.allowed">{{ status.allowed ? 'Ready' : 'Not ready' }}</span>
+  </div>
+  <p class="md-sub" *ngIf="loading && !status">Loading…</p>
+  <div class="note error" *ngIf="error" role="alert">{{ error }} <button type="button" class="link-btn" (click)="load()">Try again</button></div>
+
+  <ng-container *ngIf="status">
+    <p class="md-ok" *ngIf="status.allowed">Your SMTP mailbox is approved for marketing email<ng-container *ngIf="status.approvedAt"> (since {{ status.approvedAt | date:'mediumDate' }})</ng-container>.</p>
+    <p class="md-why" *ngIf="!status.allowed" role="status">{{ status.reason }}</p>
+
+    <div class="md-approve" *ngIf="status.code === 'MARKETING_NOT_APPROVED' && canConfigure">
+      <label class="md-check"><input type="checkbox" [(ngModel)]="confirmed" /> I confirm our SMTP provider's terms allow marketing email from this mailbox.</label>
+      <button type="button" class="btn btn-primary btn-sm" (click)="approve()" [disabled]="!confirmed || busy">{{ busy ? 'Approving…' : 'Approve for marketing' }}</button>
+    </div>
+    <p class="md-sub" *ngIf="status.code === 'MARKETING_NOT_APPROVED' && !canConfigure">A workspace Owner or Admin can approve it here.</p>
+    <p class="md-sub" *ngIf="status.code === 'MARKETING_PROVIDER_BLOCKED' || status.code === 'MARKETING_SMTP_REQUIRED'">Enter your own SMTP mailbox above and save, then approve it here. Transactional/direct Compose emails can still go through ZeptoMail.</p>
+    <p class="md-sub" *ngIf="status.code === 'MARKETING_NOT_APPROVED'">Approval applies to the saved SMTP settings; saving a different SMTP account clears it.</p>
+    <button type="button" class="link-btn" *ngIf="status.allowed && canConfigure" (click)="withdraw()" [disabled]="busy">Withdraw approval</button>
+  </ng-container>
+</section>

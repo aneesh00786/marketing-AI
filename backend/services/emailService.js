@@ -189,7 +189,7 @@ function marketingDeliveryProblem(workspaceId, config) {
     return { code: 'MARKETING_SMTP_REQUIRED', message: 'Marketing emails need an SMTP mailbox configured in Mail Settings.' };
   }
   if (!Number(config.marketing_approved)) {
-    return { code: 'MARKETING_NOT_APPROVED', message: 'This SMTP mailbox is not approved for marketing email yet. An Owner or Admin must confirm in Mail Settings that the provider allows marketing email.' };
+    return { code: 'MARKETING_NOT_APPROVED', message: 'This SMTP mailbox is not approved for marketing email yet. A workspace Owner or Admin can approve it in Mail Center → Settings → Marketing email, after confirming the provider allows marketing email.' };
   }
   return null;
 }
@@ -229,6 +229,12 @@ function usesZepto(workspaceId, config) {
   return isLegacy(workspaceId) && !!(config.sender_email && config.sender_email.includes('thrivewoo.com'));
 }
 
+const PLACEHOLDER_HOST = /(^|\.)(invalid|example|test|localhost)$|(^|\.)example\.(com|net|org)$/i;
+function imapConfigured(raw) {
+  const host = String(raw.imap_host || '').trim();
+  return !!(host && !PLACEHOLDER_HOST.test(host) && raw.imap_user && raw.imap_pass);
+}
+
 async function getSafeMailConfig(workspaceId) {
   const raw = await getRawMailConfig(workspaceId);
   return {
@@ -236,7 +242,9 @@ async function getSafeMailConfig(workspaceId) {
     smtp_pass: raw.smtp_pass ? '••••••••' : '',
     imap_pass: raw.imap_pass ? '••••••••' : '',
     has_smtp_auth: !!(raw.smtp_user && raw.smtp_pass),
-    has_imap_auth: !!(raw.imap_user && raw.imap_pass)
+    // Replies are set up only with a real server, a login and a password: sample values (reserved
+    // .invalid/.example hosts, e.g. from the demo seed) do not count.
+    has_imap_auth: imapConfigured(raw)
   };
 }
 

@@ -35,6 +35,10 @@
     <ng-container *ngIf="canView" [ngSwitch]="active">
       <!-- ===== Overview ===== -->
       <div *ngSwitchCase="'overview'" class="mc-overview">
+        <!-- 1. Is mail set up? (status bar provided by the app shell) -->
+        <ng-content select="[mcStatus]"></ng-content>
+
+        <!-- 2. Counts; each opens the matching list -->
         <div class="mc-metrics" aria-label="Mail at a glance">
           <button type="button" class="mc-metric" (click)="go('approvals', { status: 'Draft' })" [disabled]="draftsState !== 'ready'">
             <span class="mc-metric-label">Waiting for approval</span>
@@ -66,20 +70,19 @@
         <p class="muted small" *ngIf="draftsState === 'loading'">Loading drafts…</p>
         <div class="callout warn" *ngIf="draftsState === 'error'" role="alert">Draft counts could not be loaded. Open Drafts to try again.</div>
 
-        <div class="mc-attention" *ngIf="draftsState === 'ready'">
+        <!-- 3. Drafts that need someone (shown only when there are any) -->
+        <div class="mc-attention" *ngIf="draftsState === 'ready' && attention.length">
           <h3>Needs attention</h3>
-          <p class="muted small" *ngIf="!attention.length">No drafts need attention.</p>
           <button type="button" *ngFor="let a of attention" class="mc-attn-item" (click)="go(a.section, { draftId: a.draft.id })">
             <strong>{{ a.draft.subject || '(no subject)' }}</strong>
             <small>{{ a.reason }}</small>
           </button>
         </div>
 
-        <app-mail-tracking-settings (toast)="toast.emit($event)"></app-mail-tracking-settings>
-        <!-- Owners/Admins only (the server enforces mail.configure too). -->
-        <app-compose-report *ngIf="caps?.has('mail.configure')"></app-compose-report>
+        <!-- 4. Charts: sent per day and delivery (read-only) -->
+        <app-mail-activity-charts (openLogs)="go('logs')"></app-mail-activity-charts>
 
-        <!-- Company mailbox (provided by the app shell). -->
+        <!-- 5. Inbox and sent mail (provided by the app shell) -->
         <ng-content></ng-content>
       </div>
 
@@ -106,6 +109,12 @@
       <app-email-campaigns *ngSwitchCase="'campaigns'" [oauthResult]="zohoOauthResult" [startTemplate]="campaignStartTemplate" (toast)="toast.emit($event)"></app-email-campaigns>
 
       <app-email-templates *ngSwitchCase="'templates'" (toast)="toast.emit($event)" (use)="templateUse.emit($event)"></app-email-templates>
+
+      <!-- Email log, campaign log and (Owners/Admins) the Compose audit -->
+      <app-mail-logs *ngSwitchCase="'logs'" [canViewAudit]="!!caps?.has('mail.configure')" (openSection)="go($any($event))"></app-mail-logs>
+
+      <!-- All mail settings: mailbox connection, marketing approval, tracking, Zoho pointer. -->
+      <app-mail-settings *ngSwitchCase="'settings'" (toast)="toast.emit($event)" (changed)="settingsChanged.emit()" (openSection)="go($any($event))"></app-mail-settings>
     </ng-container>
   </div>
 </section>
