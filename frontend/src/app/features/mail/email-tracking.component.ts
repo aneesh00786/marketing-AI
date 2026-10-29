@@ -26,7 +26,7 @@ const EVENT_LABEL: Record<string, string> = {
   standalone: true,
   imports: [CommonModule],
   templateUrl: './email-tracking.component.html',
-  styleUrls: ['./email-tracking.component.css']
+  styleUrls: ['./mail-ui.css', './email-tracking.component.css']
 })
 export class EmailTrackingComponent implements OnChanges {
   @Input() emailId: number | null = null;

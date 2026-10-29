@@ -1,5 +1,6 @@
 import { Component, ElementRef, EventEmitter, HostListener, Input, OnInit, Output, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { IconComponent } from '../../shared/icon.component';
 import { ApiService } from '../../services/api.service';
 import { MailDraftsComponent } from './mail-drafts.component';
 import { ProductEmailsComponent } from './product-emails.component';
@@ -10,9 +11,12 @@ import { DataState, MAIL_SECTIONS, MailSection, visibleMailSections } from './ma
 import { MailSettingsComponent } from './mail-settings.component';
 import { MailActivityChartsComponent } from './mail-activity-charts.component';
 import { MailLogsComponent } from './mail-logs.component';
+import { MailInboxComponent } from './mail-inbox.component';
+import { MailSentComponent } from './mail-sent.component';
 
 /**
- * Mail Center: one place for the mailbox, drafts, approvals, product emails, campaigns, templates, logs and settings.
+ * Mail Center: one place for the inbox, sent mail, drafts, approvals, product emails, campaigns,
+ * templates, logs and settings.
  * It only arranges the existing mail components; drafting, approval and sending stay in those
  * components and on the server, which enforces permissions. Every count shown comes from data the
  * app has loaded (drafts list, latest mailbox messages); nothing is estimated.
@@ -20,20 +24,22 @@ import { MailLogsComponent } from './mail-logs.component';
 @Component({
   selector: 'app-mail-center',
   standalone: true,
-  imports: [CommonModule, MailDraftsComponent, ProductEmailsComponent, EmailCampaignsComponent, EmailTemplatesComponent, MailSettingsComponent, MailActivityChartsComponent, MailLogsComponent],
+  imports: [CommonModule, IconComponent, MailDraftsComponent, ProductEmailsComponent, EmailCampaignsComponent, EmailTemplatesComponent, MailSettingsComponent, MailActivityChartsComponent, MailLogsComponent, MailInboxComponent, MailSentComponent],
   templateUrl: './mail-center.component.html',
-  styleUrls: ['../command/command-center.component.css', './mail-center.component.css']
+  styleUrls: ['../command/command-center.component.css', './mail-ui.css', './mail-center.component.css']
 })
 export class MailCenterComponent implements OnInit {
   @Input() section: MailSection = 'overview';
   @Output() sectionChange = new EventEmitter<MailSection>();
   @Input() productEmailsEnabled = false;
   @Input() products: any[] = [];
-  /** The shell's lists, for the overview (drafts: all of them; emails: the latest messages the API returns). */
+  /** The shell's drafts list, for the overview counts. */
   @Input() drafts: any[] = [];
   @Input() draftsState: DataState = 'loading';
-  @Input() emails: any[] = [];
-  @Input() emailsState: DataState = 'loading';
+  /** Whether a reply mailbox (IMAP) is set up (null while unknown). */
+  @Input() imapReady: boolean | null = null;
+  /** Bumped by the shell after mail was sent or synced: Inbox and Sent Mail reload. */
+  @Input() mailboxVersion = 0;
   /** Handed over from elsewhere in the app (product card, Email Templates "Use in"). */
   @Input() draftTemplate: { id: number; name: string } | null = null;
   @Input() draftProduct: { id: number } | null = null;
@@ -47,6 +53,12 @@ export class MailCenterComponent implements OnInit {
   @Output() mailSent = new EventEmitter<void>();
   /** Mailbox settings saved or the inbox synced in Settings. */
   @Output() settingsChanged = new EventEmitter<void>();
+  /** Open the shell's Compose (a new email, a reply, a forward, or a failed email to send again). */
+  @Output() compose = new EventEmitter<void>();
+  @Output() reply = new EventEmitter<any>();
+  @Output() forward = new EventEmitter<any>();
+  @Output() smartReply = new EventEmitter<{ reply: any; email: any }>();
+  @Output() sendAgain = new EventEmitter<any>();
   @ViewChild('createBtn') createBtn?: ElementRef<HTMLButtonElement>;
 
   // Capabilities of the signed-in member (null = unknown: the server still decides).
@@ -56,6 +68,10 @@ export class MailCenterComponent implements OnInit {
   draftAction: 'ai' | 'template' | null = null;
   draftStatus: any = null;
   draftId: number | null = null;
+  /** Status filter Sent Mail opens with (from an Overview shortcut). */
+  sentStatus: string | null = null;
+  /** Unread received emails (null until known). */
+  inboxUnread: number | null = null;
 
   constructor(private api: ApiService) {}
 
@@ -63,6 +79,14 @@ export class MailCenterComponent implements OnInit {
     this.api.getMe().subscribe({
       next: (me: any) => { if (Array.isArray(me?.capabilities)) this.caps = new Set(me.capabilities); },
       error: () => { this.caps = null; }
+    });
+    this.loadUnread();
+  }
+
+  loadUnread(): void {
+    this.api.getInbox({ read: 'unread' }).subscribe({
+      next: (r: any) => { this.inboxUnread = typeof r?.unread === 'number' ? r.unread : null; },
+      error: () => { this.inboxUnread = null; }
     });
   }
 
@@ -75,12 +99,16 @@ export class MailCenterComponent implements OnInit {
     return MAIL_SECTIONS.filter(s => keys.includes(s.key));
   }
 
+  /** Drafts that need someone with mail.send (toolbar summary). */
+  get pendingApprovals(): number { return this.draftCount('Draft') + this.draftCount('Approved') + this.draftCount('Needs Review'); }
+
   /** The section shown: the requested one if this workspace has it, otherwise the overview. */
   get active(): MailSection {
     return this.sections.some(s => s.key === this.section) ? this.section : 'overview';
   }
 
   go(section: MailSection, opts: { status?: string | null; draftId?: number | null } = {}): void {
+    if (section === 'sent') this.sentStatus = opts.status ?? null;
     this.draftStatus = opts.status ?? null;
     this.draftId = opts.draftId ?? null;
     this.section = section;
@@ -137,8 +165,6 @@ export class MailCenterComponent implements OnInit {
   // ---------- Overview (counts from loaded data only) ----------
   draftCount(status: string): number { return this.drafts.filter(d => d.status === status).length; }
 
-  get notSentCount(): number { return this.emails.filter(e => e.status === 'Not Sent').length; }
-  get urgentUnreadCount(): number { return this.emails.filter(e => (e.is_urgent === 1 || e.ai_priority === 'Urgent') && !e.is_read).length; }
 
   /** Drafts that need someone to act, most pressing first: unknown delivery, then unfinished drafts. */
   get attention(): { draft: any; reason: string; section: MailSection }[] {

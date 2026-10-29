@@ -28,7 +28,7 @@ const BLANK = {
   standalone: true,
   imports: [CommonModule, FormsModule, MarketingDeliveryComponent, MailTrackingSettingsComponent],
   templateUrl: './mail-settings.component.html',
-  styleUrls: ['../command/command-center.component.css', './mail-settings.component.css']
+  styleUrls: ['../command/command-center.component.css', './mail-ui.css', './mail-settings.component.css']
 })
 export class MailSettingsComponent implements OnInit {
   @Output() toast = new EventEmitter<string>();

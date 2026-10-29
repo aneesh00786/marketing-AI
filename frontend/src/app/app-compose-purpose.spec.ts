@@ -69,4 +69,53 @@ describe('App shell: Compose email purpose', () => {
     app.myCaps = null;
     expect(app.canSendTransactional).withContext('unknown: the server decides').toBeTrue();
   });
+
+  it('a reply quotes the original and invents no text; forward and send again open Compose without sending', () => {
+    app.replyToEmail({ sender_email: 'kim@client.io', sender: 'Kim', subject: 'Question', body: 'What does it cost?', received_at: '2026-10-28 10:00' });
+    expect(app.composeEmail.recipient_email).toBe('kim@client.io');
+    expect(app.composeEmail.subject).toBe('Re: Question');
+    expect(app.composeEmail.body).toContain('> What does it cost?');
+    expect(app.composeEmail.body).not.toContain('demonstration');
+
+    app.forwardEmail({ sender_email: 'kim@client.io', subject: 'Question', body: 'What does it cost?', html_body: '' });
+    expect([app.composeEmail.recipient_email, app.composeEmail.subject, app.composePurpose]).toEqual(['', 'Fwd: Question', null]);
+    expect(app.composeEmail.body).toContain('Forwarded message');
+
+    app.sendEmailAgain({ recipient_email: 'max@client.io', subject: 'Setup', body: 'x', html_body: '<p>x</p>', purpose: 'marketing' });
+    expect([app.composeEmail.recipient_email, app.composeEmail.html_body, app.composePurpose, app.showComposeModal]).toEqual(['max@client.io', '<p>x</p>', 'marketing', true]);
+    expect(api.sendHtmlEmail).not.toHaveBeenCalled();
+    expect(api.sendEmail).not.toHaveBeenCalled();
+  });
+
+  it('Compose points out what is missing and sends nothing until the email is complete', () => {
+    app.openCompose();
+    expect(app.composeTab).toBe('write');
+    app.trySendCompose();
+    expect(app.composeTouched).toBeTrue();
+    expect(app.composeProblems).toEqual(['a valid recipient email', 'a subject', 'the email purpose', 'a message']);
+    expect(api.sendEmail).not.toHaveBeenCalled();
+    app.composeEmail.recipient_email = 'not-an-address';
+    app.composeEmail.subject = 'Hi';
+    app.composeEmail.body = 'Plain text written in the Write tab';
+    app.composePurpose = 'transactional';
+    expect(app.composeProblems).toEqual(['a valid recipient email']);
+    app.composeEmail.recipient_email = 'kim@client.io';
+    app.trySendCompose();
+    expect(api.sendEmail).toHaveBeenCalledTimes(1);
+    expect(api.sendEmail.calls.mostRecent().args[0].body).toBe('Plain text written in the Write tab');
+  });
+
+  it('closing Compose with content asks first and keeps it when the user cancels', () => {
+    (window.confirm as jasmine.Spy).and.returnValue(false);
+    app.showComposeModal = true;
+    app.closeCompose();
+    expect(app.showComposeModal).withContext('kept open').toBeTrue();
+    (window.confirm as jasmine.Spy).and.returnValue(true);
+    app.closeCompose();
+    expect(app.showComposeModal).toBeFalse();
+    app.openCompose();
+    (window.confirm as jasmine.Spy).calls.reset();
+    app.closeCompose();
+    expect(window.confirm).withContext('an empty email closes without asking').not.toHaveBeenCalled();
+  });
 });

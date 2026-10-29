@@ -38,7 +38,7 @@ export function rate(part: number | null, whole: number | null): string | null {
   standalone: true,
   imports: [CommonModule, FormsModule],
   templateUrl: './campaign-metrics.component.html',
-  styleUrls: ['../command/command-center.component.css', './campaign-metrics.component.css']
+  styleUrls: ['../command/command-center.component.css', './mail-ui.css', './campaign-metrics.component.css']
 })
 export class CampaignMetricsComponent implements OnChanges {
   @Input() campaignId: number | null = null;

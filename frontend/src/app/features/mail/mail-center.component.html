@@ -1,13 +1,18 @@
 <section class="mc" aria-labelledby="mc-title">
+  <!-- The app bar already shows the page title; this toolbar names the open section and holds the main actions. -->
   <header class="mc-head">
-    <div>
-      <h2 id="mc-title">Mail Center</h2>
-      <p class="sub">Your mailbox, drafts, approvals and email campaigns. Nothing is sent without approval and confirmation.</p>
-    </div>
+    <h2 id="mc-title" class="sr-only">Mail Center</h2>
+    <p class="mc-context" *ngIf="canView">
+      <button type="button" class="mc-pill" (click)="go('inbox')" [class.hot]="inboxUnread">{{ inboxUnread ?? '—' }} unread</button>
+      <button type="button" class="mc-pill" (click)="go('approvals')" [class.hot]="pendingApprovals">{{ draftsState === 'ready' ? pendingApprovals : '—' }} waiting for approval</button>
+    </p>
     <div class="mc-create">
-      <button #createBtn type="button" class="btn btn-primary" (click)="toggleCreateMenu($event)" [disabled]="!canCompose"
+      <button type="button" class="btn btn-primary" (click)="compose.emit()" title="Write one email and send it after you confirm">
+        <app-icon name="send" [size]="16"></app-icon>Compose Email</button>
+      <button #createBtn type="button" class="btn btn-secondary" (click)="toggleCreateMenu($event)" [disabled]="!canCompose"
               aria-haspopup="menu" [attr.aria-expanded]="createMenuOpen" aria-controls="mc-create-menu"
-              [title]="canCompose ? '' : 'Your role cannot create emails'">＋ Create Email <span aria-hidden="true">▾</span></button>
+              [title]="canCompose ? 'Create a draft that is approved before sending' : 'Your role cannot create emails'">
+        <app-icon name="plus" [size]="16"></app-icon>Create Email <app-icon name="chevron-down" [size]="14"></app-icon></button>
       <div class="mc-menu" id="mc-create-menu" role="menu" aria-label="Create Email" *ngIf="createMenuOpen" (click)="$event.stopPropagation()" (keydown)="onMenuKey($event)">
         <button type="button" role="menuitem" (click)="create('ai')">
           <strong>Generate with AI</strong><small>Describe the goal; AI writes a draft for you to review.</small>
@@ -21,12 +26,16 @@
   </header>
 
   <div class="mc-tabs" role="tablist" aria-label="Mail Center sections">
-    <button *ngFor="let s of sections" type="button" role="tab" [id]="'mc-tab-' + s.key" [class.on]="active === s.key"
+    <ng-container *ngFor="let s of sections; let i = index">
+    <span class="mc-divider" *ngIf="i > 0 && sections[i - 1].group !== s.group" aria-hidden="true"></span>
+    <button type="button" role="tab" [id]="'mc-tab-' + s.key" [class.on]="active === s.key"
             [attr.aria-selected]="active === s.key" [attr.tabindex]="active === s.key ? 0 : -1" aria-controls="mc-panel"
             [title]="s.hint" (click)="go(s.key)" (keydown)="onTabKey($event)">
       {{ s.label }}
+      <span class="mc-badge" *ngIf="s.key === 'inbox' && inboxUnread" [attr.aria-label]="inboxUnread + ' unread'">{{ inboxUnread }}</span>
       <span class="mc-badge" *ngIf="s.key === 'approvals' && draftsState === 'ready' && (draftCount('Draft') + draftCount('Approved') + draftCount('Needs Review'))">{{ draftCount('Draft') + draftCount('Approved') + draftCount('Needs Review') }}</span>
     </button>
+    </ng-container>
   </div>
 
   <div class="mc-panel" id="mc-panel" role="tabpanel" [attr.aria-labelledby]="'mc-tab-' + active">
@@ -60,12 +69,11 @@
             <strong>{{ draftsState === 'ready' ? draftCount('Sent') : '—' }}</strong>
             <small>Of {{ draftsState === 'ready' ? drafts.length : '—' }} drafts in total</small>
           </button>
-          <div class="mc-metric static">
-            <span class="mc-metric-label">Mailbox</span>
-            <strong>{{ emailsState === 'ready' ? emails.length : '—' }}</strong>
-            <small *ngIf="emailsState === 'ready'">Latest messages · {{ urgentUnreadCount }} urgent unread · {{ notSentCount }} not sent</small>
-            <small *ngIf="emailsState !== 'ready'">{{ emailsState === 'error' ? 'Could not load messages' : 'Loading…' }}</small>
-          </div>
+          <button type="button" class="mc-metric" (click)="go('inbox')">
+            <span class="mc-metric-label">Inbox</span>
+            <strong>{{ inboxUnread ?? '—' }}</strong>
+            <small>Unread received emails</small>
+          </button>
         </div>
         <p class="muted small" *ngIf="draftsState === 'loading'">Loading drafts…</p>
         <div class="callout warn" *ngIf="draftsState === 'error'" role="alert">Draft counts could not be loaded. Open Drafts to try again.</div>
@@ -80,11 +88,17 @@
         </div>
 
         <!-- 4. Charts: sent per day and delivery (read-only) -->
-        <app-mail-activity-charts (openLogs)="go('logs')"></app-mail-activity-charts>
-
-        <!-- 5. Inbox and sent mail (provided by the app shell) -->
-        <ng-content></ng-content>
+        <app-mail-activity-charts (openSent)="go('sent', { status: $event })"></app-mail-activity-charts>
       </div>
+
+      <!-- ===== Inbox: received mail only ===== -->
+      <app-mail-inbox *ngSwitchCase="'inbox'" [imapReady]="imapReady" [refreshKey]="mailboxVersion"
+        (reply)="reply.emit($event)" (forward)="forward.emit($event)" (smartReply)="smartReply.emit($event)"
+        (changed)="inboxUnread = $event" (toast)="toast.emit($event)" (openSettings)="go('settings')"></app-mail-inbox>
+
+      <!-- ===== Sent Mail: sent and failed outgoing mail ===== -->
+      <app-mail-sent *ngSwitchCase="'sent'" [initialStatus]="sentStatus" [refreshKey]="mailboxVersion"
+        (forward)="forward.emit($event)" (sendAgain)="sendAgain.emit($event)"></app-mail-sent>
 
       <!-- ===== Drafts / Approvals (one component, so approval and sending logic is not duplicated) ===== -->
       <app-mail-drafts *ngSwitchCase="'drafts'" view="drafts" [products]="products"

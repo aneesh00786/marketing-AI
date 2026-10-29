@@ -19,7 +19,7 @@ import { EmailPreviewComponent } from './email-preview.component';
   standalone: true,
   imports: [CommonModule, FormsModule, EmailPreviewComponent, TemplatePickerComponent],
   templateUrl: './product-emails.component.html',
-  styleUrls: ['../command/command-center.component.css', './product-emails.component.css']
+  styleUrls: ['../command/command-center.component.css', './mail-ui.css', './product-emails.component.css']
 })
 export class ProductEmailsComponent implements OnInit, OnDestroy {
   @Output() toast = new EventEmitter<string>();

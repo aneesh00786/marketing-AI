@@ -1,5 +1,4 @@
-.pe { border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin: 16px 0; }
-.pe-head h3 { margin: 0 0 4px; font-size: 1rem; }
+.pe { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .muted { color: var(--text-muted); }
 .small { font-size: 12px; }
 .note.error { background: var(--danger-soft); color: var(--danger-text); border-radius: 8px; padding: 10px 12px; margin: 10px 0; }

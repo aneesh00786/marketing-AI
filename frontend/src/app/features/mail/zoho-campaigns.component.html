@@ -1,7 +1,7 @@
 <section class="zoho">
   <div class="zoho-head">
     <div>
-      <h3>Delivery: Zoho Campaigns</h3>
+      <h3 class="mx-subhead">Zoho Campaigns connection <span class="mx-tag" [class.good]="connected" [class.warn]="!connected">{{ connected ? 'Connected' : 'Not connected' }}</span></h3>
       <p class="muted small">Campaigns are written and approved here; Zoho only delivers them to the mailing lists you choose. Lists, contacts and consent are managed in Zoho; Marketech.ai never uploads contacts.</p>
     </div>
     <div class="zoho-actions" *ngIf="status?.canConfigure">

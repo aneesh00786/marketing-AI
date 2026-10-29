@@ -4,8 +4,8 @@ const { all } = require('../../../db/database');
 const { requireCapability } = require('../../../middleware/auth');
 
 /**
- * Mail activity for the Mail Center: chart data for the Overview, the email log and the campaign
- * log. Read-only and workspace-scoped (the workspace always comes from the session). Counts come
+ * Mail activity for the Mail Center: chart data for the Overview and the campaign log, plus the
+ * shared SQL the Inbox / Sent Mail lists use (modules/mail/routes.js). Read-only and workspace-scoped (the workspace always comes from the session). Counts come
  * from what the app recorded — emails, AI campaign sends, delivery tracking and Zoho reports —
  * nothing is estimated, and nothing here contacts a provider.
  */
@@ -40,6 +40,32 @@ function deliveryOf(r) {
   if (r.t_delivered_at || r.t_delivery_status === 'delivered') return 'delivered';
   return r.t_delivery_status ? 'accepted' : 'sent';
 }
+/** deliveryOf() in SQL (emails as `e`, tracking joined as `t`), for filtering by status. */
+const DELIVERY_SQL = `CASE
+  WHEN e.status = 'Not Sent' THEN 'not_sent'
+  WHEN e.status <> 'Sent' THEN NULL
+  WHEN t.bounced_at IS NOT NULL OR t.delivery_status = 'bounced' THEN 'bounced'
+  WHEN t.first_click_at IS NOT NULL THEN 'clicked'
+  WHEN t.first_open_at IS NOT NULL THEN 'opened'
+  WHEN t.delivered_at IS NOT NULL OR t.delivery_status = 'delivered' THEN 'delivered'
+  WHEN t.delivery_status IS NOT NULL THEN 'accepted'
+  ELSE 'sent' END`;
+/**
+ * What each email of one workspace is linked to: an AI campaign send, a Compose send request (with
+ * its applied purpose) or a Mail Draft. Joined as lo / lr / ld; takes the workspace id three times.
+ * Pre-grouped by email_id so a list never repeats an email.
+ */
+const LINKS_JOIN = `
+  LEFT JOIN (SELECT email_id, COUNT(*) AS hit FROM outreach_sends WHERE workspace_id = ? AND email_id IS NOT NULL GROUP BY email_id) lo ON lo.email_id = e.id
+  LEFT JOIN (SELECT email_id, COUNT(*) AS hit, MIN(applied_purpose) AS applied_purpose FROM mail_send_requests WHERE workspace_id = ? AND email_id IS NOT NULL GROUP BY email_id) lr ON lr.email_id = e.id
+  LEFT JOIN (SELECT email_id, COUNT(*) AS hit FROM email_drafts WHERE workspace_id = ? AND email_id IS NOT NULL GROUP BY email_id) ld ON ld.email_id = e.id`;
+/** Where a sent email came from (needs LINKS_JOIN). */
+const SOURCE_SQL = `CASE WHEN lo.hit THEN 'ai_campaign' WHEN lr.hit THEN 'compose' WHEN ld.hit THEN 'draft' WHEN e.status = 'Sent' THEN 'other' ELSE NULL END`;
+/**
+ * Sending purpose as recorded (needs LINKS_JOIN): Compose sends store the applied purpose; Mail
+ * Drafts and AI Campaigns are always marketing; anything else is not recorded (NULL).
+ */
+const PURPOSE_SQL = `CASE WHEN lo.hit THEN 'marketing' WHEN lr.hit THEN lr.applied_purpose WHEN ld.hit THEN 'marketing' ELSE NULL END`;
 /** Tracking columns for deliveryOf(), joined as `t`. */
 const TRACKING_COLUMNS = 't.delivery_status AS t_delivery_status, t.delivered_at AS t_delivered_at, t.bounced_at AS t_bounced_at, t.first_open_at AS t_first_open_at, t.first_click_at AS t_first_click_at, t.failure_reason AS t_failure_reason, t.track_opens AS t_track_opens';
 const TRACKING_JOIN = 'LEFT JOIN mail_message_tracking t ON t.workspace_id = e.workspace_id AND t.email_id = e.id';
@@ -49,14 +75,6 @@ const num = v => Number(v) || 0;
 
 /** Emails table rows: direction from status (Sent / Not Sent / anything else was received). */
 const DIRECTION_SQL = "CASE WHEN e.status = 'Sent' THEN 'sent' WHEN e.status = 'Not Sent' THEN 'not_sent' ELSE 'received' END";
-/** Where a sent email came from. AI campaign and draft sends link back to the email they recorded. */
-const SOURCE_SQL = `CASE
-  WHEN EXISTS (SELECT 1 FROM outreach_sends os WHERE os.workspace_id = e.workspace_id AND os.email_id = e.id) THEN 'ai_campaign'
-  WHEN EXISTS (SELECT 1 FROM email_drafts d WHERE d.workspace_id = e.workspace_id AND d.email_id = e.id) THEN 'draft'
-  WHEN EXISTS (SELECT 1 FROM mail_send_requests r WHERE r.workspace_id = e.workspace_id AND r.email_id = e.id) THEN 'compose'
-  WHEN e.status = 'Sent' THEN 'other'
-  ELSE NULL END`;
-
 const summaryQuery = z.object({ days: z.enum(['7', '30', '90']).optional() }).strict();
 
 /** Overview charts: emails sent per day by channel, received per day, and delivery of tracked emails. */
@@ -121,54 +139,6 @@ router.get('/summary', requireCapability('mail.view'), wrap(async (req, res) => 
   });
 }));
 
-const emailLogQuery = z.object({
-  direction: z.enum(['sent', 'received', 'not_sent']).optional(),
-  q: z.string().trim().max(120).optional(),
-  page: z.coerce.number().int().min(1).max(1000).optional()
-}).strict();
-
-/** Email log: every email this workspace sent, failed to send or received, newest first. */
-router.get('/emails', requireCapability('mail.view'), wrap(async (req, res) => {
-  const q = parse(emailLogQuery, req.query);
-  const page = q.page || 1;
-  const where = ['e.workspace_id = ?'];
-  const params = [ws(req)];
-  if (q.direction === 'sent') where.push("e.status = 'Sent'");
-  else if (q.direction === 'not_sent') where.push("e.status = 'Not Sent'");
-  else if (q.direction === 'received') where.push("e.status NOT IN ('Sent', 'Not Sent')");
-  if (q.q) {
-    const like = `%${q.q.replace(/[\\%_]/g, c => `\\${c}`)}%`;
-    where.push('(e.subject LIKE ? OR e.recipient_email LIKE ? OR e.sender_email LIKE ? OR e.sender LIKE ?)');
-    params.push(like, like, like, like);
-  }
-  const rows = await all(
-    `SELECT e.id, e.subject, e.sender, e.sender_email, e.recipient_email, e.recipient_name, e.status, e.sent_at, e.received_at, e.smtp_status,
-            ${DIRECTION_SQL} AS direction, ${SOURCE_SQL} AS source,
-            ${TRACKING_COLUMNS}
-     FROM emails e
-     ${TRACKING_JOIN}
-     WHERE ${where.join(' AND ')}
-     ORDER BY COALESCE(e.sent_at, e.received_at) DESC, e.id DESC LIMIT ${PAGE + 1} OFFSET ${(page - 1) * PAGE}`, params);
-  res.json({
-    success: true,
-    page,
-    hasMore: rows.length > PAGE,
-    emails: rows.slice(0, PAGE).map(r => ({
-      id: r.id,
-      at: r.direction === 'received' ? r.received_at : (r.sent_at || r.received_at),
-      direction: r.direction,
-      source: r.source,
-      subject: r.subject,
-      from: r.sender_email || r.sender || null,
-      to: r.recipient_email || null,
-      toName: r.recipient_name || null,
-      // Delivery as far as it is known: tracking events, or the send result for untracked emails.
-      delivery: deliveryOf(r),
-      detail: r.direction === 'not_sent' ? (r.smtp_status || null) : (r.t_failure_reason || null)
-    }))
-  });
-}));
-
 const campaignLogQuery = z.object({
   type: z.enum(['ai', 'zoho']).optional(),
   page: z.coerce.number().int().min(1).max(1000).optional()
@@ -217,4 +187,4 @@ router.get('/campaigns', requireCapability('mail.view'), wrap(async (req, res) =
   res.json({ success: true, page, hasMore: items.length > start + PAGE, campaigns: items.slice(start, start + PAGE) });
 }));
 
-module.exports = { router, deliveryOf, TRACKING_COLUMNS, TRACKING_JOIN };
+module.exports = { router, deliveryOf, TRACKING_COLUMNS, TRACKING_JOIN, DELIVERY_SQL, LINKS_JOIN, PURPOSE_SQL, SOURCE_SQL };

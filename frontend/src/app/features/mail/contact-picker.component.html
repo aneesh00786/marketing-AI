@@ -46,7 +46,7 @@
           </button>
         </div>
         <div class="cp-alt">
-          <button type="button" class="btn btn-secondary btn-sm" (click)="openCreate()" [disabled]="!canCreate" [title]="canCreate ? '' : 'Your role cannot add contacts'">＋ Add New Contact</button>
+          <button type="button" class="btn btn-secondary btn-sm" (click)="openCreate()" [disabled]="!canCreate" [title]="canCreate ? '' : 'Your role cannot add contacts'">Add new contact</button>
           <button type="button" class="link-btn" *ngIf="allowManual" (click)="mode = 'manual'; manualError = null">Use an address that is not a contact</button>
         </div>
       </div>

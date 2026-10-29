@@ -1,11 +1,11 @@
 <section class="cc">
   <div class="area-tabs" role="tablist" aria-label="AI Campaigns">
-    <button role="tab" [class.on]="area === 'campaigns'" (click)="showArea('campaigns')">🧭 Campaign Command Center</button>
-    <button role="tab" [class.on]="area === 'email'" (click)="showArea('email')">✉ Email sequences</button>
-    <button role="tab" [class.on]="area === 'abtests'" (click)="showArea('abtests')">⚖ A/B tests</button>
-    <button role="tab" [class.on]="area === 'automations'" (click)="showArea('automations')">⚙ Automations</button>
-    <button role="tab" [class.on]="area === 'analytics'" (click)="showArea('analytics')">📊 Analytics</button>
-    <button role="tab" [class.on]="area === 'budget'" (click)="showArea('budget')">💰 Budget &amp; ROI</button>
+    <button role="tab" [class.on]="area === 'campaigns'" [attr.aria-selected]="area === 'campaigns'" (click)="showArea('campaigns')">Campaign Command Center</button>
+    <button role="tab" [class.on]="area === 'email'" [attr.aria-selected]="area === 'email'" (click)="showArea('email')">Email sequences</button>
+    <button role="tab" [class.on]="area === 'abtests'" [attr.aria-selected]="area === 'abtests'" (click)="showArea('abtests')">A/B tests</button>
+    <button role="tab" [class.on]="area === 'automations'" [attr.aria-selected]="area === 'automations'" (click)="showArea('automations')">Automations</button>
+    <button role="tab" [class.on]="area === 'analytics'" [attr.aria-selected]="area === 'analytics'" (click)="showArea('analytics')">Analytics</button>
+    <button role="tab" [class.on]="area === 'budget'" [attr.aria-selected]="area === 'budget'" (click)="showArea('budget')">Budget &amp; ROI</button>
     <span class="spacer"></span>
     <button class="link-btn" (click)="openPlaybooks.emit()">Idea playbooks</button>
   </div>

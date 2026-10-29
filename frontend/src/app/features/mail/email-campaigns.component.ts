@@ -1,5 +1,6 @@
 import { Component, EventEmitter, Input, OnInit, Output } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { IconComponent } from '../../shared/icon.component';
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { apiRoot } from '../../core/api-base';
@@ -16,9 +17,9 @@ import { CampaignMetricsComponent } from './campaign-metrics.component';
 @Component({
   selector: 'app-email-campaigns',
   standalone: true,
-  imports: [CommonModule, FormsModule, ZohoCampaignsComponent, TemplatePickerComponent, EmailPreviewComponent, CampaignMetricsComponent],
+  imports: [CommonModule, IconComponent, FormsModule, ZohoCampaignsComponent, TemplatePickerComponent, EmailPreviewComponent, CampaignMetricsComponent],
   templateUrl: './email-campaigns.component.html',
-  styleUrls: ['../command/command-center.component.css', './email-campaigns.component.css']
+  styleUrls: ['../command/command-center.component.css', './mail-ui.css', './email-campaigns.component.css']
 })
 export class EmailCampaignsComponent implements OnInit {
   @Input() oauthResult: { zoho?: string; reason?: string } | null = null;
@@ -39,6 +40,9 @@ export class EmailCampaignsComponent implements OnInit {
   error = '';
   // 'new': create a campaign from a template; 'load': replace this campaign's content with one.
   picker: 'new' | 'load' | null = null;
+  /** Email content panel: edit the HTML source or preview it (both use form.html; nothing is saved). */
+  contentMode: 'edit' | 'preview' = 'edit';
+  previewWidth: 'desktop' | 'mobile' = 'desktop';
 
   constructor(private http: HttpClient) {}
 
@@ -77,6 +81,36 @@ export class EmailCampaignsComponent implements OnInit {
     });
   }
 
+  setMode(m: 'edit' | 'preview'): void { this.contentMode = m; }
+
+  /** Left/Right arrows switch between Edit and Preview (tabs pattern). */
+  onModeKey(ev: KeyboardEvent): void {
+    if (ev.key !== 'ArrowLeft' && ev.key !== 'ArrowRight') return;
+    ev.preventDefault();
+    const next = this.contentMode === 'edit' ? 'preview' : 'edit';
+    this.setMode(next);
+    setTimeout(() => (document.getElementById(`ec-mode-${next}`) as HTMLElement | null)?.focus());
+  }
+
+  /** Inserts Zoho's unsubscribe link at the cursor (only edits the unsaved content). */
+  insertUnsubscribe(box: HTMLTextAreaElement): void {
+    if (!this.form || !this.editable) return;
+    if (this.form.html.includes('$[LI:UNSUBSCRIBE]$')) { this.toast.emit('The unsubscribe link is already in the content.'); return; }
+    const link = '<p><a href="$[LI:UNSUBSCRIBE]$">Unsubscribe</a></p>';
+    const at = typeof box?.selectionStart === 'number' ? box.selectionStart : this.form.html.length;
+    this.form.html = this.form.html.slice(0, at) + link + this.form.html.slice(at);
+  }
+
+  /** Reminders while editing (the server's validation is unchanged and still decides). */
+  get contentHints(): string[] {
+    const html = this.form?.html || '';
+    const out: string[] = [];
+    if (!html.trim()) return ['Add the email content: write HTML or choose a template.'];
+    if (!html.includes('$[LI:UNSUBSCRIBE]$')) out.push('No unsubscribe link yet: Zoho requires $[LI:UNSUBSCRIBE]$.');
+    if (/<img\b[^>]*\bsrc\s*=\s*["']?http:\/\//i.test(html)) out.push('Some images use http://. Use https:// image URLs so they load for recipients.');
+    return out;
+  }
+
   /** A copy of the template's HTML goes into the campaign; the template itself is not changed. */
   onTemplatePicked(t: any): void {
     const mode = this.picker;
@@ -108,6 +142,9 @@ export class EmailCampaignsComponent implements OnInit {
   private setSelected(c: any): void {
     this.selected = c;
     this.validation = null;
+    // Edit by default; a campaign that can no longer be edited opens on its preview.
+    this.contentMode = this.editable ? 'edit' : 'preview';
+    this.previewWidth = 'desktop';
     this.form = {
       name: c.name, subject: c.subject || '', fromName: c.fromName || '', fromEmail: c.fromEmail || '', html: c.html || '',
       topicId: c.topicId || '', listKeys: new Set((c.lists || []).map((l: any) => l.key))

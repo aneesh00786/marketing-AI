@@ -1,0 +1,55 @@
+/* Shared by Inbox and Sent Mail: filters row, message list and reading pane (split on desktop,
+   full-page reading view on small screens). */
+:host { display: block; }
+.mb { display: flex; flex-direction: column; gap: 12px; color: var(--text); font-family: var(--font); min-width: 0; }
+.mb-bar .hud-input { padding: 7px 10px; font-size: 0.85rem; }
+.mb-bar .spacer { flex: 1; }
+.mb-split { display: grid; grid-template-columns: minmax(280px, 380px) minmax(0, 1fr); border: 1px solid var(--border); border-radius: 14px; background: var(--surface); min-height: 520px; overflow: hidden; }
+.mb-list { display: flex; flex-direction: column; border-right: 1px solid var(--border); min-width: 0; max-height: 720px; overflow-y: auto; }
+.mb-item { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: 4px 8px; text-align: left; padding: 11px 14px; border: none; border-bottom: 1px solid var(--border); background: none; color: var(--text); font: inherit; cursor: pointer; }
+.mb-item:hover { background: var(--surface-2); }
+.mb-item.on { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+.mb-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.mb-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; background: transparent; }
+.mb-item.unread .mb-dot { background: var(--accent); }
+.mb-who { font-size: 0.86rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mb-item.unread .mb-who, .mb-item.unread .mb-subj { font-weight: 700; }
+.mb-when { font-size: 0.74rem; color: var(--text-muted); white-space: nowrap; }
+.mb-subj { grid-column: 2 / 4; font-size: 0.85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mb-prev { grid-column: 2 / 4; font-size: 0.78rem; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mb-tags { grid-column: 2 / 4; display: flex; gap: 6px; flex-wrap: wrap; }
+.mb-empty { padding: 28px 18px; text-align: center; color: var(--text-muted); font-size: 0.86rem; line-height: 1.5; }
+.mb-pager { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 14px; margin-top: auto; }
+
+.mb-read { min-width: 0; display: flex; flex-direction: column; overflow-y: auto; max-height: 720px; }
+.mb-read-empty { margin: auto; color: var(--text-muted); font-size: 0.88rem; padding: 24px; text-align: center; }
+.mb-read-head { padding: 16px 18px 12px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
+.mb-read-head h3 { margin: 0; font-size: 1.05rem; font-weight: 650; line-height: 1.35; word-break: break-word; }
+.mb-meta { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 3px 10px; font-size: 0.82rem; margin: 0; }
+.mb-meta dt { color: var(--text-muted); }
+.mb-meta dd { margin: 0; word-break: break-all; }
+.mb-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.mb-back { display: none; }
+.mb-read-body { padding: 14px 18px 18px; display: flex; flex-direction: column; gap: 12px; }
+.mb-text { margin: 0; white-space: pre-wrap; word-break: break-word; font-size: 0.88rem; line-height: 1.6; }
+.mb-ai { border: 1px solid var(--accent-ring, var(--border)); background: var(--accent-soft); border-radius: 10px; padding: 10px 12px; font-size: 0.84rem; display: flex; flex-direction: column; gap: 8px; }
+.mb-ai-replies { display: flex; gap: 6px; flex-wrap: wrap; }
+.mb-section h4 { margin: 0 0 6px; font-size: 0.86rem; font-weight: 650; }
+.mb-hint { margin: 0; font-size: 0.78rem; color: var(--text-muted); line-height: 1.45; }
+app-email-preview { height: 460px; }
+
+.link-btn { background: none; border: none; padding: 0; color: var(--accent-text, var(--accent)); text-decoration: underline; cursor: pointer; font: inherit; }
+.muted { color: var(--text-muted); }
+.small { font-size: 0.8rem; }
+
+@media (max-width: 860px) {
+  .mb-split { grid-template-columns: 1fr; min-height: 0; }
+  .mb-list { border-right: none; max-height: none; }
+  .mb-read { max-height: none; }
+  .mb-split.has-sel .mb-list { display: none; }
+  .mb-split:not(.has-sel) .mb-read { display: none; }
+  .mb-back { display: inline-flex; }
+  /* Reading a message on a phone: the message gets the whole screen. */
+  .mb.reading .mb-bar, .mb.reading > .mx-callout, .mb.reading .mb-hint, .mb.reading .mb-head .mx-desc { display: none; }
+}
+.mb-head h2 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }

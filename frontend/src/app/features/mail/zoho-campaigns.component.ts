@@ -13,7 +13,7 @@ import { apiRoot } from '../../core/api-base';
   standalone: true,
   imports: [CommonModule],
   templateUrl: './zoho-campaigns.component.html',
-  styleUrls: ['../command/command-center.component.css', './zoho-campaigns.component.css']
+  styleUrls: ['../command/command-center.component.css', './mail-ui.css', './zoho-campaigns.component.css']
 })
 export class ZohoCampaignsComponent implements OnInit {
   /** Result of the OAuth redirect (?zoho=connected|error&reason=...). */

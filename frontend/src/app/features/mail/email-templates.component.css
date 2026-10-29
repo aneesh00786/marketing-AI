@@ -1,6 +1,5 @@
-.tpl { position: relative; border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin: 16px 0; }
+.tpl { position: relative; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .tpl-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: flex-start; }
-.tpl-head h3 { margin: 0 0 4px; font-size: 1rem; }
 .tpl-actions, .editor-actions, .use-row, .entries, .card-actions, .pager, .preview-bar { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .muted { color: var(--text-muted); }
 .small { font-size: 12px; }

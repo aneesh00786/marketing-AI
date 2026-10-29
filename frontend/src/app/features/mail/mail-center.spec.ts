@@ -10,6 +10,8 @@ import { EmailTemplatesComponent } from './email-templates.component';
 import { MailSettingsComponent } from './mail-settings.component';
 import { MailActivityChartsComponent } from './mail-activity-charts.component';
 import { MailLogsComponent } from './mail-logs.component';
+import { MailInboxComponent } from './mail-inbox.component';
+import { MailSentComponent } from './mail-sent.component';
 
 // The hosted sections are tested in their own specs; here they are stand-ins that record their inputs.
 @Component({ selector: 'app-mail-drafts', standalone: true, template: '<p class="stub-drafts">{{ view }}</p>' })
@@ -28,9 +30,24 @@ class CampaignsStub { @Input() oauthResult: any; @Input() startTemplate: any; @O
 @Component({ selector: 'app-email-templates', standalone: true, template: '<p class="stub-templates">templates</p>' })
 class TemplatesStub { @Output() toast = new EventEmitter<string>(); @Output() use = new EventEmitter<any>(); }
 @Component({ selector: 'app-mail-activity-charts', standalone: true, template: '<p class="stub-charts">charts</p>' })
-class ChartsStub { static last: ChartsStub | null = null; @Output() openLogs = new EventEmitter<void>(); constructor() { ChartsStub.last = this; } }
+class ChartsStub { static last: ChartsStub | null = null; @Output() openSent = new EventEmitter<string | null>(); constructor() { ChartsStub.last = this; } }
 @Component({ selector: 'app-mail-logs', standalone: true, template: '<p class="stub-logs">logs</p>' })
 class LogsStub { static last: LogsStub | null = null; @Input() canViewAudit = false; @Output() openSection = new EventEmitter<string>(); constructor() { LogsStub.last = this; } }
+@Component({ selector: 'app-mail-inbox', standalone: true, template: '<p class="stub-inbox">inbox</p>' })
+class InboxStub {
+  static last: InboxStub | null = null;
+  @Input() imapReady: boolean | null = null; @Input() refreshKey = 0;
+  @Output() reply = new EventEmitter<any>(); @Output() forward = new EventEmitter<any>(); @Output() smartReply = new EventEmitter<any>();
+  @Output() changed = new EventEmitter<number>(); @Output() toast = new EventEmitter<string>(); @Output() openSettings = new EventEmitter<void>();
+  constructor() { InboxStub.last = this; }
+}
+@Component({ selector: 'app-mail-sent', standalone: true, template: '<p class="stub-sent">sent</p>' })
+class SentStub {
+  static last: SentStub | null = null;
+  @Input() initialStatus: string | null = null; @Input() refreshKey = 0;
+  @Output() forward = new EventEmitter<any>(); @Output() sendAgain = new EventEmitter<any>();
+  constructor() { SentStub.last = this; }
+}
 @Component({ selector: 'app-mail-settings', standalone: true, template: '<p class="stub-settings">settings</p>' })
 class SettingsStub {
   static last: SettingsStub | null = null;
@@ -50,14 +67,12 @@ describe('MailCenterComponent', () => {
   const tab = (label: string) => tabs().find(t => t.textContent!.trim().startsWith(label))!;
   const button = (text: string) => Array.from(el().querySelectorAll('button')).find(b => b.textContent!.includes(text)) as HTMLButtonElement;
 
-  function init(opts: { caps?: string[] | null; productEmails?: boolean; drafts?: any[]; section?: any } = {}): void {
+  function init(opts: { caps?: string[] | null; productEmails?: boolean; drafts?: any[]; section?: any; unread?: number } = {}): void {
     fixture = TestBed.createComponent(MailCenterComponent);
     comp = fixture.componentInstance;
     comp.productEmailsEnabled = !!opts.productEmails;
     comp.drafts = opts.drafts ?? [];
     comp.draftsState = 'ready';
-    comp.emails = [{ id: 1, status: 'Sent' }, { id: 2, status: 'Not Sent', is_urgent: 1, is_read: 0 }];
-    comp.emailsState = 'ready';
     if (opts.section) comp.section = opts.section;
     sections = [];
     comp.sectionChange.subscribe(s => sections.push(s));
@@ -65,6 +80,8 @@ describe('MailCenterComponent', () => {
     const me = http.expectOne(r => r.url.endsWith('/auth/me'));
     const caps = opts.caps === undefined ? ['mail.view', 'mail.compose', 'mail.send'] : opts.caps;
     if (caps) me.flush({ capabilities: caps }); else me.flush({}, { status: 500, statusText: 'x' });
+    // The unread count for the Inbox tab badge and the Overview tile.
+    http.expectOne(r => r.url.endsWith('/emails/inbox') && r.params.get('read') === 'unread').flush({ unread: opts.unread ?? 3, emails: [] });
     fixture.detectChanges();
   }
 
@@ -72,8 +89,8 @@ describe('MailCenterComponent', () => {
     DraftsStub.last = null;
     TestBed.configureTestingModule({ imports: [MailCenterComponent], providers: [provideHttpClient(), provideHttpClientTesting()] });
     TestBed.overrideComponent(MailCenterComponent, {
-      remove: { imports: [MailDraftsComponent, ProductEmailsComponent, EmailCampaignsComponent, EmailTemplatesComponent, MailSettingsComponent, MailActivityChartsComponent, MailLogsComponent] },
-      add: { imports: [DraftsStub, ProductEmailsStub, CampaignsStub, TemplatesStub, SettingsStub, ChartsStub, LogsStub] }
+      remove: { imports: [MailDraftsComponent, ProductEmailsComponent, EmailCampaignsComponent, EmailTemplatesComponent, MailSettingsComponent, MailActivityChartsComponent, MailLogsComponent, MailInboxComponent, MailSentComponent] },
+      add: { imports: [DraftsStub, ProductEmailsStub, CampaignsStub, TemplatesStub, SettingsStub, ChartsStub, LogsStub, InboxStub, SentStub] }
     });
     http = TestBed.inject(HttpTestingController);
   });
@@ -85,7 +102,7 @@ describe('MailCenterComponent', () => {
 
   it('shows one set of sections; Product Emails only while its feature is on', () => {
     init();
-    expect(tabs().map(t => t.textContent!.trim().replace(/\s*\d+$/, ''))).toEqual(['Overview', 'Drafts', 'Approvals', 'Campaigns', 'Email Templates', 'Logs', 'Settings']);
+    expect(tabs().map(t => t.textContent!.trim().replace(/\s*\d+$/, ''))).toEqual(['Overview', 'Inbox', 'Sent Mail', 'Drafts', 'Approvals', 'Campaigns', 'Email Templates', 'Logs', 'Settings']);
     fixture.destroy();
     init({ productEmails: true });
     expect(tab('Product Emails')).toBeTruthy();
@@ -111,13 +128,13 @@ describe('MailCenterComponent', () => {
 
   it('tabs follow the keyboard pattern: arrows, Home and End move and open; only the active tab is in the tab order', fakeAsync(() => {
     init();
-    expect(tabs().map(t => t.tabIndex)).toEqual([0, -1, -1, -1, -1, -1, -1]);
+    expect(tabs().map(t => t.tabIndex)).toEqual([0, -1, -1, -1, -1, -1, -1, -1, -1]);
     tab('Overview').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
     fixture.detectChanges();
     tick();
-    expect(comp.active).toBe('drafts');
-    expect(document.activeElement).toBe(tab('Drafts'));
-    tab('Drafts').dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+    expect(comp.active).toBe('inbox');
+    expect(document.activeElement).toBe(tab('Inbox'));
+    tab('Inbox').dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
     fixture.detectChanges();
     tick();
     expect(comp.active).toBe('settings');
@@ -136,8 +153,7 @@ describe('MailCenterComponent', () => {
   it('the overview counts only loaded drafts and messages, and its shortcuts open the matching filter', () => {
     init({ drafts: [d(1, 'Draft'), d(2, 'Draft'), d(3, 'Approved'), d(4, 'Needs Review'), d(5, 'Sent')] });
     const metrics = Array.from(el().querySelectorAll('.mc-metric')).map(m => m.querySelector('strong')!.textContent!.trim());
-    expect(metrics).toEqual(['2', '1', '1', '1', '2']);
-    expect(el().textContent).toContain('1 urgent unread · 1 not sent');
+    expect(metrics).toEqual(['2', '1', '1', '1', '3']);
     expect(el().querySelector('.stub-settings')).withContext('settings live in their own tab').toBeNull();
     (el().querySelector('.mc-metric') as HTMLButtonElement).click();
     fixture.detectChanges();
@@ -218,14 +234,53 @@ describe('MailCenterComponent', () => {
     expect(el().querySelector('.mc-metrics')).toBeTruthy();
   });
 
-  it('the overview shows the activity charts (no admin report); its log link opens Logs', () => {
+  it('the overview shows the activity charts and no message lists; "See failed" opens Sent Mail filtered', () => {
     init();
     expect(el().querySelector('.stub-charts')).toBeTruthy();
     expect(el().querySelector('app-compose-report')).toBeNull();
-    ChartsStub.last!.openLogs.emit();
+    expect(el().querySelector('.stub-inbox, .stub-sent')).withContext('mail lists live in their own tabs').toBeNull();
+    ChartsStub.last!.openSent.emit('not_sent');
     fixture.detectChanges();
-    expect(sections).toEqual(['logs']);
-    expect(el().querySelector('.stub-logs')).toBeTruthy();
+    expect(sections).toEqual(['sent']);
+    expect(SentStub.last!.initialStatus).toBe('not_sent');
+  });
+
+  it('Inbox and Sent Mail are separate tabs; the Inbox badge shows unread mail and follows changes', () => {
+    init({ unread: 2 });
+    expect(tab('Inbox').textContent).toContain('2');
+    tab('Inbox').click();
+    fixture.detectChanges();
+    expect(el().querySelector('.stub-inbox')).toBeTruthy();
+    expect(el().querySelector('.stub-sent')).toBeNull();
+    InboxStub.last!.changed.emit(0);
+    fixture.detectChanges();
+    expect(tab('Inbox').textContent!.trim()).toBe('Inbox');
+    tab('Sent Mail').click();
+    fixture.detectChanges();
+    expect(el().querySelector('.stub-sent')).toBeTruthy();
+    expect(el().querySelector('.stub-inbox')).toBeNull();
+    expect(sections).toEqual(['inbox', 'sent']);
+  });
+
+  it('reply, forward, smart replies, send again and Compose are handed to the shell (nothing is sent here)', () => {
+    init({ section: 'inbox' });
+    const got: string[] = [];
+    comp.reply.subscribe(() => got.push('reply'));
+    comp.forward.subscribe(() => got.push('forward'));
+    comp.smartReply.subscribe(() => got.push('smart'));
+    comp.sendAgain.subscribe(() => got.push('again'));
+    comp.compose.subscribe(() => got.push('compose'));
+    InboxStub.last!.reply.emit({ id: 1 });
+    InboxStub.last!.forward.emit({ id: 1 });
+    InboxStub.last!.smartReply.emit({ reply: 'Yes', email: { id: 1 } });
+    InboxStub.last!.openSettings.emit();
+    fixture.detectChanges();
+    expect(sections).toEqual(['settings']);
+    comp.go('sent');
+    fixture.detectChanges();
+    SentStub.last!.sendAgain.emit({ id: 2 });
+    button('Compose Email').click();
+    expect(got).toEqual(['reply', 'forward', 'smart', 'again', 'compose']);
   });
 
   it('Logs offers the Compose audit to Owners/Admins (mail.configure) only, and can open Campaigns', () => {
@@ -261,5 +316,16 @@ describe('MailCenterComponent', () => {
     fixture.detectChanges();
     expect(sections).toEqual(['settings', 'campaigns']);
     expect(el().querySelector('.stub-campaigns')).toBeTruthy();
+  });
+
+  it('tabs are grouped (mail · campaigns & content · records & setup) and the toolbar shortcuts open Inbox and Approvals', () => {
+    init({ drafts: [d(1, 'Draft'), d(2, 'Approved')], unread: 4 });
+    expect(el().querySelectorAll('.mc-divider').length).toBe(2);
+    const pills = Array.from(el().querySelectorAll('.mc-pill')) as HTMLButtonElement[];
+    expect(pills.map(p => p.textContent!.trim())).toEqual(['4 unread', '2 waiting for approval']);
+    pills[0].click();
+    pills[1].click();
+    expect(sections).toEqual(['inbox', 'approvals']);
+    expect(el().querySelector('#mc-title')!.classList).withContext('the app bar shows the title; kept for screen readers').toContain('sr-only');
   });
 });

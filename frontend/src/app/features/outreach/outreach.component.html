@@ -2,13 +2,13 @@
   <!-- Engine / mailbox status -->
   <div class="status-strip" *ngIf="status">
     <span class="pill" [class.ok]="status.mailConfigured" [class.warn]="!status.mailConfigured">
-      ✉ {{ status.mailConfigured ? 'Sending from ' + status.senderEmail : 'Mailbox not set up' }}
+      {{ status.mailConfigured ? 'Sending from ' + status.senderEmail : 'Mailbox not set up' }}
     </span>
     <span class="pill" [class.ok]="status.engineOnline" [class.warn]="!status.engineOnline"
           [title]="status.engineOnline ? 'The background worker is running' : 'Start the worker (start.bat starts it, or npm run worker in backend/)'">
-      ⚙ {{ status.engineOnline ? 'Sending engine online' : 'Sending engine offline' }}
+      {{ status.engineOnline ? 'Sending engine online' : 'Sending engine offline' }}
     </span>
-    <span class="pill" title="Unsubscribed or bounced addresses are never emailed again">⛔ {{ status.suppressed }} suppressed</span>
+    <span class="pill" title="Unsubscribed or bounced addresses are never emailed again">{{ status.suppressed }} suppressed</span>
     <button *ngIf="!status.mailConfigured" class="link-btn" (click)="openMailSettings.emit()">Set up mailbox →</button>
   </div>
 
@@ -129,7 +129,7 @@
         <label class="inline">Emails in sequence
           <select class="hud-input sm" [(ngModel)]="stepCount"><option *ngFor="let n of [1,2,3,4,5]" [ngValue]="n">{{ n }}</option></select>
         </label>
-        <button class="btn btn-primary" (click)="generate()" [disabled]="busy === 'generate'">{{ busy === 'generate' ? 'Writing with AI…' : (steps.length ? '↻ Rewrite with AI' : '⚡ Write emails with AI') }}</button>
+        <button class="btn btn-primary" (click)="generate()" [disabled]="busy === 'generate'">{{ busy === 'generate' ? 'Writing with AI…' : (steps.length ? 'Rewrite with AI' : 'Write emails with AI') }}</button>
         <span class="muted small">Uses only your product facts and goal. Placeholders: <code>{{ '{{first_name}}' }}</code>, <code>{{ '{{company}}' }}</code>.</span>
       </div>
       <div *ngIf="campaign.status === 'paused'" class="note small">Editing a paused campaign means it must be approved again before sending resumes.</div>

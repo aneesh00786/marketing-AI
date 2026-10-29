@@ -1,0 +1,74 @@
+/*
+ * Mail Center design layer. Loaded after the shared base (command/command-center.component.css)
+ * by every Mail Center screen so they share one header, panel, tag, callout, table, filter and
+ * empty-state style. Colours come only from the app's theme tokens (light and dark).
+ */
+
+/* Section header: title, one-line description, actions on the right */
+.mx-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px 16px; flex-wrap: wrap; }
+.mx-head h2, .mx-head h3 { margin: 0; font-size: 1.05rem; font-weight: 650; letter-spacing: -0.01em; color: var(--text); line-height: 1.3; }
+.mx-desc { margin: 4px 0 0; color: var(--text-muted); font-size: 0.86rem; line-height: 1.5; max-width: 72ch; }
+.mx-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+/* One level of panel only (no cards inside cards) */
+.mx-panel { border: 1px solid var(--border); border-radius: 12px; background: var(--surface); padding: 16px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.mx-panel.subtle { background: var(--bg-elev, var(--surface)); }
+.mx-subhead { margin: 0; font-size: 0.92rem; font-weight: 650; }
+
+/* Sub-tabs inside a section (Settings, Logs) */
+.mx-subtabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: thin; }
+.mx-subtabs [role=tab] { display: inline-flex; align-items: center; gap: 6px; border: none; border-bottom: 2px solid transparent; background: none; color: var(--text-muted); padding: 8px 12px; margin-bottom: -1px; font: inherit; font-size: 0.85rem; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.mx-subtabs [role=tab]:hover { color: var(--text); }
+.mx-subtabs [role=tab].on { color: var(--text); border-bottom-color: var(--accent); }
+.mx-subtabs [role=tab]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 6px; }
+
+/* Segmented control (e.g. Edit / Preview) */
+.mx-seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: 10px; background: var(--bg-elev, var(--surface-2)); border: 1px solid var(--border); }
+.mx-seg button { display: inline-flex; align-items: center; gap: 5px; border: none; background: none; color: var(--text-muted); font: inherit; font-size: 0.82rem; font-weight: 600; padding: 6px 12px; border-radius: 7px; cursor: pointer; transition: background-color 0.12s ease, color 0.12s ease; }
+.mx-seg button.on { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1); }
+.mx-seg button:hover:not(.on) { color: var(--text); }
+.mx-seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.mx-seg.compact button { padding: 4px 9px; font-size: 0.76rem; }
+
+/* Status tags: the label always carries the meaning; colour supports it */
+.mx-tag { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; font-size: 0.72rem; font-weight: 600; line-height: 1.5; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-muted); white-space: nowrap; }
+.mx-tag.good { background: var(--success-soft); color: var(--success-text); border-color: rgba(34, 197, 94, 0.35); }
+.mx-tag.bad { background: var(--danger-soft); color: var(--danger-text); border-color: rgba(239, 68, 68, 0.35); }
+.mx-tag.warn { background: var(--warning-soft); color: var(--warning-text); border-color: rgba(245, 158, 11, 0.35); }
+.mx-tag.info { background: var(--accent-soft); color: var(--accent-text, var(--text)); border-color: var(--accent-ring, var(--border)); }
+
+/* Callouts */
+.mx-callout { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; border-radius: 10px; padding: 10px 12px; font-size: 0.85rem; line-height: 1.45; background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border); }
+.mx-callout.warn { background: var(--warning-soft); color: var(--warning-text); border-color: rgba(245, 158, 11, 0.35); }
+.mx-callout.error { background: var(--danger-soft); color: var(--danger-text); border-color: rgba(239, 68, 68, 0.35); }
+.mx-callout.ok { background: var(--success-soft); color: var(--success-text); border-color: rgba(34, 197, 94, 0.35); }
+.mx-callout strong { color: inherit; }
+
+/* Filter bar */
+.mx-filters { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
+.mx-filters label { display: flex; flex-direction: column; gap: 4px; font-size: 0.76rem; font-weight: 600; color: var(--text-muted); }
+.mx-filters label.grow { flex: 1 1 200px; }
+
+/* Form controls inside Mail Center use one size */
+.hud-input, .hud-textarea { font-size: 0.88rem; }
+select.hud-input { padding-right: 28px; }
+
+/* Tables */
+.mx-table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.mx-table { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
+.mx-table th, .mx-table td { padding: 9px 12px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+.mx-table thead th { background: var(--surface-2); color: var(--text-muted); font-size: 0.74rem; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase; white-space: nowrap; }
+.mx-table tbody tr:last-child td { border-bottom: none; }
+.mx-table tbody tr:hover td { background: var(--surface-2); }
+.mx-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Empty states */
+.mx-empty { padding: 28px 18px; text-align: center; color: var(--text-muted); font-size: 0.86rem; line-height: 1.5; border: 1px dashed var(--border-strong, var(--border)); border-radius: 12px; }
+
+/* Buttons with icons */
+.btn app-icon { margin-left: -2px; }
+.btn-sm { padding: 6px 11px; font-size: 0.8rem; border-radius: 8px; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: none; }
+.btn:focus-visible, .link-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

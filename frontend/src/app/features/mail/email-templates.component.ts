@@ -1,5 +1,6 @@
 import { Component, EventEmitter, HostListener, OnInit, Output } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { IconComponent } from '../../shared/icon.component';
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { apiRoot } from '../../core/api-base';
@@ -15,9 +16,9 @@ export type TemplateUseTarget = 'email' | 'campaign' | 'draft';
 @Component({
   selector: 'app-email-templates',
   standalone: true,
-  imports: [CommonModule, FormsModule, EmailPreviewComponent],
+  imports: [CommonModule, IconComponent, FormsModule, EmailPreviewComponent],
   templateUrl: './email-templates.component.html',
-  styleUrls: ['../command/command-center.component.css', './email-templates.component.css']
+  styleUrls: ['../command/command-center.component.css', './mail-ui.css', './email-templates.component.css']
 })
 export class EmailTemplatesComponent implements OnInit {
   @Output() toast = new EventEmitter<string>();

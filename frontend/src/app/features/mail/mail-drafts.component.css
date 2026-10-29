@@ -1,7 +1,6 @@
 :host { display: block; grid-column: 1 / -1; }
-.md { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-xl, 16px); padding: 22px; display: flex; flex-direction: column; gap: 18px; color: var(--text); font-family: var(--font); }
+.md { display: flex; flex-direction: column; gap: 16px; color: var(--text); font-family: var(--font); min-width: 0; }
 .md-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
-.md-head h2 { margin: 0; font-size: 1.15rem; font-weight: 650; letter-spacing: -0.01em; }
 .sub { margin: 4px 0 0; color: var(--text-muted); font-size: 0.92rem; max-width: 60ch; }
 .hint { margin: 2px 0 0; color: var(--text-muted); font-size: 0.8rem; line-height: 1.4; }
 .spacer { flex: 1; }

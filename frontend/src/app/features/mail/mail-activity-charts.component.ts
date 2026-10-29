@@ -14,11 +14,11 @@ type Day = { date: string; mailbox: number; campaigns: number; received: number 
   standalone: true,
   imports: [CommonModule],
   templateUrl: './mail-activity-charts.component.html',
-  styleUrls: ['./mail-activity-charts.component.css']
+  styleUrls: ['./mail-ui.css', './mail-activity-charts.component.css']
 })
 export class MailActivityChartsComponent implements OnInit {
-  /** Open the email log (Logs tab). */
-  @Output() openLogs = new EventEmitter<void>();
+  /** Open Sent Mail, optionally filtered by status (e.g. 'not_sent'). */
+  @Output() openSent = new EventEmitter<string | null>();
 
   readonly ranges: (7 | 30 | 90)[] = [7, 30, 90];
   days: 7 | 30 | 90 = 30;

@@ -1,0 +1,96 @@
+<section class="mb" [class.reading]="selectedId !== null" aria-labelledby="mb-sent-title">
+  <header class="mx-head mb-head">
+    <div>
+      <h2 id="mb-sent-title">Sent Mail</h2>
+      <p class="mx-desc">Email sent from this workspace, with its purpose and delivery as recorded.</p>
+    </div>
+  </header>
+
+  <form class="mb-bar mx-filters" (ngSubmit)="load(1)" role="search" aria-label="Search sent mail">
+    <label class="grow">Search <input class="hud-input" name="q" [(ngModel)]="filters.q" maxlength="120" placeholder="Recipient, subject or text" /></label>
+    <label>Status
+      <select class="hud-input" name="status" [(ngModel)]="filters.status" (ngModelChange)="load(1)">
+        <option value="">All</option>
+        <option *ngFor="let s of statuses" [value]="s.value">{{ s.label }}</option>
+      </select>
+    </label>
+    <label>Purpose
+      <select class="hud-input" name="purpose" [(ngModel)]="filters.purpose" (ngModelChange)="load(1)">
+        <option value="">All</option>
+        <option value="transactional">Transactional / Direct</option>
+        <option value="marketing">Marketing</option>
+        <option value="not_recorded">Not recorded</option>
+      </select>
+    </label>
+    <label>From <input class="hud-input" type="date" name="from" [(ngModel)]="filters.from" (change)="load(1)" /></label>
+    <label>To <input class="hud-input" type="date" name="to" [(ngModel)]="filters.to" (change)="load(1)" /></label>
+    <button type="submit" class="btn btn-secondary btn-sm" [disabled]="loading">Search</button>
+  </form>
+  <p class="mb-hint">Delivered, opened and clicked come only from tracking events. SMTP servers never report delivery, and an open does not prove a person read the email.</p>
+
+  <div class="mx-callout error" *ngIf="error" role="alert">{{ error }} <button type="button" class="link-btn" (click)="load(page)">Try again</button></div>
+
+  <div class="mb-split" [class.has-sel]="selectedId !== null" *ngIf="!error">
+    <div class="mb-list" role="listbox" aria-label="Sent emails" (keydown)="onListKey($event)">
+      <p class="mb-empty" *ngIf="loading && !list">Loading…</p>
+      <p class="mb-empty" *ngIf="list && !emails.length">
+        <ng-container *ngIf="filtered">No sent emails match these filters. <button type="button" class="link-btn" (click)="clearFilters()">Clear filters</button></ng-container>
+        <ng-container *ngIf="!filtered">Nothing has been sent from this workspace yet.</ng-container>
+      </p>
+      <button type="button" *ngFor="let e of emails" class="mb-item" role="option" [id]="'mb-sent-' + e.id"
+        [class.on]="e.id === selectedId" [attr.aria-selected]="e.id === selectedId" (click)="open(e)">
+        <span class="mb-dot"></span>
+        <span class="mb-who">To: {{ e.toName || e.to || '—' }}</span>
+        <span class="mb-when">{{ e.sentAt | date:'MMM d, h:mm a' }}</span>
+        <span class="mb-subj">{{ e.subject || '(no subject)' }}</span>
+        <span class="mb-prev">{{ e.preview }}</span>
+        <span class="mb-tags">
+          <span class="mx-tag" [ngClass]="status(e.delivery).tone" [title]="status(e.delivery).hint">{{ status(e.delivery).label }}</span>
+          <span class="mx-tag" [class.info]="e.purpose">{{ purposeLabel(e.purpose) }}</span>
+        </span>
+      </button>
+      <div class="mb-pager" *ngIf="list && (page > 1 || list.hasMore)">
+        <button type="button" class="btn btn-secondary btn-sm" (click)="load(page - 1)" [disabled]="page <= 1 || loading">← Newer</button>
+        <span class="muted small">Page {{ page }}</span>
+        <button type="button" class="btn btn-secondary btn-sm" (click)="load(page + 1)" [disabled]="!list.hasMore || loading">Older →</button>
+      </div>
+    </div>
+
+    <article class="mb-read" aria-live="polite">
+      <p class="mb-read-empty" *ngIf="selectedId === null">Select an email to see its details and delivery.</p>
+      <p class="mb-read-empty" *ngIf="detailLoading">Opening…</p>
+      <div class="mx-callout error" *ngIf="detailError" role="alert">{{ detailError }}</div>
+      <ng-container *ngIf="detail && !detailLoading">
+        <header class="mb-read-head">
+          <button type="button" class="btn btn-secondary btn-sm mb-back" (click)="close()">← Back to sent mail</button>
+          <h3>{{ detail.subject || '(no subject)' }}</h3>
+          <dl class="mb-meta">
+            <dt>To</dt><dd>{{ detail.recipient_name ? detail.recipient_name + ' · ' : '' }}{{ detail.recipient_email || '—' }}</dd>
+            <dt>From</dt><dd>{{ detail.sender_email || '—' }}</dd>
+            <dt>{{ detail.direction === 'not_sent' ? 'Attempted' : 'Sent' }}</dt><dd>{{ (detail.sent_at || detail.received_at) ? ((detail.sent_at || detail.received_at) | date:'medium') : '—' }}</dd>
+            <dt>Purpose</dt><dd>{{ purposeLabel(detail.purpose) }}</dd>
+            <dt>Sent from</dt><dd>{{ sourceLabel(detail.source) }}<ng-container *ngIf="detail.provider"> · via {{ providerLabel(detail.provider) }}</ng-container></dd>
+          </dl>
+          <div class="mb-actions">
+            <span class="mx-tag" [ngClass]="status(detail.delivery).tone">{{ status(detail.delivery).label }}</span>
+            <button type="button" class="btn btn-secondary btn-sm" (click)="forward.emit(detail)"><app-icon name="forward" [size]="15"></app-icon>Forward</button>
+            <button type="button" class="btn btn-secondary btn-sm" *ngIf="detail.direction === 'not_sent'" (click)="sendAgain.emit(detail)" title="Opens Compose with this email; it is sent only after you review and confirm">Send again…</button>
+          </div>
+          <p class="mb-hint">{{ status(detail.delivery).hint }}</p>
+          <div class="mx-callout error" *ngIf="detail.failure" role="status"><strong>Reason:</strong> {{ detail.failure }}</div>
+        </header>
+        <div class="mb-read-body">
+          <section class="mb-section" *ngIf="detail.direction === 'sent'">
+            <h4>Delivery &amp; tracking</h4>
+            <app-email-tracking [emailId]="detail.id"></app-email-tracking>
+          </section>
+          <section class="mb-section">
+            <h4>Message</h4>
+            <app-email-preview *ngIf="detail.html_body; else plain" [html]="previewHtml(detail)" [contentKey]="detail.id" [title]="'Email: ' + (detail.subject || '')" emptyText="This email has no content."></app-email-preview>
+            <ng-template #plain><p class="mb-text">{{ detail.body || '(no content)' }}</p></ng-template>
+          </section>
+        </div>
+      </ng-container>
+    </article>
+  </div>
+</section>

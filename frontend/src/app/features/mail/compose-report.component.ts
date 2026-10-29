@@ -31,7 +31,7 @@ export const PURPOSE_REASON_LABELS: Record<string, string> = {
   standalone: true,
   imports: [CommonModule, FormsModule],
   templateUrl: './compose-report.component.html',
-  styleUrls: ['../command/command-center.component.css', './compose-report.component.css']
+  styleUrls: ['../command/command-center.component.css', './mail-ui.css', './compose-report.component.css']
 })
 export class ComposeReportComponent implements OnInit {
   /** Show the log expanded and loaded (in Mail Center → Logs). */

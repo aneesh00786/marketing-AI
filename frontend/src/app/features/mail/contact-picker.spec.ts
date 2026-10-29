@@ -134,7 +134,7 @@ describe('ContactPickerComponent', () => {
     init([]);
     comp.canCreate = false;
     fixture.detectChanges();
-    const add = Array.from(el().querySelectorAll('button')).find(b => b.textContent!.includes('Add New Contact')) as HTMLButtonElement;
+    const add = Array.from(el().querySelectorAll('button')).find(b => b.textContent!.includes('Add new contact')) as HTMLButtonElement;
     expect(add.disabled).toBeTrue();
   });
   // ---- product-aware selection ----

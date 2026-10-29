@@ -16,7 +16,7 @@ import { EmailPreviewComponent } from './email-preview.component';
   standalone: true,
   imports: [CommonModule, FormsModule, EmailPreviewComponent],
   templateUrl: './template-picker.component.html',
-  styleUrls: ['../command/command-center.component.css', './template-picker.component.css']
+  styleUrls: ['../command/command-center.component.css', './mail-ui.css', './template-picker.component.css']
 })
 export class TemplatePickerComponent implements OnInit, AfterViewInit, OnDestroy {
   @Input() title = 'Choose an Email Template';

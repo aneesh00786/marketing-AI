@@ -1,10 +1,12 @@
 <section class="ms" aria-labelledby="ms-title">
-  <header class="ms-head">
-    <h2 id="ms-title">Mail settings</h2>
-    <p class="sub">Everything that decides how this workspace sends and tracks email. Changes apply to emails sent from now on.</p>
+  <header class="ms-head mx-head">
+    <div>
+      <h2 id="ms-title">Mail settings</h2>
+      <p class="mx-desc">Everything that decides how this workspace sends and tracks email. Changes apply to emails sent from now on.</p>
+    </div>
   </header>
 
-  <div class="ms-tabs" role="tablist" aria-label="Mail settings" (keydown)="onTabKey($event)">
+  <div class="ms-tabs mx-subtabs" role="tablist" aria-label="Mail settings" (keydown)="onTabKey($event)">
     <button *ngFor="let t of tabs" type="button" role="tab" [id]="'ms-tab-' + t.id" [attr.aria-controls]="'ms-panel-' + t.id"
       [attr.aria-selected]="tab === t.id" [tabindex]="tab === t.id ? 0 : -1" [class.on]="tab === t.id" (click)="select(t.id)">
       {{ t.label }}

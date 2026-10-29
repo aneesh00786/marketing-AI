@@ -1,5 +1,6 @@
 import { Component, EventEmitter, HostListener, Input, OnChanges, OnInit, Output, SimpleChanges } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { IconComponent } from '../../shared/icon.component';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../services/api.service';
 import { TemplatePickerComponent } from './template-picker.component';
@@ -35,9 +36,9 @@ const TONES = [
 @Component({
   selector: 'app-mail-drafts',
   standalone: true,
-  imports: [CommonModule, FormsModule, EmailPreviewComponent, TemplatePickerComponent, ContactPickerComponent, EmailTrackingComponent],
+  imports: [CommonModule, IconComponent, FormsModule, EmailPreviewComponent, TemplatePickerComponent, ContactPickerComponent, EmailTrackingComponent],
   templateUrl: './mail-drafts.component.html',
-  styleUrls: ['../command/command-center.component.css', './mail-drafts.component.css']
+  styleUrls: ['../command/command-center.component.css', './mail-ui.css', './mail-drafts.component.css']
 })
 export class MailDraftsComponent implements OnInit, OnChanges {
   /** 'approvals' shows only drafts that need someone with mail.send; the actions are the same. */

@@ -1,6 +1,6 @@
-.zoho { border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin: 16px 0; }
+.zoho { border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; background: var(--bg-elev, var(--surface)); display: flex; flex-direction: column; gap: 6px; }
 .zoho-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: flex-start; }
-.zoho-head h3 { margin: 0 0 4px; font-size: 1rem; }
+.zoho-head h3 { margin: 0 0 4px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .zoho-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .muted { color: var(--text-muted); margin: 6px 0; }
 .small { font-size: 12px; }

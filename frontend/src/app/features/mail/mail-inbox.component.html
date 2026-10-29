@@ -1,0 +1,93 @@
+<section class="mb" [class.reading]="selectedId !== null" aria-labelledby="mb-in-title">
+  <header class="mx-head mb-head">
+    <div>
+      <h2 id="mb-in-title">Inbox <span class="mx-tag info" *ngIf="list?.unread">{{ list.unread }} unread</span></h2>
+      <p class="mx-desc">Email received by your company mailbox. Replies and forwards open Compose; nothing is sent from here.</p>
+    </div>
+    <div class="mx-actions">
+      <button type="button" class="btn btn-secondary btn-sm" *ngIf="imapReady" (click)="sync()" [disabled]="syncing"><app-icon name="refresh" [size]="15"></app-icon>{{ syncing ? 'Syncing…' : 'Sync inbox' }}</button>
+    </div>
+  </header>
+
+  <!-- Receiving needs a reply mailbox; sending-only services cannot fill an inbox. -->
+  <div class="mx-callout warn" *ngIf="imapReady === false" role="status">
+    <span><strong>New mail is not being received.</strong> The inbox fills from your company mailbox over IMAP. ZeptoMail and Zoho Campaigns only send email; they cannot receive it.</span>
+    <button type="button" class="btn btn-secondary btn-sm" (click)="openSettings.emit()">Set up replies (IMAP)</button>
+  </div>
+
+  <form class="mb-bar mx-filters" (ngSubmit)="load(1)" role="search" aria-label="Search the inbox">
+    <label class="grow">Search <input class="hud-input" name="q" [(ngModel)]="filters.q" maxlength="120" placeholder="Sender, recipient, subject or text" /></label>
+    <label>Show
+      <select class="hud-input" name="read" [(ngModel)]="filters.read" (ngModelChange)="load(1)">
+        <option value="">All</option><option value="unread">Unread</option><option value="read">Read</option>
+      </select>
+    </label>
+    <label>From <input class="hud-input" type="date" name="from" [(ngModel)]="filters.from" (change)="load(1)" /></label>
+    <label>To <input class="hud-input" type="date" name="to" [(ngModel)]="filters.to" (change)="load(1)" /></label>
+    <button type="submit" class="btn btn-secondary btn-sm" [disabled]="loading">Search</button>
+  </form>
+
+  <div class="mx-callout error" *ngIf="error" role="alert">{{ error }} <button type="button" class="link-btn" (click)="load(page)">Try again</button></div>
+
+  <div class="mb-split" [class.has-sel]="selectedId !== null" *ngIf="!error">
+    <div class="mb-list" role="listbox" aria-label="Received emails" (keydown)="onListKey($event)">
+      <p class="mb-empty" *ngIf="loading && !list">Loading…</p>
+      <p class="mb-empty" *ngIf="list && !emails.length">
+        <ng-container *ngIf="filtered">No emails match these filters. <button type="button" class="link-btn" (click)="clearFilters()">Clear filters</button></ng-container>
+        <ng-container *ngIf="!filtered">{{ imapReady === false ? 'No received email yet. Set up replies (IMAP) to receive mail here.' : 'No received email yet. New mail appears after the next sync.' }}</ng-container>
+      </p>
+      <button type="button" *ngFor="let e of emails" class="mb-item" role="option" [id]="'mb-in-' + e.id"
+        [class.unread]="!e.read" [class.on]="e.id === selectedId" [attr.aria-selected]="e.id === selectedId" (click)="open(e)">
+        <span class="mb-dot" [attr.aria-label]="e.read ? null : 'Unread'"></span>
+        <span class="mb-who">{{ sender(e) }}</span>
+        <span class="mb-when">{{ e.receivedAt | date:'MMM d, h:mm a' }}</span>
+        <span class="mb-subj">{{ e.subject || '(no subject)' }}</span>
+        <span class="mb-prev">{{ e.preview }}</span>
+        <span class="mb-tags" *ngIf="e.urgent || e.hasHtml">
+          <span class="mx-tag bad" *ngIf="e.urgent">Urgent</span>
+          <span class="mx-tag" *ngIf="e.hasHtml">HTML</span>
+        </span>
+      </button>
+      <div class="mb-pager" *ngIf="list && (page > 1 || list.hasMore)">
+        <button type="button" class="btn btn-secondary btn-sm" (click)="load(page - 1)" [disabled]="page <= 1 || loading">← Newer</button>
+        <span class="muted small">Page {{ page }}</span>
+        <button type="button" class="btn btn-secondary btn-sm" (click)="load(page + 1)" [disabled]="!list.hasMore || loading">Older →</button>
+      </div>
+    </div>
+
+    <article class="mb-read" aria-live="polite">
+      <p class="mb-read-empty" *ngIf="selectedId === null">Select an email to read it.</p>
+      <p class="mb-read-empty" *ngIf="detailLoading">Opening…</p>
+      <div class="mx-callout error" *ngIf="detailError" role="alert">{{ detailError }}</div>
+      <ng-container *ngIf="detail && !detailLoading">
+        <header class="mb-read-head">
+          <button type="button" class="btn btn-secondary btn-sm mb-back" (click)="close()">← Back to inbox</button>
+          <h3>{{ detail.subject || '(no subject)' }}</h3>
+          <dl class="mb-meta">
+            <dt>From</dt><dd>{{ detail.sender ? detail.sender + ' · ' : '' }}{{ detail.sender_email || '—' }}</dd>
+            <dt>To</dt><dd>{{ detail.recipient_email || '—' }}</dd>
+            <dt>Received</dt><dd>{{ detail.received_at ? (detail.received_at | date:'medium') : '—' }}</dd>
+          </dl>
+          <div class="mb-actions">
+            <button type="button" class="btn btn-primary btn-sm" (click)="reply.emit(detail)" [disabled]="!detail.sender_email"><app-icon name="reply" [size]="15"></app-icon>Reply</button>
+            <button type="button" class="btn btn-secondary btn-sm" (click)="forward.emit(detail)"><app-icon name="forward" [size]="15"></app-icon>Forward</button>
+            <button type="button" class="btn btn-secondary btn-sm" (click)="setRead(!detail.read)">{{ detail.read ? 'Mark as unread' : 'Mark as read' }}</button>
+            <button type="button" class="btn btn-secondary btn-sm" (click)="analyze()" [disabled]="analyzing"><app-icon name="sparkles" [size]="15"></app-icon>{{ analyzing ? 'Analyzing…' : 'Analyze with AI' }}</button>
+            <span class="mx-tag bad" *ngIf="detail.ai_priority === 'Urgent' || detail.is_urgent === 1">Urgent</span>
+          </div>
+        </header>
+        <div class="mb-read-body">
+          <div class="mb-ai" *ngIf="detail.ai_summary || detail.ai_replies?.length">
+            <span *ngIf="detail.ai_summary"><strong>AI summary:</strong> {{ detail.ai_summary }}</span>
+            <div class="mb-ai-replies" *ngIf="detail.ai_replies?.length">
+              <span class="muted small">Suggested replies (open Compose to review):</span>
+              <button type="button" class="btn btn-secondary btn-sm" *ngFor="let r of detail.ai_replies" (click)="smartReply.emit({ reply: r, email: detail })">{{ r.label || r }}</button>
+            </div>
+          </div>
+          <app-email-preview *ngIf="detail.html_body; else plain" [html]="previewHtml(detail)" [contentKey]="detail.id" [title]="'Email: ' + (detail.subject || '')" emptyText="This email has no content."></app-email-preview>
+          <ng-template #plain><p class="mb-text">{{ detail.body || '(no content)' }}</p></ng-template>
+        </div>
+      </ng-container>
+    </article>
+  </div>
+</section>

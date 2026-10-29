@@ -18,14 +18,12 @@ import { TemplatePickerComponent } from './features/mail/template-picker.compone
 import { MailCenterComponent } from './features/mail/mail-center.component';
 import { DataState, MailSection, mailSectionFromLink } from './features/mail/mail-nav';
 import { EmailPreviewComponent } from './features/mail/email-preview.component';
-import { EmailTrackingComponent } from './features/mail/email-tracking.component';
-import { textToPreviewHtml } from './features/mail/email-preview';
 import { findTokens, fillTokens, defaultTokenValues } from './features/mail/template-utils';
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [CommonModule, FormsModule, LoginComponent, SocialHubComponent, CommandCenterComponent, IconComponent, DashboardComponent, LeadDiscoveryComponent, MembersComponent, TemplatePickerComponent, MailCenterComponent, EmailPreviewComponent, EmailTrackingComponent],
+  imports: [CommonModule, FormsModule, LoginComponent, SocialHubComponent, CommandCenterComponent, IconComponent, DashboardComponent, LeadDiscoveryComponent, MembersComponent, TemplatePickerComponent, MailCenterComponent, EmailPreviewComponent],
   templateUrl: './app.component.html',
   styleUrls: ['./app.component.css']
 })
@@ -61,7 +59,7 @@ export class AppComponent implements OnInit, OnDestroy {
     {
       label: 'Communicate',
       items: [
-        { route: 'emails', label: 'Mail Center', icon: 'mail', subtitle: 'Mailbox, drafts, approvals, campaigns and templates' }
+        { route: 'emails', label: 'Mail Center', icon: 'mail', subtitle: 'Inbox, sent mail, drafts, approvals, campaigns and templates' }
       ]
     },
     {
@@ -293,7 +291,7 @@ export class AppComponent implements OnInit, OnDestroy {
   get notifications(): { icon: string; title: string; detail: string; route: AppComponent['currentRoute']; mailSection?: MailSection; tone: 'danger' | 'warning' | 'info' }[] {
     const out: { icon: string; title: string; detail: string; route: AppComponent['currentRoute']; mailSection?: MailSection; tone: 'danger' | 'warning' | 'info' }[] = [];
     const urgent = this.emails.filter(e => (e.is_urgent === 1 || e.ai_priority === 'Urgent') && !e.is_read);
-    if (urgent.length) out.push({ icon: 'mail', title: `${urgent.length} urgent email${urgent.length > 1 ? 's' : ''}`, detail: urgent[0].subject || 'Needs a reply', route: 'emails', tone: 'danger' });
+    if (urgent.length) out.push({ icon: 'mail', title: `${urgent.length} urgent email${urgent.length > 1 ? 's' : ''}`, detail: urgent[0].subject || 'Needs a reply', route: 'emails', mailSection: 'inbox', tone: 'danger' });
     const pendingDrafts = this.drafts.filter(d => d.status === 'Draft' || d.status === 'Pending Approval');
     if (pendingDrafts.length) out.push({ icon: 'drafts', title: `${pendingDrafts.length} draft${pendingDrafts.length > 1 ? 's' : ''} awaiting approval`, detail: pendingDrafts[0].subject || 'Review before sending', route: 'emails', mailSection: 'approvals', tone: 'warning' });
     const hot = this.leads.filter(l => l.category === 'Hot');
@@ -321,7 +319,6 @@ export class AppComponent implements OnInit, OnDestroy {
   onEscape(): void {
     this.openMenu = null;
     this.mobileNavOpen = false;
-    this.trackingEmail = null;
   }
 
   // Social Media Marketing hub deep-link (e.g. returning from an OAuth provider)
@@ -446,9 +443,9 @@ export class AppComponent implements OnInit, OnDestroy {
   // 3. Email Command Center (Visual HTML Rendering & AI Summaries)
   emails: any[] = [];
   showComposeModal: boolean = false;
-  composeTab: 'visual' | 'code' = 'visual';
-  viewingEmailVisual: any = null;
-  isAnalyzingEmail: boolean = false;
+  composeTab: 'write' | 'code' | 'visual' = 'write';
+  /** Set when Send was pressed, so missing fields are pointed out (not before the user starts). */
+  composeTouched = false;
   composeEmail = {
     recipient_email: '',
     recipient_name: '',
@@ -461,8 +458,10 @@ export class AppComponent implements OnInit, OnDestroy {
   // 4. Mail Drafts: the page itself is MailDraftsComponent; the shell keeps the list for counts and
   // hands over a product or template chosen elsewhere ("Create AI Email Draft", "Use in a draft").
   drafts: any[] = [];
-  /** Sent mailbox email whose delivery/open/click tracking is shown. */
-  trackingEmail: any = null;
+  /** Bumped when mail was sent or synced, so Mail Center → Inbox / Sent Mail reload. */
+  mailboxVersion = 0;
+  /** True once the mail settings have been read (Owners/Admins); otherwise IMAP status is unknown. */
+  mailConfigLoaded = false;
   draftsState: DataState = 'loading';
   emailsState: DataState = 'loading';
   draftProduct: { id: number } | null = null;
@@ -663,8 +662,6 @@ export class AppComponent implements OnInit, OnDestroy {
     this.toastTimeout = setTimeout(() => this.toastMessage = '', 4000);
   }
 
-  /** Plain-text emails in the mailbox viewer are shown as text, never interpreted as HTML. */
-  readonly textToPreviewHtml = textToPreviewHtml;
 
   // ==========================================
   // 1. STATUS & ELEVENLABS REAL-TIME VOICE
@@ -1435,7 +1432,8 @@ export class AppComponent implements OnInit, OnDestroy {
         this.composeTemplate = null;
         this.showToast(res.message);
         this.showComposeModal = false;
-        this.loadEmails();
+        this.composeTouched = false;
+        this.onMailboxChanged();
       },
       error: (err: any) => {
         this.isSendingCompose = false;
@@ -1458,24 +1456,9 @@ export class AppComponent implements OnInit, OnDestroy {
     }
   }
 
-  analyzeEmail(email: any): void {
-    this.isAnalyzingEmail = true;
-    this.apiService.analyzeEmailWithAi(email.id).subscribe({
-      next: (res) => {
-        this.isAnalyzingEmail = false;
-        this.showToast(`AI Analysis Complete! Priority: ${res.priority}`);
-        this.loadEmails();
-      },
-      error: (err) => {
-        this.isAnalyzingEmail = false;
-        this.showToast(`Analysis error: ${err.message}`);
-      }
-    });
-  }
-
   applySmartReply(reply: any, email: any): void {
-    const toEmail = email.sender_email || email.recipient_email || 'client@example.com';
-    const toName = email.sender || email.recipient_name || 'Client';
+    const toEmail = email.sender_email || email.recipient_email || '';
+    const toName = email.sender || email.recipient_name || '';
 
     this.composeEmail = {
       recipient_email: toEmail,
@@ -1488,32 +1471,117 @@ export class AppComponent implements OnInit, OnDestroy {
     // A reply to an inbound email: direct by default when allowed (the sender can change it; the server re-checks).
     this.composePurpose = this.canSendTransactional ? 'transactional' : null;
     this.composeTemplate = null;
-    this.composeTab = 'visual';
+    this.composeTab = 'write';
     this.showComposeModal = true;
   }
 
   replyToEmail(email: any): void {
-    const toEmail = email.sender_email || email.recipient_email || 'client@example.com';
-    const toName = email.sender || email.recipient_name || 'Client';
-
+    const toEmail = email.sender_email || '';
+    const toName = email.sender || '';
     this.composeEmail = {
       recipient_email: toEmail,
       recipient_name: toName,
-      subject: email.subject.startsWith('Re:') ? email.subject : `Re: ${email.subject}`,
-      body: `Hi ${toName},\n\nThank you for reaching out regarding "${email.subject}". Our team has reviewed your requirements and confirmed we can support your deployment. Would tomorrow at 2:00 PM work for a live demonstration?\n\nBest regards,\nExecutive Team`,
+      subject: /^re:/i.test(email.subject || '') ? email.subject : `Re: ${email.subject || ''}`,
+      body: `\n\n${this.quoteEmail(email)}`,
       html_body: '',
       is_html: false
     };
     // A reply to an inbound email: direct by default when allowed (the sender can change it; the server re-checks).
     this.composePurpose = this.canSendTransactional ? 'transactional' : null;
     this.composeTemplate = null;
-    this.composeTab = 'visual';
+    this.composeSend = null;
+    this.composeTab = 'write';
     this.showComposeModal = true;
   }
 
-  openVisualEmailModal(email: any): void {
-    this.viewingEmailVisual = email;
+  /** Forward: a new email with the original content; the sender chooses the recipient and purpose. */
+  forwardEmail(email: any): void {
+    const html = email.html_body || '';
+    this.composeEmail = {
+      recipient_email: '',
+      recipient_name: '',
+      subject: /^fwd?:/i.test(email.subject || '') ? email.subject : `Fwd: ${email.subject || ''}`,
+      body: html ? '' : `\n\n---------- Forwarded message ----------\n${this.quoteEmail(email, false)}`,
+      html_body: html,
+      is_html: !!html
+    };
+    this.composePurpose = null;
+    this.composeTemplate = null;
+    this.composeSend = null;
+    this.composeTab = html ? 'visual' : 'write';
+    this.showComposeModal = true;
   }
+
+  /** A failed email opened in Compose as a new email: every check runs again and nothing is sent until confirmed. */
+  sendEmailAgain(email: any): void {
+    const html = email.html_body || '';
+    this.composeEmail = {
+      recipient_email: email.recipient_email || '',
+      recipient_name: email.recipient_name || '',
+      subject: email.subject || '',
+      body: email.body || '',
+      html_body: html,
+      is_html: !!html
+    };
+    this.composePurpose = email.purpose === 'transactional' || email.purpose === 'marketing' ? email.purpose : null;
+    this.composeTemplate = null;
+    this.composeSend = null;
+    this.composeTab = html ? 'visual' : 'write';
+    this.showComposeModal = true;
+  }
+
+  /** Compose Email (Mail Center header): a blank email. */
+  openCompose(): void {
+    this.composeEmail = { recipient_email: '', recipient_name: '', subject: '', body: '', html_body: '', is_html: true };
+    this.composePurpose = null;
+    this.composeTemplate = null;
+    this.composeTemplateName = '';
+    this.composeSend = null;
+    this.composeTab = 'write';
+    this.showComposeModal = true;
+  }
+
+  get composeRecipientValid(): boolean { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((this.composeEmail.recipient_email || '').trim()); }
+
+  /** What is still missing before Compose can send (shown after the first Send attempt). */
+  get composeProblems(): string[] {
+    const out: string[] = [];
+    if (!this.composeRecipientValid) out.push('a valid recipient email');
+    if (!this.composeEmail.subject?.trim()) out.push('a subject');
+    if (!this.composePurpose) out.push('the email purpose');
+    if (!this.composeEmail.body?.trim() && !this.composeEmail.html_body?.trim()) out.push('a message');
+    return out;
+  }
+
+  trySendCompose(): void {
+    this.composeTouched = true;
+    if (this.composeProblems.length) return;
+    this.sendOutboundEmail();
+  }
+
+  /** Closing Compose with something written asks first, so a click outside the dialog loses nothing. */
+  closeCompose(): void {
+    const e = this.composeEmail;
+    const hasContent = !!(e.recipient_email?.trim() || e.subject?.trim() || e.body?.trim() || e.html_body?.trim());
+    if (hasContent && !this.isSendingCompose && !confirm('Discard this email? What you wrote is not saved.')) return;
+    this.showComposeModal = false;
+    this.composeTouched = false;
+  }
+
+  private quoteEmail(email: any, reply = true): string {
+    const when = email.received_at || email.sent_at || '';
+    const from = [email.sender, email.sender_email ? `<${email.sender_email}>` : ''].filter(Boolean).join(' ');
+    const text = String(email.body || email.snippet || '').trim();
+    const head = reply ? `On ${when}, ${from || 'the sender'} wrote:` : `From: ${from}\nDate: ${when}\nSubject: ${email.subject || ''}\nTo: ${email.recipient_email || ''}\n`;
+    return reply ? `${head}\n${text.split('\n').map(l => `> ${l}`).join('\n')}` : `${head}\n${text}`;
+  }
+
+  /** Mail was sent or synced: refresh the shell's list and Mail Center's Inbox / Sent Mail. */
+  onMailboxChanged(): void {
+    this.loadEmails();
+    this.mailboxVersion++;
+  }
+
 
   // ==========================================
   // 5. MAIL DRAFTS & APPROVALS WORKFLOW
@@ -1688,21 +1756,11 @@ export class AppComponent implements OnInit, OnDestroy {
             smtp_secure: !!res.config.smtp_secure,
             imap_tls: !!res.config.imap_tls
           };
+          this.mailConfigLoaded = true;
         }
       },
       error: (err) => console.warn('Error loading mail config:', err)
     });
-  }
-
-  /** Mailbox card: label and tooltip for a sent email's delivery status. */
-  deliveryLabel(d: string): string {
-    return ({ sent: 'SENT', accepted: 'ACCEPTED', delivered: 'DELIVERED', opened: 'OPENED', clicked: 'CLICKED', bounced: 'BOUNCED' } as Record<string, string>)[d] || d.toUpperCase();
-  }
-  deliveryHint(em: any): string {
-    if (em.delivery === 'sent') return 'Sent. Delivery is not tracked for this email (tracking covers ZeptoMail sends with tracking on).';
-    if (em.delivery === 'accepted') return 'Accepted by the mail service; no delivery event received yet.';
-    if (em.delivery === 'bounced') return em.delivery_detail?.failureReason || 'The recipient\'s server rejected this email.';
-    return 'Open "Delivery & tracking" for the full timeline.';
   }
 
   syncCompanyMail(): void {
@@ -1712,7 +1770,7 @@ export class AppComponent implements OnInit, OnDestroy {
         this.isSyncingMail = false;
         if (res.success) {
           this.showToast(res.message || 'Mailbox synchronized successfully.');
-          this.loadEmails();
+          this.onMailboxChanged();
           this.loadMailConfig();
         } else {
           this.showToast(res.error || 'IMAP sync is not configured.');

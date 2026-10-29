@@ -3,14 +3,14 @@
        display:none; uploads are still refused by the server for members without permission. -->
   <input #htmlPicker type="file" id="tplUploadHtml" class="file-input" accept=".html,.htm" tabindex="-1" aria-hidden="true" (change)="onFile($event, 'html')" />
   <input #zipPicker type="file" id="tplUploadZip" class="file-input" accept=".zip" tabindex="-1" aria-hidden="true" (change)="onFile($event, 'zip')" />
-  <div class="tpl-head">
+  <div class="tpl-head mx-head">
     <div>
-      <h3>Email templates</h3>
-      <p class="muted small">Reusable designs for emails, drafts and campaigns. Using a template makes a copy, so editing an email never changes the template.</p>
+      <h2>Email templates</h2>
+      <p class="mx-desc">Reusable designs for emails, drafts and campaigns. Using a template makes a copy, so editing an email never changes the template.</p>
     </div>
     <div class="tpl-actions create-menu" *ngIf="canCompose">
       <button class="btn btn-primary btn-sm" (click)="showCreateMenu = !showCreateMenu" [attr.aria-expanded]="showCreateMenu" aria-haspopup="true" [disabled]="busy === 'upload'">
-        {{ busy === 'upload' ? 'Importing…' : '＋ Create / Import template ▾' }}
+        <app-icon name="plus" [size]="15"></app-icon>{{ busy === 'upload' ? 'Importing…' : 'Create or import' }}<app-icon name="chevron-down" [size]="14"></app-icon>
       </button>
       <div class="menu" *ngIf="showCreateMenu" role="menu">
         <button class="menu-item" role="menuitem" (click)="newBlank()"><b>Blank template</b><small>Start from a simple email layout</small></button>
@@ -92,7 +92,7 @@
 
       <div class="use-row" *ngIf="editing.id">
         <span class="muted small">Use a copy in:</span>
-        <button class="btn btn-secondary btn-sm" (click)="useIn('email')">✉️ New email</button>
+        <button class="btn btn-secondary btn-sm" (click)="useIn('email')">New email</button>
         <button class="btn btn-secondary btn-sm" (click)="useIn('draft')">📝 New draft</button>
         <button class="btn btn-secondary btn-sm" (click)="useIn('campaign')">📣 New campaign</button>
       </div>

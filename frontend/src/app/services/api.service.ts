@@ -356,15 +356,32 @@ export class ApiService {
     return this.http.get(`${this.baseUrl}/mail/compose-report`, { params: p });
   }
 
-  // ---------- Mail activity: Overview charts, email log, campaign log (read-only) ----------
-  getMailActivitySummary(days: 7 | 30 | 90 = 30): Observable<any> {
-    return this.http.get(`${this.baseUrl}/mail/activity/summary`, { params: { days: String(days) } });
+  // ---------- Mail Center: Inbox and Sent Mail ----------
+  getInbox(params: { q?: string; read?: string; from?: string; to?: string; page?: number } = {}): Observable<any> {
+    return this.http.get(`${this.baseUrl}/emails/inbox`, { params: this.queryParams(params) });
   }
 
-  getEmailLog(params: { direction?: string; q?: string; page?: number } = {}): Observable<any> {
+  getSentMail(params: { q?: string; status?: string; purpose?: string; from?: string; to?: string; page?: number } = {}): Observable<any> {
+    return this.http.get(`${this.baseUrl}/emails/sent`, { params: this.queryParams(params) });
+  }
+
+  getEmail(id: number): Observable<any> {
+    return this.http.get(`${this.baseUrl}/emails/${id}`);
+  }
+
+  setEmailRead(id: number, read: boolean): Observable<any> {
+    return this.http.put(`${this.baseUrl}/emails/${id}/read`, { read });
+  }
+
+  private queryParams(params: Record<string, any>): Record<string, string> {
     const p: Record<string, string> = {};
     for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null && v !== '') p[k] = String(v);
-    return this.http.get(`${this.baseUrl}/mail/activity/emails`, { params: p });
+    return p;
+  }
+
+  // ---------- Mail activity: Overview charts and campaign log (read-only) ----------
+  getMailActivitySummary(days: 7 | 30 | 90 = 30): Observable<any> {
+    return this.http.get(`${this.baseUrl}/mail/activity/summary`, { params: { days: String(days) } });
   }
 
   getCampaignLog(params: { type?: string; page?: number } = {}): Observable<any> {

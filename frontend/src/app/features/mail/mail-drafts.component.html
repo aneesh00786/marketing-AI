@@ -1,11 +1,11 @@
 <section class="md">
-  <header class="md-head">
+  <header class="md-head mx-head">
     <div>
       <h2>{{ view === 'approvals' ? 'Approvals' : 'Drafts' }}</h2>
-      <p class="sub" *ngIf="view === 'drafts'">Review, edit and approve AI-written emails. Nothing is sent until you approve it and confirm.</p>
-      <p class="sub" *ngIf="view === 'approvals'">Drafts waiting for approval, approved drafts ready to send, and sends whose delivery is unknown. Approving and sending need the mail.send permission{{ caps && !canSend ? ', which your role does not have' : '' }}.</p>
+      <p class="mx-desc" *ngIf="view === 'drafts'">Review, edit and approve AI-written emails. Nothing is sent until you approve it and confirm.</p>
+      <p class="mx-desc" *ngIf="view === 'approvals'">Drafts waiting for approval, approved drafts ready to send, and sends whose delivery is unknown. Approving and sending need the mail.send permission{{ caps && !canSend ? ', which your role does not have' : '' }}.</p>
     </div>
-    <button type="button" class="btn btn-primary" *ngIf="view === 'drafts'" (click)="openCreate()" [disabled]="!canCompose" [title]="canCompose ? '' : 'Your role cannot create drafts'">＋ Create AI Draft</button>
+    <button type="button" class="btn btn-primary" *ngIf="view === 'drafts'" (click)="openCreate()" [disabled]="!canCompose" [title]="canCompose ? '' : 'Your role cannot create drafts'"><app-icon name="plus" [size]="16"></app-icon>Create AI Draft</button>
   </header>
 
   <div class="md-grid" [class.show-detail]="mobileView === 'detail'">
@@ -40,7 +40,7 @@
         <div *ngIf="!loading && !loadError && view === 'drafts' && !drafts.length" class="md-empty">
           <p><strong>No drafts yet.</strong></p>
           <p class="muted">Create one with AI, then review and approve it before anything is sent.</p>
-          <button type="button" class="btn btn-secondary" (click)="openCreate()" [disabled]="!canCompose">＋ Create AI Draft</button>
+          <button type="button" class="btn btn-secondary" (click)="openCreate()" [disabled]="!canCompose">Create AI Draft</button>
         </div>
         <div *ngIf="scoped.length && !filtered.length" class="md-empty muted">No drafts match. <button type="button" class="link-btn" (click)="query = ''; statusFilter = 'all'">Clear filters</button></div>
       </div>
@@ -239,7 +239,7 @@
         <div class="md-field">
           <span class="md-label">Email template <span class="muted">(optional)</span></span>
           <div class="md-chip" *ngIf="template">
-            <span>🧩 {{ template.name }}</span>
+            <span>Template: {{ template.name }}</span>
             <button type="button" class="link-btn" (click)="template = null">Remove</button>
           </div>
           <button type="button" class="btn btn-secondary btn-sm" *ngIf="!template" (click)="showTemplatePicker = true">Choose a template</button>

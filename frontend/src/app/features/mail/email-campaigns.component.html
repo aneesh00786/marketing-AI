@@ -1,21 +1,25 @@
 <section class="ec">
-  <app-zoho-campaigns [oauthResult]="oauthResult" (toast)="toast.emit($event)" (statusChange)="onZohoStatus($event)"></app-zoho-campaigns>
-
-  <div class="ec-head">
-    <h3>Email campaigns</h3>
-    <div class="ec-actions" *ngIf="canCompose">
-      <button class="btn btn-secondary btn-sm" (click)="picker = 'new'" [disabled]="busy === 'create'">🧩 New from template</button>
-      <button class="btn btn-primary btn-sm" (click)="newCampaign()" [disabled]="busy === 'create'">+ New campaign</button>
+  <header class="mx-head">
+    <div>
+      <h2>Campaigns</h2>
+      <p class="mx-desc">Write and approve email campaigns here; Zoho Campaigns delivers them to the mailing lists you choose.</p>
     </div>
-  </div>
+    <div class="mx-actions" *ngIf="canCompose">
+      <button class="btn btn-secondary btn-sm" (click)="picker = 'new'" [disabled]="busy === 'create'"><app-icon name="template" [size]="15"></app-icon>New from template</button>
+      <button class="btn btn-primary btn-sm" (click)="newCampaign()" [disabled]="busy === 'create'"><app-icon name="plus" [size]="15"></app-icon>New campaign</button>
+    </div>
+  </header>
+
+  <app-zoho-campaigns [oauthResult]="oauthResult" (toast)="toast.emit($event)" (statusChange)="onZohoStatus($event)"></app-zoho-campaigns>
   <div class="note error" *ngIf="error" role="alert">{{ error }}</div>
 
-  <div class="ec-grid">
+  <p class="mx-empty" *ngIf="!campaigns.length && !selected">No campaigns yet.<ng-container *ngIf="canCompose"> Start with “New campaign” or “New from template”.</ng-container></p>
+
+  <div class="ec-grid" *ngIf="campaigns.length || selected">
     <div class="ec-list">
-      <p class="muted small" *ngIf="!campaigns.length">No campaigns yet.</p>
       <button *ngFor="let c of campaigns" class="ec-item" [class.active]="selected?.id === c.id" (click)="open(c)">
         <b>{{ c.name }}</b>
-        <span class="tag" [class.ok]="c.status === 'submitted'" [class.warn]="c.status === 'needs_review' || c.status === 'failed'">{{ statusLabel(c.status) }}</span>
+        <span class="mx-tag" [class.good]="c.status === 'submitted'" [class.bad]="c.status === 'needs_review' || c.status === 'failed'">{{ statusLabel(c.status) }}</span>
         <small class="muted">{{ c.subject || 'No subject' }}</small>
       </button>
     </div>
@@ -23,7 +27,7 @@
     <div class="ec-detail" *ngIf="selected && form">
       <div class="ec-detail-head">
         <div>
-          <span class="tag" [class.ok]="selected.status === 'submitted'" [class.warn]="selected.status === 'needs_review' || selected.status === 'failed'">{{ statusLabel(selected.status) }}</span>
+          <span class="mx-tag" [class.good]="selected.status === 'submitted'" [class.bad]="selected.status === 'needs_review' || selected.status === 'failed'">{{ statusLabel(selected.status) }}</span>
           <span class="muted small">Version {{ selected.version }}{{ selected.approved ? ' · approved' : '' }}</span>
         </div>
         <div class="ec-actions">
@@ -69,17 +73,46 @@
           </label>
         </fieldset>
 
-        <div class="content">
-          <label>HTML content <button *ngIf="editable" type="button" class="btn btn-secondary btn-sm inline-btn" (click)="picker = 'load'">🧩 Choose template</button>
-            <textarea class="hud-input code" rows="14" [(ngModel)]="form.html" [disabled]="!editable" spellcheck="false"></textarea>
-          </label>
-          <div class="preview">
-            <span class="muted small">Preview</span>
-            <app-email-preview class="ec-preview" [html]="form.html" [contentKey]="selected.id" [title]="'Preview of ' + (form.name || 'campaign')"
-              emptyText="No HTML content yet. Write HTML or choose a template to see the preview."></app-email-preview>
+        <!-- One content panel: Edit (HTML source) or Preview (the unsaved HTML, rendered in a sandbox).
+             Both show form.html; switching never saves, validates, approves or sends. -->
+        <section class="ec-content" aria-labelledby="ec-content-title">
+          <div class="ec-content-head">
+            <h3 id="ec-content-title" class="mx-subhead">Email content</h3>
+            <div class="mx-seg" role="tablist" aria-label="Email content view" (keydown)="onModeKey($event)">
+              <button type="button" role="tab" id="ec-mode-edit" aria-controls="ec-content-body" [attr.aria-selected]="contentMode === 'edit'"
+                [tabindex]="contentMode === 'edit' ? 0 : -1" [class.on]="contentMode === 'edit'" (click)="setMode('edit')"><app-icon name="code" [size]="14"></app-icon>Edit</button>
+              <button type="button" role="tab" id="ec-mode-preview" aria-controls="ec-content-body" [attr.aria-selected]="contentMode === 'preview'"
+                [tabindex]="contentMode === 'preview' ? 0 : -1" [class.on]="contentMode === 'preview'" (click)="setMode('preview')"><app-icon name="eye" [size]="14"></app-icon>Preview</button>
+            </div>
+            <span class="ec-spacer"></span>
+            <div class="mx-seg compact" role="group" aria-label="Preview width" *ngIf="contentMode === 'preview'">
+              <button type="button" [class.on]="previewWidth === 'desktop'" [attr.aria-pressed]="previewWidth === 'desktop'" (click)="previewWidth = 'desktop'">Desktop</button>
+              <button type="button" [class.on]="previewWidth === 'mobile'" [attr.aria-pressed]="previewWidth === 'mobile'" (click)="previewWidth = 'mobile'">Mobile</button>
+            </div>
+            <button *ngIf="editable" type="button" class="btn btn-secondary btn-sm" (click)="picker = 'load'"><app-icon name="template" [size]="14"></app-icon>Choose template</button>
           </div>
-        </div>
-        <p class="muted small">Include <code>$[LI:UNSUBSCRIBE]$</code> for the unsubscribe link (Zoho requires one). Use https:// image URLs.</p>
+
+          <div id="ec-content-body" class="ec-content-body" role="tabpanel" [attr.aria-labelledby]="'ec-mode-' + contentMode">
+            <ng-container *ngIf="contentMode === 'edit'">
+              <div class="ec-toolbar" *ngIf="editable">
+                <button type="button" class="btn btn-secondary btn-sm" (click)="insertUnsubscribe(htmlBox)">Insert unsubscribe link</button>
+                <span class="muted small">HTML source · {{ form.html.length | number }} characters</span>
+              </div>
+              <textarea #htmlBox class="hud-input code ec-editor" [(ngModel)]="form.html" [disabled]="!editable" spellcheck="false"
+                aria-label="Email HTML" placeholder="<p>Write or paste the campaign's HTML here, or choose a template.</p>"></textarea>
+              <ul class="ec-hints" *ngIf="editable && contentHints.length" aria-live="polite">
+                <li *ngFor="let h of contentHints">{{ h }}</li>
+              </ul>
+              <p class="muted small ec-guide">Include <code>$[LI:UNSUBSCRIBE]$</code> as the unsubscribe link (Zoho requires one) and use https:// image URLs. Validate checks the saved campaign before approval.</p>
+            </ng-container>
+
+            <div class="ec-canvas" *ngIf="contentMode === 'preview'">
+              <app-email-preview class="ec-preview" [html]="form.html" [contentKey]="selected.id" [viewport]="previewWidth" [title]="'Preview of ' + (form.name || 'campaign')"
+                emptyText="No HTML content yet. Switch to Edit to write HTML, or choose a template."></app-email-preview>
+              <p class="muted small">Preview of the current, unsaved content. Zoho fills in merge tags such as <code>$[LI:UNSUBSCRIBE]$</code> when it sends.</p>
+            </div>
+          </div>
+        </section>
       </div>
 
       <div class="validation" *ngIf="validation">

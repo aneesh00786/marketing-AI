@@ -13,7 +13,7 @@ import { ApiService } from '../../services/api.service';
   standalone: true,
   imports: [CommonModule, FormsModule],
   templateUrl: './mail-tracking-settings.component.html',
-  styleUrls: ['../command/command-center.component.css', './mail-tracking-settings.component.css']
+  styleUrls: ['../command/command-center.component.css', './mail-ui.css', './mail-tracking-settings.component.css']
 })
 export class MailTrackingSettingsComponent implements OnInit {
   @Output() toast = new EventEmitter<string>();

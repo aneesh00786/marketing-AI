@@ -26,7 +26,8 @@ test.before(async () => {
 
   // Workspace A: 2 Compose/draft sends today, 1 yesterday, 1 not sent, 2 received; one AI campaign.
   const sentToday = await email(A, { status: 'Sent', sent_at: at(0), subject: 'Order shipped' });
-  await email(A, { status: 'Sent', sent_at: at(0), subject: 'Welcome' });
+  const welcome = await email(A, { status: 'Sent', sent_at: at(0), subject: 'Welcome' });
+  await run("INSERT INTO mail_send_requests (workspace_id, idempotency_key, request_hash, status, email_id, declared_purpose, applied_purpose, created_at, updated_at) VALUES (?, ?, ?, 'sent', ?, 'transactional', 'transactional', UTC_TIMESTAMP(), UTC_TIMESTAMP())", [A.workspaceId, tok(), tok(), welcome]);
   await email(A, { status: 'Sent', sent_at: at(1), subject: 'Invoice' });
   await email(A, { status: 'Not Sent', sent_at: at(1), subject: 'Bounced setup', smtp_status: 'SMTP login failed' });
   await email(A, { status: 'Unread', received_at: at(0), from: 'kim@client.io', to: 'hello@a.io', subject: 'Re: Welcome' });
@@ -67,26 +68,67 @@ test('summary: sends per day by channel (campaign emails counted once), received
   assert.equal(delivery.clicked, 0);
 });
 
-test('email log: newest first, with direction, source, delivery and filters; never another workspace', async () => {
-  const r = await h.api('GET', '/api/v1/mail/activity/emails', { token: A.token });
+test('Sent Mail lists only outgoing email with delivery, purpose and source, filters by status/purpose/text/date; never another workspace', async () => {
+  const r = await h.api('GET', '/api/v1/emails/sent', { token: A.token });
   assert.equal(r.status, 200);
   const subjects = r.data.emails.map(e => e.subject);
-  assert.ok(!subjects.includes('B secret'));
-  assert.equal(r.data.emails.length, 7);
-  const shipped = r.data.emails.find(e => e.subject === 'Order shipped');
-  assert.equal(shipped.direction, 'sent');
-  assert.equal(shipped.delivery, 'opened');
-  assert.equal(r.data.emails.find(e => e.subject === 'Campaign step 1').source, 'ai_campaign');
-  const failed = r.data.emails.find(e => e.subject === 'Bounced setup');
-  assert.deepEqual([failed.direction, failed.delivery, failed.detail], ['not_sent', 'not_sent', 'SMTP login failed']);
-  assert.equal(r.data.emails.find(e => e.subject === 'Question').delivery, null);
+  assert.ok(!subjects.includes('B secret'), 'workspace isolation');
+  assert.ok(!subjects.includes('Question') && !subjects.includes('Re: Welcome'), 'received mail is never listed as sent');
+  assert.equal(r.data.emails.length, 5);
+  const by = s => r.data.emails.find(e => e.subject === s);
+  assert.deepEqual([by('Order shipped').delivery, by('Invoice').delivery, by('Bounced setup').delivery], ['opened', 'sent', 'not_sent']);
+  assert.equal(by('Bounced setup').failure, 'SMTP login failed');
+  assert.deepEqual([by('Welcome').purpose, by('Welcome').source], ['transactional', 'compose']);
+  assert.deepEqual([by('Campaign step 1').purpose, by('Campaign step 1').source], ['marketing', 'ai_campaign']);
+  assert.equal(by('Invoice').purpose, null);
 
-  const received = await h.api('GET', '/api/v1/mail/activity/emails?direction=received', { token: A.token });
-  assert.deepEqual(received.data.emails.map(e => e.subject).sort(), ['Question', 'Re: Welcome']);
-  const search = await h.api('GET', '/api/v1/mail/activity/emails?q=invoice', { token: A.token });
-  assert.deepEqual(search.data.emails.map(e => e.subject), ['Invoice']);
-  const wild = await h.api('GET', `/api/v1/mail/activity/emails?q=${encodeURIComponent('%')}`, { token: A.token });
-  assert.equal(wild.data.emails.length, 0, 'LIKE wildcards are matched literally');
+  const q = async qs => (await h.api('GET', `/api/v1/emails/sent?${qs}`, { token: A.token })).data.emails.map(e => e.subject).sort();
+  assert.deepEqual(await q('status=opened'), ['Order shipped']);
+  assert.deepEqual(await q('status=not_sent'), ['Bounced setup']);
+  assert.deepEqual(await q('purpose=marketing'), ['Campaign step 1']);
+  assert.deepEqual(await q('purpose=not_recorded'), ['Bounced setup', 'Invoice', 'Order shipped']);
+  assert.deepEqual(await q('q=invoice'), ['Invoice']);
+  assert.deepEqual(await q(`q=${encodeURIComponent('%')}`), [], 'LIKE wildcards are matched literally');
+  assert.deepEqual(await q(`from=${day(0)}&to=${day(0)}`), ['Campaign step 1', 'Order shipped', 'Welcome']);
+  assert.equal((await h.api('GET', '/api/v1/emails/sent?status=read', { token: A.token })).status, 400);
+});
+
+test('Inbox lists only received email with unread count, read filter, search and date range', async () => {
+  const r = await h.api('GET', '/api/v1/emails/inbox', { token: A.token });
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.data.emails.map(e => e.subject), ['Re: Welcome', 'Question'], 'newest first, received only');
+  assert.equal(r.data.unread, 1);
+  assert.deepEqual(r.data.emails.map(e => e.read), [false, true]);
+  assert.equal(r.data.emails[0].from, 'kim@client.io');
+  const q = async qs => (await h.api('GET', `/api/v1/emails/inbox?${qs}`, { token: A.token })).data.emails.map(e => e.subject);
+  assert.deepEqual(await q('read=unread'), ['Re: Welcome']);
+  assert.deepEqual(await q('q=lee%40client'), ['Question']);
+  assert.deepEqual(await q('q=Body'), ['Re: Welcome', 'Question'], 'searches message content');
+  assert.deepEqual(await q(`from=${day(1)}`), ['Re: Welcome']);
+  assert.equal((await h.api('GET', '/api/v1/emails/inbox', { token: B.token })).data.emails.length, 0);
+});
+
+test('message detail and read/unread: workspace-scoped, received mail only, nothing sent', async () => {
+  const inbox = (await h.api('GET', '/api/v1/emails/inbox', { token: A.token })).data.emails;
+  const id = inbox.find(e => e.subject === 'Re: Welcome').id;
+  const d = await h.api('GET', `/api/v1/emails/${id}`, { token: A.token });
+  assert.equal(d.status, 200);
+  assert.deepEqual([d.data.email.direction, d.data.email.read, d.data.email.body, d.data.email.purpose], ['received', false, 'Body', null]);
+  assert.equal((await h.api('GET', `/api/v1/emails/${id}`, { token: B.token })).status, 404, 'another workspace');
+  assert.equal((await h.api('PUT', `/api/v1/emails/${id}/read`, { token: B.token, body: { read: true } })).status, 404);
+
+  const approver = await h.addMember(A.workspaceId, 'Approver');
+  assert.equal((await h.api('PUT', `/api/v1/emails/${id}/read`, { token: approver.token, body: { read: true } })).status, 200);
+  assert.equal((await h.api('GET', '/api/v1/emails/inbox?read=unread', { token: A.token })).data.unread, 0);
+  assert.equal((await h.api('PUT', `/api/v1/emails/${id}/read`, { token: A.token, body: { read: false } })).status, 200);
+  assert.equal((await db().get('SELECT is_read, status FROM emails WHERE id = ?', [id])).status, 'Unread');
+
+  const sent = (await h.api('GET', '/api/v1/emails/sent?q=Welcome', { token: A.token })).data.emails[0];
+  assert.equal((await h.api('PUT', `/api/v1/emails/${sent.id}/read`, { token: A.token, body: { read: true } })).status, 409, 'sent mail has no read state');
+  const sd = (await h.api('GET', `/api/v1/emails/${sent.id}`, { token: A.token })).data.email;
+  assert.deepEqual([sd.direction, sd.purpose, sd.source], ['sent', 'transactional', 'compose']);
+  assert.equal((await h.api('PUT', `/api/v1/emails/${id}/read`, { token: A.token, body: { read: 'yes' } })).status, 400);
+  assert.equal((await h.api('GET', '/api/v1/emails/inbox')).status, 401);
 });
 
 test('campaign log: AI campaigns with send/reply/bounce counts and Zoho campaigns with their report', async () => {
@@ -120,7 +162,7 @@ test('every role with mail.view can read activity; unknown filters and signed-ou
   assert.equal((await h.api('GET', '/api/v1/mail/activity/summary', { token: approver.token })).status, 200);
   assert.equal((await h.api('GET', '/api/v1/mail/activity/summary')).status, 401);
   assert.equal((await h.api('GET', '/api/v1/mail/activity/summary?days=365', { token: A.token })).status, 400);
-  assert.equal((await h.api('GET', '/api/v1/mail/activity/emails?workspace_id=2', { token: A.token })).status, 400);
+  assert.equal((await h.api('GET', '/api/v1/emails/sent?workspace_id=2', { token: A.token })).status, 400);
 });
 
 test('mail settings: sample IMAP values (reserved demo hosts) do not count as replies being set up', async () => {

@@ -140,7 +140,7 @@ describe('EmailTemplatesComponent', () => {
   it('hides write controls for members without mail.compose, and says why', () => {
     init(false);
     const text = fixture.nativeElement.textContent;
-    expect(text).not.toContain('Create / Import template');
+    expect(text).not.toContain('Create or import');
     expect(text).not.toContain('Duplicate');
     expect(text).toContain('needs the Member role or higher');
   });
@@ -148,7 +148,7 @@ describe('EmailTemplatesComponent', () => {
   it('offers Create / Import → Upload ZIP package, with a ZIP-only file picker wired to the importer', () => {
     init();
     const el: HTMLElement = fixture.nativeElement;
-    const toggle = Array.from(el.querySelectorAll('button')).find(b => /Create \/ Import template/.test(b.textContent || '')) as HTMLButtonElement;
+    const toggle = Array.from(el.querySelectorAll('button')).find(b => /Create or import/.test(b.textContent || '')) as HTMLButtonElement;
     expect(toggle).toBeTruthy();
     toggle.click();
     fixture.detectChanges();

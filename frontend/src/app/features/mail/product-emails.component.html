@@ -1,8 +1,8 @@
 <section class="pe">
-  <div class="pe-head">
+  <div class="pe-head mx-head">
     <div>
-      <h3>Product emails</h3>
-      <p class="muted small">Choose a product, select leads, and send each one a personalized email. Only leads with marketing consent recorded (and not unsubscribed) can be selected. For one-off emails to any address, use Compose &amp; Send or Mail Drafts.</p>
+      <h2>Product emails</h2>
+      <p class="mx-desc">Choose a product, select leads, and send each one a personalized email. Only leads with marketing consent recorded (and not unsubscribed) can be selected. For one-off emails to any address, use Compose &amp; Send or Mail Drafts.</p>
     </div>
   </div>
   <div class="note error" *ngIf="error" role="alert">{{ error }}</div>
@@ -118,7 +118,7 @@
       </div>
       <div class="tpl-row">
         <span class="muted small">Design:</span>
-        <span *ngIf="template" class="tag">🧩 {{ template.name }}</span>
+        <span *ngIf="template" class="tag">Template: {{ template.name }}</span>
         <button class="btn btn-secondary btn-sm" (click)="showPicker = true">{{ template ? 'Change template' : 'Use a template (optional)' }}</button>
         <button *ngIf="template" class="btn btn-secondary btn-sm" (click)="template = null">No template</button>
       </div>

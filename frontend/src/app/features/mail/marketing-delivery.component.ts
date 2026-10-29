@@ -14,7 +14,7 @@ import { ApiService } from '../../services/api.service';
   standalone: true,
   imports: [CommonModule, FormsModule],
   templateUrl: './marketing-delivery.component.html',
-  styleUrls: ['../command/command-center.component.css', './marketing-delivery.component.css']
+  styleUrls: ['../command/command-center.component.css', './mail-ui.css', './marketing-delivery.component.css']
 })
 export class MarketingDeliveryComponent implements OnInit, OnChanges {
   @Output() toast = new EventEmitter<string>();

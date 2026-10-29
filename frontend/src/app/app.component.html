@@ -366,16 +366,18 @@
   </section>
 
   <!-- =================================================================== -->
-  <!-- MAIL CENTER: overview + mailbox, drafts, approvals, product emails, campaigns, templates -->
+  <!-- MAIL CENTER: overview, inbox, sent mail, drafts, approvals, product emails, campaigns, templates, logs, settings -->
   <!-- =================================================================== -->
   <!-- Loaded on first use (keeps the initial bundle small). The former Mail Drafts page is its Drafts section. -->
   <ng-container *ngIf="currentRoute === 'emails'">
     @defer (on immediate) {
       <app-mail-center class="hud-panel full-width-panel" [(section)]="mailSection" [productEmailsEnabled]="!!serverStatus?.features?.productEmails"
-        [products]="digitalProducts" [drafts]="drafts" [draftsState]="draftsState" [emails]="emails" [emailsState]="emailsState"
+        [products]="digitalProducts" [drafts]="drafts" [draftsState]="draftsState"
+        [imapReady]="mailConfigLoaded ? !!mailConfig.has_imap_auth : null" [mailboxVersion]="mailboxVersion"
+        (compose)="openCompose()" (reply)="replyToEmail($event)" (forward)="forwardEmail($event)" (smartReply)="applySmartReply($event.reply, $event.email)" (sendAgain)="sendEmailAgain($event)"
         [draftTemplate]="draftTemplate" (templateConsumed)="draftTemplate = null" [draftProduct]="draftProduct" (productConsumed)="draftProduct = null"
         [campaignStartTemplate]="campaignStartTemplate" [zohoOauthResult]="zohoOauthResult" (templateUse)="onTemplateUse($event)"
-        (toast)="showToast($event)" (draftsChanged)="loadDrafts()" (mailSent)="loadEmails()" (settingsChanged)="loadMailConfig(); loadEmails()">
+        (toast)="showToast($event)" (draftsChanged)="loadDrafts()" (mailSent)="onMailboxChanged()" (settingsChanged)="loadMailConfig(); onMailboxChanged()">
         <div mcStatus class="mail-auth-status-bar" [class.connected]="mailConfig.has_smtp_auth">
           <div class="status-left">
             <span class="status-dot" [class.green]="mailConfig.has_smtp_auth"></span>
@@ -392,87 +394,6 @@
           </div>
         </div>
 
-        <section class="mc-mailbox" aria-labelledby="mailbox-title">
-          <div class="panel-header">
-            <div>
-              <h3 id="mailbox-title">Inbox &amp; sent mail</h3>
-              <p class="subtitle">Latest emails sent from and received by the company mailbox.<ng-container *ngIf="mailConfig.last_synced_at"> Last synced {{ mailConfig.last_synced_at }}.</ng-container></p>
-            </div>
-            <div class="header-actions">
-              <button class="btn btn-primary" (click)="showComposeModal = true" title="Write one email and send it directly">✉️ Compose &amp; Send Email</button>
-              <button class="btn btn-secondary" (click)="syncCompanyMail()" [disabled]="isSyncingMail" *ngIf="mailConfig.has_imap_auth">
-                {{ isSyncingMail ? 'Syncing...' : '🔄 Sync inbox' }}
-              </button>
-            </div>
-          </div>
-
-        <!-- Email Items Grid / Cards -->
-        <div class="emails-cards-list">
-          <div *ngFor="let em of emails" class="email-summary-card">
-            <div class="email-card-top">
-              <div class="email-header-meta">
-                <span class="chip" [class.calling]="em.ai_priority === 'Urgent' || em.is_urgent === 1" [class.active]="em.status === 'Sent'">
-                  {{ (em.ai_priority || (em.is_urgent === 1 ? 'Urgent' : 'Normal')).toUpperCase() }}
-                </span>
-                <span class="chip chip-not-sent" *ngIf="em.status === 'Not Sent'" [title]="em.smtp_status || 'This email was never sent'">NOT SENT</span>
-                <!-- Delivery status of a sent email (from delivery tracking; "Sent" when this email was not tracked) -->
-                <span class="chip delivery-chip" *ngIf="em.delivery && em.delivery !== 'not_sent'" [ngClass]="'d-' + em.delivery" [title]="deliveryHint(em)">{{ deliveryLabel(em.delivery) }}</span>
-                <span class="email-sender">From: <strong>{{ em.sender || em.sender_email || '—' }}</strong> &rarr; To: <strong>{{ em.recipient_name || em.recipient_email }}</strong></span>
-              </div>
-              <span class="email-date">{{ em.sent_at || em.received_at || 'Today' }}</span>
-            </div>
-
-            <h3 class="email-card-subject">{{ em.subject }}</h3>
-
-            <!-- Delivery timeline for tracked emails -->
-            <p class="delivery-line" *ngIf="em.delivery_detail?.tracked">
-              <span [class.done]="em.delivery_detail.deliveredAt || em.delivery_detail.firstOpenAt">✓ Delivered<ng-container *ngIf="em.delivery_detail.deliveredAt"> {{ em.delivery_detail.deliveredAt | date:'MMM d, h:mm a' }}</ng-container></span>
-              <ng-container *ngIf="em.delivery_detail.opensTracked">
-                &rarr; <span [class.done]="em.delivery_detail.firstOpenAt">{{ em.delivery_detail.firstOpenAt ? '✓ Opened ' + (em.delivery_detail.firstOpenAt | date:'MMM d, h:mm a') + (em.delivery_detail.opens > 1 ? ' (' + em.delivery_detail.opens + '×)' : '') : 'Not opened yet' }}</span>
-              </ng-container>
-              <ng-container *ngIf="em.delivery_detail.firstClickAt"> &rarr; <span class="done">✓ Clicked {{ em.delivery_detail.firstClickAt | date:'MMM d, h:mm a' }}</span></ng-container>
-              <span class="bad" *ngIf="em.delivery_detail.bouncedAt">⚠ Bounced{{ em.delivery_detail.failureReason ? ': ' + em.delivery_detail.failureReason : '' }}</span>
-            </p>
-
-            <!-- AI Summary Badge -->
-            <div class="ai-summary-banner" *ngIf="em.ai_summary">
-              <span class="ai-icon">⚡ AI Summary:</span> {{ em.ai_summary }}
-            </div>
-
-            <!-- Snippet / Body Text -->
-            <p class="email-snippet-text">{{ em.snippet || em.body }}</p>
-
-            <!-- Visual HTML Indicator -->
-            <div *ngIf="em.html_body" class="html-rendered-preview-bar">
-              <span class="badge badge-accent">📄 Visual HTML Template Included</span>
-              <button class="btn btn-secondary btn-sm" (click)="openVisualEmailModal(em)">
-                👁️ View Rendered Email Page
-              </button>
-            </div>
-
-            <!-- 1-Click AI Smart Reply Suggestions -->
-            <div class="smart-replies-row" *ngIf="em.ai_replies && em.ai_replies.length > 0">
-              <span class="replies-label">💡 1-Click AI Reply Suggestions:</span>
-              <button *ngFor="let rep of em.ai_replies" class="smart-reply-chip" (click)="applySmartReply(rep, em)">
-                {{ rep.label || rep }}
-              </button>
-            </div>
-
-            <!-- Email Actions Footer -->
-            <div class="email-actions-footer">
-              <button class="btn btn-secondary btn-sm" (click)="replyToEmail(em)">✉️ Reply</button>
-              <button *ngIf="em.sent_at && em.status !== 'Received'" class="btn btn-secondary btn-sm" (click)="trackingEmail = em">📊 Delivery &amp; tracking</button>
-              <button class="btn btn-secondary btn-sm" (click)="analyzeEmail(em)" [disabled]="isAnalyzingEmail">
-                ⚡ Re-Analyze with AI
-              </button>
-            </div>
-          </div>
-
-          <div *ngIf="emails.length === 0" class="empty-state-box">
-            No email records yet. Use “Compose &amp; Send Email” to send one, or sync the mailbox.
-          </div>
-        </div>
-        </section>
       </app-mail-center>
     } @loading { <p class="helper-text">Loading Mail Center…</p> }
   </ng-container>
@@ -983,27 +904,32 @@
   <!-- =================================================================== -->
   <!-- MODAL 2: COMPOSE & SEND VISUAL HTML EMAIL -->
   <!-- =================================================================== -->
-  <div *ngIf="showComposeModal" class="modal-backdrop" (click)="showComposeModal = false">
-    <div class="modal-card wide-modal" (click)="$event.stopPropagation()">
+  <div *ngIf="showComposeModal" class="modal-backdrop" (click)="closeCompose()">
+    <div class="modal-card wide-modal compose-card" (click)="$event.stopPropagation()" role="dialog" aria-modal="true" aria-labelledby="compose-title">
       <div class="modal-header">
-        <h3>✉️ Compose & Send Email (Visual HTML Supported)</h3>
-        <button class="close-btn" (click)="showComposeModal = false">✕</button>
+        <div>
+          <h3 id="compose-title">Compose email</h3>
+          <p class="subtitle compose-sub">Sent only after you confirm. Purpose, permissions and unsubscribes are checked again by the server.</p>
+        </div>
+        <button class="close-btn" (click)="closeCompose()" aria-label="Close">✕</button>
       </div>
       <div class="modal-body">
         <div class="form-row">
           <div class="form-group flex-1">
-            <label>Recipient Email</label>
-            <input type="email" class="hud-input" [(ngModel)]="composeEmail.recipient_email" placeholder="e.g. buyer@apexwholesale.com" />
+            <label for="compose-to">To (email) <span class="req" aria-hidden="true">*</span></label>
+            <input id="compose-to" type="email" class="hud-input" [(ngModel)]="composeEmail.recipient_email" placeholder="name@company.com" autocomplete="off"
+              [class.invalid]="composeTouched && !composeRecipientValid" [attr.aria-invalid]="composeTouched && !composeRecipientValid" />
           </div>
           <div class="form-group flex-1">
-            <label>Recipient Name</label>
-            <input type="text" class="hud-input" [(ngModel)]="composeEmail.recipient_name" placeholder="e.g. Michael Chang" />
+            <label for="compose-name">Recipient name</label>
+            <input id="compose-name" type="text" class="hud-input" [(ngModel)]="composeEmail.recipient_name" placeholder="Optional" autocomplete="off" />
           </div>
         </div>
 
         <div class="form-group">
-          <label>Subject</label>
-          <input type="text" class="hud-input" [(ngModel)]="composeEmail.subject" placeholder="e.g. Accelerate Wholesale Ordering with ThriveWoo B2B" />
+          <label for="compose-subject">Subject <span class="req" aria-hidden="true">*</span></label>
+          <input id="compose-subject" type="text" class="hud-input" [(ngModel)]="composeEmail.subject" maxlength="255" placeholder="What is this email about?"
+            [class.invalid]="composeTouched && !composeEmail.subject.trim()" [attr.aria-invalid]="composeTouched && !composeEmail.subject.trim()" />
         </div>
 
         <!-- Required email purpose (validated again by the server against the content and template) -->
@@ -1022,23 +948,18 @@
           <p class="purpose-note">Emails with promotional content are always sent as marketing, whatever is selected.</p>
         </fieldset>
 
-        <!-- Mode Toggle: Visual Page vs HTML Code -->
+        <!-- Message: plain text, HTML, or a preview of what the recipient sees -->
         <div class="compose-tab-bar">
-          <div class="tab-buttons">
-            <button class="btn btn-sm" [class.btn-primary]="composeTab === 'visual'" [class.btn-secondary]="composeTab !== 'visual'" (click)="composeTab = 'visual'">
-              👁️ Visual Page Preview
-            </button>
-            <button class="btn btn-sm" [class.btn-primary]="composeTab === 'code'" [class.btn-secondary]="composeTab !== 'code'" (click)="composeTab = 'code'">
-              &lt;/&gt; HTML Code / Template
-            </button>
+          <div class="seg" role="tablist" aria-label="Message editor">
+            <button type="button" role="tab" [attr.aria-selected]="composeTab === 'write'" [class.on]="composeTab === 'write'" (click)="composeTab = 'write'">Write</button>
+            <button type="button" role="tab" [attr.aria-selected]="composeTab === 'code'" [class.on]="composeTab === 'code'" (click)="composeTab = 'code'"><app-icon name="code" [size]="14"></app-icon>HTML</button>
+            <button type="button" role="tab" [attr.aria-selected]="composeTab === 'visual'" [class.on]="composeTab === 'visual'" (click)="composeTab = 'visual'"><app-icon name="eye" [size]="14"></app-icon>Preview</button>
           </div>
           <div class="upload-template-btn">
-            <button class="btn btn-secondary btn-sm" (click)="templatePickerFor = 'compose'">🧩 Choose Template</button>
-            <button class="btn btn-secondary btn-sm" (click)="saveComposeAsTemplate()" [disabled]="!composeEmail.html_body">💾 Save as template</button>
+            <button type="button" class="btn btn-secondary btn-sm" (click)="templatePickerFor = 'compose'"><app-icon name="template" [size]="14"></app-icon>Choose template</button>
+            <button type="button" class="btn btn-secondary btn-sm" (click)="saveComposeAsTemplate()" [disabled]="!composeEmail.html_body"><app-icon name="save" [size]="14"></app-icon>Save as template</button>
             <input #composeHtmlPicker type="file" id="htmlTemplateInput" class="file-input" accept=".html,.htm" tabindex="-1" aria-hidden="true" (change)="onHtmlTemplateUpload($event)" />
-            <button type="button" class="btn btn-secondary btn-sm" (click)="composeHtmlPicker.click()">
-              📄 Upload .html File
-            </button>
+            <button type="button" class="btn btn-secondary btn-sm" (click)="composeHtmlPicker.click()"><app-icon name="upload" [size]="14"></app-icon>Upload HTML</button>
           </div>
         </div>
 
@@ -1050,22 +971,26 @@
           <button class="btn btn-secondary btn-sm" (click)="applyComposeTokens()">Apply values</button>
         </div>
 
-        <!-- Visual Rendered Preview -->
+        <div *ngIf="composeTab === 'write'">
+          <p class="helper-text compose-mode" *ngIf="composeEmail.html_body">This email has HTML content, which is what the recipient sees. Text written here is the plain-text version for email apps that do not show HTML.</p>
+          <textarea class="hud-textarea" rows="10" [(ngModel)]="composeEmail.body" aria-label="Message" placeholder="Write your message…"></textarea>
+        </div>
+
+        <div *ngIf="composeTab === 'code'">
+          <textarea class="hud-textarea code" rows="10" [(ngModel)]="composeEmail.html_body" aria-label="HTML content" placeholder="<p>Paste or edit HTML here. Leave empty to send plain text.</p>"></textarea>
+        </div>
+
         <div *ngIf="composeTab === 'visual'" class="rendered-compose-view">
           <app-email-preview *ngIf="composeEmail.html_body" class="email-render-frame" [html]="composeEmail.html_body" title="Email preview"></app-email-preview>
           <div *ngIf="!composeEmail.html_body" class="plain-text-preview">
-            <p style="white-space: pre-wrap;">{{ composeEmail.body || 'No message content entered yet.' }}</p>
+            <p style="white-space: pre-wrap;">{{ composeEmail.body || 'No message yet. Use Write to add one.' }}</p>
           </div>
         </div>
-
-        <!-- HTML Code Editor -->
-        <div *ngIf="composeTab === 'code'">
-          <textarea class="hud-textarea" rows="8" [(ngModel)]="composeEmail.html_body" placeholder="<div style='...'>Enter your HTML template here...</div>"></textarea>
-        </div>
       </div>
-      <div class="modal-footer">
-        <button class="btn btn-secondary" (click)="showComposeModal = false">Cancel</button>
-        <button class="btn btn-primary" (click)="sendOutboundEmail()" [disabled]="isSendingCompose || !composePurpose" [title]="composePurpose ? '' : 'Choose the email purpose first'">{{ isSendingCompose ? "Sending…" : "🚀 Dispatch Email" }}</button>
+      <div class="modal-footer compose-footer">
+        <p class="compose-missing" *ngIf="composeTouched && composeProblems.length" role="alert">Still needed: {{ composeProblems.join(', ') }}.</p>
+        <button class="btn btn-secondary" (click)="closeCompose()">Cancel</button>
+        <button class="btn btn-primary" (click)="trySendCompose()" [disabled]="isSendingCompose"><app-icon name="send" [size]="16"></app-icon>{{ isSendingCompose ? 'Sending…' : 'Send email…' }}</button>
       </div>
     </div>
   </div>
@@ -1075,48 +1000,6 @@
       <app-template-picker subtitle="Loads a copy of the template into this email." (picked)="onTemplatePicked($event)" (closed)="templatePickerFor = null"></app-template-picker>
     }
   </ng-container>
-
-  <!-- =================================================================== -->
-  <!-- MODAL 3: VIEW RENDERED EMAIL PAGE POPUP -->
-  <!-- =================================================================== -->
-  <!-- Delivery and engagement tracking for one sent email (read-only). -->
-  <div *ngIf="trackingEmail" class="modal-backdrop" (click)="trackingEmail = null">
-    <div class="modal-card wide-modal" (click)="$event.stopPropagation()" role="dialog" aria-modal="true" aria-labelledby="tracking-title">
-      <div class="modal-header">
-        <div>
-          <h3 id="tracking-title">Delivery &amp; tracking</h3>
-          <p class="subtitle" style="margin: 0;">{{ trackingEmail.subject }} &bull; To: {{ trackingEmail.recipient_email }}</p>
-        </div>
-        <button class="close-btn" (click)="trackingEmail = null" aria-label="Close">✕</button>
-      </div>
-      <div class="modal-body">
-        <app-email-tracking [emailId]="trackingEmail.id"></app-email-tracking>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-secondary" (click)="trackingEmail = null">Close</button>
-      </div>
-    </div>
-  </div>
-
-  <div *ngIf="viewingEmailVisual" class="modal-backdrop" (click)="viewingEmailVisual = null">
-    <div class="modal-card wide-modal" (click)="$event.stopPropagation()">
-      <div class="modal-header">
-        <div>
-          <h3>{{ viewingEmailVisual.subject }}</h3>
-          <p class="subtitle" style="margin: 0;">To: {{ viewingEmailVisual.recipient_email }} &bull; Rendered Visual View</p>
-        </div>
-        <button class="close-btn" (click)="viewingEmailVisual = null">✕</button>
-      </div>
-      <div class="modal-body">
-        <div class="rendered-email-container">
-          <app-email-preview class="email-render-frame" [html]="viewingEmailVisual.html_body || textToPreviewHtml(viewingEmailVisual.body)" [contentKey]="viewingEmailVisual.id" [title]="'Email: ' + (viewingEmailVisual.subject || '')" emptyText="This email has no content."></app-email-preview>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-secondary" (click)="viewingEmailVisual = null">Close</button>
-      </div>
-    </div>
-  </div>
 
   <!-- =================================================================== -->
   <!-- MODAL 4: CAPTURE NEW LEAD -->

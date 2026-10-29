@@ -9,7 +9,7 @@
         <button type="button" *ngFor="let r of ranges" [class.on]="days === r" [attr.aria-pressed]="days === r" (click)="setRange(r)">{{ r }} days</button>
       </div>
       <button type="button" class="ma-link" (click)="showTable = !showTable" [attr.aria-pressed]="showTable">{{ showTable ? 'Show charts' : 'Show as table' }}</button>
-      <button type="button" class="ma-link" (click)="openLogs.emit()">Email log →</button>
+      <button type="button" class="ma-link" (click)="openSent.emit(null)">Sent Mail →</button>
     </div>
   </header>
 
@@ -23,7 +23,7 @@
       <div class="ma-stat"><span>Received</span><strong>{{ data.totals.received }}</strong><small>Synced replies and messages</small></div>
       <div class="ma-stat" [class.bad]="data.totals.notSent + data.totals.campaignFailed">
         <span>Not sent</span><strong>{{ data.totals.notSent + data.totals.campaignFailed }}</strong>
-        <small><ng-container *ngIf="data.totals.notSent + data.totals.campaignFailed; else allOk">⚠ {{ data.totals.notSent }} mailbox · {{ data.totals.campaignFailed }} AI campaigns</ng-container><ng-template #allOk>Nothing failed</ng-template></small>
+        <small><ng-container *ngIf="data.totals.notSent + data.totals.campaignFailed; else allOk">⚠ {{ data.totals.notSent }} mailbox · {{ data.totals.campaignFailed }} AI campaigns<ng-container *ngIf="data.totals.notSent"> · <button type="button" class="ma-link" (click)="openSent.emit('not_sent')">See failed</button></ng-container></ng-container><ng-template #allOk>Nothing failed</ng-template></small>
       </div>
     </div>
 

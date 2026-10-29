@@ -18,7 +18,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   standalone: true,
   imports: [CommonModule, FormsModule],
   templateUrl: './contact-picker.component.html',
-  styleUrls: ['../command/command-center.component.css', './contact-picker.component.css']
+  styleUrls: ['../command/command-center.component.css', './mail-ui.css', './contact-picker.component.css']
 })
 export class ContactPickerComponent implements OnInit, AfterViewInit {
   @Input() title = 'Select contact';

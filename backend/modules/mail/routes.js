@@ -10,6 +10,7 @@ const aiEngine = require('../../services/aiEngine');
 const emailService = require('../../services/emailService');
 const { resolveSelectedProduct } = require('../../lib/productContext');
 const mailPurpose = require('../../lib/mailPurpose');
+const mailActivity = require('./activity/routes');
 
 /**
  * Workspace-scoped Mail Drafts, Mail Center and mail settings. The workspace always
@@ -391,7 +392,7 @@ const emails = express.Router();
 
 emails.get('/', requireCapability('mail.view'), wrap(async (req, res) => {
   // Each sent email carries its delivery status (delivered / opened / clicked / bounced …) for the mailbox.
-  const { deliveryOf, TRACKING_COLUMNS, TRACKING_JOIN } = require('./activity/routes');
+  const { deliveryOf, TRACKING_COLUMNS, TRACKING_JOIN } = mailActivity;
   const rows = await all(`SELECT e.*, ${TRACKING_COLUMNS}, t.last_open_at AS t_last_open_at, t.open_events AS t_open_events FROM emails e ${TRACKING_JOIN} WHERE e.workspace_id = ? ORDER BY e.is_urgent DESC, e.id DESC LIMIT 50`, [ws(req)]);
   res.json({
     success: true,
@@ -406,6 +407,145 @@ emails.get('/', requireCapability('mail.view'), wrap(async (req, res) => {
       };
     })
   });
+}));
+
+// ---------- Inbox and Sent Mail (Mail Center tabs) ----------
+// Received = anything not sent by this workspace ('Sent' / 'Not Sent' rows are outgoing).
+const RECEIVED_SQL = "e.status NOT IN ('Sent', 'Not Sent')";
+// Read when flagged read or given the 'Read' status (older rows set only one of the two).
+const UNREAD_SQL = "(COALESCE(e.is_read, 0) = 0 AND e.status <> 'Read')";
+const MAILBOX_PAGE = 25;
+const isoDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const likeOf = q => `%${q.replace(/[\\%_]/g, c => `\\${c}`)}%`;
+const dayRange = (col, q, where, params) => {
+  if (q.from) { where.push(`${col} >= ?`); params.push(`${q.from} 00:00:00`); }
+  if (q.to) { where.push(`${col} < DATE_ADD(?, INTERVAL 1 DAY)`); params.push(`${q.to} 00:00:00`); }
+};
+function query(schema, req) {
+  const r = schema.safeParse(req.query || {});
+  if (!r.success) throw httpError(r.error.issues.map(i => `${i.path.join('.') || 'query'}: ${i.message}`).join('; '), 400, 'VALIDATION_ERROR');
+  return r.data;
+}
+const preview = e => String(e.snippet || e.body || '').replace(/\s+/g, ' ').trim().slice(0, 180);
+const listPage = (rows, page) => ({ page, hasMore: rows.length > MAILBOX_PAGE, rows: rows.slice(0, MAILBOX_PAGE) });
+
+const inboxQuery = z.object({
+  q: z.string().trim().max(120).optional(),
+  read: z.enum(['read', 'unread']).optional(),
+  from: isoDay.optional(),
+  to: isoDay.optional(),
+  page: z.coerce.number().int().min(1).max(1000).optional()
+}).strict();
+
+/** Inbox: messages received by the workspace mailbox (synced over IMAP), newest first. */
+emails.get('/inbox', requireCapability('mail.view'), wrap(async (req, res) => {
+  const q = query(inboxQuery, req);
+  const page = q.page || 1;
+  const where = ['e.workspace_id = ?', RECEIVED_SQL];
+  const params = [ws(req)];
+  if (q.read === 'unread') where.push(UNREAD_SQL);
+  else if (q.read === 'read') where.push(`NOT ${UNREAD_SQL}`);
+  if (q.q) {
+    const like = likeOf(q.q);
+    where.push('(e.subject LIKE ? OR e.sender LIKE ? OR e.sender_email LIKE ? OR e.recipient_email LIKE ? OR e.body LIKE ?)');
+    params.push(like, like, like, like, like);
+  }
+  dayRange('e.received_at', q, where, params);
+  const rows = await all(
+    `SELECT e.id, e.sender, e.sender_email, e.recipient_email, e.recipient_name, e.subject, e.snippet, LEFT(e.body, 400) AS body,
+            e.received_at, e.is_read, e.status, e.is_urgent, e.ai_priority, e.ai_summary, (e.html_body IS NOT NULL AND e.html_body <> '') AS has_html
+     FROM emails e WHERE ${where.join(' AND ')}
+     ORDER BY e.received_at DESC, e.id DESC LIMIT ${MAILBOX_PAGE + 1} OFFSET ${(page - 1) * MAILBOX_PAGE}`, params);
+  const unread = await get(`SELECT COUNT(*) AS n FROM emails e WHERE e.workspace_id = ? AND ${RECEIVED_SQL} AND ${UNREAD_SQL}`, [ws(req)]);
+  const p = listPage(rows, page);
+  res.json({
+    success: true, page, hasMore: p.hasMore, unread: Number(unread?.n) || 0,
+    emails: p.rows.map(e => ({
+      id: e.id, from: e.sender_email || null, fromName: e.sender || null, to: e.recipient_email || null,
+      subject: e.subject, preview: preview(e), receivedAt: e.received_at, read: Number(e.is_read) === 1 || e.status === 'Read',
+      urgent: Number(e.is_urgent) === 1 || e.ai_priority === 'Urgent', priority: e.ai_priority || null, hasHtml: !!Number(e.has_html)
+    }))
+  });
+}));
+
+const SENT_STATUSES = ['sent', 'accepted', 'delivered', 'opened', 'clicked', 'bounced', 'not_sent'];
+const sentQuery = z.object({
+  q: z.string().trim().max(120).optional(),
+  status: z.enum(SENT_STATUSES).optional(),
+  purpose: z.enum(['transactional', 'marketing', 'not_recorded']).optional(),
+  from: isoDay.optional(),
+  to: isoDay.optional(),
+  page: z.coerce.number().int().min(1).max(1000).optional()
+}).strict();
+
+/** Sent Mail: emails this workspace sent (or tried to send), with delivery status and purpose as recorded. */
+emails.get('/sent', requireCapability('mail.view'), wrap(async (req, res) => {
+  const q = query(sentQuery, req);
+  const page = q.page || 1;
+  const A = mailActivity;
+  const where = ['e.workspace_id = ?', "e.status IN ('Sent', 'Not Sent')"];
+  const params = [ws(req), ws(req), ws(req), ws(req)]; // three for LINKS_JOIN, one for the WHERE
+  if (q.q) {
+    const like = likeOf(q.q);
+    where.push('(e.subject LIKE ? OR e.recipient_email LIKE ? OR e.recipient_name LIKE ? OR e.body LIKE ?)');
+    params.push(like, like, like, like);
+  }
+  dayRange('COALESCE(e.sent_at, e.received_at)', q, where, params);
+  if (q.status) { where.push(`(${A.DELIVERY_SQL}) = ?`); params.push(q.status); }
+  if (q.purpose === 'not_recorded') where.push(`(${A.PURPOSE_SQL}) IS NULL`);
+  else if (q.purpose) { where.push(`(${A.PURPOSE_SQL}) = ?`); params.push(q.purpose); }
+  const rows = await all(
+    `SELECT e.id, e.recipient_email, e.recipient_name, e.sender_email, e.subject, e.snippet, LEFT(e.body, 400) AS body,
+            COALESCE(e.sent_at, e.received_at) AS sent_at, e.status, e.smtp_status,
+            ${A.DELIVERY_SQL} AS delivery, ${A.PURPOSE_SQL} AS purpose, ${A.SOURCE_SQL} AS source,
+            t.provider AS provider, t.failure_reason AS failure_reason
+     FROM emails e ${A.TRACKING_JOIN} ${A.LINKS_JOIN}
+     WHERE ${where.join(' AND ')}
+     ORDER BY sent_at DESC, e.id DESC LIMIT ${MAILBOX_PAGE + 1} OFFSET ${(page - 1) * MAILBOX_PAGE}`, params);
+  const p = listPage(rows, page);
+  res.json({
+    success: true, page, hasMore: p.hasMore,
+    emails: p.rows.map(e => ({
+      id: e.id, to: e.recipient_email || null, toName: e.recipient_name || null, from: e.sender_email || null,
+      subject: e.subject, preview: preview(e), sentAt: e.sent_at,
+      delivery: e.delivery, purpose: e.purpose || null, source: e.source || null, provider: e.provider || null,
+      failure: e.delivery === 'not_sent' ? (e.smtp_status || null) : (e.failure_reason || null)
+    }))
+  });
+}));
+
+/** One message of this workspace (received or sent) with its content; 404 for another workspace's. */
+emails.get('/:id(\\d+)', requireCapability('mail.view'), wrap(async (req, res) => {
+  const e = await get(
+    `SELECT e.*, ${mailActivity.DELIVERY_SQL} AS delivery, ${mailActivity.PURPOSE_SQL} AS purpose, ${mailActivity.SOURCE_SQL} AS source,
+            t.provider AS t_provider, t.failure_reason AS t_failure_reason
+     FROM emails e ${mailActivity.TRACKING_JOIN} ${mailActivity.LINKS_JOIN} WHERE e.id = ? AND e.workspace_id = ?`, [ws(req), ws(req), ws(req), req.params.id, ws(req)]);
+  if (!e) throw httpError('Email not found.', 404, 'NOT_FOUND');
+  const direction = e.status === 'Sent' ? 'sent' : e.status === 'Not Sent' ? 'not_sent' : 'received';
+  const { t_provider, t_failure_reason, ai_replies_json, ...rest } = e;
+  res.json({
+    success: true,
+    email: {
+      ...presentEmail({ ...rest, ai_replies_json }),
+      direction,
+      read: Number(e.is_read) === 1 || e.status === 'Read',
+      delivery: e.delivery || null,
+      purpose: direction === 'received' ? null : (e.purpose || null),
+      source: e.source || null,
+      provider: t_provider || null,
+      failure: direction === 'not_sent' ? (e.smtp_status || null) : (t_failure_reason || null)
+    }
+  });
+}));
+
+/** Mark a received message read or unread (the workspace's shared mailbox state). Sent mail has no read state. */
+emails.put('/:id(\\d+)/read', requireCapability('mail.view'), body(z.object({ read: z.boolean() }).strict()), wrap(async (req, res) => {
+  const e = await get(`SELECT e.id, e.status FROM emails e WHERE e.id = ? AND e.workspace_id = ?`, [req.params.id, ws(req)]);
+  if (!e) throw httpError('Email not found.', 404, 'NOT_FOUND');
+  if (['Sent', 'Not Sent'].includes(e.status)) throw httpError('Only received emails can be marked read or unread.', 409, 'NOT_RECEIVED');
+  const read = req.valid.read;
+  await run('UPDATE emails SET is_read = ?, status = ? WHERE id = ? AND workspace_id = ?', [read ? 1 : 0, read ? 'Read' : 'Unread', e.id, ws(req)]);
+  res.json({ success: true, id: e.id, read });
 }));
 
 const sendSchema = z.object({
