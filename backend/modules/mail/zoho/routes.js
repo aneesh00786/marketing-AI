@@ -30,6 +30,10 @@ router.use((req, res, next) => {
 router.get('/status', requireCapability('mail.view'), wrap(async (req, res) => res.json({ success: true, ...(await svc.status(req)) })));
 router.post('/connect', requireCapability('mail.configure'), wrap(async (req, res) => res.json({ success: true, ...(await svc.startConnect(req)) })));
 router.post('/disconnect', requireCapability('mail.configure'), wrap(async (req, res) => res.json({ success: true, ...(await svc.disconnect(req)) })));
+// The workspace's own Zoho API client (Mail Center → Settings). The secret is accepted, never returned.
+router.get('/app', requireCapability('mail.configure'), wrap(async (req, res) => res.json({ success: true, app: await svc.getApp(req) })));
+router.put('/app', requireCapability('mail.configure'), wrap(async (req, res) => res.json({ success: true, ...(await svc.saveApp(req, req.body || {})) })));
+router.delete('/app', requireCapability('mail.configure'), wrap(async (req, res) => res.json({ success: true, ...(await svc.removeApp(req)) })));
 router.post('/test', requireCapability('mail.configure'), wrap(async (req, res) => res.json({ success: true, ...(await svc.testConnection(req)) })));
 
 module.exports = router;

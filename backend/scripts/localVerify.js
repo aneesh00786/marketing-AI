@@ -117,7 +117,7 @@ async function main() {
   record('fresh install: migrations up to 023 (production\'s current schema)', to023.status === 0, (to023.stderr || '').slice(-200));
   const { migrate, backupProblem } = require('../db/migrate');
   const status023 = await migrate({ databaseName: target, statusOnly: true, log: () => {} });
-  record('status at 023: 024 and 025 pending', status023.pending.join(',') === '024_mail_tracking,025_compose_purpose_and_grants', `pending: ${status023.pending.join(', ')}`);
+  record('status at 023: 024, 025 and 026 pending', status023.pending.join(',') === '024_mail_tracking,025_compose_purpose_and_grants,026_mail_provider_apps', `pending: ${status023.pending.join(', ')}`);
 
   // ------------------------------------------------------------ verified pre-migration backup
   const pre = path.join(tmp, `${target}-pre.sql`);
@@ -134,12 +134,12 @@ async function main() {
   const refused = await migrate({ databaseName: target, env: { NODE_ENV: 'production' }, log: () => {} }).then(() => null, e => e);
   record('production mode refuses to migrate without a backup', refused && refused.code === 'BACKUP_REQUIRED');
   const applied = await migrate({ databaseName: target, env: { NODE_ENV: 'production' }, backupPath: pre, log: () => {} }).then(r => r, e => ({ error: e }));
-  record('024 and 025 applied with the verified backup', !applied.error && applied.applied.join(',') === '024_mail_tracking,025_compose_purpose_and_grants', applied.error ? applied.error.message : applied.applied.join(', '));
+  record('024, 025 and 026 applied with the verified backup', !applied.error && applied.applied.join(',') === '024_mail_tracking,025_compose_purpose_and_grants,026_mail_provider_apps', applied.error ? applied.error.message : applied.applied.join(', '));
 
   const db = (sql, p = []) => q(sql.replace(/\bTARGET\b/g, target), p);
   const tables = (await db("SELECT TABLE_NAME AS t FROM information_schema.TABLES WHERE TABLE_SCHEMA = 'TARGET'")).map(r => r.t);
-  const need = ['mail_message_tracking', 'mail_tracked_links', 'mail_events', 'mail_webhook_endpoints', 'workspace_member_capability_grants'];
-  record('024/025 tables exist', need.every(t => tables.includes(t)), need.filter(t => !tables.includes(t)).join(', '));
+  const need = ['mail_message_tracking', 'mail_tracked_links', 'mail_events', 'mail_webhook_endpoints', 'workspace_member_capability_grants', 'mail_provider_apps'];
+  record('024/025/026 tables exist', need.every(t => tables.includes(t)), need.filter(t => !tables.includes(t)).join(', '));
   const cols = await db("SELECT TABLE_NAME AS t, COLUMN_NAME AS c, IS_NULLABLE AS n, COLUMN_DEFAULT AS d FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = 'TARGET' AND ((TABLE_NAME = 'mail_configurations' AND COLUMN_NAME IN ('track_opens','track_clicks','tracking_updated_by','tracking_updated_at')) OR (TABLE_NAME = 'mail_send_requests' AND COLUMN_NAME IN ('declared_purpose','applied_purpose','purpose_reasons')))");
   const col = (t, c) => cols.find(x => x.t === t && x.c === c);
   record('tracking switches default to off', ['track_opens', 'track_clicks'].every(c => col('mail_configurations', c) && String(col('mail_configurations', c).d) === '0'));
@@ -148,7 +148,7 @@ async function main() {
   const wantIdx = ['mail_message_tracking.uq_mail_tracking_token:0', 'mail_tracked_links.uq_mail_link_token:0', 'mail_events.uq_mail_events_dedupe:0', 'mail_webhook_endpoints.uq_mail_webhook_token:0', 'mail_webhook_endpoints.uq_mail_webhook_ws_provider:0', 'workspace_member_capability_grants.uq_member_capability:0', 'mail_send_requests.idx_mail_send_requests_ws_created:1', 'mail_events.idx_mail_events_received:1'];
   record('unique keys and indexes', wantIdx.every(i => idx.includes(i)), wantIdx.filter(i => !idx.includes(i)).join(', '));
   const fks = (await db("SELECT TABLE_NAME AS t, CONSTRAINT_NAME AS c, DELETE_RULE AS d FROM information_schema.REFERENTIAL_CONSTRAINTS WHERE CONSTRAINT_SCHEMA = 'TARGET'")).map(r => `${r.c}:${r.d}`);
-  const wantFk = ['fk_mail_tracking_ws:CASCADE', 'fk_mail_links_ws:CASCADE', 'fk_mail_links_tracking:CASCADE', 'fk_mail_events_ws:CASCADE', 'fk_mail_events_tracking:CASCADE', 'fk_mail_webhooks_ws:CASCADE', 'fk_member_capability_ws:CASCADE', 'fk_member_capability_user:CASCADE', 'fk_member_capability_grantor:SET NULL'];
+  const wantFk = ['fk_mail_tracking_ws:CASCADE', 'fk_mail_links_ws:CASCADE', 'fk_mail_links_tracking:CASCADE', 'fk_mail_events_ws:CASCADE', 'fk_mail_events_tracking:CASCADE', 'fk_mail_webhooks_ws:CASCADE', 'fk_member_capability_ws:CASCADE', 'fk_member_capability_user:CASCADE', 'fk_member_capability_grantor:SET NULL', 'fk_mail_provider_apps_ws:CASCADE'];
   record('foreign keys and delete rules', wantFk.every(f => fks.includes(f)), wantFk.filter(f => !fks.includes(f)).join(', '));
   const [grants] = await db('SELECT COUNT(*) AS n FROM TARGET.workspace_member_capability_grants');
   record('no capability grants created by the migration', Number(grants.n) === 0, `${grants.n} rows`);
@@ -156,9 +156,9 @@ async function main() {
   // ------------------------------------------------------------ idempotent re-run
   const again = await migrate({ databaseName: target, log: () => {} });
   record('re-running migrate applies nothing', again.applied.length === 0);
-  await db("DELETE FROM TARGET.schema_migrations WHERE id IN ('024_mail_tracking','025_compose_purpose_and_grants')");
+  await db("DELETE FROM TARGET.schema_migrations WHERE id IN ('024_mail_tracking','025_compose_purpose_and_grants','026_mail_provider_apps')");
   const rerun = await migrate({ databaseName: target, log: () => {} }).then(r => r, e => ({ error: e }));
-  record('024/025 are safe to apply twice (ensure* helpers)', !rerun.error && rerun.applied.length === 2, rerun.error ? rerun.error.message : '');
+  record('024/025/026 are safe to apply twice (ensure* helpers)', !rerun.error && rerun.applied.length === 3, rerun.error ? rerun.error.message : '');
 
   // ------------------------------------------------------------ cascades and retention
   const ws = (await db("INSERT INTO TARGET.workspaces (name, slug, owner_email, plan, status, created_at) VALUES ('Rehearsal', CONCAT('rh-', UUID_SHORT()), 'owner@rehearsal.invalid', 'Starter', 'Active', UTC_TIMESTAMP())")).insertId;
@@ -201,7 +201,7 @@ async function main() {
   const sameMigrations = async (a, b) => JSON.stringify((await q(`SELECT id FROM \`${a}\`.schema_migrations ORDER BY id`)).map(r => r.id)) === JSON.stringify((await q(`SELECT id FROM \`${b}\`.schema_migrations ORDER BY id`)).map(r => r.id));
   record('restore of the post-migration backup matches (tables, migrations)', r1.status === 0 && await countTables(`${target}_restore`) === await countTables(target) && await sameMigrations(target, `${target}_restore`), r1.status === 0 ? '' : r1.stderr.slice(-200));
   const r2 = await restoreInto(`${target}_rollback`, pre);
-  const rbTables = r2.status === 0 ? (await q("SELECT TABLE_NAME AS t FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME IN ('mail_events','workspace_member_capability_grants')", [`${target}_rollback`])).length : -1;
+  const rbTables = r2.status === 0 ? (await q("SELECT TABLE_NAME AS t FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME IN ('mail_events','workspace_member_capability_grants','mail_provider_apps')", [`${target}_rollback`])).length : -1;
   const rbLast = r2.status === 0 ? (await q(`SELECT id FROM \`${target}_rollback\`.schema_migrations ORDER BY id DESC LIMIT 1`))[0]?.id : null;
   record('rollback rehearsal: restoring the pre-migration backup gives the 023 schema', r2.status === 0 && rbTables === 0 && rbLast === '023_social_media_library', `latest migration: ${rbLast}`);
 
@@ -225,7 +225,7 @@ async function main() {
   const pk = run('node', ['backend/scripts/packageRelease.js', '--out', zip], { cwd: REPO });
   // git archive puts everything under one top-level folder (e.g. marketing-AI/); compare without it.
   const list = pk.status === 0 ? run('unzip', ['-Z1', zip]).stdout.split('\n').filter(Boolean).map(n => n.replace(/^[^/]+\//, '')).filter(Boolean) : [];
-  const want = ['frontend/dist/frontend/browser/index.html', 'backend/migrations/024_mail_tracking.js', 'backend/migrations/025_compose_purpose_and_grants.js', 'backend/.env.example'];
+  const want = ['frontend/dist/frontend/browser/index.html', 'backend/migrations/024_mail_tracking.js', 'backend/migrations/025_compose_purpose_and_grants.js', 'backend/migrations/026_mail_provider_apps.js', 'backend/.env.example'];
   const bad = list.filter(n => /(^|\/)\.env$|\.env\.(?!example$)|\.(sql|dump|log|bak|pem|key)$|(^|\/)(node_modules|storage|logs?|scratch)\//i.test(n));
   record('release package (git HEAD): passes its checks and has the migrations and built frontend', pk.status === 0 && want.every(w => list.includes(w)) && !bad.length, pk.status === 0 ? `${list.length} entries${bad.length ? `; forbidden: ${bad.join(', ')}` : ''}` : (pk.stderr || pk.stdout).slice(-200));
   const uncommitted = run('git', ['status', '--porcelain'], { cwd: REPO }).stdout.trim();

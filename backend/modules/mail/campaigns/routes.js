@@ -40,7 +40,7 @@ router.use((req, res, next) => {
   next();
 });
 
-router.get('/', requireCapability('mail.view'), wrap(async (req, res) => res.json({ success: true, campaigns: await svc.list(req) })));
+router.get('/', requireCapability('mail.view'), wrap(async (req, res) => res.json({ success: true, campaigns: await svc.list(req, { thumbs: String(req.query.thumbs || '') === '1' }) })));
 router.get('/audiences', requireCapability('mail.compose'), wrap(async (req, res) => res.json({ success: true, ...(await svc.zohoAudiences(req)) })));
 router.post('/', requireCapability('mail.compose'), wrap(async (req, res) => res.json({ success: true, campaign: await svc.create(req, req.body) })));
 router.get('/:id', requireCapability('mail.view'), wrap(async (req, res) => res.json({ success: true, campaign: await svc.getOne(req, req.params.id) })));

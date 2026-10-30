@@ -16,7 +16,7 @@ import { MembersComponent } from './features/members/members.component';
 import type { TemplateUseTarget } from './features/mail/email-templates.component';
 import { TemplatePickerComponent } from './features/mail/template-picker.component';
 import { MailCenterComponent } from './features/mail/mail-center.component';
-import { DataState, MailSection, mailSectionFromLink } from './features/mail/mail-nav';
+import { DataState, MAIL_SECTIONS, MailSection, mailSectionFromLink, visibleMailSections } from './features/mail/mail-nav';
 import { EmailPreviewComponent } from './features/mail/email-preview.component';
 import { findTokens, fillTokens, defaultTokenValues } from './features/mail/template-utils';
 
@@ -108,6 +108,13 @@ export class AppComponent implements OnInit, OnDestroy {
    * Sidebar navigation opens a module at its default view. 'drafts' is the former Mail Drafts page:
    * it now opens Mail Center's Drafts section, so links to it from elsewhere keep working.
    */
+  /** Mail Center sections for the sidebar sub-menu (Product Emails only while its feature is on). */
+  get mailSubnav() {
+    const keys = visibleMailSections({ productEmails: !!this.serverStatus?.features?.productEmails });
+    return MAIL_SECTIONS.filter(s => keys.includes(s.key));
+  }
+  get pendingApprovalCount(): number { return this.drafts.filter(d => ['Draft', 'Approved', 'Needs Review'].includes(d.status)).length; }
+
   navigate(route: AppComponent['currentRoute'] | 'drafts', mailSection: MailSection = 'overview'): void {
     this.socialSection = null;
     this.socialCampaignId = null;

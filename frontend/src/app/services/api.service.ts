@@ -361,7 +361,7 @@ export class ApiService {
     return this.http.get(`${this.baseUrl}/emails/inbox`, { params: this.queryParams(params) });
   }
 
-  getSentMail(params: { q?: string; status?: string; purpose?: string; from?: string; to?: string; page?: number } = {}): Observable<any> {
+  getSentMail(params: { q?: string; status?: string; purpose?: string; from?: string; to?: string; page?: number; sentOnly?: '1' } = {}): Observable<any> {
     return this.http.get(`${this.baseUrl}/emails/sent`, { params: this.queryParams(params) });
   }
 
@@ -384,7 +384,7 @@ export class ApiService {
     return this.http.get(`${this.baseUrl}/mail/activity/summary`, { params: { days: String(days) } });
   }
 
-  getCampaignLog(params: { type?: string; page?: number } = {}): Observable<any> {
+  getCampaignLog(params: { type?: string; from?: string; to?: string; page?: number } = {}): Observable<any> {
     const p: Record<string, string> = {};
     for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null && v !== '') p[k] = String(v);
     return this.http.get(`${this.baseUrl}/mail/activity/campaigns`, { params: p });
@@ -436,6 +436,19 @@ export class ApiService {
   }
 
   // 26. Company Mail Authorization (SMTP & IMAP)
+  // Zoho Campaigns API client entered in Settings (the secret is sent, never returned)
+  getZohoApp(): Observable<any> {
+    return this.http.get(`${this.baseUrl}/mail/zoho/app`);
+  }
+
+  saveZohoApp(body: { clientId: string; clientSecret?: string }): Observable<any> {
+    return this.http.put(`${this.baseUrl}/mail/zoho/app`, body);
+  }
+
+  removeZohoApp(): Observable<any> {
+    return this.http.delete(`${this.baseUrl}/mail/zoho/app`);
+  }
+
   getMailConfig(): Observable<any> {
     return this.http.get(`${this.root}/api/mail/config`);
   }

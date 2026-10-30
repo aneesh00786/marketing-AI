@@ -1,25 +1,40 @@
-<section class="zoho">
-  <div class="zoho-head">
-    <div>
-      <h3 class="mx-subhead">Zoho Campaigns connection <span class="mx-tag" [class.good]="connected" [class.warn]="!connected">{{ connected ? 'Connected' : 'Not connected' }}</span></h3>
-      <p class="muted small">Campaigns are written and approved here; Zoho only delivers them to the mailing lists you choose. Lists, contacts and consent are managed in Zoho; Marketech.ai never uploads contacts.</p>
-    </div>
-    <div class="zoho-actions" *ngIf="status?.canConfigure">
-      <button *ngIf="!connected || missingScopes.length" class="btn btn-primary btn-sm" (click)="connect()" [disabled]="busy === 'connect' || !status.serverConfigured">
-        {{ status.connection?.status === 'not_connected' || status.connection?.status === 'disconnected' ? 'Connect Zoho' : 'Reconnect Zoho' }}
-      </button>
-      <button *ngIf="connected" class="btn btn-secondary btn-sm" (click)="test()" [disabled]="busy === 'test'">Test connection</button>
-      <button *ngIf="connected || status.connection?.status === 'reauth_required'" class="btn btn-secondary btn-sm" (click)="disconnect()" [disabled]="busy === 'disconnect'">Disconnect</button>
+<section class="zoho" aria-labelledby="zoho-title">
+  <div class="zoho-main">
+    <span class="zoho-icon" aria-hidden="true"><app-icon name="campaigns" [size]="22"></app-icon></span>
+    <div class="zoho-text">
+      <h3 id="zoho-title" class="mx-subhead">Zoho Campaigns connection <span class="mx-tag" [class.good]="connected" [class.warn]="!connected">{{ connected ? 'Connected' : 'Not connected' }}</span></h3>
+      <p class="zoho-desc">Campaigns are written and approved here; Zoho only delivers them to the mailing lists you choose. Lists, contacts and consent are managed in Zoho; Marketech.ai never uploads contacts.</p>
     </div>
   </div>
 
+  <!-- Setup steps: a tick only for what the app can confirm; the rest is done in Zoho. -->
+  <div class="zoho-setup" *ngIf="status">
+    <p class="zoho-setup-title"><app-icon name="settings" [size]="15"></app-icon>{{ connected && !missingScopes.length ? 'Ready to send' : 'Setup required' }}</p>
+    <ul class="zoho-steps">
+      <li [class.done]="status.serverConfigured"><app-icon [name]="status.serverConfigured ? 'check' : 'x'" [size]="14"></app-icon>Zoho API credentials entered (Settings → Zoho Campaigns)</li>
+      <li [class.done]="connected && !missingScopes.length"><app-icon [name]="connected && !missingScopes.length ? 'check' : 'x'" [size]="14"></app-icon>Zoho account connected to this workspace</li>
+      <li class="info"><app-icon name="info" [size]="14"></app-icon>Verify the sender address and authenticate the domain (SPF/DKIM) in Zoho</li>
+      <li class="info"><app-icon name="info" [size]="14"></app-icon>Use existing mailing lists from your Zoho account</li>
+    </ul>
+  </div>
+
+  <div class="zoho-actions" *ngIf="status?.canConfigure">
+    <button *ngIf="!status.serverConfigured && !inSettings" type="button" class="btn btn-secondary btn-sm" (click)="openSettings.emit()"><app-icon name="settings" [size]="15"></app-icon>Set up in Settings</button>
+    <button *ngIf="!connected || missingScopes.length" class="btn btn-primary btn-sm" (click)="connect()" [disabled]="busy === 'connect' || !status.serverConfigured"
+      [title]="status.serverConfigured ? '' : 'Enter the Zoho Client ID and Client Secret in Settings → Zoho Campaigns first'">
+      <app-icon name="link" [size]="15"></app-icon>{{ status.connection?.status === 'not_connected' || status.connection?.status === 'disconnected' ? 'Connect Zoho' : 'Reconnect Zoho' }}
+    </button>
+    <button *ngIf="connected" class="btn btn-secondary btn-sm" (click)="test()" [disabled]="busy === 'test'">Test connection</button>
+    <button *ngIf="connected || status.connection?.status === 'reauth_required'" class="btn btn-secondary btn-sm" (click)="disconnect()" [disabled]="busy === 'disconnect'">Disconnect</button>
+  </div>
+
   <div class="note error" *ngIf="error" role="alert">{{ error }}</div>
-  <ng-container *ngIf="status">
-    <p class="muted small" *ngIf="!status.serverConfigured">Zoho Campaigns is not set up on the server yet (Zoho client credentials missing).</p>
+  <div class="zoho-notes" *ngIf="status">
+    <p class="muted small" *ngIf="!status.serverConfigured">{{ inSettings ? 'Enter the Zoho API credentials above, then connect.' : 'Zoho is not set up yet: an Owner or Admin enters the Zoho API credentials in Settings → Zoho Campaigns.' }}</p>
     <p class="muted small" *ngIf="connected">Connected ({{ status.connection.location | uppercase }} data center){{ status.connection.lastCheckedAt ? ' · last checked ' + (status.connection.lastCheckedAt | date:'medium') : '' }}.</p>
     <p class="muted small" *ngIf="missingScopes.length">This connection was made before campaign delivery was added. Reconnect to grant: {{ missingScopes.join(', ') }}.</p>
     <p class="muted small" *ngIf="status.connection?.status === 'reauth_required'">The Zoho connection expired or was revoked. Reconnect to continue.</p>
     <p class="muted small" *ngIf="!connected && !status.canConfigure">Ask an Owner or Admin to connect Zoho Campaigns.</p>
-    <p class="muted small">{{ status.limits.note }} One-time Zoho setup: verify your sender address and authenticate your domain (SPF/DKIM) in Zoho.</p>
-  </ng-container>
+    <p class="muted small">{{ status.limits.note }}</p>
+  </div>
 </section>

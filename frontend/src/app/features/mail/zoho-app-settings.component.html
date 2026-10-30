@@ -1,0 +1,60 @@
+<section class="za" aria-labelledby="za-title">
+  <div class="za-head">
+    <div>
+      <h3 id="za-title" class="mx-subhead">Zoho API credentials</h3>
+      <p class="mx-desc">Marketech.ai connects to your Zoho Campaigns through an API client you create in the Zoho API Console. Enter its Client ID and Client Secret here; nothing needs to change on the server.</p>
+    </div>
+    <span class="mx-tag" *ngIf="app" [class.good]="app.source" [class.warn]="!app.source">
+      {{ app.source === 'workspace' ? 'Saved in Settings' : app.source === 'server' ? 'Using server settings' : 'Not set up' }}
+    </span>
+  </div>
+
+  <p class="mx-desc" *ngIf="loading">Loading…</p>
+  <div class="mx-callout info" *ngIf="forbidden">Only workspace Owners and Admins can view and change the Zoho credentials.</div>
+  <div class="mx-callout error" *ngIf="error" role="alert">{{ error }}</div>
+  <div class="mx-callout error" *ngIf="app && !app.encryptionReady" role="alert">Credential encryption is not configured on the server (SOCIAL_TOKEN_ENCRYPTION_KEY), so the Zoho secret cannot be stored. Ask whoever runs the server to set it.</div>
+
+  <ng-container *ngIf="app && !forbidden">
+    <!-- 1. Create the API client in Zoho -->
+    <ol class="za-steps">
+      <li>
+        Open the <a href="https://api-console.zoho.com" target="_blank" rel="noopener noreferrer">Zoho API Console</a>
+        with the Zoho account that owns your Zoho Campaigns, click <b>Add Client</b> and choose <b>Server-based Applications</b>.
+      </li>
+      <li>
+        Enter these two addresses exactly:
+        <dl class="za-copy">
+          <div><dt>Homepage URL</dt><dd><code>{{ app.homepageUrl }}</code><button type="button" class="btn btn-secondary btn-sm" (click)="copy(app.homepageUrl, 'Homepage URL')">Copy</button></dd></div>
+          <div><dt>Authorized Redirect URI</dt><dd><code>{{ app.redirectUri }}</code><button type="button" class="btn btn-secondary btn-sm" (click)="copy(app.redirectUri, 'Redirect URI')">Copy</button></dd></div>
+        </dl>
+      </li>
+      <li>Create the client, then in its <b>Settings</b> turn on <b>Multi-DC</b> so Zoho accounts in any data center (EU, India, Australia…) can connect.</li>
+      <li>Copy the <b>Client ID</b> and <b>Client Secret</b> into the form below and save.</li>
+      <li>Click <b>Connect Zoho</b> below and approve access in Zoho.</li>
+    </ol>
+
+    <!-- 2. Enter the credentials -->
+    <form class="za-form" (ngSubmit)="save()" autocomplete="off">
+      <p class="mx-desc" *ngIf="savedHere">Saved Client ID: <code>{{ app.clientIdHint }}</code>{{ app.updatedAt ? ' · updated ' + (app.updatedAt | date:'medium') : '' }}. The secret is stored encrypted and is never shown.</p>
+      <p class="mx-desc" *ngIf="app.source === 'server'">The server's credentials are in use. Saving your own here replaces them for this workspace.</p>
+      <div class="za-grid">
+        <label for="za-client-id">Client ID
+          <input id="za-client-id" class="hud-input" name="clientId" [(ngModel)]="form.clientId" maxlength="150" spellcheck="false" autocomplete="off"
+            [placeholder]="savedHere ? 'Enter it again to change it' : '1000.XXXXXXXXXXXXXXXXXXXXXXXXXX'" />
+        </label>
+        <label for="za-client-secret">Client Secret
+          <span class="za-secret">
+            <input id="za-client-secret" class="hud-input" name="clientSecret" [type]="showSecret ? 'text' : 'password'" [(ngModel)]="form.clientSecret" maxlength="200"
+              spellcheck="false" autocomplete="new-password" [placeholder]="savedHere ? 'Leave blank to keep the saved secret' : 'Paste the Client Secret'" />
+            <button type="button" class="btn btn-secondary btn-sm" (click)="showSecret = !showSecret" [attr.aria-pressed]="showSecret" [attr.aria-label]="showSecret ? 'Hide secret' : 'Show secret'">{{ showSecret ? 'Hide' : 'Show' }}</button>
+          </span>
+        </label>
+      </div>
+      <div class="za-actions">
+        <button type="button" class="btn btn-primary btn-sm" (click)="save()" [disabled]="!canSave"><app-icon name="save" [size]="15"></app-icon>{{ saving ? 'Saving…' : 'Save credentials' }}</button>
+        <button type="button" class="btn btn-secondary btn-sm" *ngIf="savedHere" (click)="remove()">Remove saved credentials</button>
+        <span class="mx-desc za-note">Saving different credentials disconnects Zoho Campaigns; connect it again afterwards.</span>
+      </div>
+    </form>
+  </ng-container>
+</section>

@@ -143,6 +143,43 @@ test('campaign log: AI campaigns with send/reply/bounce counts and Zoho campaign
   assert.deepEqual(onlyZoho.data.campaigns.map(c => c.type), ['zoho']);
 });
 
+test('logs list only what was sent: no draft, approved-but-unsent or failed campaigns; date range filters sends', async () => {
+  const C = await h.createWorkspace({ name: 'Logs only sent' });
+  const run = (sql, p) => db().run(sql, p);
+  const tokenStr = () => crypto.randomBytes(12).toString('hex');
+  // AI: one with sends 3 days ago and today, one draft that never sent
+  const sentAi = (await run("INSERT INTO outreach_campaigns (workspace_id, name, status, created_at, updated_at) VALUES (?, 'Sent sequence', 'active', UTC_TIMESTAMP(), UTC_TIMESTAMP())", [C.workspaceId])).lastID;
+  await run("INSERT INTO outreach_campaigns (workspace_id, name, status, created_at, updated_at) VALUES (?, 'Draft sequence', 'draft', UTC_TIMESTAMP(), UTC_TIMESTAMP())", [C.workspaceId]);
+  const step = (await run("INSERT INTO outreach_steps (workspace_id, campaign_id, step_order, subject, body_text, delay_days, created_at, updated_at) VALUES (?, ?, 1, 'S', 'B', 0, UTC_TIMESTAMP(), UTC_TIMESTAMP())", [C.workspaceId, sentAi])).lastID;
+  for (const [i, when] of [[0, at(3)], [1, at(0)]]) {
+    const r = (await run('INSERT INTO outreach_recipients (workspace_id, campaign_id, email, status, unsubscribe_token, created_at, updated_at) VALUES (?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())', [C.workspaceId, sentAi, `x${i}@lead.io`, 'active', tokenStr()])).lastID;
+    await run("INSERT INTO outreach_sends (workspace_id, campaign_id, recipient_id, step_id, step_order, status, sent_at, created_at) VALUES (?, ?, ?, ?, 1, 'sent', ?, UTC_TIMESTAMP())", [C.workspaceId, sentAi, r, step, when]);
+  }
+  // Zoho: submitted 3 days ago, plus draft, approved and failed (never sent)
+  await run("INSERT INTO mail_campaigns (workspace_id, name, subject, status, version, submitted_at, created_at, updated_at) VALUES (?, 'Submitted news', 'N', 'submitted', 1, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())", [C.workspaceId, at(3)]);
+  for (const st of ['draft', 'approved', 'failed']) {
+    await run("INSERT INTO mail_campaigns (workspace_id, name, subject, status, version, created_at, updated_at) VALUES (?, ?, 'N', ?, 1, UTC_TIMESTAMP(), UTC_TIMESTAMP())", [C.workspaceId, `Zoho ${st}`, st]);
+  }
+  const log = async qs => (await h.api('GET', `/api/v1/mail/activity/campaigns${qs}`, { token: C.token })).data.campaigns;
+  const all = await log('');
+  assert.deepEqual(all.map(c => c.name).sort(), ['Sent sequence', 'Submitted news']);
+  assert.equal(all.find(c => c.name === 'Sent sequence').sent, 2);
+  const today = await log(`?from=${day(0)}&to=${day(0)}`);
+  assert.deepEqual(today.map(c => [c.name, c.sent]), [['Sent sequence', 1]], 'only sends in the range are counted; Zoho submitted earlier is left out');
+  const earlier = await log(`?from=${day(5)}&to=${day(2)}`);
+  assert.deepEqual(earlier.map(c => c.name).sort(), ['Sent sequence', 'Submitted news']);
+  assert.equal((await log(`?from=${day(1)}&to=${day(1)}`)).length, 0);
+  assert.equal((await h.api('GET', '/api/v1/mail/activity/campaigns?from=yesterday', { token: C.token })).status, 400);
+});
+
+test('Sent Mail with sentOnly leaves out failed sends (the Logs view)', async () => {
+  const r = await h.api('GET', '/api/v1/emails/sent?sentOnly=1', { token: A.token });
+  assert.equal(r.status, 200);
+  assert.ok(r.data.emails.length > 0);
+  assert.ok(r.data.emails.every(e => e.delivery !== 'not_sent'));
+  assert.ok((await h.api('GET', '/api/v1/emails/sent', { token: A.token })).data.emails.some(e => e.delivery === 'not_sent'));
+});
+
 test('the mailbox list shows each sent email\'s delivery status (opened, not sent, plain sent) without raw tracking columns', async () => {
   const r = await h.api('GET', '/api/v1/emails', { token: A.token });
   assert.equal(r.status, 200);

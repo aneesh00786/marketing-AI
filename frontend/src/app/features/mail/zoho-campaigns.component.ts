@@ -1,5 +1,6 @@
 import { Component, EventEmitter, Input, OnInit, Output } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { IconComponent } from '../../shared/icon.component';
 import { HttpClient } from '@angular/common/http';
 import { apiRoot } from '../../core/api-base';
 
@@ -11,7 +12,7 @@ import { apiRoot } from '../../core/api-base';
 @Component({
   selector: 'app-zoho-campaigns',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, IconComponent],
   templateUrl: './zoho-campaigns.component.html',
   styleUrls: ['../command/command-center.component.css', './mail-ui.css', './zoho-campaigns.component.css']
 })
@@ -20,6 +21,10 @@ export class ZohoCampaignsComponent implements OnInit {
   @Input() oauthResult: { zoho?: string; reason?: string } | null = null;
   @Output() toast = new EventEmitter<string>();
   @Output() statusChange = new EventEmitter<any>();
+  /** Shown inside Settings → Zoho Campaigns (no "Set up in Settings" link there). */
+  @Input() inSettings = false;
+  /** Ask to open Settings → Zoho Campaigns, where the API credentials are entered. */
+  @Output() openSettings = new EventEmitter<void>();
 
   private base = `${apiRoot()}/api/v1/mail/zoho`;
   status: any = null;

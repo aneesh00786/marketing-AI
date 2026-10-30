@@ -5,18 +5,21 @@ import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { apiRoot } from '../../core/api-base';
 import { EmailPreviewComponent } from './email-preview.component';
+import { EmailContentEditorComponent } from './email-content-editor.component';
+import { TemplatePickerComponent } from './template-picker.component';
 
 export type TemplateUseTarget = 'email' | 'campaign' | 'draft';
 
 /**
- * Mail Center → Email Templates: list/search, create (blank, .html/.htm, .zip), preview,
- * edit, duplicate, delete, and "use in" email/campaign/draft. Uploaded HTML is sanitized by the
+ * Mail Center → Email Templates: list (search, category, sort, thumbnails), create (blank,
+ * .html/.htm, .zip), edit in the shared Email content editor (Visual / HTML / Preview), duplicate,
+ * delete, and "use in" email/campaign/draft. Uploaded HTML is sanitized by the
  * server and only ever rendered inside a sandboxed iframe. Nothing is saved until "Save".
  */
 @Component({
   selector: 'app-email-templates',
   standalone: true,
-  imports: [CommonModule, IconComponent, FormsModule, EmailPreviewComponent],
+  imports: [CommonModule, IconComponent, FormsModule, EmailPreviewComponent, EmailContentEditorComponent, TemplatePickerComponent],
   templateUrl: './email-templates.component.html',
   styleUrls: ['../command/command-center.component.css', './mail-ui.css', './email-templates.component.css']
 })
@@ -46,11 +49,20 @@ export class EmailTemplatesComponent implements OnInit {
   // Editor (a working copy; the saved template changes only on Save)
   editing: any = null;
   original = '';
-  viewport: 'desktop' | 'mobile' = 'desktop';
+  /** Changes for every template opened, so the content editor starts again in Edit → Visual. */
+  editKey = '';
+  private editSeq = 0;
+  sort: 'newest' | 'oldest' | 'name' = 'newest';
+  menuFor: number | null = null;
+  /** "Choose template" in the editor: load a copy of another template's HTML. */
+  picker = false;
+  zipInfoOpen = true;
 
   constructor(private http: HttpClient) {}
 
   ngOnInit(): void {
+    // On phones the ZIP explanation starts folded so the list is visible straight away.
+    try { this.zipInfoOpen = !(window.innerWidth < 700); } catch { /* no window */ }
     // Permissions come from the template API itself (not from any other module's status).
     this.http.get<any>(`${this.base}/categories`).subscribe({
       next: r => {
@@ -80,7 +92,8 @@ export class EmailTemplatesComponent implements OnInit {
   // ---------------------------------------------------------------- list
 
   load(): void {
-    const params: any = { page: String(this.page), pageSize: String(this.pageSize) };
+    // thumbs=1: the start of each template's HTML for the list thumbnails (capped by the server).
+    const params: any = { page: String(this.page), pageSize: String(this.pageSize), sort: this.sort, thumbs: '1' };
     if (this.q.trim()) params.q = this.q.trim();
     if (this.category) params.category = this.category;
     this.http.get<any>(this.base, { params }).subscribe({
@@ -155,6 +168,7 @@ export class EmailTemplatesComponent implements OnInit {
 
   private startEditing(t: any): void {
     this.editing = t;
+    this.editKey = `${t.id ?? 'new'}:${++this.editSeq}`;
     this.original = JSON.stringify(this.snapshot());
   }
 
@@ -203,6 +217,51 @@ export class EmailTemplatesComponent implements OnInit {
       next: () => { if (this.editing?.id === t.id) { this.editing = null; this.original = ''; } this.toast.emit('Template deleted.'); this.load(); },
       error: e => this.toast.emit(this.err(e))
     });
+  }
+
+  // ---------------------------------------------------------------- list helpers
+
+  toggleCreateMenu(ev: Event): void { ev.stopPropagation(); this.showCreateMenu = !this.showCreateMenu; this.menuFor = null; }
+  toggleMenu(id: number, ev: Event): void { ev.stopPropagation(); this.menuFor = this.menuFor === id ? null : id; this.showCreateMenu = false; }
+  toggleZipInfo(): void { this.zipInfoOpen = !this.zipInfoOpen; }
+
+  @HostListener('document:click') closeMenus(): void { this.menuFor = null; this.showCreateMenu = false; }
+  @HostListener('document:keydown.escape') escMenus(): void { this.menuFor = null; this.showCreateMenu = false; }
+
+  /** Tag tone by category: transactional/welcome, marketing kinds, everything else. */
+  tone(category: string): string {
+    const c = String(category || '').toLowerCase();
+    if (['transactional', 'welcome'].includes(c)) return 'good';
+    if (['newsletter', 'promotion', 'announcement', 'marketing'].includes(c)) return 'warn';
+    return 'info';
+  }
+
+  sourceLabel(t: any): string {
+    return t.source === 'zip' ? `Imported ZIP${t.sourceFilename ? ' · ' + t.sourceFilename : ''}` : t.source === 'html' ? `Uploaded HTML${t.sourceFilename ? ' · ' + t.sourceFilename : ''}` : 'Created here';
+  }
+
+  /** The category list, including a custom category already on this template. */
+  get categoryOptions(): string[] {
+    const c = this.editing?.category;
+    return c && !this.categories.includes(c) ? [...this.categories, c] : this.categories;
+  }
+
+  /** "Use in …" from the list: the full template is loaded first (the list has no HTML). */
+  useTemplate(t: any, target: TemplateUseTarget): void {
+    if (this.editing?.id === t.id) { this.useIn(target); return; }
+    this.http.get<any>(`${this.base}/${t.id}`).subscribe({
+      next: r => this.use.emit({ template: r.template, target }),
+      error: e => this.toast.emit(this.err(e))
+    });
+  }
+
+  /** "Choose template" in the editor replaces this template's HTML with a copy (not saved until Save). */
+  onTemplatePicked(t: any): void {
+    this.picker = false;
+    if (!this.editing || !t?.html) return;
+    if ((this.editing.html || '').trim() && !confirm(`Replace this template's content with a copy of "${t.name}"?`)) return;
+    this.editing.html = t.html;
+    this.toast.emit(`Loaded a copy of "${t.name}". Review it, then Save.`);
   }
 
   useIn(target: TemplateUseTarget): void {

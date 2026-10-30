@@ -101,11 +101,11 @@
 
     <app-mail-tracking-settings *ngSwitchCase="'tracking'" [startOpen]="true" (toast)="toast.emit($event)"></app-mail-tracking-settings>
 
-    <div *ngSwitchCase="'zoho'" class="ms-card">
-      <div class="ms-card-head">
-        <p class="sub">Large email campaigns are delivered by Zoho Campaigns to your Zoho mailing lists. Connect or disconnect your Zoho account where you create campaigns.</p>
-        <button type="button" class="btn btn-secondary btn-sm" (click)="openSection.emit('campaigns')">Open Campaigns</button>
-      </div>
+    <!-- Zoho Campaigns: the API credentials first, then the connection they are used for -->
+    <div *ngSwitchCase="'zoho'" class="ms-zoho">
+      <app-zoho-app-settings (toast)="toast.emit($event)" (changed)="zohoConn.loadStatus()"></app-zoho-app-settings>
+      <app-zoho-campaigns #zohoConn [inSettings]="true" (toast)="toast.emit($event)"></app-zoho-campaigns>
+      <p class="mx-desc">Campaigns themselves are written and approved in <button type="button" class="link-btn" (click)="openSection.emit('campaigns')">Campaigns</button>.</p>
     </div>
   </div>
 </section>

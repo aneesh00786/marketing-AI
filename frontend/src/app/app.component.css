@@ -58,6 +58,14 @@ code { font-family: var(--font-mono); font-size: 0.85em; }
 .nav-item.active { background: var(--accent-soft); color: var(--text-strong); font-weight: 600; }
 .nav-item.active::before { content: ''; position: absolute; left: -12px; top: 8px; bottom: 8px; width: 3px; border-radius: 0 3px 3px 0; background: var(--accent); }
 .nav-item.active app-icon { color: var(--accent-text); }
+/* Mail Center sub-menu */
+.nav-sub { display: flex; flex-direction: column; gap: 1px; margin: 2px 0 6px 18px; padding-left: 10px; border-left: 1px solid var(--border); }
+.nav-sub-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 10px; border: none; border-radius: 8px; background: none; color: var(--text-muted); font: inherit; font-size: 0.86rem; text-align: left; cursor: pointer; }
+.nav-sub-item:hover { background: var(--surface-hover); color: var(--text); }
+.nav-sub-item.active { background: var(--accent-soft); color: var(--text-strong, var(--text)); font-weight: 600; }
+.nav-sub-item.active app-icon { color: var(--accent-text); }
+.nav-sub-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.nav-sub-item .nav-count { margin-left: auto; }
 .nav-label { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .nav-count { font-size: 0.72rem; font-weight: 600; color: var(--text-muted); background: var(--surface-2); border: 1px solid var(--border); padding: 0 7px; border-radius: 999px; line-height: 18px; }
 .nav-item.active .nav-count { color: var(--accent-text); border-color: var(--accent-ring); background: transparent; }

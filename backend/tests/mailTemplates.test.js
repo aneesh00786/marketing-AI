@@ -101,6 +101,24 @@ test('templates: create, list with search/paging, rename, duplicate, delete; per
   for (const a of ['mail.template_created', 'mail.template_updated', 'mail.template_duplicated', 'mail.template_deleted']) assert.ok(logs.some(l => l.action === a), a);
 });
 
+test('list: sort by name / oldest / newest, and size-capped thumbnails only when asked; other workspaces never listed', async () => {
+  const ws = await h.createWorkspace({ name: 'Sorting' });
+  for (const [name, html] of [['Bravo', '<p>B</p>'], ['Alpha', '<p>A</p>'], ['Charlie', `<p>${'x'.repeat(60000)}</p>`]]) {
+    assert.equal((await t(ws, 'POST', '', { name, category: 'Custom', html })).status, 200);
+  }
+  const names = async qs => (await t(ws, 'GET', `?${qs}`)).data.templates.map(x => x.name);
+  assert.deepEqual(await names('sort=name'), ['Alpha', 'Bravo', 'Charlie']);
+  assert.deepEqual(await names('sort=oldest'), ['Bravo', 'Alpha', 'Charlie']);
+  assert.deepEqual(await names('sort=newest'), ['Charlie', 'Alpha', 'Bravo']);
+  assert.deepEqual(await names('sort=name;DROP TABLE x'), ['Charlie', 'Alpha', 'Bravo'], 'unknown sort falls back to newest');
+  const plain = (await t(ws, 'GET', '')).data.templates;
+  assert.ok(plain.every(x => x.thumbHtml === undefined && x.html === undefined), 'no HTML unless asked');
+  const withThumbs = (await t(ws, 'GET', '?thumbs=1&sort=name')).data.templates;
+  assert.equal(withThumbs[0].thumbHtml, '<p>A</p>');
+  assert.ok(withThumbs[2].thumbHtml.length <= 40000, 'thumbnail HTML is capped');
+  assert.ok(!(await t(A, 'GET', '?thumbs=1')).data.templates.some(x => ['Alpha', 'Bravo', 'Charlie'].includes(x.name)));
+});
+
 test('sanitization: scripts, handlers, javascript: URLs, forms and frames are removed and reported; email markup stays', async () => {
   const html = `<html><head><style>.x{color:red;background:url(javascript:alert(1))}</style></head><body>
     <table bgcolor="#eee"><tr><td onclick="steal()" style="width:expression(alert(1));color:#111">Hi</td></tr></table>

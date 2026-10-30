@@ -2,10 +2,13 @@
   <!-- The app bar already shows the page title; this toolbar names the open section and holds the main actions. -->
   <header class="mc-head">
     <h2 id="mc-title" class="sr-only">Mail Center</h2>
-    <p class="mc-context" *ngIf="canView">
-      <button type="button" class="mc-pill" (click)="go('inbox')" [class.hot]="inboxUnread">{{ inboxUnread ?? '—' }} unread</button>
-      <button type="button" class="mc-pill" (click)="go('approvals')" [class.hot]="pendingApprovals">{{ draftsState === 'ready' ? pendingApprovals : '—' }} waiting for approval</button>
-    </p>
+    <nav class="mc-crumbs" aria-label="Breadcrumb">
+      <button type="button" class="mc-crumb" (click)="go('overview')" [attr.aria-current]="active === 'overview' ? 'page' : null">Mail Center</button>
+      <ng-container *ngIf="active !== 'overview'">
+        <span class="mc-crumb-sep" aria-hidden="true">›</span>
+        <span class="mc-crumb current" aria-current="page">{{ activeLabel }}</span>
+      </ng-container>
+    </nav>
     <div class="mc-create">
       <button type="button" class="btn btn-primary" (click)="compose.emit()" title="Write one email and send it after you confirm">
         <app-icon name="send" [size]="16"></app-icon>Compose Email</button>
@@ -31,7 +34,7 @@
     <button type="button" role="tab" [id]="'mc-tab-' + s.key" [class.on]="active === s.key"
             [attr.aria-selected]="active === s.key" [attr.tabindex]="active === s.key ? 0 : -1" aria-controls="mc-panel"
             [title]="s.hint" (click)="go(s.key)" (keydown)="onTabKey($event)">
-      {{ s.label }}
+      <app-icon [name]="s.icon" [size]="16"></app-icon>{{ s.label }}
       <span class="mc-badge" *ngIf="s.key === 'inbox' && inboxUnread" [attr.aria-label]="inboxUnread + ' unread'">{{ inboxUnread }}</span>
       <span class="mc-badge" *ngIf="s.key === 'approvals' && draftsState === 'ready' && (draftCount('Draft') + draftCount('Approved') + draftCount('Needs Review'))">{{ draftCount('Draft') + draftCount('Approved') + draftCount('Needs Review') }}</span>
     </button>
@@ -120,7 +123,7 @@
 
       <app-product-emails *ngSwitchCase="'product-emails'" (toast)="toast.emit($event)"></app-product-emails>
 
-      <app-email-campaigns *ngSwitchCase="'campaigns'" [oauthResult]="zohoOauthResult" [startTemplate]="campaignStartTemplate" (toast)="toast.emit($event)"></app-email-campaigns>
+      <app-email-campaigns *ngSwitchCase="'campaigns'" (openSettings)="settingsTab = 'zoho'; go('settings')" [oauthResult]="zohoOauthResult" [startTemplate]="campaignStartTemplate" (toast)="toast.emit($event)"></app-email-campaigns>
 
       <app-email-templates *ngSwitchCase="'templates'" (toast)="toast.emit($event)" (use)="templateUse.emit($event)"></app-email-templates>
 
@@ -128,7 +131,7 @@
       <app-mail-logs *ngSwitchCase="'logs'" [canViewAudit]="!!caps?.has('mail.configure')" (openSection)="go($any($event))"></app-mail-logs>
 
       <!-- All mail settings: mailbox connection, marketing approval, tracking, Zoho pointer. -->
-      <app-mail-settings *ngSwitchCase="'settings'" (toast)="toast.emit($event)" (changed)="settingsChanged.emit()" (openSection)="go($any($event))"></app-mail-settings>
+      <app-mail-settings *ngSwitchCase="'settings'" [initialTab]="settingsTab" (toast)="toast.emit($event)" (changed)="settingsChanged.emit()" (openSection)="go($any($event))"></app-mail-settings>
     </ng-container>
   </div>
 </section>

@@ -1,12 +1,4 @@
 .ec { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
-.ec-grid { display: grid; grid-template-columns: minmax(200px, 260px) 1fr; gap: 16px; }
-.ec-list { display: flex; flex-direction: column; gap: 6px; }
-.ec-item { text-align: left; border: 1px solid var(--border); border-radius: 10px; padding: 10px; background: var(--surface); color: var(--text); cursor: pointer; display: flex; flex-direction: column; gap: 4px; font: inherit; }
-.ec-item .mx-tag { align-self: flex-start; }
-.ec-item.active { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
-.ec-detail { border: 1px solid var(--border); border-radius: 12px; padding: 14px; min-width: 0; }
-.ec-detail-head { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
-.ec-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .ec-form { display: flex; flex-direction: column; gap: 10px; }
 .ec-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text-muted); }
 .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -14,18 +6,6 @@
 .lists legend { font-size: 13px; color: var(--text-muted); padding: 0 4px; }
 .lists label.check { flex-direction: row; align-items: center; gap: 8px; color: var(--text); }
 /* Email content: one full-width panel, Edit or Preview */
-.ec-content { border: 1px solid var(--border); border-radius: 12px; background: var(--surface); display: flex; flex-direction: column; min-width: 0; }
-.ec-content-head { display: flex; align-items: center; gap: 8px 10px; flex-wrap: wrap; padding: 10px 12px; border-bottom: 1px solid var(--border); }
-.ec-spacer { flex: 1; }
-.ec-content-body { padding: 12px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-.ec-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-textarea.code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; line-height: 1.55; resize: vertical; }
-.ec-editor { min-height: 460px; tab-size: 2; }
-.ec-hints { margin: 0; padding: 8px 12px 8px 28px; border-radius: 8px; background: var(--warning-soft); color: var(--warning-text); font-size: 0.8rem; }
-.ec-guide { margin: 0; }
-.ec-canvas { background: var(--surface-2); border-radius: 10px; padding: 16px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-.ec-preview { height: 560px; }
-@media (max-width: 900px) { .ec-editor { min-height: 360px; } .ec-preview { height: 440px; } .ec-canvas { padding: 8px; } }
 .tag { display: inline-block; font-size: 11px; border-radius: 6px; padding: 2px 6px; background: var(--surface-hover); margin-right: 6px; }
 .tag.ok { background: var(--success-soft); color: var(--success-text); }
 .tag.warn { background: var(--warning-soft); color: var(--warning-text); }
@@ -41,5 +21,85 @@ textarea.code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; fon
 .warnings li { color: var(--warning-text); }
 .ok-text { color: var(--success-text); }
 @media (max-width: 900px) {
-  .ec-grid, .row2 { grid-template-columns: 1fr; }
+  .row2 { grid-template-columns: 1fr; }
 }
+
+/* ---------- Layout: campaign list beside the editor ---------- */
+.ec-page-head h2 { font-size: 1.5rem; letter-spacing: -0.02em; }
+.ec-grid { display: grid; grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.ec-listpanel, .ec-detail { border: 1px solid var(--border); border-radius: 14px; background: var(--surface); padding: 16px; min-width: 0; }
+.ec-listpanel { display: flex; flex-direction: column; gap: 10px; }
+.ec-list-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.ec-list-head h3 { margin: 0; font-size: 1.05rem; font-weight: 650; }
+.ec-icon-btn { padding: 6px 8px; }
+.ec-search { position: relative; display: block; }
+.ec-search app-icon { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--text-muted); pointer-events: none; }
+.ec-search .hud-input { padding-left: 34px; }
+.ec-list-filters { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.ec-empty { margin: 8px 0; color: var(--text-muted); font-size: 0.84rem; text-align: center; padding: 18px 8px; border: 1px dashed var(--border-strong, var(--border)); border-radius: 10px; }
+.ec-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 640px; overflow-y: auto; }
+.ec-item { position: relative; display: flex; border: 1px solid transparent; border-radius: 10px; }
+.ec-item:hover { background: var(--surface-2); }
+.ec-item.active { background: var(--accent-soft); border-color: var(--accent-ring, var(--accent)); box-shadow: inset 3px 0 0 var(--accent); }
+.ec-item-main { flex: 1; min-width: 0; display: flex; gap: 12px; align-items: flex-start; text-align: left; padding: 10px 36px 10px 12px; border: none; background: none; color: var(--text); font: inherit; cursor: pointer; border-radius: 10px; }
+.ec-item-main:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.ec-item-title { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; font-size: 0.9rem; }
+.ec-item-title b { font-weight: 650; overflow: hidden; text-overflow: ellipsis; }
+.ec-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-subtle, var(--text-muted)); flex: none; }
+.ec-dot.good { background: var(--success-text); } .ec-dot.info { background: var(--accent); } .ec-dot.bad { background: var(--danger-text); } .ec-dot.warn { background: var(--warning-text); }
+.ec-item-sub { font-size: 0.82rem; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ec-item-meta { font-size: 0.76rem; color: var(--text-subtle, var(--text-muted)); }
+.ec-item-stats { display: flex; gap: 12px; font-size: 0.76rem; color: var(--text-muted); }
+.ec-item-stats span { display: inline-flex; align-items: center; gap: 4px; }
+.ec-menu-wrap { position: absolute; top: 8px; right: 6px; }
+.ec-kebab { border: none; background: none; color: var(--text-muted); padding: 4px; border-radius: 6px; cursor: pointer; display: inline-flex; }
+.ec-kebab:hover, .ec-kebab[aria-expanded=true] { background: var(--surface-2); color: var(--text); }
+.ec-kebab:focus-visible { outline: 2px solid var(--accent); }
+.ec-menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; min-width: 140px; background: var(--surface); border: 1px solid var(--border-strong, var(--border)); border-radius: 10px; box-shadow: 0 12px 30px rgba(0, 0, 0, 0.18); padding: 4px; display: flex; flex-direction: column; }
+.ec-menu button { text-align: left; border: none; background: none; color: var(--text); font: inherit; font-size: 0.84rem; padding: 7px 10px; border-radius: 7px; cursor: pointer; }
+.ec-menu button:hover, .ec-menu button:focus-visible { background: var(--surface-2); outline: none; }
+.ec-menu button.danger { color: var(--danger-text); }
+
+.ec-detail { display: flex; flex-direction: column; gap: 14px; }
+.ec-detail-empty { display: grid; place-items: center; min-height: 240px; color: var(--text-muted); font-size: 0.9rem; }
+.ec-detail-head { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; align-items: center; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.ec-detail-status { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ec-back { display: none; }
+.ec-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.btn-danger-soft { background: var(--danger-soft); color: var(--danger-text); border: 1px solid rgba(239, 68, 68, 0.35); }
+.btn-danger-soft:hover { background: var(--danger-text); color: #fff; }
+.req { color: var(--danger-text); }
+.ec-form label { font-weight: 600; }
+.lists legend { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+.ec-lists-empty { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; color: var(--text-muted); font-size: 0.86rem; }
+.ec-lists-empty > span:nth-child(2) { flex: 1 1 180px; }
+.ec-lists-icon { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: var(--surface-2); color: var(--text-muted); flex: none; }
+
+
+
+@media (max-width: 1100px) {
+  .ec-grid { grid-template-columns: minmax(0, 1fr); }
+  /* One column: the list or the open campaign, with a way back to the list */
+  .ec-grid.has-sel .ec-listpanel { display: none; }
+  .ec-grid:not(.has-sel) .ec-detail-empty { display: none; }
+  .ec-back { display: inline-flex; }
+}
+@media (max-width: 640px) {
+  .ec-listpanel, .ec-detail { padding: 12px; }
+
+}
+
+
+/* Same pattern as Email Templates: header menu, thumbnails, editor title, content card */
+.ec-create { position: relative; }
+.ec-create-menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 30; min-width: 280px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: var(--shadow-lg, 0 8px 24px rgba(0,0,0,.15)); padding: 6px; display: flex; flex-direction: column; gap: 2px; }
+.ec-create-menu button { display: flex; flex-direction: column; gap: 2px; text-align: left; padding: 8px 10px; border-radius: 8px; background: none; border: none; color: var(--text); cursor: pointer; font: inherit; }
+.ec-create-menu button:hover, .ec-create-menu button:focus-visible { background: var(--surface-2); outline: none; }
+.ec-create-menu small { color: var(--text-muted); font-size: 0.78rem; }
+.ec-item-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.ec-thumb { flex: none; width: 64px; height: 72px; border-radius: 8px; border: 1px solid var(--border); background: #fff; overflow: hidden; position: relative; display: grid; place-items: center; color: var(--text-muted); }
+.ec-thumb app-email-preview { position: absolute; top: 0; left: 0; width: 600px; height: 675px; transform: scale(0.1067); transform-origin: top left; pointer-events: none; }
+.ec-detail-status h3 { margin: 0; font-size: 1.1rem; font-weight: 650; }
+.ec-detail-status { flex: 1 1 280px; min-width: 0; }
+.ec-content-card { border: 1px solid var(--border); border-radius: 12px; padding: 14px; background: var(--surface); }
+@media (max-width: 640px) { .ec-content-card { padding: 10px; } }

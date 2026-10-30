@@ -29,6 +29,17 @@
           <span class="nav-label">{{ item.label }}</span>
           <span class="nav-count" *ngIf="navCount(item.route) !== null && navCount(item.route)! > 0">{{ navCount(item.route) }}</span>
         </button>
+        <!-- Mail Center sections, listed under it while Mail Center is open -->
+        <ng-container *ngFor="let item of group.items">
+          <div class="nav-sub" *ngIf="item.route === 'emails' && currentRoute === 'emails' && !sidebarCollapsed" role="group" aria-label="Mail Center sections">
+            <button *ngFor="let s of mailSubnav" type="button" class="nav-sub-item" [class.active]="mailSection === s.key"
+                    [attr.aria-current]="mailSection === s.key ? 'page' : null" (click)="navigate('emails', s.key)">
+              <app-icon [name]="s.icon" [size]="16"></app-icon>
+              <span class="nav-label">{{ s.label }}</span>
+              <span class="nav-count" *ngIf="s.key === 'approvals' && pendingApprovalCount">{{ pendingApprovalCount }}</span>
+            </button>
+          </div>
+        </ng-container>
       </div>
     </nav>
 

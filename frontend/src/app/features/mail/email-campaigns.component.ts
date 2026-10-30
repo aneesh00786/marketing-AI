@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, OnInit, Output } from '@angular/core';
+import { Component, EventEmitter, Input, OnInit, Output, HostListener, ViewChild, ElementRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { IconComponent } from '../../shared/icon.component';
 import { FormsModule } from '@angular/forms';
@@ -7,6 +7,8 @@ import { apiRoot } from '../../core/api-base';
 import { ZohoCampaignsComponent } from './zoho-campaigns.component';
 import { TemplatePickerComponent } from './template-picker.component';
 import { EmailPreviewComponent } from './email-preview.component';
+import { EmailContentEditorComponent } from './email-content-editor.component';
+import { EmailPreviewComponent as ThumbPreview } from './email-preview.component';
 import { CampaignMetricsComponent } from './campaign-metrics.component';
 
 /**
@@ -17,7 +19,7 @@ import { CampaignMetricsComponent } from './campaign-metrics.component';
 @Component({
   selector: 'app-email-campaigns',
   standalone: true,
-  imports: [CommonModule, IconComponent, FormsModule, ZohoCampaignsComponent, TemplatePickerComponent, EmailPreviewComponent, CampaignMetricsComponent],
+  imports: [CommonModule, IconComponent, FormsModule, ZohoCampaignsComponent, TemplatePickerComponent, EmailContentEditorComponent, ThumbPreview, CampaignMetricsComponent],
   templateUrl: './email-campaigns.component.html',
   styleUrls: ['../command/command-center.component.css', './mail-ui.css', './email-campaigns.component.css']
 })
@@ -28,6 +30,8 @@ export class EmailCampaignsComponent implements OnInit {
     if (t && t.id) this.newFromTemplate(t);
   }
   @Output() toast = new EventEmitter<string>();
+  /** Open Settings → Zoho Campaigns (where the Zoho API credentials are entered). */
+  @Output() openSettings = new EventEmitter<void>();
 
   private base = `${apiRoot()}/api/v1/mail/campaigns`;
   zoho: any = null;
@@ -40,9 +44,15 @@ export class EmailCampaignsComponent implements OnInit {
   error = '';
   // 'new': create a campaign from a template; 'load': replace this campaign's content with one.
   picker: 'new' | 'load' | null = null;
-  /** Email content panel: edit the HTML source or preview it (both use form.html; nothing is saved). */
-  contentMode: 'edit' | 'preview' = 'edit';
-  previewWidth: 'desktop' | 'mobile' = 'desktop';
+  // Campaign list: search, status filter, sort, and the per-item menu (all client-side).
+  listQuery = '';
+  listStatus = '';
+  listSort: 'newest' | 'oldest' | 'name' = 'newest';
+  menuFor: number | null = null;
+  showCreateMenu = false;
+  /** The saved values of the open campaign, to tell when the form has unsaved changes. */
+  private original = '';
+  @ViewChild(ZohoCampaignsComponent) private zohoPanel?: ZohoCampaignsComponent;
 
   constructor(private http: HttpClient) {}
 
@@ -60,7 +70,8 @@ export class EmailCampaignsComponent implements OnInit {
   }
 
   load(): void {
-    this.http.get<any>(this.base).subscribe({
+    // thumbs=1: the start of each campaign's HTML for the list thumbnails (capped by the server).
+    this.http.get<any>(this.base, { params: { thumbs: '1' } }).subscribe({
       next: r => { this.campaigns = r.campaigns; },
       error: e => this.error = this.err(e)
     });
@@ -74,6 +85,7 @@ export class EmailCampaignsComponent implements OnInit {
   }
 
   newCampaign(): void {
+    if (!this.confirmDiscard()) return;
     this.busy = 'create';
     this.http.post<any>(this.base, { name: 'Untitled campaign', html: '<p>Hello,</p>\n<p></p>\n<p><a href="$[LI:UNSUBSCRIBE]$">Unsubscribe</a></p>' }).subscribe({
       next: r => { this.busy = ''; this.open(r.campaign); this.load(); },
@@ -81,35 +93,34 @@ export class EmailCampaignsComponent implements OnInit {
     });
   }
 
-  setMode(m: 'edit' | 'preview'): void { this.contentMode = m; }
-
-  /** Left/Right arrows switch between Edit and Preview (tabs pattern). */
-  onModeKey(ev: KeyboardEvent): void {
-    if (ev.key !== 'ArrowLeft' && ev.key !== 'ArrowRight') return;
-    ev.preventDefault();
-    const next = this.contentMode === 'edit' ? 'preview' : 'edit';
-    this.setMode(next);
-    setTimeout(() => (document.getElementById(`ec-mode-${next}`) as HTMLElement | null)?.focus());
+  // ---------- Campaign list ----------
+  get visibleCampaigns(): any[] {
+    const q = this.listQuery.trim().toLowerCase();
+    const list = this.campaigns.filter(c => (!this.listStatus || c.status === this.listStatus)
+      && (!q || `${c.name || ''} ${c.subject || ''}`.toLowerCase().includes(q)));
+    const at = (c: any) => String(c.updatedAt || c.createdAt || '');
+    if (this.listSort === 'name') return list.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    return list.sort((a, b) => this.listSort === 'oldest' ? at(a).localeCompare(at(b)) : at(b).localeCompare(at(a)));
   }
 
-  /** Inserts Zoho's unsubscribe link at the cursor (only edits the unsaved content). */
-  insertUnsubscribe(box: HTMLTextAreaElement): void {
-    if (!this.form || !this.editable) return;
-    if (this.form.html.includes('$[LI:UNSUBSCRIBE]$')) { this.toast.emit('The unsubscribe link is already in the content.'); return; }
-    const link = '<p><a href="$[LI:UNSUBSCRIBE]$">Unsubscribe</a></p>';
-    const at = typeof box?.selectionStart === 'number' ? box.selectionStart : this.form.html.length;
-    this.form.html = this.form.html.slice(0, at) + link + this.form.html.slice(at);
+  /** Tag/dot tone for a campaign status (the label always says the status too). */
+  tone(s: string): string {
+    if (s === 'submitted') return 'good';
+    if (s === 'approved') return 'info';
+    if (s === 'failed' || s === 'needs_review') return 'bad';
+    if (s === 'submitting') return 'warn';
+    return '';
   }
 
-  /** Reminders while editing (the server's validation is unchanged and still decides). */
-  get contentHints(): string[] {
-    const html = this.form?.html || '';
-    const out: string[] = [];
-    if (!html.trim()) return ['Add the email content: write HTML or choose a template.'];
-    if (!html.includes('$[LI:UNSUBSCRIBE]$')) out.push('No unsubscribe link yet: Zoho requires $[LI:UNSUBSCRIBE]$.');
-    if (/<img\b[^>]*\bsrc\s*=\s*["']?http:\/\//i.test(html)) out.push('Some images use http://. Use https:// image URLs so they load for recipients.');
-    return out;
-  }
+  canDelete(c: any): boolean { return this.canCompose && ['draft', 'approved', 'failed'].includes(c.status); }
+
+  toggleMenu(id: number, ev: Event): void { ev.stopPropagation(); this.menuFor = this.menuFor === id ? null : id; }
+
+  @HostListener('document:click') closeMenu(): void { this.menuFor = null; this.showCreateMenu = false; }
+  @HostListener('document:keydown.escape') escMenu(): void { this.menuFor = null; this.showCreateMenu = false; }
+
+  /** The recipient-lists "Connect Zoho" button uses the same connect flow as the Zoho panel. */
+  connectZoho(): void { this.zohoPanel?.connect(); }
 
   /** A copy of the template's HTML goes into the campaign; the template itself is not changed. */
   onTemplatePicked(t: any): void {
@@ -125,6 +136,7 @@ export class EmailCampaignsComponent implements OnInit {
   }
 
   newFromTemplate(t: { id: number; name: string }): void {
+    if (!this.confirmDiscard()) return;
     this.busy = 'create';
     this.http.post<any>(this.base, { name: String(t.name).slice(0, 150), templateId: t.id }).subscribe({
       next: r => { this.busy = ''; this.open(r.campaign); this.load(); this.toast.emit('Campaign created from the template.'); },
@@ -133,6 +145,7 @@ export class EmailCampaignsComponent implements OnInit {
   }
 
   open(c: any): void {
+    if (this.selected?.id !== c.id && !this.confirmDiscard()) return;
     this.http.get<any>(`${this.base}/${c.id}`).subscribe({
       next: r => this.setSelected(r.campaign),
       error: e => this.toast.emit(this.err(e))
@@ -142,14 +155,35 @@ export class EmailCampaignsComponent implements OnInit {
   private setSelected(c: any): void {
     this.selected = c;
     this.validation = null;
-    // Edit by default; a campaign that can no longer be edited opens on its preview.
-    this.contentMode = this.editable ? 'edit' : 'preview';
-    this.previewWidth = 'desktop';
     this.form = {
       name: c.name, subject: c.subject || '', fromName: c.fromName || '', fromEmail: c.fromEmail || '', html: c.html || '',
       topicId: c.topicId || '', listKeys: new Set((c.lists || []).map((l: any) => l.key))
     };
+    this.original = this.snapshot();
   }
+
+  private snapshot(): string {
+    const f = this.form;
+    return f ? JSON.stringify([f.name, f.subject, f.fromName, f.fromEmail, f.html, f.topicId, [...f.listKeys].sort()]) : '';
+  }
+
+  /** True when the open campaign has edits that are not saved yet. */
+  get dirty(): boolean { return !!this.form && this.editable && this.snapshot() !== this.original; }
+
+  /** True when nothing is unsaved, or the user agrees to discard it. */
+  confirmDiscard(): boolean { return !this.dirty || confirm('Discard your unsaved changes to this campaign?'); }
+
+  close(): void {
+    if (!this.confirmDiscard()) return;
+    this.selected = null;
+    this.form = null;
+    this.original = '';
+  }
+
+  toggleCreateMenu(ev: Event): void { ev.stopPropagation(); this.showCreateMenu = !this.showCreateMenu; this.menuFor = null; }
+
+  @HostListener('window:beforeunload', ['$event'])
+  onBeforeUnload(e: BeforeUnloadEvent): void { if (this.dirty) { e.preventDefault(); e.returnValue = ''; } }
 
   toggleList(key: string): void {
     this.form.listKeys.has(key) ? this.form.listKeys.delete(key) : this.form.listKeys.add(key);
@@ -212,10 +246,12 @@ export class EmailCampaignsComponent implements OnInit {
     });
   }
 
-  remove(): void {
-    if (!confirm(`Delete "${this.selected.name}"?`)) return;
-    this.http.delete<any>(`${this.base}/${this.selected.id}`).subscribe({
-      next: () => { this.selected = null; this.form = null; this.load(); this.toast.emit('Campaign deleted.'); },
+  remove(): void { if (this.selected) this.removeCampaign(this.selected); }
+
+  removeCampaign(c: any): void {
+    if (!confirm(`Delete "${c.name}"?`)) return;
+    this.http.delete<any>(`${this.base}/${c.id}`).subscribe({
+      next: () => { if (this.selected?.id === c.id) { this.selected = null; this.form = null; this.original = ''; } this.load(); this.toast.emit('Campaign deleted.'); },
       error: e => this.toast.emit(this.err(e))
     });
   }

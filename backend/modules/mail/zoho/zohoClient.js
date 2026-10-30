@@ -43,6 +43,7 @@ function zohoError(message, { status = 502, code = 'ZOHO_ERROR', providerCode = 
   return err;
 }
 
+/** The server-wide OAuth client from .env (used when a workspace has not entered its own in Settings). */
 function clientConfig() {
   const clientId = process.env.ZOHO_CAMPAIGNS_CLIENT_ID;
   const clientSecret = process.env.ZOHO_CAMPAIGNS_CLIENT_SECRET;
@@ -68,8 +69,8 @@ function resolveDataCenter(location, accountsServer) {
   return { location: loc, ...dc };
 }
 
-function authorizeUrl(state) {
-  const cfg = clientConfig();
+/** cfg: the OAuth client to use ({ clientId, clientSecret }): the workspace's own or the server's. */
+function authorizeUrl(state, cfg = clientConfig()) {
   // Server-based apps start at the US accounts server; Zoho redirects back with the user's location.
   const params = new URLSearchParams({
     scope: SCOPES.join(','),
@@ -101,8 +102,7 @@ async function postForm(url, form, { label }) {
 }
 
 /** Exchanges the authorization code at the user's data center. Returns the refresh token. */
-async function exchangeCode(dc, code) {
-  const cfg = clientConfig();
+async function exchangeCode(dc, code, cfg = clientConfig()) {
   const { data } = await postForm(`${dc.accounts}/oauth/v2/token`, {
     grant_type: 'authorization_code',
     client_id: cfg.clientId,
@@ -116,9 +116,8 @@ async function exchangeCode(dc, code) {
 }
 
 /** New access token from a refresh token. invalid grants mean the user must reconnect. */
-async function refreshAccessToken(dc, refreshToken) {
-  const cfg = clientConfig();
-  if (!cfg) throw zohoError('Zoho Campaigns is not set up on the server (ZOHO_CAMPAIGNS_CLIENT_ID / ZOHO_CAMPAIGNS_CLIENT_SECRET).', { status: 503, code: 'ZOHO_NOT_CONFIGURED' });
+async function refreshAccessToken(dc, refreshToken, cfg = clientConfig()) {
+  if (!cfg) throw zohoError('Zoho Campaigns is not set up: enter the Zoho Client ID and Client Secret in Mail Center → Settings → Zoho Campaigns.', { status: 503, code: 'ZOHO_NOT_CONFIGURED' });
   const { data } = await postForm(`${dc.accounts}/oauth/v2/token`, {
     grant_type: 'refresh_token',
     client_id: cfg.clientId,

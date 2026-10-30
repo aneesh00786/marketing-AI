@@ -1,4 +1,4 @@
-# EC2 Deployment Runbook — Marketech.ai (Mail Center, email tracking, migrations 024–025)
+# EC2 Deployment Runbook — Marketech.ai (Mail Center, email tracking, migrations 024–026)
 
 For the operator deploying to one EC2 instance. All values below are placeholders (`<...>`); never
 copy a real `.env`, key or password into this document, a ticket or a release archive.
@@ -13,8 +13,8 @@ Status when this was written: verified locally only (mocked providers, disposabl
 - [ ] Local: `node scripts/localVerify.js --db mt_rehearsal_<date>` → RESULT: PASS; package built from the release commit
 - [ ] EC2: security group has no inbound rule for the API port; nginx is the only proxy; `LISTEN_HOST=127.0.0.1`, `TRUST_PROXY=1`
 - [ ] `ZEPTOMAIL_WEBHOOKS_ENABLED` empty; `scripts/checkProductionConfig.js` OK as each service account
-- [ ] Services stopped → `scripts/backup.sh` (verified, timestamped) → migrate `--status` (024, 025 pending)
-- [ ] `npm run migrate -- --backup=<that dump>` → `--status` all applied (024 then 025)
+- [ ] Services stopped → `scripts/backup.sh` (verified, timestamped) → migrate `--status` (024, 025, 026 pending, or only what production has not applied yet)
+- [ ] `npm run migrate -- --backup=<that dump>` → `--status` all applied (024, then 025, then 026)
 - [ ] Services started → health checks and log review (section 7)
 - [ ] Rollback plan ready: previous release package + the pre-migration dump (section 10)
 - [ ] Live provider checks (section 8) before enabling the webhook or relying on tracking
@@ -130,10 +130,11 @@ WantedBy=multi-user.target
 Same for `marketech-worker.service` with `ExecStart=/usr/bin/node workers/socialWorker.js` and
 `User=mkt-worker`. Exactly one worker.
 
-## 6. Release with migrations 024 and 025
+## 6. Release with migrations 024, 025 and 026
 
-Order matters: 024 (tracking tables) then 025 (Compose purpose columns, capability grants). Both are
-additive; the runner applies them in order and records each in `schema_migrations`.
+Order matters: 024 (tracking tables), 025 (Compose purpose columns, capability grants), then 026
+(`mail_provider_apps`: the Zoho API client entered in Mail Center → Settings, secret encrypted with
+`SOCIAL_TOKEN_ENCRYPTION_KEY`). All are additive; the runner applies them in order and records each in `schema_migrations`.
 
 ```bash
 cd <app dir>/backend
@@ -142,7 +143,7 @@ sudo systemctl stop marketech-worker marketech-api
 MYSQL_DEFAULTS_FILE=<backup cnf> scripts/backup.sh <prod db> <backup root>
 # 2. Install the new release (unpacked package or git checkout of the released commit), then
 npm ci --omit=dev
-npm run migrate -- --status                 # expect: 024 and 025 [pending], nothing else
+npm run migrate -- --status                 # expect: 024, 025 and 026 [pending], nothing else
 npm run migrate -- --backup=<backup root>/<prod db>-<timestamp>/<prod db>.sql   # <dir> from backup.sh's "Backup complete: <dir>" line + /<prod db>.sql
 npm run migrate -- --status                 # expect: all [applied]
 # 3. Start
@@ -202,7 +203,7 @@ Follow `docs/EMAIL_TRACKING_STAGING.md` sections 3–5. In short:
 
 ## 10. Rollback
 
-- **Code only (preferred)**: 024/025 are additive and older code ignores the new tables/columns, so
+- **Code only (preferred)**: 024/025/026 are additive and older code ignores the new tables/columns, so
   redeploy the previous release and restart; no database change needed. Turn off
   `ZEPTOMAIL_WEBHOOKS_ENABLED` first if it was on.
 - **Database** (only if data must be reverted): stop both services, restore the pre-migration backup

@@ -51,6 +51,7 @@ class SentStub {
 @Component({ selector: 'app-mail-settings', standalone: true, template: '<p class="stub-settings">settings</p>' })
 class SettingsStub {
   static last: SettingsStub | null = null;
+  @Input() initialTab: any = null;
   @Output() toast = new EventEmitter<string>(); @Output() changed = new EventEmitter<void>(); @Output() openSection = new EventEmitter<string>();
   constructor() { SettingsStub.last = this; }
 }
@@ -318,14 +319,16 @@ describe('MailCenterComponent', () => {
     expect(el().querySelector('.stub-campaigns')).toBeTruthy();
   });
 
-  it('tabs are grouped (mail · campaigns & content · records & setup) and the toolbar shortcuts open Inbox and Approvals', () => {
+  it('tabs are grouped with icons, and the breadcrumb names the open section', () => {
     init({ drafts: [d(1, 'Draft'), d(2, 'Approved')], unread: 4 });
     expect(el().querySelectorAll('.mc-divider').length).toBe(2);
-    const pills = Array.from(el().querySelectorAll('.mc-pill')) as HTMLButtonElement[];
-    expect(pills.map(p => p.textContent!.trim())).toEqual(['4 unread', '2 waiting for approval']);
-    pills[0].click();
-    pills[1].click();
-    expect(sections).toEqual(['inbox', 'approvals']);
+    expect(el().querySelectorAll('.mc-tabs [role=tab] app-icon').length).toBe(9);
+    expect(el().querySelector('.mc-crumbs')!.textContent!.trim()).toBe('Mail Center');
+    tab('Sent Mail').click();
+    fixture.detectChanges();
+    expect(el().querySelector('.mc-crumbs')!.textContent!.replace(/\s+/g, ' ').trim()).toBe('Mail Center›Sent Mail');
+    (el().querySelector('.mc-crumb') as HTMLButtonElement).click();
+    expect(sections).toEqual(['sent', 'overview']);
     expect(el().querySelector('#mc-title')!.classList).withContext('the app bar shows the title; kept for screen readers').toContain('sr-only');
   });
 });

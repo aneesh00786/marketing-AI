@@ -104,6 +104,9 @@ async function claimAssets(ctx, templateId, importId, assetIds) {
 
 // ------------------------------------------------------------------ list / read
 
+/** Characters of HTML sent per list thumbnail: enough for the top of an email, bounded per page. */
+const THUMB_CHARS = 40000;
+
 async function list(ctx, query = {}) {
   const page = Math.max(1, parseInt(query.page, 10) || 1);
   const pageSize = Math.min(50, Math.max(1, parseInt(query.pageSize, 10) || 12));
@@ -113,8 +116,17 @@ async function list(ctx, query = {}) {
   if (q) { where.push('(name LIKE ? OR description LIKE ?)'); params.push(`%${q.replace(/[%_\\]/g, '\\$&')}%`, `%${q.replace(/[%_\\]/g, '\\$&')}%`); }
   if (query.category) { where.push('category = ?'); params.push(String(query.category).slice(0, 50)); }
   const total = Number((await get(`SELECT COUNT(*) AS n FROM mail_templates WHERE ${where.join(' AND ')}`, params)).n);
-  const rows = await all(`SELECT id, name, description, category, source, source_filename, version, created_at, updated_at FROM mail_templates WHERE ${where.join(' AND ')} ORDER BY COALESCE(updated_at, created_at) DESC, id DESC LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}`, params);
-  return { templates: rows.map(r => present(r)), page, pageSize, total };
+  // Fixed ORDER BY clauses only (never built from the query string).
+  const ORDER = {
+    newest: 'COALESCE(updated_at, created_at) DESC, id DESC',
+    oldest: 'COALESCE(updated_at, created_at) ASC, id ASC',
+    name: 'name ASC, id ASC'
+  };
+  const order = ORDER[query.sort] || ORDER.newest;
+  // thumbs=1: the start of each template's HTML for the list thumbnails (capped, never the whole file).
+  const thumbs = String(query.thumbs || '') === '1';
+  const rows = await all(`SELECT id, name, description, category, source, source_filename, version, created_at, updated_at${thumbs ? `, LEFT(html, ${THUMB_CHARS}) AS thumb_html` : ''} FROM mail_templates WHERE ${where.join(' AND ')} ORDER BY ${order} LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}`, params);
+  return { templates: rows.map(r => ({ ...present(r), ...(thumbs ? { thumbHtml: expandAssetRefs(r.thumb_html || '') } : {}) })), page, pageSize, total };
 }
 
 async function categories(ctx) {

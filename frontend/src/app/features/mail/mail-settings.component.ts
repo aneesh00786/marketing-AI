@@ -1,9 +1,11 @@
-import { Component, ElementRef, EventEmitter, OnInit, Output } from '@angular/core';
+import { Component, ElementRef, EventEmitter, OnInit, Output, Input, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../services/api.service';
 import { MarketingDeliveryComponent } from './marketing-delivery.component';
 import { MailTrackingSettingsComponent } from './mail-tracking-settings.component';
+import { ZohoAppSettingsComponent } from './zoho-app-settings.component';
+import { ZohoCampaignsComponent } from './zoho-campaigns.component';
 
 export type SettingsTab = 'sending' | 'replies' | 'marketing' | 'tracking' | 'zoho';
 
@@ -26,7 +28,7 @@ const BLANK = {
 @Component({
   selector: 'app-mail-settings',
   standalone: true,
-  imports: [CommonModule, FormsModule, MarketingDeliveryComponent, MailTrackingSettingsComponent],
+  imports: [CommonModule, FormsModule, MarketingDeliveryComponent, MailTrackingSettingsComponent, ZohoAppSettingsComponent, ZohoCampaignsComponent],
   templateUrl: './mail-settings.component.html',
   styleUrls: ['../command/command-center.component.css', './mail-ui.css', './mail-settings.component.css']
 })
@@ -36,6 +38,8 @@ export class MailSettingsComponent implements OnInit {
   @Output() changed = new EventEmitter<void>();
   /** Ask Mail Center to open another section (e.g. Campaigns for the Zoho connection). */
   @Output() openSection = new EventEmitter<string>();
+  /** Open on a given tab (e.g. 'zoho' from the Campaigns "Set up in Settings" link). */
+  @Input() initialTab: SettingsTab | null = null;
 
   readonly tabs: { id: SettingsTab; label: string }[] = [
     { id: 'sending', label: 'Sending' },
@@ -60,7 +64,10 @@ export class MailSettingsComponent implements OnInit {
 
   constructor(private api: ApiService, private host: ElementRef<HTMLElement>) {}
 
-  ngOnInit(): void { this.load(); }
+  ngOnInit(): void {
+    if (this.initialTab && this.tabs.some(t => t.id === this.initialTab)) this.tab = this.initialTab;
+    this.load();
+  }
 
   get isZepto(): boolean { return this.config.provider === 'zeptomail'; }
 

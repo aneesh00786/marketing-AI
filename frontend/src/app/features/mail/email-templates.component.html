@@ -3,27 +3,40 @@
        display:none; uploads are still refused by the server for members without permission. -->
   <input #htmlPicker type="file" id="tplUploadHtml" class="file-input" accept=".html,.htm" tabindex="-1" aria-hidden="true" (change)="onFile($event, 'html')" />
   <input #zipPicker type="file" id="tplUploadZip" class="file-input" accept=".zip" tabindex="-1" aria-hidden="true" (change)="onFile($event, 'zip')" />
-  <div class="tpl-head mx-head">
+
+  <header class="mx-head tpl-page-head">
     <div>
-      <h2>Email templates</h2>
+      <h2>Email Templates</h2>
       <p class="mx-desc">Reusable designs for emails, drafts and campaigns. Using a template makes a copy, so editing an email never changes the template.</p>
     </div>
-    <div class="tpl-actions create-menu" *ngIf="canCompose">
-      <button class="btn btn-primary btn-sm" (click)="showCreateMenu = !showCreateMenu" [attr.aria-expanded]="showCreateMenu" aria-haspopup="true" [disabled]="busy === 'upload'">
-        <app-icon name="plus" [size]="15"></app-icon>{{ busy === 'upload' ? 'Importing…' : 'Create or import' }}<app-icon name="chevron-down" [size]="14"></app-icon>
-      </button>
-      <div class="menu" *ngIf="showCreateMenu" role="menu">
-        <button class="menu-item" role="menuitem" (click)="newBlank()"><b>Blank template</b><small>Start from a simple email layout</small></button>
-        <button type="button" class="menu-item" role="menuitem" (click)="htmlPicker.click()"><b>Upload HTML file</b><small>.html or .htm, up to {{ limits.htmlKb }} KB</small></button>
-        <button type="button" class="menu-item" role="menuitem" (click)="zipPicker.click()"><b>Upload ZIP package</b><small>.zip with an HTML file, CSS and images, up to {{ limits.zipMb }} MB</small></button>
+    <div class="mx-actions" *ngIf="canCompose">
+      <div class="create-menu">
+        <button class="btn btn-primary btn-sm" (click)="toggleCreateMenu($event)" [attr.aria-expanded]="showCreateMenu" aria-haspopup="true" [disabled]="busy === 'upload'">
+          <app-icon name="plus" [size]="15"></app-icon>{{ busy === 'upload' ? 'Importing…' : 'Create Template' }}<app-icon name="chevron-down" [size]="14"></app-icon>
+        </button>
+        <div class="menu" *ngIf="showCreateMenu" role="menu" (click)="$event.stopPropagation()">
+          <button class="menu-item" role="menuitem" (click)="newBlank()"><b>Blank template</b><small>Start from a simple email layout</small></button>
+          <button type="button" class="menu-item" role="menuitem" (click)="showCreateMenu = false; htmlPicker.click()"><b>Upload HTML file</b><small>.html or .htm, up to {{ limits.htmlKb }} KB</small></button>
+          <button type="button" class="menu-item" role="menuitem" (click)="showCreateMenu = false; zipPicker.click()"><b>Upload ZIP package</b><small>.zip with an HTML file, CSS and images, up to {{ limits.zipMb }} MB</small></button>
+        </div>
       </div>
+      <button type="button" class="btn btn-secondary btn-sm" (click)="zipPicker.click()" [disabled]="busy === 'upload'"><app-icon name="upload" [size]="15"></app-icon>Import from ZIP</button>
     </div>
-  </div>
+  </header>
   <p class="muted small" *ngIf="permissionsLoaded && !canCompose">You can view and use templates. Creating, importing and editing templates needs the Member role or higher.</p>
-  <details class="zip-help" *ngIf="canCompose">
-    <summary>What can a ZIP package contain?</summary>
-    <p class="muted small">One email HTML file (e.g. <code>index.html</code>) with its CSS files and images (PNG, JPG, GIF, WebP) in any folders, such as <code>css/style.css</code> and <code>images/logo.png</code>. Relative links are resolved, CSS is embedded and images are hosted for you. If the package has several HTML files, you choose the main one. You see a preview before saving; nothing is saved until you press Save.</p>
-  </details>
+
+  <!-- What a ZIP package may contain (collapsible) -->
+  <section class="zip-card" *ngIf="canCompose" [class.open]="zipInfoOpen">
+    <span class="zip-icon" aria-hidden="true"><app-icon name="upload" [size]="22"></app-icon></span>
+    <div class="zip-text">
+      <h3 class="mx-subhead">Import templates from a ZIP package</h3>
+      <p *ngIf="zipInfoOpen">Upload one HTML file (e.g. <code>index.html</code>) with its CSS files and images (PNG, JPG, GIF, WebP) in any folders, such as <code>css/style.css</code> and <code>images/logo.png</code>. Relative links are resolved, CSS is embedded and images are hosted for you. If the package has several HTML files, you choose the main one. You see a preview before saving; nothing is saved until you press Save.</p>
+    </div>
+    <button type="button" class="zip-toggle" (click)="toggleZipInfo()" [attr.aria-expanded]="zipInfoOpen" [attr.aria-label]="zipInfoOpen ? 'Hide ZIP details' : 'Show ZIP details'">
+      <app-icon name="chevron-down" [size]="18"></app-icon>
+    </button>
+  </section>
+
   <div class="note error" *ngIf="error" role="alert">{{ error }}</div>
 
   <div class="entry-choice" *ngIf="pendingUpload" role="dialog" aria-label="Choose the main HTML file">
@@ -34,83 +47,116 @@
     </div>
   </div>
 
-  <div class="tpl-grid" [class.with-editor]="editing">
-    <div class="tpl-list">
-      <div class="filters">
-        <input class="hud-input" [(ngModel)]="q" (ngModelChange)="search()" placeholder="Search templates" aria-label="Search templates" />
+  <div class="tpl-grid" [class.has-sel]="!!editing">
+    <!-- ============ Template list ============ -->
+    <aside class="tpl-listpanel" aria-labelledby="tpl-list-title">
+      <div class="tpl-list-head">
+        <h3 id="tpl-list-title">Templates</h3>
+        <button *ngIf="canCompose" class="btn btn-primary btn-sm" (click)="newBlank()"><app-icon name="plus" [size]="15"></app-icon>New template</button>
+      </div>
+      <label class="tpl-search">
+        <app-icon name="search" [size]="15"></app-icon>
+        <input class="hud-input" type="search" [(ngModel)]="q" (ngModelChange)="search()" placeholder="Search templates…" aria-label="Search templates" />
+      </label>
+      <div class="tpl-filters">
         <select class="hud-input" [(ngModel)]="category" (ngModelChange)="page = 1; load()" aria-label="Category">
           <option value="">All categories</option>
           <option *ngFor="let c of categories" [value]="c">{{ c }}</option>
         </select>
+        <select class="hud-input" [(ngModel)]="sort" (ngModelChange)="page = 1; load()" aria-label="Sort templates">
+          <option value="newest">Newest first</option>
+          <option value="oldest">Oldest first</option>
+          <option value="name">Name A–Z</option>
+        </select>
       </div>
+
       <div class="empty" *ngIf="!templates.length">
-        <p class="muted small">No templates found.</p>
+        <p class="muted small">{{ q || category ? 'No templates match.' : 'No templates yet.' }}</p>
         <ng-container *ngIf="canCompose && !q && !category">
-          <button type="button" class="btn btn-secondary btn-sm" (click)="zipPicker.click()">⬆ Import a ZIP package</button>
-          <button type="button" class="btn btn-secondary btn-sm" (click)="htmlPicker.click()">⬆ Upload an HTML file</button>
+          <button type="button" class="btn btn-secondary btn-sm" (click)="zipPicker.click()"><app-icon name="upload" [size]="14"></app-icon>Import a ZIP package</button>
+          <button type="button" class="btn btn-secondary btn-sm" (click)="htmlPicker.click()"><app-icon name="upload" [size]="14"></app-icon>Upload an HTML file</button>
         </ng-container>
       </div>
-      <div class="cards">
-        <div *ngFor="let t of templates" class="card" [class.active]="editing?.id === t.id">
-          <button class="card-main" (click)="open(t)">
-            <b>{{ t.name }}</b>
-            <small class="muted">{{ t.category }} · {{ t.source | titlecase }}{{ t.sourceFilename ? ' (' + t.sourceFilename + ')' : '' }}</small>
-            <small class="muted">Updated {{ t.updatedAt | date:'medium' }}</small>
+
+      <ul class="tpl-list" *ngIf="templates.length">
+        <li *ngFor="let t of templates" class="tpl-item" [class.active]="editing?.id === t.id">
+          <button type="button" class="tpl-item-main" (click)="open(t)" [attr.aria-current]="editing?.id === t.id ? 'true' : null">
+            <!-- Thumbnail: the top of the template, rendered in the same sandboxed preview -->
+            <span class="tpl-thumb" aria-hidden="true">
+              <app-email-preview *ngIf="t.thumbHtml" [html]="t.thumbHtml" [contentKey]="'thumb-' + t.id + '-' + t.version" [title]="'Thumbnail of ' + t.name" emptyText=""></app-email-preview>
+              <app-icon *ngIf="!t.thumbHtml" name="template" [size]="22"></app-icon>
+            </span>
+            <span class="tpl-item-body">
+              <span class="tpl-item-title"><b>{{ t.name }}</b><span class="mx-tag" [ngClass]="tone(t.category)">{{ t.category }}</span></span>
+              <span class="tpl-item-sub">{{ t.description || sourceLabel(t) }}</span>
+              <span class="tpl-item-meta">{{ t.updatedAt | date:'MMM d, y, h:mm a' }}</span>
+            </span>
           </button>
-          <div class="card-actions" *ngIf="canCompose">
-            <button class="btn btn-secondary btn-sm" (click)="duplicate(t)">Duplicate</button>
-            <button class="btn btn-secondary btn-sm" (click)="remove(t)">Delete</button>
+          <div class="tpl-menu-wrap">
+            <button type="button" class="tpl-kebab" (click)="toggleMenu(t.id, $event)" [attr.aria-expanded]="menuFor === t.id" aria-haspopup="menu" [attr.aria-label]="'Actions for ' + t.name"><app-icon name="more" [size]="16"></app-icon></button>
+            <div class="tpl-menu" role="menu" *ngIf="menuFor === t.id" (click)="$event.stopPropagation()">
+              <button type="button" role="menuitem" (click)="menuFor = null; open(t)">Open</button>
+              <button type="button" role="menuitem" (click)="menuFor = null; useTemplate(t, 'email')">Use in a new email</button>
+              <button type="button" role="menuitem" (click)="menuFor = null; useTemplate(t, 'draft')">Use in a new draft</button>
+              <button type="button" role="menuitem" (click)="menuFor = null; useTemplate(t, 'campaign')">Use in a new campaign</button>
+              <ng-container *ngIf="canCompose">
+                <button type="button" role="menuitem" (click)="menuFor = null; duplicate(t)">Duplicate</button>
+                <button type="button" role="menuitem" class="danger" (click)="menuFor = null; remove(t)">Delete</button>
+              </ng-container>
+            </div>
           </div>
-        </div>
-      </div>
+        </li>
+      </ul>
       <div class="pager" *ngIf="pages > 1">
         <button class="btn btn-secondary btn-sm" (click)="go(page - 1)" [disabled]="page <= 1">‹ Prev</button>
         <span class="muted small">Page {{ page }} of {{ pages }}</span>
         <button class="btn btn-secondary btn-sm" (click)="go(page + 1)" [disabled]="page >= pages">Next ›</button>
       </div>
+    </aside>
+
+    <!-- ============ Editor ============ -->
+    <div class="tpl-editor tpl-editor-empty" *ngIf="!editing">
+      <p>{{ templates.length ? 'Select a template to edit it.' : (canCompose ? 'Create or import a template to start.' : 'No templates yet.') }}</p>
     </div>
 
     <div class="tpl-editor" *ngIf="editing">
       <div class="editor-head">
-        <span class="tag">{{ editing.id ? 'Editing saved template' : 'New template (not saved yet)' }}</span>
-        <span class="tag warn" *ngIf="dirty">Unsaved changes</span>
+        <div class="editor-title">
+          <button type="button" class="btn btn-secondary btn-sm tpl-back" (click)="cancel()">← Templates</button>
+          <h3>{{ editing.name || 'Untitled template' }}</h3>
+          <span class="mx-tag" [ngClass]="tone(editing.category)">{{ editing.category || 'Custom' }}</span>
+          <span class="muted small" *ngIf="editing.id">Last saved: {{ (editing.updatedAt || editing.createdAt) | date:'MMM d, y, h:mm a' }}</span>
+          <span class="mx-tag" *ngIf="!editing.id">New template · not saved yet</span>
+          <span class="mx-tag warn" *ngIf="dirty">Unsaved changes</span>
+        </div>
         <div class="editor-actions">
-          <button class="btn btn-secondary btn-sm" (click)="validate()" [disabled]="busy === 'validate'">Validate</button>
-          <button *ngIf="canCompose" class="btn btn-primary btn-sm" (click)="save()" [disabled]="busy === 'save' || !editing.name?.trim()">Save</button>
-          <button class="btn btn-secondary btn-sm" (click)="cancel()">{{ dirty ? 'Cancel' : 'Close' }}</button>
+          <button class="btn btn-secondary btn-sm" (click)="validate()" [disabled]="busy === 'validate'"><app-icon name="check" [size]="15"></app-icon>Validate</button>
+          <button *ngIf="canCompose" class="btn btn-primary btn-sm" (click)="save()" [disabled]="busy === 'save' || !editing.name?.trim()"><app-icon name="save" [size]="15"></app-icon>Save</button>
+          <button class="btn btn-secondary btn-sm" (click)="cancel()"><app-icon name="x" [size]="15"></app-icon>{{ dirty ? 'Cancel' : 'Close' }}</button>
         </div>
       </div>
 
       <div class="meta">
-        <label>Name <input class="hud-input" [(ngModel)]="editing.name" maxlength="150" [disabled]="!canCompose" /></label>
-        <label>Category
-          <input class="hud-input" [(ngModel)]="editing.category" list="tplCategories" maxlength="50" [disabled]="!canCompose" />
-          <datalist id="tplCategories"><option *ngFor="let c of categories" [value]="c"></option></datalist>
+        <label><span>Template name <span class="req" aria-hidden="true">*</span></span><input class="hud-input" [(ngModel)]="editing.name" maxlength="150" [disabled]="!canCompose" required /></label>
+        <label><span>Category <span class="req" aria-hidden="true">*</span></span>
+          <select class="hud-input" [(ngModel)]="editing.category" [disabled]="!canCompose">
+            <option *ngFor="let c of categoryOptions" [value]="c">{{ c }}</option>
+          </select>
         </label>
-        <label class="wide">Description <input class="hud-input" [(ngModel)]="editing.description" maxlength="500" [disabled]="!canCompose" /></label>
+        <label class="wide">Description <input class="hud-input" [(ngModel)]="editing.description" maxlength="500" [disabled]="!canCompose" placeholder="What is this template for?" /></label>
       </div>
 
       <div class="use-row" *ngIf="editing.id">
         <span class="muted small">Use a copy in:</span>
-        <button class="btn btn-secondary btn-sm" (click)="useIn('email')">New email</button>
-        <button class="btn btn-secondary btn-sm" (click)="useIn('draft')">📝 New draft</button>
-        <button class="btn btn-secondary btn-sm" (click)="useIn('campaign')">📣 New campaign</button>
+        <button class="btn btn-secondary btn-sm" (click)="useIn('email')"><app-icon name="send" [size]="14"></app-icon>New email</button>
+        <button class="btn btn-secondary btn-sm" (click)="useIn('draft')"><app-icon name="drafts" [size]="14"></app-icon>New draft</button>
+        <button class="btn btn-secondary btn-sm" (click)="useIn('campaign')"><app-icon name="campaigns" [size]="14"></app-icon>New campaign</button>
       </div>
 
-      <div class="panes">
-        <label class="source">HTML source
-          <textarea class="hud-input code" rows="20" [(ngModel)]="editing.html" spellcheck="false" [disabled]="!canCompose" aria-label="HTML source"></textarea>
-        </label>
-        <div class="preview">
-          <div class="preview-bar">
-            <span class="muted small">Preview</span>
-            <button class="btn btn-sm" [class.btn-primary]="viewport === 'desktop'" [class.btn-secondary]="viewport !== 'desktop'" (click)="viewport = 'desktop'">Desktop</button>
-            <button class="btn btn-sm" [class.btn-primary]="viewport === 'mobile'" [class.btn-secondary]="viewport !== 'mobile'" (click)="viewport = 'mobile'">Mobile</button>
-          </div>
-          <app-email-preview class="frame" [html]="editing.html" [contentKey]="editing.id" [viewport]="viewport" [title]="'Preview of ' + (editing.name || 'template')"
-            emptyText="No HTML yet. Paste or import HTML to see the preview."></app-email-preview>
-        </div>
-      </div>
+      <section class="tpl-content-card">
+        <app-email-content-editor [html]="editing.html" (htmlChange)="editing.html = $event" [editable]="canCompose" [contentKey]="editKey"
+          [name]="editing.name" purpose="template" (chooseTemplate)="picker = true" (toast)="toast.emit($event)"></app-email-content-editor>
+      </section>
 
       <div class="checks">
         <div *ngIf="editing.placeholders?.length"><b>Placeholders:</b> {{ editing.placeholders.join(', ') }} — filled per email before sending (supported: {{ tokenList }}; campaigns: Zoho merge tags such as $[LI:UNSUBSCRIBE]$).</div>
@@ -121,4 +167,7 @@
       </div>
     </div>
   </div>
+
+  <app-template-picker *ngIf="picker" subtitle="Replaces this template's HTML with a copy of the one you choose. Nothing changes until you click Use This Template, and nothing is saved until you press Save."
+    (picked)="onTemplatePicked($event)" (closed)="picker = false"></app-template-picker>
 </section>

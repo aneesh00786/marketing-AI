@@ -30,6 +30,91 @@ function frontendUrl() {
 
 const resultRedirect = params => `${frontendUrl()}/?${new URLSearchParams({ view: 'mail', section: 'zoho', ...params })}`;
 
+// ------------------------------------------------------------------ OAuth client (Settings or .env)
+
+/**
+ * The Zoho API client a workspace uses: the one its Owner/Admin entered in Mail Center → Settings,
+ * otherwise the server's ZOHO_CAMPAIGNS_CLIENT_ID / _SECRET. null when neither exists. The secret
+ * is decrypted only here, for the calls to Zoho's token endpoint.
+ */
+async function appConfig(workspaceId) {
+  const row = await get('SELECT client_id, client_secret_ciphertext FROM mail_provider_apps WHERE workspace_id = ? AND provider = ?', [workspaceId, PROVIDER]);
+  if (row) {
+    const clientSecret = secretBox.decrypt(row.client_secret_ciphertext);
+    return clientSecret ? { clientId: row.client_id, clientSecret, source: 'workspace' } : null;
+  }
+  const server = zoho.clientConfig();
+  return server ? { ...server, source: 'server' } : null;
+}
+
+const CLIENT_ID_RE = /^[A-Za-z0-9._-]{8,150}$/;
+const CLIENT_SECRET_RE = /^[A-Za-z0-9._-]{8,200}$/;
+/** Shows enough of a Client ID to recognise it, never the whole value. */
+const maskId = id => (id.length <= 10 ? `${id.slice(0, 2)}…` : `${id.slice(0, 6)}…${id.slice(-4)}`);
+
+/** What Settings shows about the OAuth client: never the secret. */
+async function getApp(ctx) {
+  const row = await get('SELECT client_id, updated_at, updated_by FROM mail_provider_apps WHERE workspace_id = ? AND provider = ?', [ws(ctx), PROVIDER]);
+  const server = zoho.clientConfig();
+  return {
+    source: row ? 'workspace' : server ? 'server' : null,
+    clientIdHint: row ? maskId(row.client_id) : null,
+    hasSecret: !!row,
+    updatedAt: row ? row.updated_at : null,
+    serverFallback: !!server,
+    encryptionReady: secretBox.isConfigured(),
+    redirectUri: zoho.redirectUri(),
+    homepageUrl: frontendUrl(),
+    scopes: zoho.SCOPES
+  };
+}
+
+/** Deletes the stored connection: its refresh token belongs to the previous OAuth client. */
+async function dropConnection(ctx, reason) {
+  const row = await connectionRow(ws(ctx));
+  if (!row || row.status === 'disconnected') return false;
+  await run("UPDATE mail_provider_connections SET status = 'disconnected', refresh_token_ciphertext = NULL, last_error = NULL, updated_at = UTC_TIMESTAMP() WHERE id = ? AND workspace_id = ?", [row.id, ws(ctx)]);
+  tokenCache.delete(ws(ctx));
+  await audit(ctx, 'mail.zoho.disconnected', { resourceType: 'mail_provider', resourceId: PROVIDER, metadata: { reason } });
+  return true;
+}
+
+/**
+ * Saves the workspace's Zoho Client ID and Secret (Owners/Admins). The secret may be left out to
+ * keep the saved one. A different client disconnects Zoho, which must then be connected again.
+ */
+async function saveApp(ctx, input = {}) {
+  if (!secretBox.isConfigured()) throw httpError(409, 'Credential encryption is not configured on the server (SOCIAL_TOKEN_ENCRYPTION_KEY), so the Zoho secret cannot be stored safely.', 'SETUP_REQUIRED');
+  const clientId = String(input.clientId ?? '').trim();
+  const secretIn = input.clientSecret === undefined || input.clientSecret === null ? '' : String(input.clientSecret).trim();
+  if (!CLIENT_ID_RE.test(clientId)) throw httpError(400, 'Enter the Client ID exactly as shown in the Zoho API Console.', 'VALIDATION_ERROR');
+  if (secretIn && !CLIENT_SECRET_RE.test(secretIn)) throw httpError(400, 'Enter the Client Secret exactly as shown in the Zoho API Console.', 'VALIDATION_ERROR');
+  const existing = await get('SELECT client_id, client_secret_ciphertext FROM mail_provider_apps WHERE workspace_id = ? AND provider = ?', [ws(ctx), PROVIDER]);
+  if (!existing && !secretIn) throw httpError(400, 'Enter the Client Secret too.', 'VALIDATION_ERROR');
+  const oldSecret = existing ? secretBox.decrypt(existing.client_secret_ciphertext) : null;
+  const clientSecret = secretIn || oldSecret;
+  const changed = !existing || existing.client_id !== clientId || oldSecret !== clientSecret;
+  if (!changed) return { saved: true, changed: false, disconnected: false, app: await getApp(ctx) };
+  await run(
+    `INSERT INTO mail_provider_apps (workspace_id, provider, client_id, client_secret_ciphertext, updated_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())
+     ON DUPLICATE KEY UPDATE client_id = VALUES(client_id), client_secret_ciphertext = VALUES(client_secret_ciphertext), updated_by = VALUES(updated_by), updated_at = UTC_TIMESTAMP()`,
+    [ws(ctx), PROVIDER, clientId, secretBox.encrypt(clientSecret), ctx.auth.userId || null]
+  );
+  const disconnected = await dropConnection(ctx, 'oauth_client_changed');
+  await audit(ctx, existing ? 'mail.zoho.app_updated' : 'mail.zoho.app_saved', { resourceType: 'mail_provider', resourceId: PROVIDER, metadata: { clientIdHint: maskId(clientId) } });
+  return { saved: true, changed: true, disconnected, app: await getApp(ctx) };
+}
+
+/** Removes the workspace's own client (the server's, if any, is used again); disconnects Zoho. */
+async function removeApp(ctx) {
+  const res = await run('DELETE FROM mail_provider_apps WHERE workspace_id = ? AND provider = ?', [ws(ctx), PROVIDER]);
+  if (!res.changes) throw httpError(404, 'No Zoho credentials are saved for this workspace.', 'NOT_FOUND');
+  const disconnected = await dropConnection(ctx, 'oauth_client_removed');
+  await audit(ctx, 'mail.zoho.app_removed', { resourceType: 'mail_provider', resourceId: PROVIDER });
+  return { removed: true, disconnected, app: await getApp(ctx) };
+}
+
 // ------------------------------------------------------------------ connection
 
 async function connectionRow(workspaceId) {
@@ -58,8 +143,11 @@ function presentConnection(row) {
 
 async function status(ctx) {
   const caps = ctx.auth.capabilities;
+  const cfg = await appConfig(ws(ctx));
   return {
-    serverConfigured: !!zoho.clientConfig() && secretBox.isConfigured(),
+    // Ready to connect: an OAuth client (Settings or .env) and token encryption are available.
+    serverConfigured: !!cfg && secretBox.isConfigured(),
+    credentialsSource: cfg ? cfg.source : null,
     redirectUri: zoho.redirectUri(),
     connection: presentConnection(await connectionRow(ws(ctx))),
     canConfigure: caps.has('mail.configure'),
@@ -71,7 +159,8 @@ async function status(ctx) {
 }
 
 async function startConnect(ctx) {
-  if (!zoho.clientConfig()) throw httpError(409, 'Zoho Campaigns is not set up on the server: ZOHO_CAMPAIGNS_CLIENT_ID and ZOHO_CAMPAIGNS_CLIENT_SECRET are missing.', 'SETUP_REQUIRED');
+  const cfg = await appConfig(ws(ctx));
+  if (!cfg) throw httpError(409, 'Zoho Campaigns is not set up yet: enter the Zoho Client ID and Client Secret in Mail Center → Settings → Zoho Campaigns.', 'SETUP_REQUIRED');
   if (!secretBox.isConfigured()) throw httpError(409, 'Credential encryption is not configured on the server.', 'SETUP_REQUIRED');
   const state = crypto.randomBytes(32).toString('base64url');
   await run(
@@ -80,7 +169,7 @@ async function startConnect(ctx) {
     [secretBox.sha256(state), ws(ctx), ctx.auth.userId, PROVIDER, toDbDateTime(new Date(Date.now() + STATE_TTL_MS))]
   );
   await audit(ctx, 'mail.zoho.connect_started', { resourceType: 'mail_provider', resourceId: PROVIDER });
-  return { authorizeUrl: zoho.authorizeUrl(state) };
+  return { authorizeUrl: zoho.authorizeUrl(state, cfg) };
 }
 
 /** Single use, unexpired, for this provider. */
@@ -119,7 +208,9 @@ async function handleCallback(query) {
   if (!query.code || typeof query.code !== 'string' || query.code.length > 500) return resultRedirect({ zoho: 'error', reason: 'missing_code' });
 
   try {
-    const tokens = await zoho.exchangeCode(dc, query.code);
+    const cfg = await appConfig(ctx.auth.workspaceId);
+    if (!cfg) throw Object.assign(new Error('No Zoho OAuth client.'), { code: 'ZOHO_NOT_CONFIGURED' });
+    const tokens = await zoho.exchangeCode(dc, query.code, cfg);
     await run(
       `INSERT INTO mail_provider_connections (workspace_id, provider, location, accounts_server, api_host, refresh_token_ciphertext, scopes, status, last_error, connected_by, connected_at, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, 'connected', NULL, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP(), UTC_TIMESTAMP())
@@ -163,7 +254,7 @@ async function session(workspaceId) {
     return { row, dc, accessToken: cached.accessToken };
   }
   try {
-    const t = await zoho.refreshAccessToken(dc, secretBox.decrypt(row.refresh_token_ciphertext));
+    const t = await zoho.refreshAccessToken(dc, secretBox.decrypt(row.refresh_token_ciphertext), await appConfig(workspaceId));
     tokenCache.set(workspaceId, { connectionId: row.id, connectedAt: String(row.connected_at), accessToken: t.accessToken, expiresAt: Date.now() + t.expiresIn * 1000 });
     return { row, dc, accessToken: t.accessToken };
   } catch (err) {
@@ -229,6 +320,10 @@ async function assertReady(workspaceId) {
 
 module.exports = {
   PROVIDER,
+  appConfig,
+  getApp,
+  saveApp,
+  removeApp,
   status,
   startConnect,
   handleCallback,

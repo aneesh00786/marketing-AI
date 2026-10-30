@@ -1,0 +1,70 @@
+<!-- One content panel: Edit (HTML source) or Preview (the unsaved HTML, rendered in a sandbox).
+     Both show html; switching never saves, validates, approves or sends. -->
+<section class="ec-content" aria-labelledby="ec-content-title">
+  <div class="ec-content-head">
+    <h3 id="ec-content-title" class="mx-subhead">Email content</h3>
+    <span class="ec-spacer"></span>
+    <div class="mx-seg compact" role="group" aria-label="Preview width" *ngIf="contentMode === 'preview'">
+      <button type="button" [class.on]="previewWidth === 'desktop'" [attr.aria-pressed]="previewWidth === 'desktop'" (click)="previewWidth = 'desktop'">Desktop</button>
+      <button type="button" [class.on]="previewWidth === 'mobile'" [attr.aria-pressed]="previewWidth === 'mobile'" (click)="previewWidth = 'mobile'">Mobile</button>
+    </div>
+    <!-- Edit / Preview switch: the labels and the switch all change the same view -->
+    <div class="ec-switch" role="group" aria-label="Email content view">
+      <button type="button" id="ec-mode-edit" class="ec-switch-label" [class.on]="contentMode === 'edit'" [attr.aria-pressed]="contentMode === 'edit'" (click)="setMode('edit')">Edit</button>
+      <button type="button" role="switch" class="ec-switch-track" [class.on]="contentMode === 'preview'" [attr.aria-checked]="contentMode === 'preview'"
+        aria-label="Show preview" (click)="setMode(contentMode === 'edit' ? 'preview' : 'edit')"><span class="ec-switch-thumb"></span></button>
+      <button type="button" id="ec-mode-preview" class="ec-switch-label" [class.on]="contentMode === 'preview'" [attr.aria-pressed]="contentMode === 'preview'" (click)="setMode('preview')">Preview</button>
+    </div>
+    <button *ngIf="editable && canChooseTemplate" type="button" class="btn btn-secondary btn-sm" (click)="chooseTemplate.emit()"><app-icon name="template" [size]="14"></app-icon>Choose template</button>
+  </div>
+
+  <div id="ec-content-body" class="ec-content-body" [attr.aria-label]="contentMode === 'edit' ? 'Email HTML editor' : 'Email preview'">
+    <ng-container *ngIf="contentMode === 'edit'">
+      <!-- Formatting toolbar: formats the email in Visual mode, inserts tags at the cursor in HTML mode -->
+      <div class="ec-toolbar" role="toolbar" aria-label="Formatting">
+        <div class="mx-seg compact" role="group" aria-label="Editor">
+          <button type="button" id="ec-edit-visual" [class.on]="editMode === 'visual'" [attr.aria-pressed]="editMode === 'visual'" (click)="setEditMode('visual')" title="Edit the email as it looks">Visual</button>
+          <button type="button" id="ec-edit-html" [class.on]="editMode === 'html'" [attr.aria-pressed]="editMode === 'html'" (click)="setEditMode('html')" title="Edit the HTML source"><app-icon name="code" [size]="13"></app-icon>HTML</button>
+        </div>
+        <ng-container *ngIf="editable">
+        <span class="ec-tb-sep" aria-hidden="true"></span>
+        <select class="hud-input ec-block" aria-label="Wrap the selection in" (change)="wrapBlock($any($event.target).value); $any($event.target).value = ''">
+          <option value="">Paragraph</option>
+          <option value="p">Paragraph &lt;p&gt;</option>
+          <option value="h1">Heading 1</option>
+          <option value="h2">Heading 2</option>
+          <option value="h3">Heading 3</option>
+        </select>
+        <span class="ec-tb-sep" aria-hidden="true"></span>
+        <button type="button" class="ec-tb" title="Bold" aria-label="Bold" (click)="wrapInline('strong')"><app-icon name="bold" [size]="16"></app-icon></button>
+        <button type="button" class="ec-tb" title="Italic" aria-label="Italic" (click)="wrapInline('em')"><app-icon name="italic" [size]="16"></app-icon></button>
+        <button type="button" class="ec-tb" title="Underline" aria-label="Underline" (click)="wrapInline('u')"><app-icon name="underline" [size]="16"></app-icon></button>
+        <button type="button" class="ec-tb" title="Bulleted list" aria-label="Bulleted list" (click)="insertList()"><app-icon name="list" [size]="16"></app-icon></button>
+        <button type="button" class="ec-tb" title="Link" aria-label="Link" (click)="insertLink()"><app-icon name="link" [size]="16"></app-icon></button>
+        <button type="button" class="ec-tb" title="Image (https:// URL)" aria-label="Image" (click)="insertImage()"><app-icon name="image" [size]="16"></app-icon></button>
+        <button type="button" class="ec-tb" title="Insert unsubscribe link" aria-label="Insert unsubscribe link" (click)="insertUnsubscribe()"><app-icon name="unsubscribe" [size]="16"></app-icon></button>
+        <span class="ec-tb-sep" aria-hidden="true"></span>
+        <button type="button" class="ec-tb" title="Undo" aria-label="Undo" (click)="history('undo')"><app-icon name="undo" [size]="16"></app-icon></button>
+        <button type="button" class="ec-tb" title="Redo" aria-label="Redo" (click)="history('redo')"><app-icon name="redo" [size]="16"></app-icon></button>
+        </ng-container>
+        <span class="ec-spacer"></span>
+        <span class="muted small ec-count" *ngIf="editMode === 'html'">{{ html.length | number }} characters</span>
+      </div>
+      <app-visual-html-editor *ngIf="editMode === 'visual'" class="ec-visual" [html]="html" (htmlChange)="setHtml($event)"
+        [disabled]="!editable" [title]="'Edit ' + (name || purposeNoun) + ' visually'"></app-visual-html-editor>
+      <app-html-code-editor #code *ngIf="editMode === 'html'" class="ec-code" [value]="html" (valueChange)="setHtml($event)" [disabled]="!editable"
+        label="Email HTML" placeholder="<p>Write or paste the HTML here, or choose a template.</p>"></app-html-code-editor>
+      <ul class="ec-hints" *ngIf="editable && contentHints.length" aria-live="polite">
+        <li *ngFor="let h of contentHints">{{ h }}</li>
+      </ul>
+      <p class="ec-guide" *ngIf="purpose === 'campaign'"><app-icon name="info" [size]="16"></app-icon><span>Include <code>$[LI:UNSUBSCRIBE]$</code> for the unsubscribe link (Zoho requires one). Use https:// image URLs.</span></p>
+      <p class="ec-guide" *ngIf="purpose === 'template'"><app-icon name="info" [size]="16"></app-icon><span>Placeholders such as <code ngNonBindable>{{first_name}}</code> are filled for each email. For Zoho campaigns include <code>$[LI:UNSUBSCRIBE]$</code> (other marketing emails get an unsubscribe link added automatically). Use https:// image URLs.</span></p>
+    </ng-container>
+
+    <div class="ec-canvas" *ngIf="contentMode === 'preview'">
+      <app-email-preview class="ec-preview" [html]="html" [contentKey]="contentKey" [viewport]="previewWidth" [title]="'Preview of ' + (name || purposeNoun)"
+        emptyText="No HTML content yet. Switch to Edit to write HTML, or choose a template."></app-email-preview>
+      <p class="muted small">Preview of the current, unsaved content. {{ purpose === 'campaign' ? 'Zoho fills in merge tags such as $[LI:UNSUBSCRIBE]$ when it sends.' : 'Placeholders are filled when the template is used.' }}</p>
+    </div>
+  </div>
+</section>

@@ -70,6 +70,8 @@ export class MailCenterComponent implements OnInit {
   draftId: number | null = null;
   /** Status filter Sent Mail opens with (from an Overview shortcut). */
   sentStatus: string | null = null;
+  /** Settings tab to open on (e.g. 'zoho' from Campaigns); cleared when Settings is left. */
+  settingsTab: any = null;
   /** Unread received emails (null until known). */
   inboxUnread: number | null = null;
 
@@ -99,7 +101,9 @@ export class MailCenterComponent implements OnInit {
     return MAIL_SECTIONS.filter(s => keys.includes(s.key));
   }
 
-  /** Drafts that need someone with mail.send (toolbar summary). */
+  get activeLabel(): string { return this.sections.find(s => s.key === this.active)?.label || ''; }
+
+  /** Drafts that need someone with mail.send (tab badge). */
   get pendingApprovals(): number { return this.draftCount('Draft') + this.draftCount('Approved') + this.draftCount('Needs Review'); }
 
   /** The section shown: the requested one if this workspace has it, otherwise the overview. */
@@ -109,6 +113,7 @@ export class MailCenterComponent implements OnInit {
 
   go(section: MailSection, opts: { status?: string | null; draftId?: number | null } = {}): void {
     if (section === 'sent') this.sentStatus = opts.status ?? null;
+    if (section !== 'settings') this.settingsTab = null;
     this.draftStatus = opts.status ?? null;
     this.draftId = opts.draftId ?? null;
     this.section = section;

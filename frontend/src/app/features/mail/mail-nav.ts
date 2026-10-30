@@ -7,17 +7,17 @@ export type MailSection = 'overview' | 'inbox' | 'sent' | 'drafts' | 'approvals'
 /** Tab groups, shown with a divider between them: day-to-day mail, campaigns & content, records & setup. */
 export type MailGroup = 'mail' | 'campaigns' | 'admin';
 
-export const MAIL_SECTIONS: { key: MailSection; label: string; hint: string; group: MailGroup }[] = [
-  { key: 'overview', label: 'Overview', hint: 'Mail at a glance: status, counts and activity', group: 'mail' },
-  { key: 'inbox', label: 'Inbox', hint: 'Email received by the company mailbox', group: 'mail' },
-  { key: 'sent', label: 'Sent Mail', hint: 'Email sent from this workspace, with delivery status', group: 'mail' },
-  { key: 'drafts', label: 'Drafts', hint: 'AI drafts: create, edit and review', group: 'mail' },
-  { key: 'approvals', label: 'Approvals', hint: 'Drafts waiting for approval, ready to send, or with unknown delivery', group: 'mail' },
-  { key: 'product-emails', label: 'Product Emails', hint: 'Personalised emails to a product\'s leads', group: 'campaigns' },
-  { key: 'campaigns', label: 'Campaigns', hint: 'Email campaigns delivered through Zoho Campaigns', group: 'campaigns' },
-  { key: 'templates', label: 'Email Templates', hint: 'Reusable HTML email templates', group: 'campaigns' },
-  { key: 'logs', label: 'Logs', hint: 'Campaign log and the Compose audit', group: 'admin' },
-  { key: 'settings', label: 'Settings', hint: 'Mailbox, marketing approval, tracking and Zoho: all mail settings in one place', group: 'admin' }
+export const MAIL_SECTIONS: { key: MailSection; label: string; hint: string; group: MailGroup; icon: string }[] = [
+  { key: 'overview', label: 'Overview', hint: 'Mail at a glance: status, counts and activity', group: 'mail', icon: 'dashboard' },
+  { key: 'inbox', label: 'Inbox', hint: 'Email received by the company mailbox', group: 'mail', icon: 'inbox' },
+  { key: 'sent', label: 'Sent Mail', hint: 'Email sent from this workspace, with delivery status', group: 'mail', icon: 'send' },
+  { key: 'drafts', label: 'Drafts', hint: 'AI drafts: create, edit and review', group: 'mail', icon: 'drafts' },
+  { key: 'approvals', label: 'Approvals', hint: 'Drafts waiting for approval, ready to send, or with unknown delivery', group: 'mail', icon: 'check' },
+  { key: 'product-emails', label: 'Product Emails', hint: 'Personalised emails to a product\'s leads', group: 'campaigns', icon: 'products' },
+  { key: 'campaigns', label: 'Campaigns', hint: 'Email campaigns delivered through Zoho Campaigns', group: 'campaigns', icon: 'campaigns' },
+  { key: 'templates', label: 'Email Templates', hint: 'Reusable HTML email templates', group: 'campaigns', icon: 'template' },
+  { key: 'logs', label: 'Logs', hint: 'What was sent: sent campaigns and sent emails, by date', group: 'admin', icon: 'logs' },
+  { key: 'settings', label: 'Settings', hint: 'Mailbox, marketing approval, tracking and Zoho: all mail settings in one place', group: 'admin', icon: 'settings' }
 ];
 
 /** Draft statuses that need someone with mail.send: approve, send, or confirm an unknown delivery. */

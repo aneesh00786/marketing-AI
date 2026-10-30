@@ -90,9 +90,13 @@ async function requireRow(ctx, rawId) {
 
 // ------------------------------------------------------------------ management (Marketech.ai)
 
-async function list(ctx) {
+/** Characters of HTML per list thumbnail (the top of the email only). */
+const THUMB_CHARS = 40000;
+
+/** opts.thumbs: also return the start of each campaign's HTML for the list thumbnails (capped). */
+async function list(ctx, { thumbs = false } = {}) {
   const rows = await all('SELECT * FROM mail_campaigns WHERE workspace_id = ? ORDER BY id DESC LIMIT 200', [ws(ctx)]);
-  return rows.map(r => present(r));
+  return rows.map(r => ({ ...present(r), ...(thumbs ? { thumbHtml: String(r.html_content || '').slice(0, THUMB_CHARS) } : {}) }));
 }
 
 async function getOne(ctx, id) {

@@ -472,6 +472,8 @@ const SENT_STATUSES = ['sent', 'accepted', 'delivered', 'opened', 'clicked', 'bo
 const sentQuery = z.object({
   q: z.string().trim().max(120).optional(),
   status: z.enum(SENT_STATUSES).optional(),
+  /** Only emails that went out (no failed attempts): the Logs "Sent emails" view. */
+  sentOnly: z.enum(['1']).optional(),
   purpose: z.enum(['transactional', 'marketing', 'not_recorded']).optional(),
   from: isoDay.optional(),
   to: isoDay.optional(),
@@ -483,7 +485,7 @@ emails.get('/sent', requireCapability('mail.view'), wrap(async (req, res) => {
   const q = query(sentQuery, req);
   const page = q.page || 1;
   const A = mailActivity;
-  const where = ['e.workspace_id = ?', "e.status IN ('Sent', 'Not Sent')"];
+  const where = ['e.workspace_id = ?', q.sentOnly ? "e.status = 'Sent'" : "e.status IN ('Sent', 'Not Sent')"];
   const params = [ws(req), ws(req), ws(req), ws(req)]; // three for LINKS_JOIN, one for the WHERE
   if (q.q) {
     const like = likeOf(q.q);

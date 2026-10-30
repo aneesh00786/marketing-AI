@@ -1,8 +1,8 @@
 <section class="ml" aria-labelledby="ml-title">
   <header class="ml-head mx-head">
     <div>
-    <h2 id="ml-title">Logs</h2>
-    <p class="mx-desc">Every campaign and what it has sent. Individual emails are in Inbox and Sent Mail.</p>
+      <h2 id="ml-title">Logs</h2>
+      <p class="mx-desc">A record of what was actually sent: campaigns that went out and every email sent. Drafts and unsent campaigns are not listed.</p>
     </div>
   </header>
 
@@ -11,14 +11,25 @@
       [tabindex]="tab === t.id ? 0 : -1" [class.on]="tab === t.id" (click)="select(t.id)">{{ t.label }}</button>
   </div>
 
+  <!-- Date range for both sent logs (the Compose audit has its own) -->
+  <form class="ml-dates mx-filters" *ngIf="tab !== 'audit'" (ngSubmit)="applyRange()" aria-label="Date range">
+    <label>From <input class="hud-input" type="date" name="from" [(ngModel)]="range.from" (change)="applyRange()" [max]="range.to || null" /></label>
+    <label>To <input class="hud-input" type="date" name="to" [(ngModel)]="range.to" (change)="applyRange()" [min]="range.from || null" /></label>
+    <div class="ml-presets" role="group" aria-label="Quick ranges">
+      <button type="button" *ngFor="let d of presets" class="btn btn-secondary btn-sm" [class.on]="isPreset(d)" [attr.aria-pressed]="isPreset(d)" (click)="preset(d)">Last {{ d }} days</button>
+      <button type="button" class="btn btn-secondary btn-sm" *ngIf="range.from || range.to" (click)="clearRange()">All dates</button>
+    </div>
+  </form>
+  <div class="mx-callout error" *ngIf="rangeInvalid && tab !== 'audit'" role="alert">The From date is after the To date.</div>
+
   <div class="ml-panel" role="tabpanel" [attr.aria-labelledby]="'ml-tab-' + tab" [ngSwitch]="tab">
 
-    <!-- Campaign log -->
+    <!-- Sent campaigns -->
     <ng-container *ngSwitchCase="'campaigns'">
       <div class="ml-filters mx-filters">
         <label>Show
           <select class="hud-input" name="ctype" [(ngModel)]="campaignType" (ngModelChange)="loadCampaigns(1)">
-            <option value="">All campaigns</option>
+            <option value="">All sent campaigns</option>
             <option value="ai">AI Campaigns (sequences)</option>
             <option value="zoho">Zoho Campaigns</option>
           </select>
@@ -28,12 +39,13 @@
       <div class="mx-callout error" *ngIf="campaignsError" role="alert">{{ campaignsError }}</div>
       <p class="muted small" *ngIf="campaignsLoading">Loading…</p>
       <ng-container *ngIf="campaigns && !campaignsError">
-        <p class="muted small" *ngIf="!campaigns.campaigns.length">No campaigns yet.</p>
+        <p class="mx-empty" *ngIf="!campaigns.campaigns.length">{{ range.from || range.to ? 'No campaign sent in this period.' : 'No campaign has been sent yet.' }}</p>
         <div class="mx-table-wrap" *ngIf="campaigns.campaigns.length">
           <table class="mx-table">
-            <thead><tr><th>Campaign</th><th>Type</th><th>Status</th><th class="num">Recipients</th><th class="num">Sent</th><th class="num">Opened</th><th class="num">Replied</th><th class="num">Bounced</th><th class="num">Failed</th><th>Last activity</th></tr></thead>
+            <thead><tr><th>Sent</th><th>Campaign</th><th>Type</th><th>Status</th><th class="num">Recipients</th><th class="num">{{ range.from || range.to ? 'Sent in period' : 'Sent' }}</th><th class="num">Opened</th><th class="num">Replied</th><th class="num">Bounced</th><th class="num">Failed</th></tr></thead>
             <tbody>
               <tr *ngFor="let c of campaigns.campaigns">
+                <td class="nowrap">{{ c.sentAt ? (c.sentAt | date:'MMM d, y, h:mm a') : '—' }}</td>
                 <td class="subj"><strong>{{ c.name }}</strong><small class="detail" *ngIf="c.note">{{ c.note }}</small></td>
                 <td>{{ c.type === 'ai' ? 'AI Campaign' : 'Zoho' }}</td>
                 <td><span class="mx-tag" [ngClass]="tone(c.status)">{{ statusLabel(c.status) }}</span></td>
@@ -43,16 +55,50 @@
                 <td class="num">{{ n(c.replied) }}</td>
                 <td class="num">{{ n(c.bounced) }}</td>
                 <td class="num" [class.bad]="c.failed">{{ n(c.failed) }}</td>
-                <td class="nowrap">{{ c.lastActivityAt ? (c.lastActivityAt | date:'MMM d, y') : '—' }}</td>
               </tr>
             </tbody>
           </table>
         </div>
-        <p class="muted small">“—” means the number is not available for that campaign type (Zoho reports opens; AI campaigns record replies).</p>
+        <p class="muted small">“Sent” is the latest send for AI Campaigns and the submission time for Zoho. “—” means the number is not available for that campaign type (Zoho reports opens; AI Campaigns record replies).</p>
         <div class="ml-pager" *ngIf="campaignPage > 1 || campaigns.hasMore">
           <button type="button" class="btn btn-secondary btn-sm" (click)="loadCampaigns(campaignPage - 1)" [disabled]="campaignPage <= 1 || campaignsLoading">← Newer</button>
           <span class="muted small">Page {{ campaignPage }}</span>
           <button type="button" class="btn btn-secondary btn-sm" (click)="loadCampaigns(campaignPage + 1)" [disabled]="!campaigns.hasMore || campaignsLoading">Older →</button>
+        </div>
+      </ng-container>
+    </ng-container>
+
+    <!-- Sent emails -->
+    <ng-container *ngSwitchCase="'emails'">
+      <form class="ml-filters mx-filters" (ngSubmit)="loadEmails(1)" role="search" aria-label="Search sent emails">
+        <label class="grow">Search <input class="hud-input" name="q" [(ngModel)]="emailQuery" maxlength="120" placeholder="Recipient or subject" /></label>
+        <button type="submit" class="btn btn-secondary btn-sm" [disabled]="emailsLoading">Search</button>
+        <button type="button" class="ml-link" (click)="openSection.emit('sent')">Open Sent Mail →</button>
+      </form>
+      <div class="mx-callout error" *ngIf="emailsError" role="alert">{{ emailsError }}</div>
+      <p class="muted small" *ngIf="emailsLoading">Loading…</p>
+      <ng-container *ngIf="emails && !emailsError">
+        <p class="mx-empty" *ngIf="!emails.emails.length">{{ range.from || range.to || emailQuery ? 'No email sent in this period.' : 'No email has been sent yet.' }}</p>
+        <div class="mx-table-wrap" *ngIf="emails.emails.length">
+          <table class="mx-table">
+            <thead><tr><th>Sent</th><th>To</th><th>Subject</th><th>Purpose</th><th>Sent from</th><th>Status</th></tr></thead>
+            <tbody>
+              <tr *ngFor="let e of emails.emails">
+                <td class="nowrap">{{ e.sentAt | date:'MMM d, y, h:mm a' }}</td>
+                <td class="addr">{{ e.toName ? e.toName + ' · ' : '' }}{{ e.to || '—' }}</td>
+                <td class="subj">{{ e.subject || '(no subject)' }}</td>
+                <td>{{ purposeLabel(e.purpose) }}</td>
+                <td>{{ sourceLabel(e.source) }}</td>
+                <td><span class="mx-tag" [ngClass]="tone(e.delivery)">{{ deliveryLabel(e.delivery) }}</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="muted small">Only emails that went out. Delivered, opened and clicked come from tracking events; an open does not prove a person read the email.</p>
+        <div class="ml-pager" *ngIf="emailPage > 1 || emails.hasMore">
+          <button type="button" class="btn btn-secondary btn-sm" (click)="loadEmails(emailPage - 1)" [disabled]="emailPage <= 1 || emailsLoading">← Newer</button>
+          <span class="muted small">Page {{ emailPage }}</span>
+          <button type="button" class="btn btn-secondary btn-sm" (click)="loadEmails(emailPage + 1)" [disabled]="!emails.hasMore || emailsLoading">Older →</button>
         </div>
       </ng-container>
     </ng-container>

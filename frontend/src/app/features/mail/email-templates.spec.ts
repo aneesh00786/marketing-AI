@@ -30,7 +30,10 @@ describe('EmailTemplatesComponent', () => {
     fixture.detectChanges();
     http.expectNone(`${apiRoot()}/api/v1/mail/zoho/status`); // permissions no longer depend on Zoho
     http.expectOne(`${BASE}/categories`).flush({ categories: ['Newsletter', 'Custom'], tokens: ['first_name', 'company'], canManage: canCompose, limits: { htmlKb: 1024, zipMb: 10 } });
-    http.expectOne(r => r.url === BASE).flush({ templates: [{ id: 7, name: 'Welcome', category: 'Welcome', source: 'zip', updatedAt: '2026-10-01T00:00:00Z' }], total: 1, page: 1, pageSize: 12 });
+    const list = http.expectOne(r => r.url === BASE);
+    expect(list.request.params.get('thumbs')).withContext('thumbnails requested').toBe('1');
+    expect(list.request.params.get('sort')).toBe('newest');
+    list.flush({ templates: [{ id: 7, name: 'Welcome', category: 'Welcome', source: 'zip', updatedAt: '2026-10-01T00:00:00Z', version: 1, thumbHtml: '<p>Welcome</p>' }], total: 1, page: 1, pageSize: 12 });
     fixture.detectChanges();
   }
 
@@ -47,7 +50,12 @@ describe('EmailTemplatesComponent', () => {
     http.expectOne(`${BASE}/7`).flush({ template: { id: 7, name: 'Welcome', category: 'Welcome', version: 1, html: HOSTILE, warnings: [], placeholders: [] } });
     fixture.detectChanges();
     const el: HTMLElement = fixture.nativeElement;
-    const frame = el.querySelector('iframe') as HTMLIFrameElement;
+    // Edit → Visual: the editing frame never allows scripts.
+    const editing = el.querySelector('app-visual-html-editor iframe') as HTMLIFrameElement;
+    expect(editing.getAttribute('sandbox')).toBe('allow-same-origin', 'no allow-scripts');
+    (el.querySelector('#ec-mode-preview') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    const frame = el.querySelector('.ec-preview iframe') as HTMLIFrameElement;
     expect(frame).toBeTruthy();
     expect(frame.getAttribute('sandbox')).toBe('', 'no allow-scripts / allow-same-origin');
     expect(frame.getAttribute('srcdoc')).toContain('tpl-content');
@@ -148,7 +156,7 @@ describe('EmailTemplatesComponent', () => {
   it('offers Create / Import → Upload ZIP package, with a ZIP-only file picker wired to the importer', () => {
     init();
     const el: HTMLElement = fixture.nativeElement;
-    const toggle = Array.from(el.querySelectorAll('button')).find(b => /Create or import/.test(b.textContent || '')) as HTMLButtonElement;
+    const toggle = Array.from(el.querySelectorAll('button')).find(b => /Create Template/.test(b.textContent || '')) as HTMLButtonElement;
     expect(toggle).toBeTruthy();
     toggle.click();
     fixture.detectChanges();
@@ -184,6 +192,57 @@ describe('EmailTemplatesComponent', () => {
     req.flush({ needsEntry: false, suggestedName: 'newsletter', source: 'zip', sourceFilename: 'newsletter.zip', importId: 'b'.repeat(32), html: '<p>ok</p>', warnings: [], placeholders: [] });
     expect(comp.editing.source).toBe('zip');
     expect(comp.editing.id).toBeNull('a preview, not saved yet');
+  });
+
+  it('the list shows a sandboxed thumbnail, the category and the date; sorting reloads from the server', () => {
+    init();
+    const el: HTMLElement = fixture.nativeElement;
+    const thumb = el.querySelector('.tpl-thumb iframe') as HTMLIFrameElement;
+    expect(thumb.getAttribute('sandbox')).toBe('');
+    expect(el.querySelector('.tpl-item')!.textContent).toContain('Welcome');
+    comp.sort = 'name';
+    comp.load();
+    expect(http.expectOne(r => r.url === BASE).request.params.get('sort')).toBe('name');
+  });
+
+  it('the item menu offers Use in…, Duplicate and Delete; "Use in a new campaign" loads the full template first', () => {
+    init();
+    const el: HTMLElement = fixture.nativeElement;
+    (el.querySelector('.tpl-kebab') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    const items = Array.from(el.querySelectorAll('.tpl-menu button')).map(b => b.textContent!.trim());
+    expect(items).toEqual(['Open', 'Use in a new email', 'Use in a new draft', 'Use in a new campaign', 'Duplicate', 'Delete']);
+    const used: any[] = [];
+    comp.use.subscribe(u => used.push(u));
+    (Array.from(el.querySelectorAll('.tpl-menu button')).find(b => b.textContent!.includes('new campaign')) as HTMLButtonElement).click();
+    http.expectOne(`${BASE}/7`).flush({ template: { id: 7, name: 'Welcome', html: '<p>Hi</p>' } });
+    expect(used).toEqual([{ template: { id: 7, name: 'Welcome', html: '<p>Hi</p>' }, target: 'campaign' }]);
+  });
+
+  it('the editor uses the shared content editor; Choose template replaces the HTML only after confirming (not saved)', () => {
+    init();
+    comp.open({ id: 7 });
+    http.expectOne(`${BASE}/7`).flush({ template: { id: 7, name: 'Welcome', category: 'Welcome', version: 1, html: '<p>Old</p>', warnings: [], placeholders: [] } });
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('app-email-content-editor')).toBeTruthy();
+    const c = spyOn(window, 'confirm').and.returnValue(false);
+    comp.onTemplatePicked({ name: 'Promo', html: '<p>New</p>' });
+    expect(comp.editing.html).toBe('<p>Old</p>');
+    c.and.returnValue(true);
+    comp.onTemplatePicked({ name: 'Promo', html: '<p>New</p>' });
+    expect(comp.editing.html).toBe('<p>New</p>');
+    expect(comp.dirty).toBeTrue();
+    http.expectNone(r => r.method === 'PATCH' || r.method === 'POST');
+  });
+
+  it('the ZIP information card can be collapsed and expanded', () => {
+    init();
+    const el: HTMLElement = fixture.nativeElement;
+    expect(el.querySelector('.zip-text p')).toBeTruthy();
+    (el.querySelector('.zip-toggle') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect(el.querySelector('.zip-text p')).toBeNull();
+    expect(el.querySelector('.zip-toggle')!.getAttribute('aria-expanded')).toBe('false');
   });
 });
 

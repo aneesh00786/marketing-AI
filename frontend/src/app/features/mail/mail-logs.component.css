@@ -9,3 +9,7 @@
 .detail { display: block; color: var(--text-muted); font-size: 0.74rem; margin-top: 3px; max-width: 280px; }
 .mx-table .bad { color: var(--danger-text); font-weight: 650; }
 .ml-pager { display: flex; gap: 10px; align-items: center; justify-content: flex-end; }
+.ml-dates { align-items: flex-end; }
+.ml-presets { display: flex; gap: 6px; flex-wrap: wrap; padding-bottom: 1px; }
+.ml-presets .btn.on { background: var(--accent-soft); border-color: var(--accent-ring, var(--accent)); color: var(--text); }
+.addr { word-break: break-all; min-width: 160px; }

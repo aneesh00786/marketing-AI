@@ -458,3 +458,16 @@ test('disconnect deletes the stored token', async () => {
   assert.equal(r.refresh_token_ciphertext, null);
   assert.equal((await capi(A, 'GET', '/audiences')).data.code, 'NOT_CONNECTED');
 });
+
+test('campaign list: size-capped thumbnails only when asked; never another workspace\'s campaigns', async () => {
+  const big = `<p>${'y'.repeat(50000)}</p><p><a href="$[LI:UNSUBSCRIBE]$">u</a></p>`;
+  const made = await capi(A, 'POST', '', { ...GOOD, name: 'Thumb test', html: big });
+  assert.equal(made.status, 200, JSON.stringify(made.data));
+  const plain = (await capi(A, 'GET', '')).data.campaigns;
+  assert.ok(plain.every(c => c.thumbHtml === undefined && c.html === undefined), 'no HTML unless asked');
+  const thumbs = (await capi(A, 'GET', '?thumbs=1')).data.campaigns;
+  const t = thumbs.find(c => c.name === 'Thumb test');
+  assert.ok(t.thumbHtml.startsWith('<p>yyy'));
+  assert.ok(t.thumbHtml.length <= 40000, 'capped');
+  assert.ok(!(await capi(B, 'GET', '?thumbs=1')).data.campaigns.some(c => c.name === 'Thumb test'));
+});

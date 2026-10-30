@@ -5,6 +5,8 @@ import { EmailPreviewComponent } from './email-preview.component';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { EmailCampaignsComponent } from './email-campaigns.component';
+import { VisualHtmlEditorComponent } from './visual-html-editor.component';
+import { EmailContentEditorComponent } from './email-content-editor.component';
 import { ZohoCampaignsComponent } from './zoho-campaigns.component';
 
 @Component({ selector: 'app-zoho-campaigns', standalone: true, template: '' })
@@ -90,11 +92,15 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     expect(el().querySelector('app-template-picker')).toBeNull();
   });
   // ---- Campaign preview (Preview mode of the Email content panel) ----
+  /** The shared Email content editor inside the campaign editor. */
+  const ed = () => fixture.debugElement.query(By.directive(EmailContentEditorComponent)).componentInstance as EmailContentEditorComponent;
   const modeTab = (m: string) => el().querySelector(`#ec-mode-${m}`) as HTMLButtonElement;
   const toPreview = () => { modeTab('preview').click(); fixture.detectChanges(); };
   const toEdit = () => { modeTab('edit').click(); fixture.detectChanges(); };
+  const unsubBtn = () => (el().querySelector('[aria-label="Insert unsubscribe link"]') as HTMLButtonElement | null) ?? undefined;
   const editor = () => el().querySelector('textarea[aria-label="Email HTML"]') as HTMLTextAreaElement;
-  const typeHtml = (v: string) => { editor().value = v; editor().dispatchEvent(new Event('input')); fixture.detectChanges(); };
+  const toHtmlEditor = () => { (el().querySelector('#ec-edit-html') as HTMLButtonElement).click(); fixture.detectChanges(); };
+  const typeHtml = (v: string) => { if (!editor()) toHtmlEditor(); editor().value = v; editor().dispatchEvent(new Event('input')); fixture.detectChanges(); };
   const previewDoc = () => (el().querySelector('.ec-preview iframe') as HTMLIFrameElement).getAttribute('srcdoc') || '';
   const previewCmp = () => fixture.debugElement.query(By.directive(EmailPreviewComponent)).componentInstance as EmailPreviewComponent;
 
@@ -142,7 +148,7 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     previewCmp().onLoad();
     (comp as any).setSelected({ id: 6, name: 'Winter', status: 'draft', version: 1, html: '<h1>Winter campaign</h1>', lists: [] });
     fixture.detectChanges();
-    expect(comp.contentMode).withContext('a newly opened campaign starts in Edit').toBe('edit');
+    expect(ed().contentMode).withContext('a newly opened campaign starts in Edit').toBe('edit');
     toPreview();
     expect(previewDoc()).toContain('Winter campaign');
     expect(previewDoc()).not.toContain('Original campaign content');
@@ -175,14 +181,20 @@ describe('EmailCampaignsComponent: Choose Template', () => {
   // ---- Email content panel: Edit / Preview ----
   it('opens in Edit with the HTML editor; the preview is not shown until Preview is chosen', async () => {
     await fixture.whenStable();
-    expect(modeTab('edit').getAttribute('aria-selected')).toBe('true');
-    expect(modeTab('preview').getAttribute('aria-selected')).toBe('false');
+    expect(modeTab('edit').getAttribute('aria-pressed')).toBe('true');
+    expect(modeTab('preview').getAttribute('aria-pressed')).toBe('false');
+    expect(el().querySelector('[role=switch]')!.getAttribute('aria-checked')).toBe('false');
+    expect(el().querySelector('app-visual-html-editor')).withContext('Edit opens in Visual (normal) editing').toBeTruthy();
+    expect(el().querySelector('#ec-edit-visual')!.getAttribute('aria-pressed')).toBe('true');
+    toHtmlEditor();
+    await fixture.whenStable();
+    expect(el().querySelector('app-visual-html-editor')).toBeNull();
     expect(editor().value).toBe(ORIGINAL);
     expect(el().querySelector('.ec-preview')).toBeNull();
-    expect(button('Insert unsubscribe link')).withContext('the toolbar shows in Edit').toBeTruthy();
+    expect(unsubBtn()).withContext('the toolbar shows in Edit').toBeTruthy();
     toPreview();
     expect(editor()).toBeNull();
-    expect(button('Insert unsubscribe link')).withContext('and not in Preview').toBeUndefined();
+    expect(unsubBtn()).withContext('and not in Preview').toBeUndefined();
     expect(el().querySelector('.ec-preview')).toBeTruthy();
   });
 
@@ -211,6 +223,7 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     tick(300);
     expect(previewDoc()).toContain('Template HTML');
     toEdit();
+    toHtmlEditor();
     tick();
     expect(editor().value).toBe('<p>Template HTML</p>');
     flush();
@@ -220,17 +233,37 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     toPreview(); toEdit(); toPreview();
     (el().querySelector('[aria-label="Preview width"] button:last-child') as HTMLButtonElement).click();
     fixture.detectChanges();
-    expect(comp.previewWidth).toBe('mobile');
+    expect(ed().previewWidth).toBe('mobile');
     http.expectNone(() => true);
   });
 
-  it('arrow keys switch between Edit and Preview', fakeAsync(() => {
-    el().querySelector('[aria-label="Email content view"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+  it('the switch toggles Edit and Preview, like the labels', () => {
+    const sw = el().querySelector('[role=switch]') as HTMLButtonElement;
+    sw.click(); fixture.detectChanges();
+    expect(ed().contentMode).toBe('preview');
+    expect(sw.getAttribute('aria-checked')).toBe('true');
+    sw.click(); fixture.detectChanges();
+    expect(ed().contentMode).toBe('edit');
+  });
+
+  it('the formatting toolbar wraps the selection in HTML and links need https://', () => {
+    typeHtml('<p>Hello world</p>');
+    const box = editor();
+    box.setSelectionRange(9, 14); // "world"
+    (el().querySelector('[aria-label=Bold]') as HTMLButtonElement).click();
     fixture.detectChanges();
-    tick();
-    expect(comp.contentMode).toBe('preview');
-    flush();
-  }));
+    expect(comp.form.html).toBe('<p>Hello <strong>world</strong></p>');
+    const toasts: string[] = [];
+    comp.toast.subscribe(t => toasts.push(t));
+    spyOn(window, 'prompt').and.returnValue('http://insecure.example.com');
+    (el().querySelector('[aria-label=Link]') as HTMLButtonElement).click();
+    expect(toasts[0]).toContain('https://');
+    expect(comp.form.html).not.toContain('insecure');
+    (window.prompt as jasmine.Spy).and.returnValue('https://example.com/offer');
+    editor().setSelectionRange(0, 0);
+    (el().querySelector('[aria-label=Link]') as HTMLButtonElement).click();
+    expect(comp.form.html).toContain('<a href="https://example.com/offer">https://example.com/offer</a>');
+  });
 
   it('malformed HTML previews without breaking the page', fakeAsync(() => {
     typeHtml('<div><p>Unclosed <b>bold <table><tr><td>cell');
@@ -244,13 +277,13 @@ describe('EmailCampaignsComponent: Choose Template', () => {
   it('Insert unsubscribe link adds Zoho\'s link once and clears the reminder', () => {
     typeHtml('<p>Hello</p>');
     expect(el().querySelector('.ec-hints')!.textContent).toContain('No unsubscribe link yet');
-    button('Insert unsubscribe link').click();
+    unsubBtn()!.click();
     fixture.detectChanges();
     expect(comp.form.html).toContain('$[LI:UNSUBSCRIBE]$');
     expect(el().querySelector('.ec-hints')).toBeNull();
     const toasts: string[] = [];
     comp.toast.subscribe(t => toasts.push(t));
-    button('Insert unsubscribe link').click();
+    unsubBtn()!.click();
     expect(comp.form.html.split('$[LI:UNSUBSCRIBE]$').length).toBe(2);
     expect(toasts[0]).toContain('already');
   });
@@ -260,15 +293,138 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     expect(el().querySelector('.ec-hints')!.textContent).toContain('https://');
   });
 
-  it('a campaign that can no longer be edited opens on its preview, with the editor read-only', fakeAsync(() => {
+  it('a campaign that can no longer be edited opens on its preview, with the editor and toolbar read-only', fakeAsync(() => {
     (comp as any).setSelected({ id: 9, name: 'Sent', status: 'submitted', version: 2, html: '<p>Sent content</p>', lists: [] });
     fixture.detectChanges();
-    expect(comp.contentMode).toBe('preview');
+    expect(ed().contentMode).toBe('preview');
     expect(button('Choose template')).toBeUndefined();
     toEdit();
+    toHtmlEditor();
     tick();
     expect(editor().disabled).toBeTrue();
-    expect(button('Insert unsubscribe link')).toBeUndefined();
+    expect(unsubBtn()).toBeUndefined();
     flush();
   }));
+
+  // ---- Campaign list ----
+  const LIST = [
+    { id: 1, name: 'Spring offers', subject: 'New this spring', status: 'draft', updatedAt: '2026-10-28 10:00:00' },
+    { id: 2, name: 'Autumn recap', subject: 'Our year', status: 'submitted', updatedAt: '2026-10-20 10:00:00', report: { emails_sent_count: 273, open_percent: 41.2 } },
+    { id: 3, name: 'Black Friday', subject: 'Deals', status: 'approved', updatedAt: '2026-10-25 10:00:00' }
+  ];
+  const names = () => Array.from(el().querySelectorAll('.ec-item b')).map(b => b.textContent!.trim());
+
+  it('the list searches, filters by status and sorts, all without new requests', () => {
+    comp.campaigns = LIST.map(c => ({ ...c }));
+    fixture.detectChanges();
+    expect(names()).toEqual(['Spring offers', 'Black Friday', 'Autumn recap']);
+    expect(el().querySelector('.ec-item-stats')!.textContent).toContain('273 sent');
+    expect(el().querySelector('.ec-item-stats')!.textContent).toContain('41.2% opened');
+    comp.listSort = 'name'; fixture.detectChanges();
+    expect(names()).toEqual(['Autumn recap', 'Black Friday', 'Spring offers']);
+    comp.listStatus = 'approved'; fixture.detectChanges();
+    expect(names()).toEqual(['Black Friday']);
+    comp.listStatus = ''; comp.listQuery = 'spring'; fixture.detectChanges();
+    expect(names()).toEqual(['Spring offers']);
+    comp.listQuery = 'nothing'; fixture.detectChanges();
+    expect(el().textContent).toContain('No campaigns match.');
+  });
+
+  it('the item menu offers Delete only for campaigns that can still change, and asks first', () => {
+    comp.campaigns = LIST.map(c => ({ ...c }));
+    fixture.detectChanges();
+    const menuFor = (i: number) => { (el().querySelectorAll('.ec-kebab')[i] as HTMLButtonElement).click(); fixture.detectChanges(); return Array.from(el().querySelectorAll('.ec-menu button')).map(b => b.textContent!.trim()); };
+    expect(menuFor(2)).withContext('submitted to Zoho').toEqual(['Open']);
+    expect(menuFor(0)).toEqual(['Open', 'Delete']);
+    spyOn(window, 'confirm').and.returnValue(false);
+    (Array.from(el().querySelectorAll('.ec-menu button')).find(b => b.textContent!.trim() === 'Delete') as HTMLButtonElement).click();
+    expect(window.confirm).toHaveBeenCalled();
+    // declined: no DELETE request (checked in afterEach)
+  });
+
+  // ---- Visual and HTML editing ----
+  it('Visual and HTML editing share the same content: switching keeps edits from either', fakeAsync(() => {
+    expect(ed().editMode).toBe('visual');
+    typeHtml('<p>Edited in HTML</p>');
+    (el().querySelector('#ec-edit-visual') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    const visual = fixture.debugElement.query(By.directive(VisualHtmlEditorComponent)).componentInstance as VisualHtmlEditorComponent;
+    expect(visual.html).toBe('<p>Edited in HTML</p>');
+    visual.htmlChange.emit('<p>Edited visually</p>'); // what the visual editor emits after an edit
+    fixture.detectChanges();
+    expect(comp.form.html).toBe('<p>Edited visually</p>');
+    toHtmlEditor();
+    tick();
+    expect(editor().value).toBe('<p>Edited visually</p>');
+    expect(comp.selected.html).withContext('nothing saved').toBe(ORIGINAL);
+    flush();
+  }));
+
+  it('in Visual mode the toolbar formats the email itself (bold, headings, links need https://)', () => {
+    const visual = fixture.debugElement.query(By.directive(VisualHtmlEditorComponent)).componentInstance as VisualHtmlEditorComponent;
+    const exec = spyOn(visual, 'exec').and.returnValue(true);
+    (el().querySelector('[aria-label=Bold]') as HTMLButtonElement).click();
+    expect(exec).toHaveBeenCalledWith('bold', undefined);
+    ed().wrapBlock('h2');
+    expect(exec).toHaveBeenCalledWith('formatBlock', '<h2>');
+    spyOn(window, 'prompt').and.returnValue('http://insecure.example.com');
+    (el().querySelector('[aria-label=Link]') as HTMLButtonElement).click();
+    expect(exec).not.toHaveBeenCalledWith('createLink', jasmine.anything());
+    (window.prompt as jasmine.Spy).and.returnValue('https://example.com');
+    (el().querySelector('[aria-label=Link]') as HTMLButtonElement).click();
+    expect(exec).toHaveBeenCalledWith('createLink', 'https://example.com');
+    http.expectNone(() => true);
+  });
+
+  it('a newly opened campaign starts in Visual editing', () => {
+    toHtmlEditor();
+    (comp as any).setSelected({ id: 12, name: 'Next', status: 'draft', version: 1, html: '<p>x</p>', lists: [] });
+    fixture.detectChanges();
+    expect(ed().editMode).toBe('visual');
+  });
+
+  // ---- Same pattern as Email Templates ----
+  it('the header "New Campaign" menu offers a blank campaign or one from a template', () => {
+    (Array.from(el().querySelectorAll('.ec-page-head button')).find(b => b.textContent!.includes('New Campaign')) as HTMLButtonElement).click();
+    fixture.detectChanges();
+    const items = Array.from(el().querySelectorAll('.ec-create-menu button')).map(b => b.querySelector('b')!.textContent!.trim());
+    expect(items).toEqual(['Blank campaign', 'From a template']);
+    (el().querySelectorAll('.ec-create-menu button')[1] as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect(comp.picker).toBe('new');
+    http.expectOne(r => /\/mail\/templates$/.test(r.url)).flush({ templates: [] });
+  });
+
+  it('list items show a sandboxed thumbnail when the list has one', () => {
+    comp.campaigns = [{ id: 31, name: 'With thumb', status: 'draft', version: 1, thumbHtml: '<p>Thumb</p>' }, { id: 32, name: 'No thumb', status: 'draft', version: 1 }];
+    fixture.detectChanges();
+    const thumbs = el().querySelectorAll('.ec-thumb');
+    expect(thumbs[0].querySelector('iframe')!.getAttribute('sandbox')).toBe('');
+    expect(thumbs[1].querySelector('iframe')).toBeNull();
+  });
+
+  it('the editor shows the campaign name and an Unsaved changes tag; Close asks before discarding', () => {
+    expect(el().querySelector('.ec-detail-status h3')!.textContent).toBe('Autumn');
+    expect(comp.dirty).toBeFalse();
+    expect(el().querySelector('.ec-detail-status .mx-tag.warn')).toBeNull();
+    comp.form.subject = 'Changed subject';
+    fixture.detectChanges();
+    expect(comp.dirty).toBeTrue();
+    expect(el().querySelector('.ec-detail-status .mx-tag.warn')!.textContent).toContain('Unsaved changes');
+    const c = spyOn(window, 'confirm').and.returnValue(false);
+    (Array.from(el().querySelectorAll('.ec-actions button')).find(b => b.textContent!.includes('Cancel')) as HTMLButtonElement).click();
+    expect(c).toHaveBeenCalled();
+    expect(comp.selected).withContext('kept when the user declines').not.toBeNull();
+    c.and.returnValue(true);
+    comp.close();
+    expect(comp.selected).toBeNull();
+  });
+
+  it('opening another campaign with unsaved edits asks first; declining keeps the edits', () => {
+    comp.form.html = '<p>Unsaved</p>';
+    spyOn(window, 'confirm').and.returnValue(false);
+    comp.open({ id: 99 });
+    http.expectNone(r => r.url.endsWith('/mail/campaigns/99'));
+    expect(comp.form.html).toBe('<p>Unsaved</p>');
+  });
 });
