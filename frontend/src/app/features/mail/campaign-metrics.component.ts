@@ -1,9 +1,10 @@
-import { Component, Input, OnChanges, SimpleChanges } from '@angular/core';
+import { Component, ElementRef, Input, OnChanges, SimpleChanges, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../services/api.service';
 
-export interface Metric { label: string; value: string; hint?: string; unavailable?: boolean }
+export interface Metric { label: string; value: string; hint?: string; unavailable?: boolean; activity?: string }
+export interface BarRow { label: string; value: number; pct: number; activity?: string }
 
 const ACTIVITIES = [
   { key: 'opened', label: 'Opened' },
@@ -28,9 +29,17 @@ export function rate(part: number | null, whole: number | null): string | null {
   return `${(Math.round((part / whole) * 1000) / 10).toFixed(1)}%`;
 }
 
+/** Bars for the figures Zoho reported, scaled to the largest. A missing figure gets no bar, never 0. */
+function bars(rows: { label: string; value: number | null; activity?: string }[]): BarRow[] {
+  const known = rows.filter(r => r.value !== null) as (BarRow & { value: number })[];
+  const max = Math.max(0, ...known.map(r => r.value));
+  return known.map(r => ({ label: r.label, value: r.value, activity: r.activity, pct: max ? (r.value / max) * 100 : 0 }));
+}
+
 /**
- * Campaign figures from Zoho's campaign report (refreshed with "Refresh status"), and, for roles
- * with mail.send, per-recipient lists read from Zoho on demand. Figures Zoho did not report are
+ * Campaign figures from Zoho's campaign report (read when a sent campaign is opened, or with "Refresh status"), and, for roles
+ * with mail.send, per-recipient lists read from Zoho on demand: a chart row or figure opens the
+ * list of those people. Figures Zoho did not report are
  * "Unavailable", never 0. Zoho gives campaign totals and recipient lists, not per-recipient times.
  */
 @Component({
@@ -45,6 +54,7 @@ export class CampaignMetricsComponent implements OnChanges {
   @Input() report: any = null;
   @Input() zohoStatus: string | null = null;
   @Input() status: string | null = null;
+  @Input() lastCheckedAt: string | null = null;
   /** Owner, Admin, Marketing Manager and Approver (mail.send); the server enforces it too. */
   @Input() canViewRecipients = false;
 
@@ -57,6 +67,7 @@ export class CampaignMetricsComponent implements OnChanges {
   error: string | null = null;
   notSent = false;
   showRecipients = false;
+  @ViewChild('recips') private recipsRef?: ElementRef<HTMLElement>;
   private seq = 0;
 
   constructor(private api: ApiService) {}
@@ -74,23 +85,60 @@ export class CampaignMetricsComponent implements OnChanges {
     const bounced = num(r.bounces_count);
     const opens = num(r.opens_count);
     const clicks = num(r.unique_clicks_count);
-    const show = (v: number | null) => (v === null ? 'Unavailable' : String(v));
+    const show = (v: number | null) => (v === null ? 'Unavailable' : v.toLocaleString('en-US'));
     const pct = (zoho: any, computed: string | null) => (num(zoho) !== null ? `${num(zoho)}%` : computed ?? 'Unavailable');
     const hard = num(r.hardbounce_count);
     const soft = num(r.softbounce_count);
     return [
-      { label: 'Sent', value: show(sent) },
+      { label: 'Sent', value: show(sent), activity: 'sent' },
       { label: 'Delivered', value: show(delivered), unavailable: delivered === null },
       { label: 'Delivery rate', value: pct(r.delivered_percent, rate(delivered, sent)) },
-      { label: 'Bounced', value: show(bounced), hint: hard !== null || soft !== null ? `Hard ${show(hard)} · Soft ${show(soft)}` : undefined },
+      { label: 'Bounced', value: show(bounced), hint: hard !== null || soft !== null ? `Hard ${show(hard)} · Soft ${show(soft)}` : undefined, activity: 'hard_bounced' },
       { label: 'Not sent', value: show(num(r.unsent_count)), hint: 'Zoho could not send to these addresses' },
-      { label: 'Opens', value: show(opens), hint: 'As Zoho counts them (unique opens). An estimate, not proof of reading.' },
+      { label: 'Opens', value: show(opens), hint: 'As Zoho counts them (unique opens). An estimate, not proof of reading.', activity: 'opened' },
       { label: 'Open rate', value: pct(r.open_percent, rate(opens, delivered)) },
-      { label: 'Unique clickers', value: show(clicks) },
+      { label: 'Unique clickers', value: show(clicks), activity: 'clicked' },
       { label: 'Click rate', value: rate(clicks, delivered) ?? 'Unavailable', hint: 'Unique clickers ÷ delivered' },
-      { label: 'Unsubscribes', value: show(num(r.unsub_count)) },
-      { label: 'Spam complaints', value: show(num(r.spams_count) ?? num(r.complaints_count)) }
+      { label: 'Unsubscribes', value: show(num(r.unsub_count)), activity: 'unsubscribed' },
+      { label: 'Spam complaints', value: show(num(r.spams_count) ?? num(r.complaints_count)), activity: 'spam' }
     ].map(m => ({ ...m, unavailable: m.value === 'Unavailable' }));
+  }
+
+  /** From Sent down to Clicked. Delivered has no list: Zoho has no such recipient group. */
+  get reach(): BarRow[] {
+    const r = this.report || {};
+    return bars([
+      { label: 'Sent', value: num(r.emails_sent_count), activity: 'sent' },
+      { label: 'Delivered', value: num(r.delivered_count) },
+      { label: 'Opened', value: num(r.opens_count), activity: 'opened' },
+      { label: 'Clicked', value: num(r.unique_clicks_count), activity: 'clicked' }
+    ]);
+  }
+
+  get problems(): BarRow[] {
+    const r = this.report || {};
+    const hard = num(r.hardbounce_count);
+    const soft = num(r.softbounce_count);
+    const bounced = hard !== null || soft !== null
+      ? [{ label: 'Hard bounced', value: hard, activity: 'hard_bounced' }, { label: 'Soft bounced', value: soft, activity: 'soft_bounced' }]
+      : [{ label: 'Bounced', value: num(r.bounces_count), activity: 'hard_bounced' }];
+    return bars([
+      ...bounced,
+      { label: 'Unsubscribed', value: num(r.unsub_count), activity: 'unsubscribed' },
+      { label: 'Spam complaints', value: num(r.spams_count) ?? num(r.complaints_count), activity: 'spam' }
+    ]);
+  }
+
+  get canOpenLists(): boolean { return this.sent && this.canViewRecipients; }
+  canOpen(activity?: string): boolean { return !!activity && this.canOpenLists; }
+  isOpen(activity?: string): boolean { return this.showRecipients && this.activity === activity; }
+  trackLabel(_: number, row: { label: string }): string { return row.label; }
+
+  /** Opens the list of people behind a figure or chart row. */
+  openActivity(activity: string): void {
+    this.activity = activity;
+    this.openRecipients();
+    setTimeout(() => this.recipsRef?.nativeElement.scrollIntoView({ block: 'nearest', behavior: 'smooth' }));
   }
 
   loadRecipients(page = 1): void {

@@ -100,7 +100,7 @@ const LEAD_COLUMNS = 'id, name, email, company_name, status, product_id, product
  * Leads of the workspace for the recipient picker: searchable and filterable, each with its
  * eligibility. Nothing is selected server-side; eligibleIds supports "Select all eligible".
  */
-async function listRecipients(ctx, query = {}) {
+async function listRecipients(ctx, query = {}, { maxSelect = maxBatch() } = {}) {
   const where = ['workspace_id = ?'];
   const params = [ws(ctx)];
   const q = String(query.q || '').trim().slice(0, 100);
@@ -129,8 +129,8 @@ async function listRecipients(ctx, query = {}) {
     page,
     pageSize,
     truncated,
-    // Distinct addresses only; capped at the batch size.
-    eligibleIds: dedupeByEmail(leads.filter(l => l.eligible)).slice(0, maxBatch()).map(l => l.id),
+    // Distinct addresses only; capped at the batch size (or the caller's own limit).
+    eligibleIds: dedupeByEmail(leads.filter(l => l.eligible)).slice(0, maxSelect).map(l => l.id),
     eligibleCount: leads.filter(l => l.eligible).length,
     maxBatch: maxBatch()
   };
@@ -569,5 +569,5 @@ async function unsubscribeByToken(token, { apply }) {
 module.exports = {
   CONSENT_METHODS, listRecipients, recordConsent, createBatch, getBatch, listBatches, approveBatch, sendBatch, retryFailed,
   processBatches, recoverStaleBatches, recheckRecipient, unsubscribeByToken, unsubscribeLink, footer, applyUnsubscribe,
-  detectUnsubscribeReplies, monitoredWorkspaces, personalize, withEligibility
+  detectUnsubscribeReplies, monitoredWorkspaces, personalize, withEligibility, LEAD_COLUMNS
 };

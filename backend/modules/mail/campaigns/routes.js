@@ -42,10 +42,16 @@ router.use((req, res, next) => {
 
 router.get('/', requireCapability('mail.view'), wrap(async (req, res) => res.json({ success: true, campaigns: await svc.list(req, { thumbs: String(req.query.thumbs || '') === '1' }) })));
 router.get('/audiences', requireCapability('mail.compose'), wrap(async (req, res) => res.json({ success: true, ...(await svc.zohoAudiences(req)) })));
+// Leads and selected contacts are addresses from Leads CRM: leads.view as well.
+router.get('/lead-options', requireCapability('mail.compose', 'leads.view'), wrap(async (req, res) => res.json({ success: true, ...(await svc.leadOptions(req, req.query)) })));
 router.post('/', requireCapability('mail.compose'), wrap(async (req, res) => res.json({ success: true, campaign: await svc.create(req, req.body) })));
 router.get('/:id', requireCapability('mail.view'), wrap(async (req, res) => res.json({ success: true, campaign: await svc.getOne(req, req.params.id) })));
 router.patch('/:id', requireCapability('mail.compose'), wrap(async (req, res) => res.json({ success: true, campaign: await svc.update(req, req.params.id, req.body) })));
+router.post('/:id/duplicate', requireCapability('mail.compose'), wrap(async (req, res) => res.json({ success: true, ...(await svc.duplicate(req, req.params.id)) })));
 router.delete('/:id', requireCapability('mail.compose'), wrap(async (req, res) => res.json({ success: true, ...(await svc.remove(req, req.params.id)) })));
+router.get('/:id/contacts', requireCapability('mail.view', 'leads.view'), wrap(async (req, res) => res.json({ success: true, ...(await svc.getContacts(req, req.params.id)) })));
+router.put('/:id/contacts/leads', requireCapability('mail.compose', 'leads.view'), wrap(async (req, res) => res.json({ success: true, ...(await svc.setContactLeads(req, req.params.id, req.body)) })));
+router.post('/:id/contacts/remove', requireCapability('mail.compose'), wrap(async (req, res) => res.json({ success: true, ...(await svc.removeContacts(req, req.params.id, req.body)) })));
 router.post('/:id/validate', requireCapability('mail.view'), wrap(async (req, res) => res.json({ success: true, validation: await svc.validate(req, req.params.id) })));
 router.post('/:id/approve', requireCapability('mail.send'), wrap(async (req, res) => res.json({ success: true, campaign: await svc.approve(req, req.params.id) })));
 router.post('/:id/send', requireCapability('mail.send'), wrap(async (req, res) => res.json({ success: true, campaign: await svc.send(req, req.params.id, req.body || {}) })));
@@ -53,6 +59,10 @@ router.post('/:id/refresh', requireCapability('mail.view'), wrap(async (req, res
 // Per-recipient activity from Zoho (addresses): Owner, Admin, Marketing Manager and Approver only.
 // Limited per workspace: Zoho allows 500 calls per 5 minutes and then locks the account for 30 minutes.
 const recipientsLimit = require('../../../lib/rateLimit').rateLimit({ windowMs: 60 * 1000, max: 30, keyFn: req => `zoho-recipients:${req.auth.workspaceId}`, message: 'Too many recipient lookups. Wait a minute and try again.' });
+// Contacts of one Zoho mailing list, read-only (addresses, so the same roles and limit as above).
+router.get('/audiences/:listKey/contacts', requireCapability('mail.send'), recipientsLimit, wrap(async (req, res) => res.json({ success: true, ...(await svc.listContacts(req, req.params.listKey, { status: String(req.query.status || 'subscribed'), page: req.query.page })) })));
+// Selecting from a Zoho list reads the same addresses, so it needs the same role and limit.
+router.post('/:id/contacts/zoho', requireCapability('mail.compose', 'mail.send'), recipientsLimit, wrap(async (req, res) => res.json({ success: true, ...(await svc.addContactsFromZoho(req, req.params.id, req.body)) })));
 router.get('/:id/recipients', requireCapability('mail.send'), recipientsLimit, wrap(async (req, res) => res.json({ success: true, ...(await svc.recipientActivity(req, req.params.id, { activity: String(req.query.activity || ''), page: req.query.page })) })));
 router.post('/:id/resolve', requireCapability('mail.send'), wrap(async (req, res) => res.json({ success: true, campaign: await svc.resolve(req, req.params.id, req.body || {}) })));
 

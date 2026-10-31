@@ -8,9 +8,17 @@ import { EmailCampaignsComponent } from './email-campaigns.component';
 import { VisualHtmlEditorComponent } from './visual-html-editor.component';
 import { EmailContentEditorComponent } from './email-content-editor.component';
 import { ZohoCampaignsComponent } from './zoho-campaigns.component';
+import { CampaignContactsComponent } from './campaign-contacts.component';
 
 @Component({ selector: 'app-zoho-campaigns', standalone: true, template: '' })
 class ZohoStub { @Input() oauthResult: any; @Output() toast = new EventEmitter<string>(); @Output() statusChange = new EventEmitter<any>(); }
+
+@Component({ selector: 'app-campaign-contacts', standalone: true, template: '' })
+class ContactsStub {
+  @Input() campaignId: any; @Input() editable: any; @Input() canSync: any; @Input() canReconnect: any; @Input() zohoLists: any;
+  @Output() contactsChange = new EventEmitter<any[]>();
+  @Output() changed = new EventEmitter<any>(); @Output() reconnect = new EventEmitter<void>(); @Output() toast = new EventEmitter<string>();
+}
 
 const ORIGINAL = '<p>Original campaign content</p>';
 
@@ -23,7 +31,7 @@ describe('EmailCampaignsComponent: Choose Template', () => {
 
   beforeEach(() => {
     TestBed.configureTestingModule({ imports: [EmailCampaignsComponent], providers: [provideHttpClient(), provideHttpClientTesting()] });
-    TestBed.overrideComponent(EmailCampaignsComponent, { remove: { imports: [ZohoCampaignsComponent] }, add: { imports: [ZohoStub] } });
+    TestBed.overrideComponent(EmailCampaignsComponent, { remove: { imports: [ZohoCampaignsComponent, CampaignContactsComponent] }, add: { imports: [ZohoStub, ContactsStub] } });
     http = TestBed.inject(HttpTestingController);
     fixture = TestBed.createComponent(EmailCampaignsComponent);
     comp = fixture.componentInstance;
@@ -35,7 +43,7 @@ describe('EmailCampaignsComponent: Choose Template', () => {
   });
   afterEach(() => {
     // Choosing a template never saves, sends or contacts Zoho by itself.
-    http.expectNone(r => r.method !== 'GET');
+    http.expectNone(r => r.method !== 'GET' && !/\/(duplicate|refresh)$/.test(r.url));
     http.verify();
   });
 
@@ -97,7 +105,8 @@ describe('EmailCampaignsComponent: Choose Template', () => {
   const modeTab = (m: string) => el().querySelector(`#ec-mode-${m}`) as HTMLButtonElement;
   const toPreview = () => { modeTab('preview').click(); fixture.detectChanges(); };
   const toEdit = () => { modeTab('edit').click(); fixture.detectChanges(); };
-  const unsubBtn = () => (el().querySelector('[aria-label="Insert unsubscribe link"]') as HTMLButtonElement | null) ?? undefined;
+  const unsubBox = () => el().querySelector('.ec-unsub input') as HTMLInputElement | null;
+  const tickUnsub = (on: boolean) => { const b = unsubBox()!; b.checked = on; b.dispatchEvent(new Event('change')); fixture.detectChanges(); };
   const editor = () => el().querySelector('textarea[aria-label="Email HTML"]') as HTMLTextAreaElement;
   const toHtmlEditor = () => { (el().querySelector('#ec-edit-html') as HTMLButtonElement).click(); fixture.detectChanges(); };
   const typeHtml = (v: string) => { if (!editor()) toHtmlEditor(); editor().value = v; editor().dispatchEvent(new Event('input')); fixture.detectChanges(); };
@@ -191,10 +200,10 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     expect(el().querySelector('app-visual-html-editor')).toBeNull();
     expect(editor().value).toBe(ORIGINAL);
     expect(el().querySelector('.ec-preview')).toBeNull();
-    expect(unsubBtn()).withContext('the toolbar shows in Edit').toBeTruthy();
+    expect(el().querySelector('[aria-label=Bold]')).withContext('the toolbar shows in Edit').toBeTruthy();
     toPreview();
     expect(editor()).toBeNull();
-    expect(unsubBtn()).withContext('and not in Preview').toBeUndefined();
+    expect(el().querySelector('[aria-label=Bold]')).withContext('and not in Preview').toBeNull();
     expect(el().querySelector('.ec-preview')).toBeTruthy();
   });
 
@@ -274,18 +283,28 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     flush();
   }));
 
-  it('Insert unsubscribe link adds Zoho\'s link once and clears the reminder', () => {
+  it('the unsubscribe checkbox adds the link once at the end, shows its state, and removes it again', () => {
     typeHtml('<p>Hello</p>');
+    expect(unsubBox()!.checked).toBeFalse();
     expect(el().querySelector('.ec-hints')!.textContent).toContain('No unsubscribe link yet');
-    unsubBtn()!.click();
-    fixture.detectChanges();
-    expect(comp.form.html).toContain('$[LI:UNSUBSCRIBE]$');
+    tickUnsub(true);
+    expect(comp.form.html).toBe('<p>Hello</p>\n<p style="text-align:center;font-size:12px;"><a href="$[LI:UNSUBSCRIBE]$">Unsubscribe</a></p>');
+    expect(unsubBox()!.checked).toBeTrue();
     expect(el().querySelector('.ec-hints')).toBeNull();
-    const toasts: string[] = [];
-    comp.toast.subscribe(t => toasts.push(t));
-    unsubBtn()!.click();
-    expect(comp.form.html.split('$[LI:UNSUBSCRIBE]$').length).toBe(2);
-    expect(toasts[0]).toContain('already');
+    tickUnsub(false);
+    expect(comp.form.html.trim()).toBe('<p>Hello</p>');
+    expect(unsubBox()!.checked).toBeFalse();
+    http.expectNone(() => true);
+  });
+
+  it('the unsubscribe link goes before </body> in full documents; a link written by hand is recognised and can be removed', () => {
+    typeHtml('<html><body><p>Hi</p></body></html>');
+    tickUnsub(true);
+    expect(comp.form.html).toMatch(/<p>Hi<\/p><p style[^>]*><a href="\$\[LI:UNSUBSCRIBE\]\$">Unsubscribe<\/a><\/p>\n<\/body>/);
+    typeHtml('<p>Hi, <a class="x" href="$[LI:ORG_OPTOUT]$">leave here</a> anytime.</p>');
+    expect(unsubBox()!.checked).toBeTrue();
+    tickUnsub(false);
+    expect(comp.form.html).toBe('<p>Hi,  anytime.</p>');
   });
 
   it('http:// images get a reminder to use https://', () => {
@@ -302,7 +321,7 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     toHtmlEditor();
     tick();
     expect(editor().disabled).toBeTrue();
-    expect(unsubBtn()).toBeUndefined();
+    expect(unsubBox()).withContext('read-only campaigns have no checkbox').toBeNull();
     flush();
   }));
 
@@ -334,8 +353,8 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     comp.campaigns = LIST.map(c => ({ ...c }));
     fixture.detectChanges();
     const menuFor = (i: number) => { (el().querySelectorAll('.ec-kebab')[i] as HTMLButtonElement).click(); fixture.detectChanges(); return Array.from(el().querySelectorAll('.ec-menu button')).map(b => b.textContent!.trim()); };
-    expect(menuFor(2)).withContext('submitted to Zoho').toEqual(['Open']);
-    expect(menuFor(0)).toEqual(['Open', 'Delete']);
+    expect(menuFor(2)).withContext('submitted to Zoho').toEqual(['Open', 'Duplicate']);
+    expect(menuFor(0)).toEqual(['Open', 'Duplicate', 'Delete']);
     spyOn(window, 'confirm').and.returnValue(false);
     (Array.from(el().querySelectorAll('.ec-menu button')).find(b => b.textContent!.trim() === 'Delete') as HTMLButtonElement).click();
     expect(window.confirm).toHaveBeenCalled();
@@ -426,5 +445,157 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     comp.open({ id: 99 });
     http.expectNone(r => r.url.endsWith('/mail/campaigns/99'));
     expect(comp.form.html).toBe('<p>Unsaved</p>');
+  });
+
+  // ---- Zoho list contacts ----
+  it('each Zoho list has View contacts for roles that can send; ticking a list is separate from viewing it', () => {
+    comp.audiences = { lists: [{ key: 'L1', name: 'Customers', contacts: 2 }], topics: [] };
+    comp.zoho = { canCompose: true, canSend: false, connection: { connected: true, missingScopes: [] } };
+    fixture.detectChanges();
+    expect(button('View contacts')).withContext('Members cannot see addresses').toBeUndefined();
+    comp.zoho = { ...comp.zoho, canSend: true };
+    fixture.detectChanges();
+    button('View contacts').click();
+    fixture.detectChanges();
+    expect(comp.form.listKeys.has('L1')).withContext('viewing does not select the list').toBeFalse();
+    const req = http.expectOne(r => r.url.endsWith('/mail/campaigns/audiences/L1/contacts'));
+    expect(req.request.params.get('status')).toBe('subscribed');
+    req.flush({ contacts: [{ email: 'kim@client.io', name: 'Kim Lee', company: 'Acme', phone: null }], page: 1, hasMore: false });
+    fixture.detectChanges();
+    expect(el().querySelector('[role=dialog]')!.textContent).toContain('kim@client.io');
+    expect(el().querySelector('[role=dialog]')!.textContent).toContain('Customers');
+    (el().querySelector('.zc-close') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect(el().querySelector('[role=dialog]')).toBeNull();
+  });
+
+  // ---- Selected contacts ----
+  const contactsStub = () => fixture.debugElement.query(By.directive(ContactsStub)).componentInstance as ContactsStub;
+
+  it('changing the selected contacts keeps unsaved edits and shows the campaign is back to draft', () => {
+    (comp as any).setSelected({ id: 5, name: 'Autumn', status: 'approved', approved: true, version: 3, html: ORIGINAL, lists: [] });
+    comp.form.subject = 'Unsaved subject';
+    fixture.detectChanges();
+    contactsStub().changed.emit({ id: 5, name: 'Autumn', status: 'draft', approved: false, version: 4, html: ORIGINAL, lists: [], contactCount: 2 });
+    http.expectOne(r => /\/mail\/campaigns$/.test(r.url)).flush({ campaigns: [] });
+    fixture.detectChanges();
+    expect(comp.selected.status).toBe('draft');
+    expect(comp.form.subject).withContext('the form is not reloaded').toBe('Unsaved subject');
+    expect(comp.dirty).toBeTrue();
+  });
+
+  it('the send confirmation names the lists and the selected contacts; Cancel sends nothing', () => {
+    (comp as any).setSelected({ id: 5, name: 'Autumn', status: 'approved', approved: true, version: 3, html: ORIGINAL, lists: [{ key: 'L1', name: 'Customers' }], contactCount: 2 });
+    const ask = spyOn(window, 'confirm').and.returnValue(false);
+    comp.send();
+    expect(ask.calls.mostRecent().args[0]).toContain('Recipients: Zoho lists Customers and 2 selected contacts (added to Zoho first).');
+    (comp as any).setSelected({ id: 5, name: 'Autumn', status: 'approved', approved: true, version: 3, html: ORIGINAL, lists: [], contactCount: 1 });
+    comp.send();
+    expect(ask.calls.mostRecent().args[0]).toContain('Recipients: 1 selected contact (added to Zoho first).');
+  });
+
+  it('Zoho contacts can be picked only while the campaign can change and the connection allows it', () => {
+    comp.zoho = { canCompose: true, canSend: true, connection: { connected: true, missingScopes: [], canSyncContacts: true } };
+    expect(comp.canPickFromZoho).toBeTrue();
+    comp.zoho = { ...comp.zoho, connection: { connected: true, missingScopes: [], canSyncContacts: false } };
+    expect(comp.canPickFromZoho).withContext('reconnect needed').toBeFalse();
+    comp.zoho = { canCompose: true, canSend: false, connection: { connected: true, missingScopes: [], canSyncContacts: true } };
+    expect(comp.canPickFromZoho).withContext('role cannot read addresses').toBeFalse();
+    comp.zoho = { canCompose: true, canSend: true, connection: { connected: true, missingScopes: [], canSyncContacts: true } };
+    comp.selected = { ...comp.selected, status: 'submitted' };
+    expect(comp.canPickFromZoho).withContext('already sent').toBeFalse();
+  });
+
+  it('contacts picked from a Zoho list show on its row, part-ticked; ticking the whole list covers them', () => {
+    comp.audiences = { lists: [{ key: 'L1', name: 'Customers', contacts: 5 }, { key: 'L2', name: 'Other', contacts: 3 }], topics: [] };
+    comp.zoho = { canCompose: true, canSend: true, connection: { connected: true, missingScopes: [] } };
+    comp.onContacts([{ id: 1, email: 'kim@client.io', name: 'Kim', source: 'zoho_list', sourceListKey: 'L1', eligible: true, reasons: [] }]);
+    fixture.detectChanges();
+    const boxes = () => Array.from(el().querySelectorAll('.ec-list-row input')) as HTMLInputElement[];
+    expect([boxes()[0].indeterminate, boxes()[0].checked]).toEqual([true, false]);
+    expect(boxes()[1].indeterminate).toBeFalse();
+    expect(el().textContent).toContain('· 1 selected');
+    expect(el().querySelector('app-campaign-contact-rows')!.textContent).toContain('kim@client.io');
+    boxes()[0].click();
+    fixture.detectChanges();
+    expect([boxes()[0].indeterminate, boxes()[0].checked]).toEqual([false, true]);
+    expect(el().querySelector('app-campaign-contact-rows')).toBeNull();
+    expect(el().textContent).not.toContain('· 1 selected');
+  });
+
+  it('the send confirmation does not count contacts already covered by a ticked list', () => {
+    (comp as any).setSelected({ id: 5, name: 'Autumn', status: 'approved', approved: true, version: 3, html: ORIGINAL, lists: [{ key: 'L1', name: 'Customers' }] });
+    comp.onContacts([{ id: 1, sourceListKey: 'L1', eligible: true }, { id: 2, leadId: 4, eligible: true }]);
+    const ask = spyOn(window, 'confirm').and.returnValue(false);
+    comp.send();
+    expect(ask.calls.mostRecent().args[0]).toContain('Zoho lists Customers and 1 selected contact (added to Zoho first)');
+  });
+
+  // ---- Duplicate ----
+  const FULL = { id: 5, name: 'Autumn', status: 'submitted', version: 2, html: ORIGINAL, lists: [] };
+  const COPY = { id: 6, name: 'Autumn (copy)', status: 'draft', version: 1, html: ORIGINAL, lists: [] };
+
+  it('Duplicate on a sent campaign opens the copy as a draft and reports contacts left out', () => {
+    (comp as any).setSelected(FULL);
+    fixture.detectChanges();
+    const toasts: string[] = [];
+    comp.toast.subscribe(t => toasts.push(t));
+    button('Duplicate').click();
+    http.expectOne(r => r.method === 'POST' && r.url.endsWith('/campaigns/5/duplicate')).flush({ campaign: COPY, contactsDropped: 2 });
+    http.expectOne(r => /\/mail\/campaigns$/.test(r.url)).flush({ campaigns: [] });
+    fixture.detectChanges();
+    expect(comp.selected.id).toBe(6);
+    expect(comp.form.name).toBe('Autumn (copy)');
+    expect(comp.editable).toBeTrue();
+    expect(toasts[0]).toContain('2 contacts were left out');
+  });
+
+  it('Duplicate asks first when there are unsaved changes, and Cancel creates nothing', () => {
+    comp.form.subject = 'Edited';
+    spyOn(window, 'confirm').and.returnValue(false);
+    comp.duplicate(comp.selected);
+    expect(window.confirm).toHaveBeenCalled();
+    http.expectNone(r => r.url.endsWith('/duplicate'));
+  });
+
+  it('roles that cannot write campaigns have no Duplicate action', () => {
+    comp.zoho = { canCompose: false, canSend: false, connection: { connected: false } };
+    fixture.detectChanges();
+    expect(button('Duplicate')).toBeUndefined();
+  });
+
+  // ---- Results of a sent campaign ----
+  const SENT = { id: 7, name: 'Sent one', status: 'submitted', version: 1, html: ORIGINAL, lists: [] };
+  const openSent = (c: any) => {
+    comp.open(c);
+    http.expectOne(r => r.method === 'GET' && r.url.endsWith('/campaigns/7')).flush({ campaign: c });
+  };
+
+  it('opening a sent campaign reads its latest figures from Zoho', () => {
+    openSent({ ...SENT, lastCheckedAt: null });
+    http.expectOne(r => r.method === 'POST' && r.url.endsWith('/campaigns/7/refresh')).flush({ campaign: { ...SENT, report: { emails_sent_count: '10' } } });
+    http.expectOne(r => /\/mail\/campaigns$/.test(r.url)).flush({ campaigns: [] });
+    expect(comp.selected.report.emails_sent_count).toBe('10');
+  });
+
+  it('figures read in the last few minutes are not read again, and drafts never are', () => {
+    openSent({ ...SENT, lastCheckedAt: new Date(Date.now() - 60000).toISOString() });
+    http.expectNone(r => r.url.endsWith('/refresh'));
+    comp.open(comp.campaigns[0] || { id: 5 });
+    http.expectOne(r => r.url.endsWith('/campaigns/5')).flush({ campaign: { id: 5, name: 'Autumn', status: 'draft', version: 1, html: ORIGINAL, lists: [] } });
+    http.expectNone(r => r.url.endsWith('/refresh'));
+  });
+
+  it('if Zoho cannot be reached the campaign stays open with its last figures, and a late answer cannot replace another campaign', () => {
+    openSent({ ...SENT, lastCheckedAt: null, report: { emails_sent_count: '3' } });
+    http.expectOne(r => r.url.endsWith('/refresh')).flush({ error: 'x' }, { status: 502, statusText: 'x' });
+    expect(comp.selected.report.emails_sent_count).toBe('3');
+    openSent({ ...SENT, lastCheckedAt: null });
+    const late = http.expectOne(r => r.url.endsWith('/refresh'));
+    comp.open({ id: 5 });
+    http.expectOne(r => r.url.endsWith('/campaigns/5')).flush({ campaign: { id: 5, name: 'Autumn', status: 'draft', version: 1, html: ORIGINAL, lists: [] } });
+    late.flush({ campaign: { ...SENT, name: 'Stale' } });
+    http.expectOne(r => /\/mail\/campaigns$/.test(r.url)).flush({ campaigns: [] });
+    expect(comp.selected.id).toBe(5);
   });
 });

@@ -1,4 +1,4 @@
-# EC2 Deployment Runbook — Marketech.ai (Mail Center, email tracking, migrations 024–026)
+# EC2 Deployment Runbook — Marketech.ai (Mail Center, email tracking, migrations 024–027)
 
 For the operator deploying to one EC2 instance. All values below are placeholders (`<...>`); never
 copy a real `.env`, key or password into this document, a ticket or a release archive.
@@ -13,8 +13,8 @@ Status when this was written: verified locally only (mocked providers, disposabl
 - [ ] Local: `node scripts/localVerify.js --db mt_rehearsal_<date>` → RESULT: PASS; package built from the release commit
 - [ ] EC2: security group has no inbound rule for the API port; nginx is the only proxy; `LISTEN_HOST=127.0.0.1`, `TRUST_PROXY=1`
 - [ ] `ZEPTOMAIL_WEBHOOKS_ENABLED` empty; `scripts/checkProductionConfig.js` OK as each service account
-- [ ] Services stopped → `scripts/backup.sh` (verified, timestamped) → migrate `--status` (024, 025, 026 pending, or only what production has not applied yet)
-- [ ] `npm run migrate -- --backup=<that dump>` → `--status` all applied (024, then 025, then 026)
+- [ ] Services stopped → `scripts/backup.sh` (verified, timestamped) → migrate `--status` (024, 025, 026, 027 pending, or only what production has not applied yet)
+- [ ] `npm run migrate -- --backup=<that dump>` → `--status` all applied (024, then 025, 026, then 027)
 - [ ] Services started → health checks and log review (section 7)
 - [ ] Rollback plan ready: previous release package + the pre-migration dump (section 10)
 - [ ] Live provider checks (section 8) before enabling the webhook or relying on tracking
@@ -130,11 +130,14 @@ WantedBy=multi-user.target
 Same for `marketech-worker.service` with `ExecStart=/usr/bin/node workers/socialWorker.js` and
 `User=mkt-worker`. Exactly one worker.
 
-## 6. Release with migrations 024, 025 and 026
+## 6. Release with migrations 024, 025, 026 and 027
 
 Order matters: 024 (tracking tables), 025 (Compose purpose columns, capability grants), then 026
 (`mail_provider_apps`: the Zoho API client entered in Mail Center → Settings, secret encrypted with
-`SOCIAL_TOKEN_ENCRYPTION_KEY`). All are additive; the runner applies them in order and records each in `schema_migrations`.
+`SOCIAL_TOKEN_ENCRYPTION_KEY`), then 027 (`mail_campaign_contacts`: contacts selected for a campaign, and
+three `contact_list_*` columns on `mail_campaigns`). After 027, reconnect Zoho once per workspace to grant
+`ZohoCampaigns.contact.CREATE`; until then list-only campaigns keep working and selected contacts are refused
+with a reconnect message. All are additive; the runner applies them in order and records each in `schema_migrations`.
 
 ```bash
 cd <app dir>/backend
@@ -143,7 +146,7 @@ sudo systemctl stop marketech-worker marketech-api
 MYSQL_DEFAULTS_FILE=<backup cnf> scripts/backup.sh <prod db> <backup root>
 # 2. Install the new release (unpacked package or git checkout of the released commit), then
 npm ci --omit=dev
-npm run migrate -- --status                 # expect: 024, 025 and 026 [pending], nothing else
+npm run migrate -- --status                 # expect: 024, 025, 026 and 027 [pending], nothing else
 npm run migrate -- --backup=<backup root>/<prod db>-<timestamp>/<prod db>.sql   # <dir> from backup.sh's "Backup complete: <dir>" line + /<prod db>.sql
 npm run migrate -- --status                 # expect: all [applied]
 # 3. Start
@@ -184,6 +187,9 @@ Follow `docs/EMAIL_TRACKING_STAGING.md` sections 3–5. In short:
   `client_reference`, retries (respond 500/429). Only if everything matches the table in section 3.6:
   set `ZEPTOMAIL_WEBHOOKS_ENABLED=1`, restart the API, create the workspace webhook URL in Mail Center,
   save the key, turn it on. Any mismatch: leave it off.
+- **Zoho contact sync**: reconnect Zoho, then send a campaign to 2–3 of your own addresses and confirm in Zoho
+  that a private "Marketech campaign …" list appears, whether Zoho sent those addresses a confirmation email,
+  and that the campaign reached them. Keep the first real audience small.
 - **Zoho Campaigns**: API console client (redirect URI `https://<app host>/api/v1/mail/zoho/callback`),
   connect a workspace, then `scripts/zohoRecipientsProbe.js` on one already-sent campaign (staging
   guard) — or compare the Campaigns → recipient activity panel with Zoho's own report.
@@ -203,7 +209,7 @@ Follow `docs/EMAIL_TRACKING_STAGING.md` sections 3–5. In short:
 
 ## 10. Rollback
 
-- **Code only (preferred)**: 024/025/026 are additive and older code ignores the new tables/columns, so
+- **Code only (preferred)**: 024/025/026/027 are additive and older code ignores the new tables/columns, so
   redeploy the previous release and restart; no database change needed. Turn off
   `ZEPTOMAIL_WEBHOOKS_ENABLED` first if it was on.
 - **Database** (only if data must be reverted): stop both services, restore the pre-migration backup

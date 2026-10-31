@@ -78,6 +78,77 @@ describe('CampaignMetricsComponent', () => {
     expect(el().textContent).toContain('cannot see recipient activity');
   });
 
+  describe('charts and click to view', () => {
+    const REPORT = { emails_sent_count: '200', delivered_count: '190', opens_count: '57', unique_clicks_count: '19', bounces_count: '10', hardbounce_count: '6', softbounce_count: '4', unsub_count: '3', spams_count: '0' };
+    const row = (label: string) => Array.from(el().querySelectorAll('.cm-bar')).find(r => r.querySelector('.cm-bar-label')!.textContent === label) as HTMLElement;
+    const width = (label: string) => (row(label).querySelector('.cm-track i') as HTMLElement).style.width;
+    const recipients = () => http.expectOne(r => r.url.endsWith('/mail/campaigns/7/recipients'));
+
+    it('draws reach and problems to scale with their counts; a missing figure has no bar', () => {
+      init({ report: { ...REPORT, unique_clicks_count: undefined } });
+      expect(el().querySelectorAll('.cm-card').length).toBe(2);
+      expect(width('Sent')).toBe('100%');
+      expect(width('Delivered')).toBe('95%');
+      expect(row('Clicked')).toBeUndefined();
+      expect(row('Hard bounced').textContent).toContain('6');
+      expect(width("Soft bounced")).toBe("66.6667%");
+      expect(row('Spam complaints').querySelector('.cm-track i')!.classList.contains('some')).toBeFalse();
+    });
+
+    it('large figures read the same in the tiles and the charts', () => {
+      init({ report: { emails_sent_count: '7229' } });
+      expect(tile('Sent').querySelector('b')!.textContent).toBe('7,229');
+      expect(row('Sent').querySelector('.cm-bar-value')!.textContent).toBe('7,229');
+    });
+
+    it('with only a total for bounces it shows one Bounced bar', () => {
+      init({ report: { emails_sent_count: '10', bounces_count: '2' } });
+      expect(row('Bounced')).toBeTruthy();
+      expect(row('Hard bounced')).toBeUndefined();
+    });
+
+    it('nothing reported means no chart', () => {
+      init({ report: {} });
+      expect(el().querySelector('.cm-charts')).toBeNull();
+    });
+
+    it('clicking a bar opens the people behind it, and keeps the button in place', () => {
+      init({ report: REPORT, canViewRecipients: true });
+      const bar = row('Opened');
+      bar.click();
+      const req = recipients();
+      expect(req.request.params.get('activity')).toBe('opened');
+      req.flush({ available: true, recipients: [{ email: 'ann@acme.io' }], hasMore: false });
+      fixture.detectChanges();
+      expect(row('Opened')).withContext('not re-created, so focus stays').toBe(bar);
+      expect(bar.getAttribute('aria-pressed')).toBe('true');
+      expect(el().querySelector('.cm-list')!.textContent).toContain('ann@acme.io');
+      expect(comp.activity).toBe('opened');
+    });
+
+    it('figures open their list too; those with no list, or nothing reported, stay plain', () => {
+      init({ report: { ...REPORT, unsub_count: undefined }, canViewRecipients: true });
+      expect(tile('Open rate').tagName).toBe('DIV');
+      expect(tile('Unsubscribes').tagName).withContext('Unavailable').toBe('DIV');
+      expect(tile('Delivered').tagName).toBe('DIV');
+      expect(row('Delivered').tagName).toBe('DIV');
+      (tile('Bounced') as HTMLElement).click();
+      const req = recipients();
+      expect(req.request.params.get('activity')).toBe('hard_bounced');
+      req.flush({ available: true, recipients: [], hasMore: false });
+    });
+
+    it('roles that cannot see addresses, and unsent campaigns, get the charts without links', () => {
+      init({ report: REPORT, canViewRecipients: false });
+      expect(el().querySelector('.cm-charts')).toBeTruthy();
+      expect(el().querySelector('button.cm-bar, button.cm-tile')).toBeNull();
+      expect(el().textContent).not.toContain('Click a bar');
+      fixture.destroy();
+      init({ report: REPORT, canViewRecipients: true, status: 'failed' });
+      expect(el().querySelector('button.cm-bar')).toBeNull();
+    });
+  });
+
   it('num() and rate() never invent values', () => {
     expect(num(undefined)).toBeNull();
     expect(num('')).toBeNull();

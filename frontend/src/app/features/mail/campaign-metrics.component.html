@@ -1,20 +1,60 @@
 <section class="cm" aria-label="Campaign results">
   <div class="cm-head">
     <strong>Results from Zoho</strong>
-    <span class="cm-muted" *ngIf="zohoStatus">Zoho status: {{ zohoStatus }}</span>
+    <span class="cm-muted" *ngIf="zohoStatus">Zoho status: {{ zohoStatus }}<ng-container *ngIf="lastCheckedAt"> · Updated {{ lastCheckedAt | date:'MMM d, h:mm a' }}</ng-container></span>
   </div>
-  <p class="cm-muted" *ngIf="!report">{{ sent ? 'No report yet. Use "Refresh status" to read the latest figures from Zoho.' : 'Results appear after the campaign is sent.' }}</p>
+  <p class="cm-muted" *ngIf="!report">{{ sent ? 'No figures from Zoho yet. They appear shortly after Zoho starts sending; use "Refresh status" to check.' : 'Results appear after the campaign is sent.' }}</p>
+  <div class="cm-charts" *ngIf="report && (reach.length || problems.length)">
+    <figure class="cm-card" *ngIf="reach.length">
+      <figcaption>Campaign reach</figcaption>
+      <ng-container *ngFor="let b of reach; trackBy: trackLabel">
+        <ng-container *ngTemplateOutlet="barRow; context: { $implicit: b, tone: 'reach' }"></ng-container>
+      </ng-container>
+    </figure>
+    <figure class="cm-card" *ngIf="problems.length">
+      <figcaption>Problems <small class="cm-scale">Bars compare these figures with each other</small></figcaption>
+      <ng-container *ngFor="let b of problems; trackBy: trackLabel">
+        <ng-container *ngTemplateOutlet="barRow; context: { $implicit: b, tone: 'problem' }"></ng-container>
+      </ng-container>
+    </figure>
+  </div>
+  <p class="cm-muted" *ngIf="report && canOpenLists">Click a bar or figure to see the people behind it.</p>
+
+  <ng-template #barRow let-b let-tone="tone">
+    <button type="button" class="cm-bar" *ngIf="canOpen(b.activity); else staticBar" [class.on]="isOpen(b.activity)" [ngClass]="tone" (click)="openActivity(b.activity)"
+      [attr.aria-pressed]="isOpen(b.activity)" [attr.aria-label]="'Show who: ' + b.label + ', ' + b.value" [title]="b.label + ': ' + (b.value | number)">
+      <ng-container *ngTemplateOutlet="barBody; context: { $implicit: b }"></ng-container>
+    </button>
+    <ng-template #staticBar>
+      <div class="cm-bar static" [ngClass]="tone" [title]="b.label + ': ' + (b.value | number)"><ng-container *ngTemplateOutlet="barBody; context: { $implicit: b }"></ng-container></div>
+    </ng-template>
+  </ng-template>
+  <ng-template #barBody let-b>
+    <span class="cm-bar-label">{{ b.label }}</span>
+    <span class="cm-track" aria-hidden="true"><i [style.width.%]="b.pct" [class.some]="b.value > 0"></i></span>
+    <b class="cm-bar-value">{{ b.value | number }}</b>
+  </ng-template>
+
   <div class="cm-grid" *ngIf="report">
-    <div class="cm-tile" *ngFor="let m of metrics" [class.na]="m.unavailable" [title]="m.hint || ''">
-      <span>{{ m.label }}</span>
-      <b>{{ m.value }}</b>
-      <small *ngIf="m.hint">{{ m.hint }}</small>
-    </div>
+    <ng-container *ngFor="let m of metrics; trackBy: trackLabel">
+      <button type="button" class="cm-tile cm-link" *ngIf="canOpen(m.activity) && !m.unavailable; else plainTile" [class.on]="isOpen(m.activity)" [title]="m.hint || ''"
+        (click)="openActivity(m.activity!)" [attr.aria-pressed]="isOpen(m.activity)" [attr.aria-label]="'Show who: ' + m.label + ', ' + m.value">
+        <ng-container *ngTemplateOutlet="tileBody; context: { $implicit: m }"></ng-container>
+      </button>
+      <ng-template #plainTile>
+        <div class="cm-tile" [class.na]="m.unavailable" [title]="m.hint || ''"><ng-container *ngTemplateOutlet="tileBody; context: { $implicit: m }"></ng-container></div>
+      </ng-template>
+    </ng-container>
   </div>
+  <ng-template #tileBody let-m>
+    <span>{{ m.label }}</span>
+    <b>{{ m.value }}</b>
+    <small *ngIf="m.hint">{{ m.hint }}</small>
+  </ng-template>
   <p class="cm-note" *ngIf="report">Totals as reported by Zoho Campaigns when last refreshed. Opens are an estimate: image blocking, caching and privacy features distort them.</p>
 
   <ng-container *ngIf="sent">
-    <div class="cm-recips" *ngIf="canViewRecipients">
+    <div class="cm-recips" #recips *ngIf="canViewRecipients">
       <button type="button" class="btn btn-secondary btn-sm" *ngIf="!showRecipients" (click)="openRecipients()">Show recipient activity</button>
       <ng-container *ngIf="showRecipients">
         <div class="cm-recips-bar">

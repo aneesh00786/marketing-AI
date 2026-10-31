@@ -8,18 +8,25 @@ import { ZohoCampaignsComponent } from './zoho-campaigns.component';
 import { TemplatePickerComponent } from './template-picker.component';
 import { EmailPreviewComponent } from './email-preview.component';
 import { EmailContentEditorComponent } from './email-content-editor.component';
+import { ZohoListContactsComponent } from './zoho-list-contacts.component';
+import { CampaignContactsComponent } from './campaign-contacts.component';
+import { CampaignContactRowsComponent } from './campaign-contact-rows.component';
 import { EmailPreviewComponent as ThumbPreview } from './email-preview.component';
 import { CampaignMetricsComponent } from './campaign-metrics.component';
 
+/** A sent campaign's figures are read from Zoho when it is opened, at most this often. */
+const REPORT_MAX_AGE_MS = 5 * 60 * 1000;
+
 /**
  * Email campaigns: written, validated, approved and sent from Marketech.ai; delivered by Zoho.
- * Recipients are Zoho mailing lists chosen here (their contacts and consent live in Zoho).
+ * Recipients are Zoho mailing lists and contacts selected here; selected contacts are added to
+ * Zoho by the server when the campaign is sent.
  * The server enforces permissions; controls are only hidden here.
  */
 @Component({
   selector: 'app-email-campaigns',
   standalone: true,
-  imports: [CommonModule, IconComponent, FormsModule, ZohoCampaignsComponent, TemplatePickerComponent, EmailContentEditorComponent, ThumbPreview, CampaignMetricsComponent],
+  imports: [CommonModule, IconComponent, FormsModule, ZohoCampaignsComponent, TemplatePickerComponent, EmailContentEditorComponent, ThumbPreview, ZohoListContactsComponent, CampaignContactsComponent, CampaignContactRowsComponent, CampaignMetricsComponent],
   templateUrl: './email-campaigns.component.html',
   styleUrls: ['../command/command-center.component.css', './mail-ui.css', './email-campaigns.component.css']
 })
@@ -50,9 +57,15 @@ export class EmailCampaignsComponent implements OnInit {
   listSort: 'newest' | 'oldest' | 'name' = 'newest';
   menuFor: number | null = null;
   showCreateMenu = false;
+  /** The Zoho mailing list whose contacts are being viewed. */
+  contactsList: any = null;
+  /** The saved selection once loaded, and the part picked from each Zoho list (shown on its row). */
+  allContacts: any[] | null = null;
+  picksByList = new Map<string, any[]>();
   /** The saved values of the open campaign, to tell when the form has unsaved changes. */
   private original = '';
   @ViewChild(ZohoCampaignsComponent) private zohoPanel?: ZohoCampaignsComponent;
+  @ViewChild(CampaignContactsComponent) private contactsPanel?: CampaignContactsComponent;
 
   constructor(private http: HttpClient) {}
 
@@ -61,6 +74,9 @@ export class EmailCampaignsComponent implements OnInit {
   get canCompose(): boolean { return !!this.zoho?.canCompose; }
   get canSend(): boolean { return !!this.zoho?.canSend; }
   get zohoReady(): boolean { return !!this.zoho?.connection?.connected && !(this.zoho?.connection?.missingScopes || []).length; }
+  get canSyncContacts(): boolean { return this.zoho?.connection?.canSyncContacts !== false; }
+  /** Contacts can be picked inside a Zoho list only while this campaign's recipients can change. */
+  get canPickFromZoho(): boolean { return this.editable && this.canSend && this.canSyncContacts; }
   get selectedListNames(): string { return (this.selected?.lists || []).map((l: any) => l.name || l.key).join(', '); }
   get editable(): boolean { return !!this.selected && ['draft', 'approved', 'failed'].includes(this.selected.status) && this.canCompose; }
 
@@ -147,12 +163,23 @@ export class EmailCampaignsComponent implements OnInit {
   open(c: any): void {
     if (this.selected?.id !== c.id && !this.confirmDiscard()) return;
     this.http.get<any>(`${this.base}/${c.id}`).subscribe({
-      next: r => this.setSelected(r.campaign),
+      next: r => { this.setSelected(r.campaign); this.refreshReport(r.campaign); },
       error: e => this.toast.emit(this.err(e))
     });
   }
 
+  /** Quietly updates the figures: if Zoho cannot be reached, the last ones stay on screen. */
+  private refreshReport(c: any): void {
+    if (c.status !== 'submitted') return;
+    if (c.lastCheckedAt && Date.now() - new Date(c.lastCheckedAt).getTime() < REPORT_MAX_AGE_MS) return;
+    this.http.post<any>(`${this.base}/${c.id}/refresh`, {}).subscribe({
+      next: r => { if (this.selected?.id === c.id) this.selected = r.campaign; this.load(); },
+      error: () => {}
+    });
+  }
+
   private setSelected(c: any): void {
+    if (this.selected?.id !== c.id) this.onContacts(null);
     this.selected = c;
     this.validation = null;
     this.form = {
@@ -160,6 +187,30 @@ export class EmailCampaignsComponent implements OnInit {
       topicId: c.topicId || '', listKeys: new Set((c.lists || []).map((l: any) => l.key))
     };
     this.original = this.snapshot();
+  }
+
+  onContacts(list: any[] | null): void {
+    this.allContacts = list;
+    this.picksByList = new Map();
+    for (const c of list || []) {
+      if (c.sourceListKey) this.picksByList.set(c.sourceListKey, [...(this.picksByList.get(c.sourceListKey) || []), c]);
+    }
+  }
+
+  removeContact(c: any): void { this.contactsPanel?.remove(c); }
+
+  /** Selected contacts are saved at once: the campaign changed, but form edits are kept. */
+  onCampaignChanged(c: any): void {
+    this.selected = c;
+    this.validation = null;
+    this.load();
+  }
+
+  onZohoContactsAdded(r: any): void {
+    this.contactsPanel?.apply(r);
+    this.onCampaignChanged(r.campaign);
+    const refused = r.refused ? ` ${r.refused} could not be added (unsubscribed or blocked).` : '';
+    this.toast.emit(`${r.added} contact${r.added === 1 ? '' : 's'} added.${refused} Approve the campaign before sending.`);
   }
 
   private snapshot(): string {
@@ -222,7 +273,11 @@ export class EmailCampaignsComponent implements OnInit {
 
   send(): void {
     const lists = (this.selected.lists || []).map((l: any) => l.name || l.key).join(', ');
-    if (!confirm(`Send "${this.selected.name}" through Zoho now?\n\nRecipients: Zoho lists ${lists}.\nYour Zoho plan's sending limits apply. This cannot be undone.`)) return;
+    // A ticked list already covers the contacts picked from it.
+    const keys = new Set((this.selected.lists || []).map((l: any) => l.key));
+    const contacts = this.allContacts ? this.allContacts.filter(c => c.eligible && !keys.has(c.sourceListKey)).length : this.selected.contactCount ?? 0;
+    const to = [lists && `Zoho lists ${lists}`, contacts && `${contacts} selected contact${contacts === 1 ? '' : 's'} (added to Zoho first)`].filter(Boolean).join(' and ');
+    if (!confirm(`Send "${this.selected.name}" through Zoho now?\n\nRecipients: ${to}.\nYour Zoho plan's sending limits apply. This cannot be undone.`)) return;
     this.busy = 'send';
     this.http.post<any>(`${this.base}/${this.selected.id}/send`, { confirm: true }).subscribe({
       next: r => { this.busy = ''; this.setSelected(r.campaign); this.load(); this.toast.emit('Zoho accepted the campaign for sending. Delivery figures appear as Zoho sends.'); },
@@ -243,6 +298,22 @@ export class EmailCampaignsComponent implements OnInit {
     this.http.post<any>(`${this.base}/${this.selected.id}/resolve`, { confirm: true }).subscribe({
       next: r => { this.setSelected(r.campaign); this.load(); this.toast.emit('Marked as not done. You can send it again.'); },
       error: e => { this.toast.emit(this.err(e)); this.open(this.selected); }
+    });
+  }
+
+  /** A new draft from this campaign, to send it again. The server re-checks selected contacts. */
+  duplicate(c: any): void {
+    if (!this.confirmDiscard()) return;
+    this.busy = 'duplicate';
+    this.http.post<any>(`${this.base}/${c.id}/duplicate`, {}).subscribe({
+      next: r => {
+        this.busy = '';
+        this.setSelected(r.campaign);
+        this.load();
+        const dropped = r.contactsDropped ? ` ${r.contactsDropped} contact${r.contactsDropped === 1 ? ' was' : 's were'} left out because they can no longer be emailed.` : '';
+        this.toast.emit(`Copy created as a draft.${dropped}`);
+      },
+      error: e => { this.busy = ''; this.toast.emit(this.err(e)); }
     });
   }
 

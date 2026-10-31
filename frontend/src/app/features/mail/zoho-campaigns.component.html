@@ -3,7 +3,7 @@
     <span class="zoho-icon" aria-hidden="true"><app-icon name="campaigns" [size]="22"></app-icon></span>
     <div class="zoho-text">
       <h3 id="zoho-title" class="mx-subhead">Zoho Campaigns connection <span class="mx-tag" [class.good]="connected" [class.warn]="!connected">{{ connected ? 'Connected' : 'Not connected' }}</span></h3>
-      <p class="zoho-desc">Campaigns are written and approved here; Zoho only delivers them to the mailing lists you choose. Lists, contacts and consent are managed in Zoho; Marketech.ai never uploads contacts.</p>
+      <p class="zoho-desc">Campaigns are written and approved here; Zoho delivers them to the lists and contacts you choose. Contacts you select are added to a new Zoho list when you send; your existing lists are not changed.</p>
     </div>
   </div>
 
@@ -14,7 +14,7 @@
       <li [class.done]="status.serverConfigured"><app-icon [name]="status.serverConfigured ? 'check' : 'x'" [size]="14"></app-icon>Zoho API credentials entered (Settings → Zoho Campaigns)</li>
       <li [class.done]="connected && !missingScopes.length"><app-icon [name]="connected && !missingScopes.length ? 'check' : 'x'" [size]="14"></app-icon>Zoho account connected to this workspace</li>
       <li class="info"><app-icon name="info" [size]="14"></app-icon>Verify the sender address and authenticate the domain (SPF/DKIM) in Zoho</li>
-      <li class="info"><app-icon name="info" [size]="14"></app-icon>Use existing mailing lists from your Zoho account</li>
+      <li class="info"><app-icon name="info" [size]="14"></app-icon>Choose mailing lists from your Zoho account, or select contacts one by one</li>
     </ul>
   </div>
 

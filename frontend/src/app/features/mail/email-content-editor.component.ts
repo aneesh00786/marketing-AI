@@ -5,6 +5,12 @@ import { EmailPreviewComponent } from './email-preview.component';
 import { VisualHtmlEditorComponent } from './visual-html-editor.component';
 import { HtmlCodeEditorComponent } from './html-code-editor.component';
 
+const UNSUB_LINK = '<p style="text-align:center;font-size:12px;"><a href="$[LI:UNSUBSCRIBE]$">Unsubscribe</a></p>';
+const UNSUB_TAG = /\$\[LI:(?:UNSUBSCRIBE|ORG_OPTOUT)\]\$/i;
+/** A paragraph holding only the link, then a link inside other text. */
+const UNSUB_PARAGRAPH = /[ \t]*<p\b[^>]*>\s*<a\b[^>]*\$\[LI:(?:UNSUBSCRIBE|ORG_OPTOUT)\]\$[^>]*>[\s\S]*?<\/a>\s*<\/p>\s*\n?/gi;
+const UNSUB_ANCHOR = /<a\b[^>]*\$\[LI:(?:UNSUBSCRIBE|ORG_OPTOUT)\]\$[^>]*>[\s\S]*?<\/a>/gi;
+
 /**
  * The email content panel shared by Campaigns and Email Templates: Edit (Visual or HTML source,
  * with a formatting toolbar) or Preview (the unsaved HTML, sandboxed, desktop or mobile width).
@@ -133,13 +139,22 @@ export class EmailContentEditorComponent implements OnChanges {
     if (typeof document.execCommand === 'function') document.execCommand(cmd);
   }
 
-  /** Inserts Zoho's unsubscribe link at the cursor (only edits the unsaved content). */
-  insertUnsubscribe(): void {
-    if (!this.editable) return;
-    if ((this.html || '').includes('$[LI:UNSUBSCRIBE]$')) { this.toast.emit('The unsubscribe link is already in the content.'); return; }
-    const link = '<p><a href="$[LI:UNSUBSCRIBE]$">Unsubscribe</a></p>';
-    if (!this.visualExec('insertHTML', link)) this.replaceSelection(link);
-    if (!(this.html || '').includes('$[LI:UNSUBSCRIBE]$')) this.setHtml((this.html || '') + link);
+  /** True when the email already has Zoho's unsubscribe link (added here or written by hand). */
+  get hasUnsubscribe(): boolean { return UNSUB_TAG.test(this.html || ''); }
+
+  /** The "Add unsubscribe link" checkbox: adds the link at the end of the email, or removes it. */
+  setUnsubscribe(on: boolean): void {
+    if (!this.editable || on === this.hasUnsubscribe) return;
+    const html = this.html || '';
+    if (on) {
+      const body = /<\/body\s*>/i.exec(html);
+      this.setHtml(body ? html.slice(0, body.index) + UNSUB_LINK + '\n' + html.slice(body.index) : `${html}\n${UNSUB_LINK}`.trimStart());
+      return;
+    }
+    this.setHtml(html
+      .replace(UNSUB_PARAGRAPH, '')
+      .replace(UNSUB_ANCHOR, '')
+      .replace(new RegExp(UNSUB_TAG.source, 'gi'), ''));
   }
 
   /** Reminders while editing (the server's validation is unchanged and still decides). */
@@ -147,7 +162,7 @@ export class EmailContentEditorComponent implements OnChanges {
     const html = this.html || '';
     const out: string[] = [];
     if (!html.trim()) return [`Add the email content: write HTML${this.canChooseTemplate ? ' or choose a template' : ''}.`];
-    if (this.purpose === 'campaign' && !html.includes('$[LI:UNSUBSCRIBE]$')) out.push('No unsubscribe link yet: Zoho requires $[LI:UNSUBSCRIBE]$.');
+    if (this.purpose === 'campaign' && !html.includes('$[LI:UNSUBSCRIBE]$')) out.push('No unsubscribe link yet: Zoho requires one. Tick "Add unsubscribe link" below.');
     if (/<img\b[^>]*\bsrc\s*=\s*["']?http:\/\//i.test(html)) out.push('Some images use http://. Use https:// image URLs so they load for recipients.');
     return out;
   }

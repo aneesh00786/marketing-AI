@@ -38,3 +38,4 @@ textarea.code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; fon
 .ec-code { display: block; }
 .ec-toolbar + .ec-code { margin-top: 0; }
 @media (max-width: 1400px) { .ec-count { display: none; } }
+.ec-unsub { display: inline-flex; align-items: center; gap: 8px; align-self: flex-start; font-size: 0.86rem; font-weight: 600; color: var(--text); cursor: pointer; }

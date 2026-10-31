@@ -7,17 +7,19 @@ const { unresolvedPlaceholders, TOKEN_RE } = require('../../../lib/mailContent')
 const { sanitizeEmailHtml } = require('../../../lib/emailHtml');
 const { workerAuthorizationProblem } = require('../../../lib/workerAuthorization');
 const zoho = require('../zoho/zohoService');
+const contactsSvc = require('./campaignContacts');
 
 /**
  * Email campaigns written, approved and managed in Marketech.ai; Zoho Campaigns only delivers them.
  *
- * Marketech.ai: name, subject, sender, HTML content, the Zoho mailing lists to send to (chosen
- * from the connected account; lists and consent are managed in Zoho, no contacts are uploaded),
- * validation, approval, submission status and the delivery report.
+ * Marketech.ai: name, subject, sender, HTML content, the recipients (Zoho mailing lists chosen
+ * from the connected account, and contacts selected one by one), validation, approval, submission
+ * status and the delivery report.
  *
- * Zoho (internal, never done by the user): createCampaign makes the delivery object Zoho needs
- * (content imported from a public, expiring content URL), then sendcampaign sends it. Each step is
- * claimed in the database first and never retried automatically after an unclear result.
+ * Zoho (internal, never done by the user): selected contacts are added to a new list (see
+ * campaignContacts.js), createCampaign makes the delivery object Zoho needs (content imported from
+ * a public, expiring content URL), then sendcampaign sends it. Each step is claimed in the database
+ * first and never retried automatically after an unclear result.
  */
 const ws = ctx => ctx.auth.workspaceId;
 const { httpError } = zoho;
@@ -100,7 +102,9 @@ async function list(ctx, { thumbs = false } = {}) {
 }
 
 async function getOne(ctx, id) {
-  return present(await requireRow(ctx, id), { full: true });
+  const row = await requireRow(ctx, id);
+  const { n } = await get('SELECT COUNT(*) AS n FROM mail_campaign_contacts WHERE workspace_id = ? AND campaign_id = ?', [ws(ctx), row.id]);
+  return { ...present(row, { full: true }), contactCount: Number(n) };
 }
 
 function columnsFrom(v) {
@@ -138,22 +142,47 @@ async function create(ctx, input) {
   return getOne(ctx, ins.lastID);
 }
 
-/** Any edit returns the campaign to draft (new version, approval cleared). */
-async function update(ctx, id, input) {
+async function editableRow(ctx, id) {
   const row = await requireRow(ctx, id);
   if (!EDITABLE.includes(row.status)) throw httpError(409, `A ${row.status.replace('_', ' ')} campaign cannot be edited.`, 'NOT_EDITABLE');
-  const v = updateSchema.parse(input || {});
-  const { sets, params } = columnsFrom(v);
-  if (!sets.length) throw httpError(400, 'Nothing to update.', 'VALIDATION_ERROR');
+  return row;
+}
+
+/** Any edit returns the campaign to draft (new version, approval cleared). */
+async function resetToDraft(ctx, row, sets = [], params = []) {
   const r = await run(
-    `UPDATE mail_campaigns SET ${sets.join(', ')}, status = 'draft', version = version + 1, approved_version = NULL, approved_by = NULL, approved_at = NULL,
+    `UPDATE mail_campaigns SET ${[...sets, ''].join(', ')}status = 'draft', version = version + 1, approved_version = NULL, approved_by = NULL, approved_at = NULL,
        content_token_hash = NULL, content_token_expires_at = NULL, provider_code = NULL, provider_message = NULL, updated_by = ?, updated_at = UTC_TIMESTAMP()
      WHERE id = ? AND workspace_id = ? AND status IN ('draft', 'approved', 'failed')`,
     [...params, ctx.auth.userId, row.id, ws(ctx)]
   );
   if (!r.changes) throw httpError(409, 'The campaign changed meanwhile. Reload and try again.', 'CONFLICT');
+}
+
+async function update(ctx, id, input) {
+  const row = await editableRow(ctx, id);
+  const v = updateSchema.parse(input || {});
+  const { sets, params } = columnsFrom(v);
+  if (!sets.length) throw httpError(400, 'Nothing to update.', 'VALIDATION_ERROR');
+  await resetToDraft(ctx, row, sets, params);
   await audit(ctx, 'mail.campaign_updated', { resourceType: 'mail_campaign', resourceId: row.id, metadata: { fields: Object.keys(v) } });
   return getOne(ctx, row.id);
+}
+
+/**
+ * A sent campaign stays as it was; to send it again, it is copied. The copy is a new draft with its
+ * own version history: no approval, Zoho campaign, contact list or results come with it.
+ */
+async function duplicate(ctx, id) {
+  const row = await requireRow(ctx, id);
+  const ins = await run(
+    `INSERT INTO mail_campaigns (workspace_id, name, subject, from_name, from_email, html_content, list_keys_json, list_names_json, topic_id, status, version, created_by, updated_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', 1, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+    [ws(ctx), `${String(row.name).slice(0, 143)} (copy)`, row.subject, row.from_name, row.from_email, row.html_content, row.list_keys_json, row.list_names_json, row.topic_id, ctx.auth.userId, ctx.auth.userId]
+  );
+  const contacts = await contactsSvc.copySelection(ws(ctx), row.id, ins.lastID);
+  await audit(ctx, 'mail.campaign_duplicated', { resourceType: 'mail_campaign', resourceId: ins.lastID, metadata: { from: row.id, ...contacts } });
+  return { campaign: await getOne(ctx, ins.lastID), contactsDropped: contacts.dropped };
 }
 
 async function remove(ctx, id) {
@@ -164,10 +193,28 @@ async function remove(ctx, id) {
   return { deleted: true };
 }
 
+/** Selected contacts: a change needs a new approval, because the audience is part of what was approved. */
+async function getContacts(ctx, id) {
+  return contactsSvc.selection(ctx, (await requireRow(ctx, id)).id);
+}
+
+async function changeContacts(ctx, id, input, change) {
+  const row = await editableRow(ctx, id);
+  const result = await change(ctx, row, input, () => resetToDraft(ctx, row));
+  return { ...result, campaign: await getOne(ctx, row.id) };
+}
+
+const setContactLeads = (ctx, id, input) => changeContacts(ctx, id, input, contactsSvc.setLeads);
+const addContactsFromZoho = (ctx, id, input) => changeContacts(ctx, id, input, contactsSvc.addFromZoho);
+const removeContacts = (ctx, id, input) => changeContacts(ctx, id, input, contactsSvc.removeContacts);
+
+/** Leads to choose from, with why each one can or cannot be emailed. */
+const leadOptions = (ctx, query) => require('../productEmails/service').listRecipients(ctx, query, { maxSelect: contactsSvc.MAX_CONTACTS });
+
 /** Mailing lists and topics of the connected Zoho account, to choose recipients from. */
 async function zohoAudiences(ctx) {
   await zoho.assertReady(ws(ctx));
-  const lists = await fetchLists(ws(ctx));
+  const lists = (await contactsSvc.fetchLists(ws(ctx))).filter(l => !contactsSvc.isSyncList(l.name));
   let topics = [];
   try {
     const t = await zoho.readCall(ws(ctx), 'topics', { details: JSON.stringify({ from_index: 0, range: 100 }) });
@@ -176,17 +223,7 @@ async function zohoAudiences(ctx) {
     if (err.code === 'ZOHO_REAUTH_REQUIRED' || err.code === 'ZOHO_UNAUTHORIZED') throw err;
     topics = []; // topics are optional (only for accounts with topic management)
   }
-  return { lists, topics, note: 'Lists, their contacts and consent are managed in Zoho Campaigns. Marketech.ai does not upload or change contacts.' };
-}
-
-async function fetchLists(workspaceId) {
-  try {
-    const d = await zoho.readCall(workspaceId, 'getmailinglists', { sort: 'asc', fromindex: '1', range: '100' });
-    return (d.list_of_details || []).map(l => ({ key: String(l.listkey), name: l.listname || null, contacts: l.noofcontacts != null ? Number(l.noofcontacts) : null }));
-  } catch (err) {
-    if (['2203', '995'].includes(err.providerCode)) return [];
-    throw err;
-  }
+  return { lists, topics, note: 'Lists and consent are managed in Zoho Campaigns. Contacts you select are added to a new Zoho list when the campaign is sent.' };
 }
 
 function publicBaseUrl() {
@@ -213,7 +250,11 @@ async function validateRow(ctx, row, { checkZoho = true } = {}) {
   if (brackets.length) problems.push(`Replace the placeholders: ${brackets.join(', ')}.`);
   if (tokens.length) problems.push(`Personalization tokens are not filled for Zoho delivery yet: ${tokens.join(', ')}. Replace them with text (or use Zoho merge tags such as $[LI:UNSUBSCRIBE]$).`);
   const keys = parse(row.list_keys_json, []);
-  if (!keys.length) problems.push('Choose at least one Zoho mailing list.');
+  const contacts = contactsSvc.notOnLists(await contactsSvc.assess(ws(ctx), row.id), keys);
+  const eligible = contacts.filter(c => c.eligible).length;
+  if (!keys.length && !eligible) problems.push(contacts.length ? 'None of the selected contacts can be emailed. Choose others or a Zoho mailing list.' : 'Choose at least one Zoho mailing list or contact.');
+  if (eligible) warnings.push(`${eligible} selected contact(s) will be added to a new Zoho list when you send.`);
+  if (contacts.length > eligible) warnings.push(`${contacts.length - eligible} selected contact(s) cannot be emailed and will be skipped.`);
   if (html && !UNSUB_TAG_RE.test(html)) warnings.push('No unsubscribe link: add $[LI:UNSUBSCRIBE]$ (or $[LI:ORG_OPTOUT]$). Without it Zoho adds its default footer or holds the campaign.');
   if (/<img[^>]+src=["'](?!https:\/\/|data:)/i.test(html)) warnings.push('Some images do not use https:// URLs; they may not show in Zoho.');
   if (!publicBaseUrl()) problems.push('The server needs a public https APP_BASE_URL: Zoho imports the content from a Marketech.ai link.');
@@ -221,8 +262,8 @@ async function validateRow(ctx, row, { checkZoho = true } = {}) {
 
   if (checkZoho) {
     try {
-      await zoho.assertReady(ws(ctx));
-      const available = new Set((await fetchLists(ws(ctx))).map(l => l.key));
+      await (contacts.length ? zoho.assertContactSync : zoho.assertReady)(ws(ctx));
+      const available = new Set((await contactsSvc.fetchLists(ws(ctx))).map(l => l.key));
       const missing = keys.filter(k => !available.has(k));
       if (missing.length) problems.push(`These lists no longer exist in Zoho: ${missing.join(', ')}.`);
     } catch (err) {
@@ -263,8 +304,8 @@ async function setState(id, st, extra = {}) {
 
 /**
  * Sends an approved campaign through Zoho. Claimed first (approved/failed -> submitting), so it
- * runs once. Step 1 creates the Zoho delivery object unless this version already has one; step 2
- * sends it. A clear Zoho rejection leaves it "failed" (fix and send again, reusing the Zoho object
+ * runs once. Selected contacts are added to Zoho, then step 1 creates the Zoho delivery object
+ * unless this version already has one; step 2 sends it. A clear Zoho rejection leaves it "failed" (fix and send again, reusing the Zoho object
  * if it exists); an unclear result leaves it "needs_review" until Zoho shows what happened.
  */
 async function send(ctx, id, { confirm } = {}) {
@@ -290,13 +331,20 @@ async function send(ctx, id, { confirm } = {}) {
   // Step 1: the Zoho delivery object for this version (created at most once).
   let key = row.zoho_key_version === row.version ? row.zoho_campaign_key : null;
   if (!key) {
+    const keys = parse(row.list_keys_json, []);
+    await setState(row.id, 'submitting', { submit_stage: 'sync' });
+    try {
+      const contactList = await contactsSvc.syncForSend(ctx, row, { listKeys: keys.slice() });
+      if (contactList) keys.push(contactList);
+    } catch (err) {
+      return fail(ctx, row, 'sync', err);
+    }
     const token = crypto.randomBytes(32).toString('base64url');
     await setState(row.id, 'submitting', {
       submit_stage: 'create',
       content_token_hash: crypto.createHash('sha256').update(token).digest('hex'),
       content_token_expires_at: toDbDateTime(new Date(Date.now() + CONTENT_TTL_MS))
     });
-    const keys = parse(row.list_keys_json, []);
     try {
       const res = await zoho.writeCall(ws(ctx), 'createCampaign', {
         campaignname: `${String(row.name).slice(0, 100)} ${marker(row)}`,
@@ -473,4 +521,21 @@ async function recipientActivity(ctx, id, { activity, page = 1 } = {}) {
   return { available: true, recipients, page: p, pageSize: PAGE_SIZE, hasMore: recipients.length === PAGE_SIZE };
 }
 
-module.exports = { list, getOne, create, update, remove, zohoAudiences, validate, approve, send, refresh, resolve, contentByToken, recipientActivity, RECIPIENT_ACTIONS, contactsIn };
+const LIST_CONTACT_STATUS = { subscribed: 'active', unsubscribed: 'unsub', bounced: 'bounce' };
+
+/**
+ * Contacts of a Zoho mailing list, read on demand (one page at a time). Nothing is stored unless
+ * a contact is selected for a campaign. Each view is audited, without any address.
+ */
+async function listContacts(ctx, listKey, { status = 'subscribed', page = 1 } = {}) {
+  const zohoStatus = LIST_CONTACT_STATUS[status];
+  if (!zohoStatus) throw httpError(400, `Unknown status. Use one of: ${Object.keys(LIST_CONTACT_STATUS).join(', ')}.`, 'VALIDATION_ERROR');
+  if (!/^[A-Za-z0-9_-]{1,200}$/.test(String(listKey || ''))) throw httpError(400, 'Invalid list.', 'VALIDATION_ERROR');
+  await zoho.assertReady(ws(ctx));
+  const p = Math.max(1, Math.min(1000, parseInt(page, 10) || 1));
+  const { contacts, hasMore } = await contactsSvc.readListPage(ws(ctx), listKey, zohoStatus, p);
+  await audit(ctx, 'mail.zoho_list_contacts_viewed', { resourceType: 'mail_provider', resourceId: 'zoho_campaigns', metadata: { status, page: p, count: contacts.length } });
+  return { contacts, page: p, pageSize: contactsSvc.PAGE_SIZE, hasMore };
+}
+
+module.exports = { list, getOne, create, update, duplicate, remove, getContacts, setContactLeads, addContactsFromZoho, removeContacts, leadOptions, zohoAudiences, listContacts, validate, approve, send, refresh, resolve, contentByToken, recipientActivity, RECIPIENT_ACTIONS, contactsIn };

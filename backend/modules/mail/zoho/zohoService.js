@@ -121,10 +121,15 @@ async function connectionRow(workspaceId) {
   return get('SELECT * FROM mail_provider_connections WHERE workspace_id = ? AND provider = ?', [workspaceId, PROVIDER]);
 }
 
+/** Zoho returns granted scopes separated by spaces; older rows may use commas. */
+const parseScopes = value => String(value || '').split(/[\s,]+/).filter(Boolean);
+
 function missingScopes(row) {
-  const granted = new Set(String(row?.scopes || '').split(',').map(x => x.trim()).filter(Boolean));
-  return zoho.SCOPES.filter(sc => !granted.has(sc));
+  const granted = new Set(parseScopes(row?.scopes));
+  return zoho.DELIVERY_SCOPES.filter(sc => !granted.has(sc));
 }
+
+const canSyncContacts = row => parseScopes(row?.scopes).includes(zoho.CONTACT_SYNC_SCOPE);
 
 function presentConnection(row) {
   if (!row || row.status === 'disconnected') return { connected: false, status: row ? row.status : 'not_connected' };
@@ -132,9 +137,10 @@ function presentConnection(row) {
     connected: row.status === 'connected',
     status: row.status,
     location: row.location,
-    scopes: row.scopes ? row.scopes.split(',') : [],
+    scopes: parseScopes(row.scopes),
     // Connections made before campaign delivery was added lack some scopes: reconnect to grant them.
     missingScopes: missingScopes(row),
+    canSyncContacts: canSyncContacts(row),
     connectedAt: row.connected_at,
     lastCheckedAt: row.last_checked_at,
     lastError: row.last_error
@@ -297,7 +303,7 @@ async function testConnection(ctx) {
   return { ok: true, listsVisible: Array.isArray(data.list_of_details) && data.list_of_details.length > 0, message: 'Zoho Campaigns answered. Mailing lists can be read with this connection.' };
 }
 
-/** One write call (createCampaign / sendcampaign). Never retried after it may have reached Zoho. */
+/** One write call (delivery or contact sync). Never retried here after it may have reached Zoho. */
 async function writeCall(workspaceId, endpoint, params) {
   const s = await session(workspaceId);
   try {
@@ -318,6 +324,13 @@ async function assertReady(workspaceId) {
   return row;
 }
 
+/** Throws unless the connection may add contacts. Connections made before this feature must reconnect. */
+async function assertContactSync(workspaceId) {
+  const row = await assertReady(workspaceId);
+  if (!canSyncContacts(row)) throw httpError(409, 'Reconnect Zoho Campaigns to allow adding selected contacts to Zoho.', 'ZOHO_SCOPES_MISSING');
+  return row;
+}
+
 module.exports = {
   PROVIDER,
   appConfig,
@@ -332,6 +345,7 @@ module.exports = {
   readCall,
   writeCall,
   assertReady,
+  assertContactSync,
   httpError,
   _tokenCache: tokenCache
 };

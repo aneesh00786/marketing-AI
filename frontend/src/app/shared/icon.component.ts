@@ -57,7 +57,6 @@ import { CommonModule } from '@angular/common';
       <g *ngSwitchCase="'image'"><rect x="3" y="3" width="18" height="18" rx="2.5"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/></g>
       <g *ngSwitchCase="'undo'"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></g>
       <g *ngSwitchCase="'redo'"><path d="m15 14 5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h3"/></g>
-      <g *ngSwitchCase="'unsubscribe'"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="m3.5 7 8.5 6 8.5-6"/><path d="m15 15 4 4M19 15l-4 4"/></g>
       <g *ngSwitchDefault><circle cx="12" cy="12" r="8"/></g>
     </svg>
   `,

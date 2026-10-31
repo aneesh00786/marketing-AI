@@ -1,0 +1,18 @@
+.muted { color: var(--text-muted); }
+.small { font-size: 0.8rem; }
+.note.error { background: var(--danger-soft); color: var(--danger-text); border-radius: 8px; padding: 8px 10px; margin: 0; }
+.cc { display: flex; flex-direction: column; gap: 6px; }
+/* Same look as a Zoho list row in Recipients */
+.cc-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.cc-check { flex: 1 1 200px; min-width: 0; display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--text); cursor: pointer; }
+.cc-choose { font-size: 0.82rem; white-space: nowrap; }
+.cc-hint { margin: 0; }
+.cc-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.cc-reason { display: block; font-size: 0.76rem; color: var(--warning-text); }
+.cc-tools { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.cc-search { position: relative; flex: 1 1 240px; display: block; min-width: 0; }
+.cc-search app-icon { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--text-muted); pointer-events: none; }
+.cc-search .hud-input { padding-left: 34px; width: 100%; }
+.cc-all { display: flex; align-items: center; gap: 8px; font-size: 0.86rem; font-weight: 600; cursor: pointer; }
+.cc-off td { color: var(--text-muted); }
+.cc-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }

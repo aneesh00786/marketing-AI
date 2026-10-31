@@ -103,3 +103,7 @@
 .ec-detail-status { flex: 1 1 280px; min-width: 0; }
 .ec-content-card { border: 1px solid var(--border); border-radius: 12px; padding: 14px; background: var(--surface); }
 @media (max-width: 640px) { .ec-content-card { padding: 10px; } }
+
+.ec-list-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.ec-list-row label.check { flex: 1 1 200px; min-width: 0; }
+.ec-view-contacts { font-size: 0.82rem; white-space: nowrap; }

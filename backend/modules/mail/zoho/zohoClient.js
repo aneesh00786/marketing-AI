@@ -2,8 +2,9 @@
  * Minimal Zoho Campaigns (API v1.1) client. Zoho is only the delivery backend for campaigns that
  * are written and approved in Marketech.ai. Only these endpoints can be called:
  * - read: mailing lists, topics, recent campaigns, campaign details, campaign reports;
- * - write: createCampaign (the delivery object Zoho needs before sending) and sendcampaign.
- * Contact uploads, list changes and content updates of existing Zoho campaigns are never called.
+ * - write: createCampaign (the delivery object Zoho needs before sending) and sendcampaign;
+ * - contact sync: a new private list for the contacts selected on a campaign, and adding to it.
+ * Contacts of existing lists and content of existing Zoho campaigns are never changed.
  *
  * Data centers: Zoho accounts live in regional data centers. The accounts-server comes only from
  * the allowlist below (never from a URL in the request), selected by the "location" Zoho returns.
@@ -23,12 +24,17 @@ const DATA_CENTERS = {
 
 // Documented minimum scopes: campaign.CREATE (createCampaign), campaign.UPDATE (sendcampaign),
 // campaign.READ (details, reports, recent campaigns), contact.READ (mailing lists, topics).
-const SCOPES = ['ZohoCampaigns.campaign.CREATE', 'ZohoCampaigns.campaign.READ', 'ZohoCampaigns.campaign.UPDATE', 'ZohoCampaigns.contact.READ'];
-const READ_ENDPOINTS = new Set(['recentcampaigns', 'getcampaigndetails', 'campaignreports', 'getmailinglists', 'topics', 'getcampaignrecipientsdata']);
+const DELIVERY_SCOPES = ['ZohoCampaigns.campaign.CREATE', 'ZohoCampaigns.campaign.READ', 'ZohoCampaigns.campaign.UPDATE', 'ZohoCampaigns.contact.READ'];
+// Only for campaigns with selected contacts: a connection without it can still send to lists.
+const CONTACT_SYNC_SCOPE = 'ZohoCampaigns.contact.CREATE';
+const SCOPES = [...DELIVERY_SCOPES, CONTACT_SYNC_SCOPE];
+const READ_ENDPOINTS = new Set(['recentcampaigns', 'getcampaigndetails', 'campaignreports', 'getmailinglists', 'topics', 'getcampaignrecipientsdata', 'getlistsubscribers']);
 // Reads Zoho documents as POST (form body). Still reads: a failure is a plain error, never "outcome unknown".
 const READ_POST_ENDPOINTS = new Set(['getcampaignrecipientsdata']);
 // Write calls whose outcome can be unknown after a timeout; never retried automatically.
 const WRITE_ENDPOINTS = new Set(['createCampaign', 'sendcampaign']);
+// Sent before anything is emailed and safe to repeat, so a failure is a plain error.
+const SYNC_ENDPOINTS = new Set(['addlistandcontacts', 'addlistsubscribersinbulk']);
 const TIMEOUT_MS = 20000;
 const NOT_CONNECTED_CODES = new Set(['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'EHOSTUNREACH', 'ENETUNREACH', 'UND_ERR_CONNECT_TIMEOUT']);
 
@@ -138,9 +144,9 @@ const isSuccess = d => d && (String(d.status).toLowerCase() === 'success' || ['0
  */
 async function call(dc, accessToken, endpoint, params = {}) {
   const isSend = WRITE_ENDPOINTS.has(endpoint);
-  if (!isSend && !READ_ENDPOINTS.has(endpoint)) throw new Error(`Zoho endpoint "${endpoint}" is not allowed.`);
+  if (!isSend && !READ_ENDPOINTS.has(endpoint) && !SYNC_ENDPOINTS.has(endpoint)) throw new Error(`Zoho endpoint "${endpoint}" is not allowed.`);
   const query = new URLSearchParams({ resfmt: 'JSON', ...params });
-  const usePost = isSend || READ_POST_ENDPOINTS.has(endpoint);
+  const usePost = isSend || READ_POST_ENDPOINTS.has(endpoint) || SYNC_ENDPOINTS.has(endpoint);
   const url = `${dc.campaigns}/api/v1.1/${endpoint}${usePost ? '' : `?${query}`}`;
   let res;
   try {
@@ -173,6 +179,8 @@ async function call(dc, accessToken, endpoint, params = {}) {
 module.exports = {
   DATA_CENTERS,
   SCOPES,
+  DELIVERY_SCOPES,
+  CONTACT_SYNC_SCOPE,
   clientConfig,
   redirectUri,
   resolveDataCenter,

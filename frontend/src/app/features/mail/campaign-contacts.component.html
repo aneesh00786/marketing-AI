@@ -1,0 +1,81 @@
+<div class="cc" *ngIf="editable || rows.length">
+  <div class="cc-head">
+    <label class="cc-check">
+      <input type="checkbox" [checked]="rows.length > 0" (change)="onRowToggle($event)" [disabled]="!editable || busy" />
+      Leads
+      <span class="muted small" *ngIf="rows.length">({{ rows.length | number }} selected<ng-container *ngIf="rowsEligible !== rows.length"> · {{ rowsEligible | number }} can be emailed</ng-container>)</span>
+    </label>
+    <button type="button" class="link-btn cc-choose" *ngIf="editable" (click)="openPicker()" [disabled]="busy">Choose leads</button>
+  </div>
+  <p class="muted small cc-hint" *ngIf="editable && rows.length">Added to a new Zoho list automatically when you send.</p>
+
+  <div class="mx-callout warn" *ngIf="!canSync && editable" role="status">
+    Reconnect Zoho once to allow adding selected contacts.
+    <button type="button" class="link-btn" *ngIf="canReconnect" (click)="reconnect.emit()">Reconnect Zoho</button>
+  </div>
+  <p class="note error" *ngIf="error" role="alert">{{ error }}</p>
+
+  <app-campaign-contact-rows *ngIf="rows.length" [contacts]="rows" [editable]="editable" [busy]="busy" (remove)="remove($event)"></app-campaign-contact-rows>
+</div>
+
+<div class="zc-backdrop" *ngIf="picking" (click)="picking = false">
+  <div class="zc-card" role="dialog" aria-modal="true" aria-labelledby="cc-title" (click)="$event.stopPropagation()">
+    <header class="zc-head">
+      <div>
+        <h3 id="cc-title">Choose leads</h3>
+        <p class="mx-desc">Only leads with recorded marketing consent can be emailed. Others show the reason.</p>
+      </div>
+      <button type="button" class="zc-close" (click)="picking = false" aria-label="Close"><app-icon name="x" [size]="18"></app-icon></button>
+    </header>
+
+    <div class="cc-tools">
+      <label class="cc-search">
+        <app-icon name="search" [size]="15"></app-icon>
+        <input class="hud-input" type="search" [(ngModel)]="query" (ngModelChange)="onSearch()" placeholder="Search name, email or company…" aria-label="Search leads" />
+      </label>
+      <div class="mx-seg" role="group" aria-label="Show">
+        <button type="button" [class.on]="filter === ''" [attr.aria-pressed]="filter === ''" (click)="setFilter('')">All</button>
+        <button type="button" [class.on]="filter === 'eligible'" [attr.aria-pressed]="filter === 'eligible'" (click)="setFilter('eligible')">Can be emailed</button>
+        <button type="button" [class.on]="filter === 'ineligible'" [attr.aria-pressed]="filter === 'ineligible'" (click)="setFilter('ineligible')">Cannot be emailed</button>
+      </div>
+    </div>
+
+    <label class="cc-all">
+      <input type="checkbox" [checked]="allChosen" [indeterminate]="someChosen" (change)="toggleAll()" [disabled]="!eligibleIds.length" />
+      Select all ({{ eligibleIds.length | number }} that can be emailed)
+    </label>
+
+    <div class="mx-callout error" *ngIf="pickerError" role="alert">{{ pickerError }} <button type="button" class="link-btn" (click)="fetch(page)">Try again</button></div>
+    <p class="mx-desc" *ngIf="loading">Loading leads…</p>
+    <p class="mx-empty" *ngIf="!loading && !pickerError && !leads.length">No leads match.</p>
+    <p class="muted small" *ngIf="truncated">Showing the most recent leads. Search to find others.</p>
+
+    <div class="mx-table-wrap zc-table" *ngIf="leads.length">
+      <table class="mx-table">
+        <thead><tr><th><span class="cc-sr">Select</span></th><th>Name</th><th>Email</th><th>Company</th></tr></thead>
+        <tbody>
+          <tr *ngFor="let l of leads" [class.cc-off]="!l.eligible">
+            <td class="zc-pick"><input type="checkbox" [checked]="chosen.has(l.id)" (change)="toggle(l.id)" [disabled]="!l.eligible && !chosen.has(l.id)" [attr.aria-label]="'Select ' + (l.name || l.email || 'lead')" /></td>
+            <td>{{ l.name || '—' }}<span class="cc-reason" *ngIf="!l.eligible">{{ reasonText(l) }}</span></td>
+            <td class="zc-email">{{ l.email || '—' }}</td>
+            <td>{{ l.company || '—' }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="zc-pager" *ngIf="page > 1 || hasMore">
+      <button type="button" class="btn btn-secondary btn-sm" (click)="fetch(page - 1)" [disabled]="page <= 1 || loading">← Previous</button>
+      <span class="mx-desc">Page {{ page }}</span>
+      <button type="button" class="btn btn-secondary btn-sm" (click)="fetch(page + 1)" [disabled]="!hasMore || loading">Next →</button>
+    </div>
+
+    <footer class="zc-foot">
+      <span class="mx-desc">{{ chosen.size | number }} selected<ng-container *ngIf="chosen.size > max"> · the limit is {{ max | number }}</ng-container></span>
+      <div class="cc-actions">
+        <button type="button" class="btn btn-secondary btn-sm" (click)="picking = false">Cancel</button>
+        <button type="button" class="btn btn-primary btn-sm" (click)="savePicker()" [disabled]="busy || chosen.size > max">Save selection</button>
+      </div>
+    </footer>
+  </div>
+</div>

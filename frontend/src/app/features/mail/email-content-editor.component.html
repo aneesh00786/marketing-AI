@@ -42,7 +42,6 @@
         <button type="button" class="ec-tb" title="Bulleted list" aria-label="Bulleted list" (click)="insertList()"><app-icon name="list" [size]="16"></app-icon></button>
         <button type="button" class="ec-tb" title="Link" aria-label="Link" (click)="insertLink()"><app-icon name="link" [size]="16"></app-icon></button>
         <button type="button" class="ec-tb" title="Image (https:// URL)" aria-label="Image" (click)="insertImage()"><app-icon name="image" [size]="16"></app-icon></button>
-        <button type="button" class="ec-tb" title="Insert unsubscribe link" aria-label="Insert unsubscribe link" (click)="insertUnsubscribe()"><app-icon name="unsubscribe" [size]="16"></app-icon></button>
         <span class="ec-tb-sep" aria-hidden="true"></span>
         <button type="button" class="ec-tb" title="Undo" aria-label="Undo" (click)="history('undo')"><app-icon name="undo" [size]="16"></app-icon></button>
         <button type="button" class="ec-tb" title="Redo" aria-label="Redo" (click)="history('redo')"><app-icon name="redo" [size]="16"></app-icon></button>
@@ -60,6 +59,11 @@
       <p class="ec-guide" *ngIf="purpose === 'campaign'"><app-icon name="info" [size]="16"></app-icon><span>Include <code>$[LI:UNSUBSCRIBE]$</code> for the unsubscribe link (Zoho requires one). Use https:// image URLs.</span></p>
       <p class="ec-guide" *ngIf="purpose === 'template'"><app-icon name="info" [size]="16"></app-icon><span>Placeholders such as <code ngNonBindable>{{first_name}}</code> are filled for each email. For Zoho campaigns include <code>$[LI:UNSUBSCRIBE]$</code> (other marketing emails get an unsubscribe link added automatically). Use https:// image URLs.</span></p>
     </ng-container>
+
+    <label class="ec-unsub" *ngIf="contentMode === 'edit' && editable">
+      <input type="checkbox" [checked]="hasUnsubscribe" (change)="setUnsubscribe($any($event.target).checked)" />
+      Add unsubscribe link
+    </label>
 
     <div class="ec-canvas" *ngIf="contentMode === 'preview'">
       <app-email-preview class="ec-preview" [html]="html" [contentKey]="contentKey" [viewport]="previewWidth" [title]="'Preview of ' + (name || purposeNoun)"
