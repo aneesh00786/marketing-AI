@@ -1,0 +1,68 @@
+<div class="crm-stack" *ngIf="!detail">
+  <div class="crm-toolbar">
+    <input class="hud-input grow" type="search" [(ngModel)]="q" (ngModelChange)="onSearch()" placeholder="Search name or number…" aria-label="Search calls" />
+  </div>
+
+  <p class="mx-callout error" *ngIf="error" role="alert">{{ error }} <button type="button" class="link-btn" (click)="load(page)">Try again</button></p>
+  <p class="muted small" *ngIf="loading && !calls.length">Loading…</p>
+  <p class="mx-empty" *ngIf="!loading && !error && !calls.length">{{ q ? 'No calls match.' : 'No calls yet. Calls made with a phone icon appear here.' }}</p>
+
+  <div class="mx-table-wrap" *ngIf="calls.length">
+    <table class="mx-table">
+      <thead><tr><th>When</th><th>Who</th><th>Number</th><th>Called by</th><th>Duration</th><th>Transcript</th></tr></thead>
+      <tbody>
+        <tr *ngFor="let c of calls">
+          <td><button type="button" class="crm-row-link" (click)="open(c.id)">{{ c.startedAt | date:'MMM d, y, h:mm a' }}</button></td>
+          <td>{{ c.name || '—' }}</td>
+          <td>{{ c.phone }}</td>
+          <td>{{ c.callerName || 'Former team member' }}</td>
+          <td>{{ duration(c) }}</td>
+          <td><span class="mx-tag" *ngIf="transcriptLabel(c)" [class.bad]="c.transcriptStatus === 'failed'" [class.good]="c.transcriptStatus === 'done'">{{ transcriptLabel(c) }}</span><ng-container *ngIf="!transcriptLabel(c)">—</ng-container></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="crm-pager" *ngIf="page > 1 || hasMore">
+    <button type="button" class="btn btn-secondary btn-sm" (click)="load(page - 1)" [disabled]="page <= 1 || loading">← Previous</button>
+    <span class="muted small">Page {{ page }} · {{ total | number }} calls</span>
+    <button type="button" class="btn btn-secondary btn-sm" (click)="load(page + 1)" [disabled]="!hasMore || loading">Next →</button>
+  </div>
+</div>
+
+<div class="crm-stack" *ngIf="detail">
+  <div class="crm-detail-head">
+    <div class="crm-detail-title">
+      <button type="button" class="btn btn-secondary btn-sm" (click)="back()">← Calls</button>
+      <h3>{{ detail.name || detail.phone }}</h3>
+    </div>
+  </div>
+  <section class="mx-panel">
+    <dl class="crm-facts">
+      <div><dt>Number</dt><dd>{{ detail.phone }}<app-call-button [phone]="detail.phone" [name]="detail.name" [contactId]="detail.contactId"></app-call-button></dd></div>
+      <div><dt>Contact</dt><dd>
+        <button *ngIf="detail.contactId; else noContact" type="button" class="crm-row-link" (click)="openContact.emit(detail.contactId)">{{ detail.name }}</button>
+        <ng-template #noContact>—</ng-template>
+      </dd></div>
+      <div><dt>Called by</dt><dd>{{ detail.callerName || 'Former team member' }}</dd></div>
+      <div><dt>When</dt><dd>{{ detail.startedAt | date:'MMM d, y, h:mm a' }}</dd></div>
+      <div><dt>Duration</dt><dd>{{ duration(detail) }}</dd></div>
+    </dl>
+  </section>
+  <section class="mx-panel">
+    <div class="cl-head">
+      <h4 class="mx-subhead">Transcript</h4>
+      <button *ngIf="canManage && detail.transcript.length" type="button" class="link-btn" (click)="removeTranscript()">Delete transcript</button>
+    </div>
+    <p class="muted small" *ngIf="detail.transcript.length">Written by speech recognition, so it may contain mistakes.</p>
+    <p class="muted small" *ngIf="detail.transcriptStatus === 'none'">This call was not transcribed.</p>
+    <p class="muted small" *ngIf="detail.transcriptStatus === 'pending'">The transcript is being made, or the page was closed before it finished.</p>
+    <p class="mx-callout error" *ngIf="detail.transcriptStatus === 'failed'" role="alert">The transcript could not be made{{ detail.transcript.length ? ' for one side of this call' : '' }}.</p>
+    <p class="muted small" *ngIf="detail.transcriptStatus === 'done' && !detail.transcript.length">No speech was found in this call.</p>
+    <div class="cl-lines" *ngIf="detail.transcript.length">
+      <p *ngFor="let l of detail.transcript" class="cl-line" [ngClass]="l.speaker" style="margin:0">
+        <small>{{ l.speaker === 'agent' ? (detail.callerName || 'You') : (detail.name || 'Customer') }}</small>{{ l.text }}
+      </p>
+    </div>
+  </section>
+</div>

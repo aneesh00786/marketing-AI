@@ -23,22 +23,31 @@
     <nav class="sidebar-nav">
       <div class="nav-group" *ngFor="let group of navGroups">
         <div class="nav-group-label">{{ group.label }}</div>
-        <button *ngFor="let item of group.items" class="nav-item" [class.active]="currentRoute === item.route"
-                (click)="navigate(item.route)" [attr.aria-current]="currentRoute === item.route ? 'page' : null" [title]="sidebarCollapsed ? item.label : ''">
-          <app-icon [name]="item.icon" [size]="19"></app-icon>
-          <span class="nav-label">{{ item.label }}</span>
-          <span class="nav-count" *ngIf="navCount(item.route) !== null && navCount(item.route)! > 0">{{ navCount(item.route) }}</span>
-        </button>
-        <!-- Mail Center sections, listed under it while Mail Center is open -->
         <ng-container *ngFor="let item of group.items">
-          <div class="nav-sub" *ngIf="item.route === 'emails' && currentRoute === 'emails' && !sidebarCollapsed" role="group" aria-label="Mail Center sections">
-            <button *ngFor="let s of mailSubnav" type="button" class="nav-sub-item" [class.active]="mailSection === s.key"
-                    [attr.aria-current]="mailSection === s.key ? 'page' : null" (click)="navigate('emails', s.key)">
-              <app-icon [name]="s.icon" [size]="16"></app-icon>
-              <span class="nav-label">{{ s.label }}</span>
-              <span class="nav-count" *ngIf="s.key === 'approvals' && pendingApprovalCount">{{ pendingApprovalCount }}</span>
+          <ng-container *ngIf="showNavItem(item.route)">
+            <button class="nav-item" [class.active]="currentRoute === item.route"
+                    (click)="navigate(item.route)" [attr.aria-current]="currentRoute === item.route ? 'page' : null" [title]="sidebarCollapsed ? item.label : ''">
+              <app-icon [name]="item.icon" [size]="19"></app-icon>
+              <span class="nav-label">{{ item.label }}</span>
+              <span class="nav-count" *ngIf="navCount(item.route) !== null && navCount(item.route)! > 0">{{ navCount(item.route) }}</span>
             </button>
-          </div>
+            <!-- CRM and Mail Center sections, listed under them while they are open -->
+            <div class="nav-sub" *ngIf="item.route === 'crm' && currentRoute === 'crm' && !sidebarCollapsed" role="group" aria-label="CRM sections">
+              <button *ngFor="let s of crmSubnav" type="button" class="nav-sub-item" [class.active]="crmSection === s.key"
+                      [attr.aria-current]="crmSection === s.key ? 'page' : null" (click)="navigate('crm', 'overview', s.key)">
+                <app-icon [name]="s.icon" [size]="16"></app-icon>
+                <span class="nav-label">{{ s.label }}</span>
+              </button>
+            </div>
+            <div class="nav-sub" *ngIf="item.route === 'emails' && currentRoute === 'emails' && !sidebarCollapsed" role="group" aria-label="Mail Center sections">
+              <button *ngFor="let s of mailSubnav" type="button" class="nav-sub-item" [class.active]="mailSection === s.key"
+                      [attr.aria-current]="mailSection === s.key ? 'page' : null" (click)="navigate('emails', s.key)">
+                <app-icon [name]="s.icon" [size]="16"></app-icon>
+                <span class="nav-label">{{ s.label }}</span>
+                <span class="nav-count" *ngIf="s.key === 'approvals' && pendingApprovalCount">{{ pendingApprovalCount }}</span>
+              </button>
+            </div>
+          </ng-container>
         </ng-container>
       </div>
     </nav>
@@ -140,7 +149,13 @@
       </div>
     </header>
 
+    <app-softphone></app-softphone>
     <main class="content">
+      <div class="admin-access-banner" *ngIf="auth.workspace?.adminAccess" role="status">
+        <app-icon name="settings" [size]="16"></app-icon>
+        <span>Admin access: you are inside <b>{{ auth.workspace?.name }}</b>. Changes here are real and logged under your name.</span>
+        <button type="button" class="link-btn" (click)="leaveAdminAccess()" [disabled]="workspaceBusy">Back to my workspace</button>
+      </div>
   <app-dashboard *ngIf="currentRoute === 'dashboard'" (navigate)="onDashboardNavigate($event)"
                  [voiceOn]="voiceAlwaysOn" [voiceLive]="isElevenLabsConnected" [voiceBusy]="voiceConnecting" [voiceStatus]="voiceStatusLabel"
                  (voiceToggle)="setVoiceAlwaysOn($event)"></app-dashboard>
@@ -264,6 +279,18 @@
   <!-- =================================================================== -->
   <!-- TAB 2: LEADS CRM & EXCEL / CSV IMPORTER WITH AI QUALIFICATION -->
   <!-- =================================================================== -->
+  <ng-container *ngIf="currentRoute === 'crm'">
+    @defer (on immediate) {
+      <app-crm class="hud-panel full-width-panel" [(section)]="crmSection" [resetKey]="crmResetKey" [access]="crmAccess" (toast)="showToast($event)"></app-crm>
+    }
+  </ng-container>
+
+  <ng-container *ngIf="currentRoute === 'admin' && platformAdmin">
+    @defer (on immediate) {
+      <app-platform-admin class="hud-panel full-width-panel" (toast)="showToast($event)" (opened)="startSession($event)"></app-platform-admin>
+    }
+  </ng-container>
+
   <section *ngIf="currentRoute === 'leads'" class="hud-panel full-width-panel">
     <div class="panel-header">
       <div>
@@ -323,7 +350,7 @@
               <div class="lead-sub" *ngIf="ld.notes" [title]="ld.notes">📝 {{ ld.notes | slice:0:50 }}{{ ld.notes.length > 50 ? '…' : '' }}</div></td>
             <td>{{ dash(ld.companyName) }}</td>
             <td>{{ dash(ld.email) }}</td>
-            <td>{{ dash(ld.phone) }}</td>
+            <td>{{ dash(ld.phone) }}<app-call-button [phone]="ld.phone" [name]="ld.name"></app-call-button></td>
             <td>
               <span class="chip" *ngIf="ld.productName">{{ ld.productName }}</span>
               <span class="lead-muted" *ngIf="!ld.productName && !ld.productMissing">No product selected</span>
@@ -841,7 +868,7 @@
               <tr><th>Business</th><td>{{ pl.name || 'Not provided by Google' }}</td></tr>
               <tr><th>Category</th><td>{{ pl.category || 'Not provided by Google' }}</td></tr>
               <tr><th>Address</th><td>{{ pl.address || 'Not provided by Google' }}</td></tr>
-              <tr><th>Phone</th><td>{{ pl.phone || 'Not provided by Google' }}</td></tr>
+              <tr><th>Phone</th><td>{{ pl.phone || 'Not provided by Google' }}<app-call-button [phone]="pl.phone" [name]="placeDetails.lead.name"></app-call-button></td></tr>
               <tr><th>Website</th><td><a *ngIf="pl.website" [href]="pl.website" target="_blank" rel="noopener noreferrer">{{ pl.website }}</a><span *ngIf="!pl.website">Not provided by Google</span></td></tr>
               <tr><th>Status</th><td>{{ pl.businessStatus || 'Not provided by Google' }}</td></tr>
               <tr *ngIf="pl.googleMapsUri"><th>Map</th><td><a [href]="pl.googleMapsUri" target="_blank" rel="noopener noreferrer">Open in Google Maps</a></td></tr>

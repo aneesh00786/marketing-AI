@@ -10,8 +10,13 @@ import { LoginComponent } from './core/login.component';
 import { SocialHubComponent } from './features/social/social-hub.component';
 import { CommandCenterComponent } from './features/command/command-center.component';
 import { IconComponent } from './shared/icon.component';
+import { CallButtonComponent } from './shared/calling/call-button.component';
+import { SoftphoneComponent } from './shared/calling/softphone.component';
 import { DashboardComponent, DashboardNavigation } from './features/dashboard/dashboard.component';
 import { LeadDiscoveryComponent } from './features/leads/lead-discovery.component';
+import { CrmComponent } from './features/crm/crm.component';
+import { PlatformAdminComponent } from './features/platform/platform-admin.component';
+import { CRM_SECTIONS, CrmAccess, CrmSection, crmSectionFromLink } from './features/crm/crm-api.service';
 import { MembersComponent } from './features/members/members.component';
 import type { TemplateUseTarget } from './features/mail/email-templates.component';
 import { TemplatePickerComponent } from './features/mail/template-picker.component';
@@ -23,7 +28,7 @@ import { findTokens, fillTokens, defaultTokenValues } from './features/mail/temp
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [CommonModule, FormsModule, LoginComponent, SocialHubComponent, CommandCenterComponent, IconComponent, DashboardComponent, LeadDiscoveryComponent, MembersComponent, TemplatePickerComponent, MailCenterComponent, EmailPreviewComponent],
+  imports: [CommonModule, FormsModule, LoginComponent, SocialHubComponent, CommandCenterComponent, IconComponent, DashboardComponent, LeadDiscoveryComponent, CrmComponent, PlatformAdminComponent, CallButtonComponent, SoftphoneComponent, MembersComponent, TemplatePickerComponent, MailCenterComponent, EmailPreviewComponent],
   templateUrl: './app.component.html',
   styleUrls: ['./app.component.css']
 })
@@ -38,7 +43,7 @@ export class AppComponent implements OnInit, OnDestroy {
   composeTemplateName = '';
   composeTokenValues: Record<string, string> = {};
   zohoOauthResult: { zoho?: string; reason?: string } | null = null;
-  currentRoute: 'dashboard' | 'products' | 'leads' | 'emails' | 'businesses' | 'social' | 'voice' | 'appointments' | 'members' = 'dashboard';
+  currentRoute: 'dashboard' | 'products' | 'crm' | 'admin' | 'leads' | 'emails' | 'businesses' | 'social' | 'voice' | 'appointments' | 'members' = 'dashboard';
 
   // ---------- App shell (sidebar, top bar, menus) ----------
   readonly navGroups: { label: string; items: { route: AppComponent['currentRoute']; label: string; icon: string; subtitle: string }[] }[] = [
@@ -52,6 +57,7 @@ export class AppComponent implements OnInit, OnDestroy {
       label: 'Sell',
       items: [
         { route: 'products', label: 'Digital Products', icon: 'products', subtitle: 'Your products, live website features and AI extraction' },
+        { route: 'crm', label: 'CRM', icon: 'briefcase', subtitle: 'Customers, companies, deals and support' },
         { route: 'leads', label: 'Leads CRM', icon: 'leads', subtitle: 'AI-scored leads, Excel import and follow-up advice' },
         { route: 'appointments', label: 'Demos', icon: 'calendar', subtitle: 'Booked demos and appointments' }
       ]
@@ -78,7 +84,8 @@ export class AppComponent implements OnInit, OnDestroy {
     {
       label: 'Workspace',
       items: [
-        { route: 'members', label: 'Members', icon: 'building', subtitle: 'People in this workspace, roles and invitations' }
+        { route: 'members', label: 'Members', icon: 'building', subtitle: 'People in this workspace, roles and invitations' },
+        { route: 'admin', label: 'Platform Admin', icon: 'settings', subtitle: 'All workspaces, users and activity' }
       ]
     }
   ];
@@ -115,13 +122,30 @@ export class AppComponent implements OnInit, OnDestroy {
   }
   get pendingApprovalCount(): number { return this.drafts.filter(d => ['Draft', 'Approved', 'Needs Review'].includes(d.status)).length; }
 
-  navigate(route: AppComponent['currentRoute'] | 'drafts', mailSection: MailSection = 'overview'): void {
+  readonly crmSubnav = CRM_SECTIONS;
+  crmSection: CrmSection = 'dashboard';
+  crmResetKey = 0;
+  /** The user's global CRM grant. The CRM stays hidden without one. */
+  crmAccess: CrmAccess | null = null;
+
+  /** Listed only for the platform admin. The server refuses everyone else. */
+  platformAdmin = false;
+
+  /** The global CRM is listed only for users with a CRM grant, and Platform Admin only for the admin. */
+  showNavItem(route: AppComponent['currentRoute']): boolean {
+    if (route === 'crm') return !!this.crmAccess;
+    if (route === 'admin') return this.platformAdmin;
+    return true;
+  }
+
+  navigate(route: AppComponent['currentRoute'] | 'drafts', mailSection: MailSection = 'overview', crmSection: CrmSection = 'dashboard'): void {
     this.socialSection = null;
     this.socialCampaignId = null;
     this.socialLibraryStatus = null;
     this.showPlaybooks = false;
     if (route === 'drafts') { route = 'emails'; mailSection = 'drafts'; }
     if (route === 'emails') this.mailSection = mailSection;
+    if (route === 'crm') { this.crmSection = crmSection; this.crmResetKey++; }
     this.currentRoute = route;
     this.mobileNavOpen = false;
     this.openMenu = null;
@@ -242,6 +266,12 @@ export class AppComponent implements OnInit, OnDestroy {
     });
   }
 
+  /** Leaves a workspace opened from Platform Admin. */
+  leaveAdminAccess(): void {
+    const home = this.workspaces.find(w => w.id !== this.auth.workspace?.id) || this.workspaces[0];
+    if (home) this.switchWorkspace(home);
+  }
+
   openCreateWorkspace(): void {
     this.openMenu = null;
     this.newWorkspace = { name: '', industry: '' };
@@ -282,7 +312,7 @@ export class AppComponent implements OnInit, OnDestroy {
     window.location.reload();
   }
 
-  private startSession(res: any): void {
+  startSession(res: any): void {
     this.voiceManualStop = true;
     this.speechService.stopElevenLabsSession();
     this.auth.setSession(res);
@@ -561,6 +591,12 @@ export class AppComponent implements OnInit, OnDestroy {
       if (params.get('zoho')) this.zohoOauthResult = { zoho: params.get('zoho') || undefined, reason: params.get('reason') || undefined };
       window.history.replaceState({}, '', window.location.pathname);
     }
+    const crmSection = crmSectionFromLink(params.get('view'), params.get('section'));
+    if (crmSection) {
+      this.currentRoute = 'crm';
+      this.crmSection = crmSection;
+      window.history.replaceState({}, '', window.location.pathname);
+    }
     if (params.get('view') === 'social') {
       this.currentRoute = 'social';
       this.socialSection = params.get('section');
@@ -642,6 +678,10 @@ export class AppComponent implements OnInit, OnDestroy {
       next: (me: any) => { this.myCaps = Array.isArray(me?.capabilities) ? new Set(me.capabilities) : null; },
       error: () => { this.myCaps = null; }
     });
+    this.platformAdmin = false;
+    this.apiService.getPlatformAccess().subscribe({ next: (r: any) => { this.platformAdmin = !!r.admin; }, error: () => { this.platformAdmin = false; } });
+    this.crmAccess = null;
+    this.apiService.getCrmAccess().subscribe({ next: (r: any) => { this.crmAccess = r.access; }, error: () => { this.crmAccess = null; } });
     this.loadDigitalProducts();
     this.loadLeads();
     this.loadEmails();

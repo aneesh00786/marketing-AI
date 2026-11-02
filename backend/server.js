@@ -129,6 +129,11 @@ app.use('/api/v1/leads/discovery', leadDiscoveryRouter);
 // Tenant-aware Leads CRM (legacy paths kept as aliases). The voice agent's track_lead tool
 // creates leads through the same validated, workspace-scoped logic.
 app.use(['/api/v1/leads', '/api/leads', '/api/v1/crm/leads'], leadsRouter);
+// Global CRM: not workspace-scoped, and open only to users with a CRM grant. It has its own prefix
+// because /api/v1/crm already serves the Leads alias and Appointments, which it must never intercept.
+app.use('/api/v1/global-crm', require('./modules/crm/routes'));
+app.use('/api/v1/calling', require('./modules/calling/routes'));
+app.use('/api/v1/platform', require('./modules/platform/routes'));
 // Tenant-aware Digital Products.
 app.use(['/api/v1/products', '/api/products'], productsRouter);
 // Tenant-aware Mail Drafts, Mail Center and mail settings; the voice tool send_email only saves a draft.

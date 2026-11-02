@@ -1,4 +1,4 @@
-# EC2 Deployment Runbook — Marketech.ai (Mail Center, email tracking, migrations 024–027)
+# EC2 Deployment Runbook — Marketech.ai (Mail Center, email tracking, migrations 024–029)
 
 For the operator deploying to one EC2 instance. All values below are placeholders (`<...>`); never
 copy a real `.env`, key or password into this document, a ticket or a release archive.
@@ -13,8 +13,8 @@ Status when this was written: verified locally only (mocked providers, disposabl
 - [ ] Local: `node scripts/localVerify.js --db mt_rehearsal_<date>` → RESULT: PASS; package built from the release commit
 - [ ] EC2: security group has no inbound rule for the API port; nginx is the only proxy; `LISTEN_HOST=127.0.0.1`, `TRUST_PROXY=1`
 - [ ] `ZEPTOMAIL_WEBHOOKS_ENABLED` empty; `scripts/checkProductionConfig.js` OK as each service account
-- [ ] Services stopped → `scripts/backup.sh` (verified, timestamped) → migrate `--status` (024, 025, 026, 027 pending, or only what production has not applied yet)
-- [ ] `npm run migrate -- --backup=<that dump>` → `--status` all applied (024, then 025, 026, then 027)
+- [ ] Services stopped → `scripts/backup.sh` (verified, timestamped) → migrate `--status` (024 to 029 pending, or only what production has not applied yet)
+- [ ] `npm run migrate -- --backup=<that dump>` → `--status` all applied (024, then 025, 026, 027, 028, then 029)
 - [ ] Services started → health checks and log review (section 7)
 - [ ] Rollback plan ready: previous release package + the pre-migration dump (section 10)
 - [ ] Live provider checks (section 8) before enabling the webhook or relying on tracking
@@ -130,14 +130,18 @@ WantedBy=multi-user.target
 Same for `marketech-worker.service` with `ExecStart=/usr/bin/node workers/socialWorker.js` and
 `User=mkt-worker`. Exactly one worker.
 
-## 6. Release with migrations 024, 025, 026 and 027
+## 6. Release with migrations 024 to 029
 
 Order matters: 024 (tracking tables), 025 (Compose purpose columns, capability grants), then 026
 (`mail_provider_apps`: the Zoho API client entered in Mail Center → Settings, secret encrypted with
 `SOCIAL_TOKEN_ENCRYPTION_KEY`), then 027 (`mail_campaign_contacts`: contacts selected for a campaign, and
 three `contact_list_*` columns on `mail_campaigns`). After 027, reconnect Zoho once per workspace to grant
 `ZohoCampaigns.contact.CREATE`; until then list-only campaigns keep working and selected contacts are refused
-with a reconnect message. All are additive; the runner applies them in order and records each in `schema_migrations`.
+with a reconnect message. 028 adds the global CRM as new tables only (`crm_*`, with no `workspace_id`). Only the
+platform admin (the Owner of workspace 1, `admin@tradesage.ai`) can open the CRM at first. Everyone else needs a
+grant: `npm run crm-access -- grant <email> manager` (roles: viewer, sales,
+support, manager; `list` and `revoke` also exist). To remove it, follow the rollback note in
+`backend/migrations/028_global_crm.js`. 029 adds the call log (`crm_call_logs`); audio is never stored. All are additive; the runner applies them in order and records each in `schema_migrations`.
 
 ```bash
 cd <app dir>/backend
@@ -146,7 +150,7 @@ sudo systemctl stop marketech-worker marketech-api
 MYSQL_DEFAULTS_FILE=<backup cnf> scripts/backup.sh <prod db> <backup root>
 # 2. Install the new release (unpacked package or git checkout of the released commit), then
 npm ci --omit=dev
-npm run migrate -- --status                 # expect: 024, 025, 026 and 027 [pending], nothing else
+npm run migrate -- --status                 # expect: 024 to 029 [pending], nothing else
 npm run migrate -- --backup=<backup root>/<prod db>-<timestamp>/<prod db>.sql   # <dir> from backup.sh's "Backup complete: <dir>" line + /<prod db>.sql
 npm run migrate -- --status                 # expect: all [applied]
 # 3. Start
@@ -187,6 +191,11 @@ Follow `docs/EMAIL_TRACKING_STAGING.md` sections 3–5. In short:
   `client_reference`, retries (respond 500/429). Only if everything matches the table in section 3.6:
   set `ZEPTOMAIL_WEBHOOKS_ENABLED=1`, restart the API, create the workspace webhook URL in Mail Center,
   save the key, turn it on. Any mismatch: leave it off.
+- **Browser calling**: set `TELNYX_WEBRTC_API_KEY`, `TELNYX_WEBRTC_CONNECTION_ID`, `TELNYX_CALLER_ID` and
+  `TELNYX_CALLER_NAME`, then place one call to your own phone. Browsers allow the microphone only over https.
+  Only users with CRM access that includes contacts (sales, support, manager, or the platform admin) can call.
+  Transcripts use the same key and are made only when the caller ticks "Transcribe this call"; check the rules on
+  recording and telling customers for each country you call.
 - **Zoho contact sync**: reconnect Zoho, then send a campaign to 2–3 of your own addresses and confirm in Zoho
   that a private "Marketech campaign …" list appears, whether Zoho sent those addresses a confirmation email,
   and that the campaign reached them. Keep the first real audience small.
@@ -209,7 +218,7 @@ Follow `docs/EMAIL_TRACKING_STAGING.md` sections 3–5. In short:
 
 ## 10. Rollback
 
-- **Code only (preferred)**: 024/025/026/027 are additive and older code ignores the new tables/columns, so
+- **Code only (preferred)**: 024 to 029 are additive and older code ignores the new tables/columns, so
   redeploy the previous release and restart; no database change needed. Turn off
   `ZEPTOMAIL_WEBHOOKS_ENABLED` first if it was on.
 - **Database** (only if data must be reverted): stop both services, restore the pre-migration backup

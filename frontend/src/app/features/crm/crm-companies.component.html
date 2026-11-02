@@ -1,0 +1,100 @@
+<div class="crm-stack" *ngIf="!detail">
+  <div class="crm-toolbar">
+    <input class="hud-input grow" type="search" [(ngModel)]="q" (ngModelChange)="onSearch()" placeholder="Search companies…" aria-label="Search companies" />
+    <button *ngIf="canManage" type="button" class="btn btn-primary btn-sm" (click)="openForm()"><app-icon name="plus" [size]="15"></app-icon>New company</button>
+  </div>
+
+  <p class="mx-callout error" *ngIf="error" role="alert">{{ error }} <button type="button" class="link-btn" (click)="load()">Try again</button></p>
+  <p class="muted small" *ngIf="loading && !companies.length">Loading…</p>
+  <p class="mx-empty" *ngIf="!loading && !error && !companies.length">{{ q ? 'No companies match.' : 'No companies yet. Add one to group its contacts, deals and tickets.' }}</p>
+
+  <div class="mx-table-wrap" *ngIf="companies.length">
+    <table class="mx-table">
+      <thead><tr><th>Company</th><th>Website</th><th>Industry</th><th class="num">Contacts</th></tr></thead>
+      <tbody>
+        <tr *ngFor="let c of companies">
+          <td><button type="button" class="crm-row-link" (click)="open(c.id)">{{ c.name }}</button></td>
+          <td><a *ngIf="c.website; else none" [href]="c.website" target="_blank" rel="noopener noreferrer">{{ c.website }}</a><ng-template #none>—</ng-template></td>
+          <td>{{ c.industry || '—' }}</td>
+          <td class="num">{{ c.contactCount | number }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="muted small" *ngIf="truncated">Showing the first 500 companies. Search to find others.</p>
+</div>
+
+<div class="crm-stack" *ngIf="detail">
+  <div class="crm-detail-head">
+    <div class="crm-detail-title">
+      <button type="button" class="btn btn-secondary btn-sm" (click)="back()">← Companies</button>
+      <h3>{{ detail.company.name }}</h3>
+    </div>
+    <div class="mx-actions"><button *ngIf="canManage" type="button" class="btn btn-secondary btn-sm" (click)="openForm(detail.company)">Edit</button></div>
+  </div>
+  <section class="mx-panel">
+    <dl class="crm-facts">
+      <div><dt>Website</dt><dd><a *ngIf="detail.company.website; else noSite" [href]="detail.company.website" target="_blank" rel="noopener noreferrer">{{ detail.company.website }}</a><ng-template #noSite>—</ng-template></dd></div>
+      <div><dt>Industry</dt><dd>{{ detail.company.industry || '—' }}</dd></div>
+      <div><dt>Email</dt><dd>{{ detail.company.email || '—' }}</dd></div>
+      <div><dt>Phone</dt><dd>{{ detail.company.phone || '—' }}<app-call-button [phone]="detail.company.phone" [name]="detail.company.name"></app-call-button></dd></div>
+      <div *ngIf="detail.company.notes"><dt>Notes</dt><dd>{{ detail.company.notes }}</dd></div>
+    </dl>
+  </section>
+  <div class="crm-columns">
+    <section class="mx-panel">
+      <app-crm-activities parent="companies" [parentId]="detail.company.id" [canManage]="canManage"></app-crm-activities>
+    </section>
+    <div class="crm-stack">
+      <section class="mx-panel">
+        <h4 class="mx-subhead">Contacts</h4>
+        <p class="muted small" *ngIf="!detail.contacts.length">No contacts at this company.</p>
+        <ul class="crm-list" *ngIf="detail.contacts.length">
+          <li *ngFor="let c of detail.contacts">
+            <div><button type="button" class="crm-row-link" (click)="openContact.emit(c.id)">{{ c.fullName }}</button><span class="crm-sub">{{ c.email }}</span></div>
+            <span class="mx-tag" [ngClass]="tone(c.status)">{{ c.status }}</span>
+          </li>
+        </ul>
+      </section>
+      <section class="mx-panel">
+        <h4 class="mx-subhead">Deals</h4>
+        <p class="muted small" *ngIf="!detail.deals.length">No deals for this company.</p>
+        <ul class="crm-list" *ngIf="detail.deals.length">
+          <li *ngFor="let d of detail.deals">
+            <button type="button" class="crm-row-link" (click)="openDeal.emit(d.id)">{{ d.name }}</button>
+            <span class="mx-tag" [ngClass]="tone(d.stage)">{{ d.stage }}</span>
+          </li>
+        </ul>
+      </section>
+      <section class="mx-panel">
+        <h4 class="mx-subhead">Support tickets</h4>
+        <p class="muted small" *ngIf="!detail.tickets.length">No tickets for this company.</p>
+        <ul class="crm-list" *ngIf="detail.tickets.length">
+          <li *ngFor="let t of detail.tickets">
+            <button type="button" class="crm-row-link" (click)="openTicket.emit(t.id)">{{ t.subject }}</button>
+            <span class="mx-tag" [ngClass]="tone(t.status)">{{ t.status }}</span>
+          </li>
+        </ul>
+      </section>
+    </div>
+  </div>
+</div>
+
+<div class="crm-backdrop" *ngIf="form" (click)="form = null">
+  <form class="crm-dialog" role="dialog" aria-modal="true" aria-labelledby="crm-company-title" (click)="$event.stopPropagation()" (ngSubmit)="save()">
+    <h3 id="crm-company-title">{{ form.id ? 'Edit company' : 'New company' }}</h3>
+    <div class="crm-form">
+      <label class="wide"><span>Company name <span class="req" aria-hidden="true">*</span></span><input class="hud-input" name="name" [(ngModel)]="form.name" maxlength="255" required /></label>
+      <label>Website<input class="hud-input" name="website" [(ngModel)]="form.website" maxlength="500" placeholder="example.com" /></label>
+      <label>Industry<input class="hud-input" name="industry" [(ngModel)]="form.industry" maxlength="100" /></label>
+      <label>Email<input class="hud-input" type="email" name="email" [(ngModel)]="form.email" maxlength="255" /></label>
+      <app-crm-phone-input [value]="form.phone" (valueChange)="form.phone = $event"></app-crm-phone-input>
+      <label class="wide">Notes<textarea class="hud-textarea" name="notes" rows="3" [(ngModel)]="form.notes" maxlength="5000"></textarea></label>
+    </div>
+    <p class="mx-callout error" *ngIf="formError" role="alert">{{ formError }}</p>
+    <div class="crm-dialog-foot">
+      <button type="button" class="btn btn-secondary btn-sm" (click)="form = null">Cancel</button>
+      <button type="submit" class="btn btn-primary btn-sm" [disabled]="busy">{{ busy ? 'Saving…' : 'Save' }}</button>
+    </div>
+  </form>
+</div>

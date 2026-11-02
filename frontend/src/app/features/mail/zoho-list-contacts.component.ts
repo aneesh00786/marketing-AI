@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { apiRoot } from '../../core/api-base';
 import { IconComponent } from '../../shared/icon.component';
+import { CallButtonComponent } from '../../shared/calling/call-button.component';
 
 /**
  * Contacts of one Zoho mailing list, read on demand. Contacts and consent are managed in Zoho, and
@@ -13,7 +14,7 @@ import { IconComponent } from '../../shared/icon.component';
 @Component({
   selector: 'app-zoho-list-contacts',
   standalone: true,
-  imports: [CommonModule, IconComponent],
+  imports: [CommonModule, IconComponent, CallButtonComponent],
   templateUrl: './zoho-list-contacts.component.html',
   styleUrls: ['../command/command-center.component.css', './mail-ui.css', './zoho-list-contacts.component.css']
 })

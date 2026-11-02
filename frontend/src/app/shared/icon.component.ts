@@ -23,6 +23,7 @@ import { CommonModule } from '@angular/common';
       <g *ngSwitchCase="'collapse'"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M9 4v16"/><path d="m15 10-2 2 2 2"/></g>
       <g *ngSwitchCase="'expand'"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M9 4v16"/><path d="m13 10 2 2-2 2"/></g>
       <g *ngSwitchCase="'chevron-down'"><path d="m6 9 6 6 6-6"/></g>
+      <g *ngSwitchCase="'briefcase'"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 13h18"/></g>
       <g *ngSwitchCase="'check'"><path d="m5 12 5 5 9-10"/></g>
       <g *ngSwitchCase="'logout'"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5M21 12H9"/></g>
       <g *ngSwitchCase="'building'"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M9 21v-4h6v4M8 7h2M14 7h2M8 11h2M14 11h2"/></g>

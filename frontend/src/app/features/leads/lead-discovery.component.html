@@ -167,7 +167,7 @@
               <div class="tag ok" *ngIf="x.ineligibleReason === 'imported'">Imported to Leads</div>
             </td>
             <td>{{ x.address || '—' }}<div class="muted small" *ngIf="!x.address">Not provided by Google</div></td>
-            <td>{{ x.phone || '—' }}<div class="muted small" *ngIf="!x.phone && data.run.includeContacts">Not provided by Google</div><div class="muted small" *ngIf="!data.run.includeContacts">Not requested</div></td>
+            <td>{{ x.phone || '—' }}<app-call-button [phone]="x.phone" [name]="x.name"></app-call-button><div class="muted small" *ngIf="!x.phone && data.run.includeContacts">Not provided by Google</div><div class="muted small" *ngIf="!data.run.includeContacts">Not requested</div></td>
             <td>
               <a *ngIf="x.website" [href]="x.website" target="_blank" rel="noopener noreferrer">{{ x.website }}</a>
               <span *ngIf="!x.website">—</span><div class="muted small" *ngIf="!x.website && data.run.includeContacts">Not provided by Google</div>

@@ -17,6 +17,8 @@ async function workerAuthorizationProblem(workspaceId, userId, capability) {
   if (!userId) {
     return { code: 'SCHEDULER_UNKNOWN', message: 'No scheduling user is recorded for this job; a current member must schedule or approve it again.' };
   }
+  // The platform admin has full rights in every workspace without being a member of it.
+  if (await require('./platformAdmin').isPlatformAdmin(userId)) return null;
   const m = await get(
     'SELECT m.role, m.status, u.status AS user_status FROM workspace_members m JOIN users u ON u.id = m.user_id WHERE m.workspace_id = ? AND m.user_id = ?',
     [workspaceId, userId]

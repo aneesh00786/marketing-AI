@@ -60,6 +60,16 @@ export class ApiService {
     return this.http.post(`${this.baseUrl}/invitations/decline`, body);
   }
 
+  /** The signed-in user's global CRM grant ({ access: null } when they have none). */
+  getCrmAccess(): Observable<any> {
+    return this.http.get(`${this.baseUrl}/global-crm/me`);
+  }
+
+  /** Whether the signed-in user is the platform admin ({ admin: boolean }). */
+  getPlatformAccess(): Observable<any> {
+    return this.http.get(`${this.baseUrl}/platform/me`);
+  }
+
   getMe(): Observable<any> {
     return this.http.get(`${this.baseUrl}/auth/me`, { headers: this.getHeaders() });
   }

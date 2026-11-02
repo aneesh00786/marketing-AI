@@ -32,7 +32,7 @@
             <td class="zc-email">{{ c.email }}</td>
             <td>{{ c.name || '—' }}</td>
             <td>{{ c.company || '—' }}</td>
-            <td class="zc-nowrap">{{ c.phone || '—' }}</td>
+            <td class="zc-nowrap">{{ c.phone || '—' }}<app-call-button [phone]="c.phone" [name]="c.name"></app-call-button></td>
           </tr>
         </tbody>
       </table>

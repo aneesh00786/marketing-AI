@@ -1,0 +1,149 @@
+<div class="crm-stack" *ngIf="!detail">
+  <div class="crm-toolbar">
+    <input class="hud-input grow" type="search" [(ngModel)]="q" (ngModelChange)="onSearch()" placeholder="Search name, email, phone or company…" aria-label="Search contacts" />
+    <select class="hud-input" [(ngModel)]="status" (ngModelChange)="load(1)" aria-label="Filter by status">
+      <option value="">All statuses</option>
+      <option *ngFor="let s of statuses" [value]="s">{{ s }}</option>
+    </select>
+    <select class="hud-input" [(ngModel)]="assignedTo" (ngModelChange)="load(1)" aria-label="Filter by team member">
+      <option value="">Everyone</option>
+      <option value="none">Unassigned</option>
+      <option *ngFor="let t of team" [value]="t.id">{{ t.name }}</option>
+    </select>
+    <button *ngIf="canManage" type="button" class="btn btn-primary btn-sm" (click)="openForm()"><app-icon name="plus" [size]="15"></app-icon>New contact</button>
+  </div>
+
+  <p class="mx-callout error" *ngIf="error" role="alert">{{ error }} <button type="button" class="link-btn" (click)="load(page)">Try again</button></p>
+  <p class="muted small" *ngIf="loading && !contacts.length">Loading…</p>
+  <p class="mx-empty" *ngIf="!loading && !error && !contacts.length">{{ q || status || assignedTo ? 'No contacts match.' : 'No contacts yet. Add your first customer or contact.' }}</p>
+
+  <div class="mx-table-wrap" *ngIf="contacts.length">
+    <table class="mx-table">
+      <thead><tr><th>Name</th><th>Company</th><th>Phone</th><th>Status</th><th>Assigned to</th><th>Created</th></tr></thead>
+      <tbody>
+        <tr *ngFor="let c of contacts">
+          <td><button type="button" class="crm-row-link" (click)="open(c.id)">{{ c.fullName }}</button><span class="crm-sub">{{ c.email }}</span></td>
+          <td>{{ c.companyName || '—' }}</td>
+          <td>{{ c.phone || '—' }}<app-call-button [phone]="c.phone" [name]="c.fullName" [contactId]="c.id"></app-call-button></td>
+          <td><span class="mx-tag" [ngClass]="tone(c.status)">{{ c.status }}</span></td>
+          <td>{{ c.assigneeName || '—' }}</td>
+          <td>{{ c.createdAt | date:'MMM d, y' }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="crm-pager" *ngIf="page > 1 || hasMore">
+    <button type="button" class="btn btn-secondary btn-sm" (click)="load(page - 1)" [disabled]="page <= 1 || loading">← Previous</button>
+    <span class="muted small">Page {{ page }} · {{ total | number }} contacts</span>
+    <button type="button" class="btn btn-secondary btn-sm" (click)="load(page + 1)" [disabled]="!hasMore || loading">Next →</button>
+  </div>
+</div>
+
+<div class="crm-stack" *ngIf="detail">
+  <div class="crm-detail-head">
+    <div class="crm-detail-title">
+      <button type="button" class="btn btn-secondary btn-sm" (click)="back()">← Contacts</button>
+      <h3>{{ detail.contact.fullName }}</h3>
+      <span class="mx-tag" [ngClass]="tone(detail.contact.status)">{{ detail.contact.status }}</span>
+    </div>
+    <div class="mx-actions">
+      <button *ngIf="canDeals" type="button" class="btn btn-secondary btn-sm" (click)="newDeal.emit(detail.contact)"><app-icon name="plus" [size]="15"></app-icon>New deal</button>
+      <button *ngIf="canSupport" type="button" class="btn btn-secondary btn-sm" (click)="newTicket.emit(detail.contact)"><app-icon name="plus" [size]="15"></app-icon>New ticket</button>
+      <button *ngIf="canManage" type="button" class="btn btn-secondary btn-sm" (click)="openForm(detail.contact)">Edit</button>
+    </div>
+  </div>
+
+  <section class="mx-panel">
+    <dl class="crm-facts">
+      <div><dt>Email</dt><dd>{{ detail.contact.email || '—' }}</dd></div>
+      <div><dt>Phone</dt><dd>{{ detail.contact.phone || '—' }}<app-call-button [phone]="detail.contact.phone" [name]="detail.contact.fullName" [contactId]="detail.contact.id"></app-call-button></dd></div>
+      <div><dt>Company</dt><dd>
+        <button *ngIf="detail.contact.companyId; else noCompany" type="button" class="crm-row-link" (click)="openCompany.emit(detail.contact.companyId)">{{ detail.contact.companyName }}</button>
+        <ng-template #noCompany>—</ng-template>
+      </dd></div>
+      <div><dt>Assigned to</dt><dd>{{ detail.contact.assigneeName || 'Unassigned' }}</dd></div>
+      <div><dt>Created</dt><dd>{{ detail.contact.createdAt | date:'MMM d, y' }}</dd></div>
+      <div *ngIf="detail.contact.notes"><dt>Notes</dt><dd>{{ detail.contact.notes }}</dd></div>
+    </dl>
+  </section>
+
+  <div class="crm-columns">
+    <section class="mx-panel">
+      <app-crm-activities parent="contacts" [parentId]="detail.contact.id" [canManage]="canManage"></app-crm-activities>
+    </section>
+    <div class="crm-stack">
+      <section class="mx-panel">
+        <h4 class="mx-subhead">Deals</h4>
+        <p class="muted small" *ngIf="!detail.deals.length">No deals for this contact.</p>
+        <ul class="crm-list" *ngIf="detail.deals.length">
+          <li *ngFor="let d of detail.deals">
+            <button type="button" class="crm-row-link" (click)="openDeal.emit(d.id)">{{ d.name }}</button>
+            <span class="mx-tag" [ngClass]="tone(d.stage)">{{ d.stage }}</span>
+          </li>
+        </ul>
+      </section>
+      <section class="mx-panel">
+        <h4 class="mx-subhead">Support tickets</h4>
+        <p class="muted small" *ngIf="!detail.tickets.length">No tickets for this contact.</p>
+        <ul class="crm-list" *ngIf="detail.tickets.length">
+          <li *ngFor="let t of detail.tickets">
+            <button type="button" class="crm-row-link" (click)="openTicket.emit(t.id)">{{ t.subject }}</button>
+            <span class="mx-tag" [ngClass]="tone(t.status)">{{ t.status }}</span>
+          </li>
+        </ul>
+      </section>
+      <section class="mx-panel">
+        <h4 class="mx-subhead">Calls</h4>
+        <p class="muted small" *ngIf="!detail.calls?.length">No calls with this contact.</p>
+        <ul class="crm-list" *ngIf="detail.calls?.length">
+          <li *ngFor="let k of detail.calls">
+            <button type="button" class="crm-row-link" (click)="openCall.emit(k.id)">{{ k.startedAt | date:'MMM d, y, h:mm a' }}</button>
+            <span class="mx-tag" *ngIf="k.transcriptStatus === 'done'">Transcript</span>
+          </li>
+        </ul>
+      </section>
+    </div>
+  </div>
+</div>
+
+<div class="crm-backdrop" *ngIf="form" (click)="form = null">
+  <form class="crm-dialog" role="dialog" aria-modal="true" aria-labelledby="crm-contact-title" (click)="$event.stopPropagation()" (ngSubmit)="save()">
+    <h3 id="crm-contact-title">{{ form.id ? 'Edit contact' : 'New contact' }}</h3>
+    <div class="crm-form">
+      <label class="wide"><span>Full name <span class="req" aria-hidden="true">*</span></span><input class="hud-input" name="fullName" [(ngModel)]="form.fullName" maxlength="255" required /></label>
+      <label>Email<input class="hud-input" type="email" name="email" [(ngModel)]="form.email" maxlength="255" /></label>
+      <app-crm-phone-input [value]="form.phone" (valueChange)="form.phone = $event"></app-crm-phone-input>
+      <label>Company
+        <select class="hud-input" name="company" [(ngModel)]="form.companyId">
+          <option [ngValue]="null">None</option>
+          <option *ngFor="let c of companies" [ngValue]="c.id">{{ c.name }}</option>
+        </select>
+      </label>
+      <label>Status
+        <select class="hud-input" name="status" [(ngModel)]="form.status"><option *ngFor="let s of statuses" [value]="s">{{ s }}</option></select>
+      </label>
+      <label class="wide">Assigned to
+        <select class="hud-input" name="assignedTo" [(ngModel)]="form.assignedTo">
+          <option [ngValue]="null">Unassigned</option>
+          <option *ngFor="let t of team" [ngValue]="t.id">{{ t.name }}</option>
+        </select>
+      </label>
+      <label class="wide">Notes<textarea class="hud-textarea" name="notes" rows="3" [(ngModel)]="form.notes" maxlength="5000"></textarea></label>
+    </div>
+    <div class="mx-callout warn" *ngIf="duplicates.length" role="alert">
+      <div>
+        This may be someone you already have (same email or phone):
+        <ul class="crm-list">
+          <li *ngFor="let d of duplicates"><button type="button" class="crm-row-link" (click)="viewDuplicate(d.id)">{{ d.fullName }}</button><span class="crm-sub">{{ d.email || d.phone }}</span></li>
+        </ul>
+      </div>
+    </div>
+    <p class="mx-callout error" *ngIf="formError" role="alert">{{ formError }}</p>
+    <div class="crm-dialog-foot">
+      <button type="button" class="btn btn-secondary btn-sm" (click)="form = null">Cancel</button>
+      <button *ngIf="duplicates.length" type="button" class="btn btn-secondary btn-sm" (click)="save(true)" [disabled]="busy">Save anyway</button>
+      <button *ngIf="!duplicates.length" type="submit" class="btn btn-primary btn-sm" [disabled]="busy">{{ busy ? 'Saving…' : 'Save' }}</button>
+    </div>
+  </form>
+</div>

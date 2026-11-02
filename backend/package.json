@@ -11,6 +11,7 @@
     "migrate:status": "node db/migrate.js --status",
     "worker": "node workers/socialWorker.js",
     "set-password": "node scripts/setPassword.js",
+    "crm-access": "node scripts/crmAccess.js",
     "test": "node --test --test-concurrency=1 tests/",
     "seed:demo": "node scripts/seedDemoWorkspace.js",
     "seed:demo-campaigns": "node scripts/seedDemoCampaigns.js"

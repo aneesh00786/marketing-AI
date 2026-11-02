@@ -15,10 +15,35 @@ function readBearer(req) {
   return header.startsWith('Bearer ') ? header.slice(7).trim() : null;
 }
 
+/**
+ * A session from "Open workspace" in Platform Admin: full Owner rights in that workspace, without
+ * being a member of it. Only tokens the server issued for this carry platformAccess, and being the
+ * platform admin is checked again on every request, so the access ends the moment that does.
+ */
+async function resolvePlatformAccess(payload) {
+  const { isPlatformAdmin } = require('../lib/platformAdmin');
+  if (!(await isPlatformAdmin(payload.userId))) return null;
+  const row = await get(
+    `SELECT u.id, u.email, u.display_name, w.id AS workspace_id FROM users u JOIN workspaces w ON w.id = ? WHERE u.id = ? LIMIT 1`,
+    [payload.workspaceId, payload.userId]
+  );
+  if (!row) return null;
+  return {
+    userId: row.id,
+    workspaceId: row.workspace_id,
+    role: 'Workspace Owner',
+    email: row.email,
+    displayName: row.display_name,
+    platformAccess: true,
+    capabilities: capabilitiesForRole('Workspace Owner')
+  };
+}
+
 /** Resolves user, workspace membership and capabilities from the token on every request. */
 async function resolveAuth(token) {
   const payload = authService.verifyToken(token);
   if (!payload || !payload.userId || !payload.workspaceId) return null;
+  if (payload.platformAccess) return resolvePlatformAccess(payload);
 
   const member = await get(
     `SELECT m.workspace_id, m.user_id, m.role, m.status, u.email, u.display_name, u.status AS user_status

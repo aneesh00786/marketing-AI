@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { apiRoot } from '../../core/api-base';
 import { AuthStateService } from '../../core/auth-state.service';
+import { CallButtonComponent } from '../../shared/calling/call-button.component';
 
 /**
  * AI Lead Discovery: search Google Places for businesses, review them, import selected ones
@@ -16,7 +17,7 @@ import { AuthStateService } from '../../core/auth-state.service';
 @Component({
   selector: 'app-lead-discovery',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, CallButtonComponent],
   templateUrl: './lead-discovery.component.html',
   styleUrls: ['../command/command-center.component.css', './lead-discovery.component.css']
 })

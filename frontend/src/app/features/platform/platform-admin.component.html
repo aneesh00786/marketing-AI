@@ -1,0 +1,216 @@
+<section class="crm-stack">
+  <header class="mx-head">
+    <div><h2>Platform Admin</h2><p class="mx-desc">All workspaces, users and activity across the platform.</p></div>
+    <div class="mx-actions" *ngIf="tab === 'workspaces' && !detail">
+      <button type="button" class="btn btn-primary btn-sm" (click)="openForm()"><app-icon name="plus" [size]="15"></app-icon>New workspace</button>
+    </div>
+  </header>
+
+  <div class="mx-subtabs" role="tablist" aria-label="Platform admin sections">
+    <button *ngFor="let t of tabs" type="button" role="tab" [class.on]="tab === t.key" [attr.aria-selected]="tab === t.key" (click)="show(t.key)">
+      <app-icon [name]="t.icon" [size]="15"></app-icon>{{ t.label }}
+    </button>
+  </div>
+
+  <p class="mx-callout error" *ngIf="error" role="alert">{{ error }} <button type="button" class="link-btn" (click)="load()">Try again</button></p>
+
+  <!-- Workspaces -->
+  <ng-container *ngIf="tab === 'workspaces' && !detail">
+    <div class="crm-toolbar"><input class="hud-input grow" type="search" [(ngModel)]="q" (ngModelChange)="onSearch()" placeholder="Search workspaces…" aria-label="Search workspaces" /></div>
+    <p class="muted small" *ngIf="loading && !workspaces.length">Loading…</p>
+    <p class="mx-empty" *ngIf="!loading && !error && !workspaces.length">{{ q ? 'No workspaces match.' : 'No workspaces yet.' }}</p>
+    <div class="mx-table-wrap" *ngIf="workspaces.length">
+      <table class="mx-table">
+        <thead><tr><th>Workspace</th><th>Owner</th><th class="num">Members</th><th class="num">Leads</th><th class="num">Campaigns</th><th>Last activity</th><th>Created</th><th></th></tr></thead>
+        <tbody>
+          <tr *ngFor="let w of workspaces">
+            <td><button type="button" class="crm-row-link" (click)="open(w.id)">{{ w.name }}</button>
+              <span class="mx-tag" *ngIf="w.protected" style="margin-left:6px">Platform</span>
+              <span class="mx-tag warn" *ngIf="w.status !== 'Active'" style="margin-left:6px">{{ w.status }}</span></td>
+            <td>{{ w.owners || '—' }}</td>
+            <td class="num">{{ w.memberCount | number }}</td>
+            <td class="num">{{ w.leadCount | number }}</td>
+            <td class="num">{{ w.campaignCount | number }}</td>
+            <td>{{ w.lastActivity ? (w.lastActivity | date:'MMM d, y') : '—' }}</td>
+            <td>{{ w.createdAt | date:'MMM d, y' }}</td>
+            <td><button type="button" class="link-btn" (click)="enter(w.id)" [attr.aria-label]="'Open ' + w.name">Open</button></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </ng-container>
+
+  <!-- One workspace -->
+  <ng-container *ngIf="detail">
+    <div class="crm-detail-head">
+      <div class="crm-detail-title">
+        <button type="button" class="btn btn-secondary btn-sm" (click)="back()">← Workspaces</button>
+        <h3>{{ detail.workspace.name }}</h3>
+        <span class="mx-tag" *ngIf="detail.workspace.protected">Platform</span>
+      </div>
+      <div class="mx-actions">
+        <button type="button" class="btn btn-primary btn-sm" (click)="enter(detail.workspace.id)">Open workspace</button>
+        <button type="button" class="btn btn-secondary btn-sm" (click)="showActivity({ workspaceId: detail.workspace.id })">View activity</button>
+      </div>
+    </div>
+    <section class="mx-panel">
+      <dl class="crm-facts">
+        <div><dt>Status</dt><dd>{{ detail.workspace.status }}</dd></div>
+        <div><dt>Plan</dt><dd>{{ detail.workspace.plan }}</dd></div>
+        <div><dt>Leads</dt><dd>{{ detail.workspace.leadCount | number }}</dd></div>
+        <div><dt>Campaigns</dt><dd>{{ detail.workspace.campaignCount | number }}</dd></div>
+        <div><dt>Created</dt><dd>{{ detail.workspace.createdAt | date:'MMM d, y' }}</dd></div>
+      </dl>
+    </section>
+    <section class="mx-panel">
+      <h4 class="mx-subhead">Assign a user</h4>
+      <div class="crm-toolbar">
+        <select class="hud-input grow" [(ngModel)]="assign.userId" aria-label="User to assign">
+          <option [ngValue]="null">Choose a user…</option>
+          <option *ngFor="let u of assignable" [ngValue]="u.id">{{ u.name }} ({{ u.email }})</option>
+        </select>
+        <select class="hud-input" [(ngModel)]="assign.role" aria-label="Role">
+          <option *ngFor="let r of rolesFor()" [value]="r">{{ r }}</option>
+        </select>
+        <button type="button" class="btn btn-primary btn-sm" (click)="assignUser()" [disabled]="!assign.userId">Assign</button>
+      </div>
+      <p class="muted small" *ngIf="detail.workspace.protected">The Owner of this workspace is the platform admin, so it can't be changed here.</p>
+      <div class="mx-table-wrap">
+        <table class="mx-table">
+          <thead><tr><th>User</th><th>Role</th><th>Joined</th><th></th></tr></thead>
+          <tbody>
+            <tr *ngFor="let m of detail.members">
+              <td><b>{{ m.name }}</b><span class="crm-sub">{{ m.email }}</span></td>
+              <td>
+                <span *ngIf="detail.workspace.protected && m.role === 'Workspace Owner'; else roleSelect">{{ m.role }}</span>
+                <ng-template #roleSelect>
+                  <select class="hud-input sm" [ngModel]="m.role" (ngModelChange)="setRole(m.userId, $event)" [attr.aria-label]="'Role of ' + m.name">
+                    <option *ngFor="let r of rolesFor(m.role)" [value]="r">{{ r }}</option>
+                  </select>
+                </ng-template>
+              </td>
+              <td>{{ m.joinedAt | date:'MMM d, y' }}</td>
+              <td><button *ngIf="!(detail.workspace.protected && m.role === 'Workspace Owner')" type="button" class="link-btn" (click)="remove(m)">Remove</button></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </ng-container>
+
+  <!-- Users -->
+  <ng-container *ngIf="tab === 'users'">
+    <div class="crm-toolbar"><input class="hud-input grow" type="search" [(ngModel)]="q" (ngModelChange)="onSearch()" placeholder="Search name or email…" aria-label="Search users" /></div>
+    <p class="muted small" *ngIf="loading && !users.length">Loading…</p>
+    <p class="mx-empty" *ngIf="!loading && !error && !users.length">{{ q ? 'No users match.' : 'No users yet.' }}</p>
+    <div class="mx-table-wrap" *ngIf="users.length">
+      <table class="mx-table">
+        <thead><tr><th>User</th><th>Workspaces</th><th>Status</th><th>Last activity</th><th>Joined</th><th></th></tr></thead>
+        <tbody>
+          <tr *ngFor="let u of users">
+            <td><b>{{ u.name }}</b><span class="crm-sub">{{ u.email }}</span></td>
+            <td>
+              <span *ngIf="!u.workspaces.length">—</span>
+              <span *ngFor="let w of u.workspaces" class="crm-sub"><button type="button" class="crm-row-link" (click)="open(w.id)">{{ w.name }}</button> · {{ w.role }}</span>
+            </td>
+            <td><span class="mx-tag" [class.good]="u.status === 'Active'" [class.bad]="u.status !== 'Active'">{{ u.status }}</span></td>
+            <td>{{ u.lastActivity ? (u.lastActivity | date:'MMM d, y') : '—' }}</td>
+            <td>{{ u.createdAt | date:'MMM d, y' }}</td>
+            <td>
+              <button type="button" class="link-btn" (click)="manage(u)" [attr.aria-label]="'Manage workspaces of ' + u.name">Workspaces</button>
+              <span class="muted"> · </span>
+              <button type="button" class="link-btn" (click)="showActivity({ userId: u.id })">Activity</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </ng-container>
+
+  <!-- Activity -->
+  <ng-container *ngIf="tab === 'activity'">
+    <div class="crm-toolbar">
+      <select class="hud-input" [(ngModel)]="filters.workspaceId" (ngModelChange)="load()" aria-label="Filter by workspace">
+        <option value="">All workspaces</option>
+        <option *ngFor="let w of allWorkspaces" [value]="w.id">{{ w.name }}</option>
+      </select>
+      <select class="hud-input" [(ngModel)]="filters.userId" (ngModelChange)="load()" aria-label="Filter by user">
+        <option value="">All users</option>
+        <option *ngFor="let u of allUsers" [value]="u.id">{{ u.name }}</option>
+      </select>
+      <input class="hud-input sm" type="date" [(ngModel)]="filters.from" (ngModelChange)="load()" aria-label="From date" />
+      <input class="hud-input sm" type="date" [(ngModel)]="filters.to" (ngModelChange)="load()" aria-label="To date" />
+      <button type="button" class="link-btn" (click)="clearFilters()">Clear</button>
+    </div>
+    <p class="muted small" *ngIf="loading && !activity.length">Loading…</p>
+    <p class="mx-empty" *ngIf="!loading && !error && !activity.length">No activity found.</p>
+    <div class="mx-table-wrap" *ngIf="activity.length">
+      <table class="mx-table">
+        <thead><tr><th>When</th><th>User</th><th>Workspace</th><th>Activity</th></tr></thead>
+        <tbody>
+          <tr *ngFor="let a of activity">
+            <td>{{ a.createdAt | date:'MMM d, y, h:mm a' }}</td>
+            <td>{{ a.userName || (a.actorType === 'system' ? 'System' : '—') }}</td>
+            <td>{{ a.workspaceName || 'Platform' }}</td>
+            <td>{{ actionLabel(a.action) }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="crm-pager" *ngIf="page > 1 || hasMore">
+      <button type="button" class="btn btn-secondary btn-sm" (click)="load(page - 1)" [disabled]="page <= 1 || loading">← Newer</button>
+      <span class="muted small">Page {{ page }}</span>
+      <button type="button" class="btn btn-secondary btn-sm" (click)="load(page + 1)" [disabled]="!hasMore || loading">Older →</button>
+    </div>
+  </ng-container>
+</section>
+
+<div class="crm-backdrop" *ngIf="form" (click)="form = null">
+  <form class="crm-dialog" role="dialog" aria-modal="true" aria-labelledby="pa-title" (click)="$event.stopPropagation()" (ngSubmit)="create()">
+    <h3 id="pa-title">New workspace</h3>
+    <div class="crm-form">
+      <label class="wide"><span>Workspace name <span class="req" aria-hidden="true">*</span></span><input class="hud-input" name="name" [(ngModel)]="form.name" maxlength="100" required /></label>
+      <label class="wide"><span>Assign to user <span class="req" aria-hidden="true">*</span></span>
+        <select class="hud-input" name="owner" [(ngModel)]="form.ownerUserId">
+          <option [ngValue]="null">Choose a user…</option>
+          <ng-container *ngFor="let u of allUsers"><option *ngIf="u.status === 'Active'" [ngValue]="u.id">{{ u.name }} ({{ u.email }})</option></ng-container>
+        </select>
+      </label>
+      <label class="wide">Industry<input class="hud-input" name="industry" [(ngModel)]="form.industry" maxlength="100" /></label>
+    </div>
+    <p class="muted small">This user becomes the Workspace Owner. They need an account first.</p>
+    <p class="mx-callout error" *ngIf="formError" role="alert">{{ formError }}</p>
+    <div class="crm-dialog-foot">
+      <button type="button" class="btn btn-secondary btn-sm" (click)="form = null">Cancel</button>
+      <button type="submit" class="btn btn-primary btn-sm" [disabled]="busy">{{ busy ? 'Creating…' : 'Create workspace' }}</button>
+    </div>
+  </form>
+</div>
+
+<div class="crm-backdrop" *ngIf="managing" (click)="managing = null">
+  <div class="crm-dialog" role="dialog" aria-modal="true" aria-labelledby="pa-manage-title" (click)="$event.stopPropagation()">
+    <h3 id="pa-manage-title">Workspaces of {{ managing.name }}</h3>
+    <p class="muted small">{{ managing.email }}</p>
+    <p class="muted small" *ngIf="!managing.workspaces.length">Not in any workspace yet.</p>
+    <ul class="crm-list" *ngIf="managing.workspaces.length">
+      <li *ngFor="let w of managing.workspaces">
+        <div><b>{{ w.name }}</b><span class="crm-sub">{{ w.role }}</span></div>
+        <button type="button" class="link-btn" (click)="removeFromWorkspace(w)" [attr.aria-label]="'Remove from ' + w.name">Remove</button>
+      </li>
+    </ul>
+    <h4 class="mx-subhead">Assign a workspace</h4>
+    <div class="crm-toolbar">
+      <select class="hud-input grow" [(ngModel)]="manageAdd.workspaceId" aria-label="Workspace to assign">
+        <option [ngValue]="null">Choose a workspace…</option>
+        <option *ngFor="let w of addable" [ngValue]="w.id">{{ w.name }}</option>
+      </select>
+      <select class="hud-input" [(ngModel)]="manageAdd.role" aria-label="Role">
+        <option *ngFor="let r of roles" [value]="r">{{ r }}</option>
+      </select>
+    </div>
+    <div class="crm-dialog-foot">
+      <button type="button" class="btn btn-secondary btn-sm" (click)="managing = null">Close</button>
+      <button type="button" class="btn btn-primary btn-sm" (click)="addToWorkspace()" [disabled]="!manageAdd.workspaceId">Assign</button>
+    </div>
+  </div>
+</div>

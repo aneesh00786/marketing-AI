@@ -1,0 +1,124 @@
+<div class="crm-stack" *ngIf="!detail">
+  <div class="crm-toolbar">
+    <input class="hud-input grow" type="search" [(ngModel)]="q" (ngModelChange)="onSearch()" placeholder="Search subject, contact or company…" aria-label="Search tickets" />
+    <select class="hud-input" [(ngModel)]="status" (ngModelChange)="load()" aria-label="Filter by status">
+      <option value="">All statuses</option>
+      <option *ngFor="let s of statuses" [value]="s">{{ s }}</option>
+    </select>
+    <select class="hud-input" [(ngModel)]="priority" (ngModelChange)="load()" aria-label="Filter by priority">
+      <option value="">All priorities</option>
+      <option *ngFor="let p of priorities" [value]="p">{{ p }}</option>
+    </select>
+    <select class="hud-input" [(ngModel)]="assignedTo" (ngModelChange)="load()" aria-label="Filter by team member">
+      <option value="">Everyone</option>
+      <option value="none">Unassigned</option>
+      <option *ngFor="let t of team" [value]="t.id">{{ t.name }}</option>
+    </select>
+    <button *ngIf="canSupport" type="button" class="btn btn-primary btn-sm" (click)="openForm()"><app-icon name="plus" [size]="15"></app-icon>New ticket</button>
+  </div>
+
+  <p class="mx-callout error" *ngIf="error" role="alert">{{ error }} <button type="button" class="link-btn" (click)="load()">Try again</button></p>
+  <p class="muted small" *ngIf="loading && !tickets.length">Loading…</p>
+  <p class="mx-empty" *ngIf="!loading && !error && !tickets.length">{{ q || status || priority || assignedTo ? 'No tickets match.' : 'No support tickets yet.' }}</p>
+
+  <div class="mx-table-wrap" *ngIf="tickets.length">
+    <table class="mx-table">
+      <thead><tr><th>Subject</th><th>Contact</th><th>Priority</th><th>Status</th><th>Assigned to</th><th>Created</th><th></th></tr></thead>
+      <tbody>
+        <!-- The whole row opens the ticket; a click on either button bubbles up to it. -->
+        <tr *ngFor="let t of tickets" class="crm-click-row" (click)="open(t.id)">
+          <td><button type="button" class="crm-row-link">{{ t.subject }}</button><span class="crm-sub">#{{ t.id }}</span></td>
+          <td>{{ t.contactName || '—' }}<span class="crm-sub">{{ t.companyName }}</span></td>
+          <td><span class="mx-tag" [ngClass]="tone(t.priority)">{{ t.priority }}</span></td>
+          <td><span class="mx-tag" [ngClass]="tone(t.status)">{{ t.status }}</span></td>
+          <td>{{ t.assigneeName || '—' }}</td>
+          <td>{{ t.createdAt | date:'MMM d, y' }}</td>
+          <td class="crm-open"><button type="button" class="btn btn-secondary btn-sm" tabindex="-1" aria-hidden="true">Open →</button></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="muted small" *ngIf="truncated">Showing the newest 500 tickets.</p>
+</div>
+
+<div class="crm-stack" *ngIf="detail">
+  <div class="crm-detail-head">
+    <div class="crm-detail-title">
+      <button type="button" class="btn btn-secondary btn-sm" (click)="back()">← Support</button>
+      <h3>{{ detail.subject }}</h3>
+      <span class="mx-tag" [ngClass]="tone(detail.status)">{{ detail.status }}</span>
+      <span class="mx-tag" [ngClass]="tone(detail.priority)">{{ detail.priority }} priority</span>
+    </div>
+    <div class="mx-actions" *ngIf="canSupport">
+      <button *ngIf="detail.status !== 'Closed'" type="button" class="btn btn-primary btn-sm" (click)="update({ status: 'Closed' })">Close ticket</button>
+      <button *ngIf="detail.status === 'Closed'" type="button" class="btn btn-secondary btn-sm" (click)="update({ status: 'Open' })">Reopen ticket</button>
+    </div>
+  </div>
+
+  <section class="mx-panel" *ngIf="canSupport">
+    <div class="crm-form crm-ticket-controls">
+      <label>Status<select class="hud-input" [ngModel]="detail.status" (ngModelChange)="update({ status: $event })"><option *ngFor="let s of statuses" [value]="s">{{ s }}</option></select></label>
+      <label>Priority<select class="hud-input" [ngModel]="detail.priority" (ngModelChange)="update({ priority: $event })"><option *ngFor="let p of priorities" [value]="p">{{ p }}</option></select></label>
+      <label>Assigned to
+        <select class="hud-input" [ngModel]="detail.assignedTo" (ngModelChange)="update({ assignedTo: $event })">
+          <option [ngValue]="null">Unassigned</option>
+          <option *ngFor="let t of team" [ngValue]="t.id">{{ t.name }}</option>
+        </select>
+      </label>
+    </div>
+  </section>
+
+  <section class="mx-panel">
+    <dl class="crm-facts">
+      <div><dt>Contact</dt><dd>
+        <button *ngIf="detail.contactId; else noContact" type="button" class="crm-row-link" (click)="openContact.emit(detail.contactId)">{{ detail.contactName }}</button>
+        <ng-template #noContact>—</ng-template>
+        <span class="crm-sub" *ngIf="detail.contactEmail">{{ detail.contactEmail }}</span>
+        <span class="crm-sub" *ngIf="detail.contactPhone">{{ detail.contactPhone }}<app-call-button [phone]="detail.contactPhone" [name]="detail.contactName" [contactId]="detail.contactId"></app-call-button></span>
+      </dd></div>
+      <div><dt>Company</dt><dd>
+        <button *ngIf="detail.companyId; else noCompany" type="button" class="crm-row-link" (click)="openCompany.emit(detail.companyId)">{{ detail.companyName }}</button>
+        <ng-template #noCompany>—</ng-template>
+      </dd></div>
+      <div><dt>Assigned to</dt><dd>{{ detail.assigneeName || 'Unassigned' }}</dd></div>
+      <div><dt>Created</dt><dd>{{ detail.createdAt | date:'MMM d, y' }}<span class="crm-sub" *ngIf="detail.createdBy">{{ detail.createdBy }}</span></dd></div>
+    </dl>
+    <h4 class="mx-subhead">Issue</h4>
+    <p class="crm-issue">{{ detail.description }}</p>
+  </section>
+
+  <section class="mx-panel" *ngFor="let k of [historyKey]">
+    <app-crm-activities parent="tickets" [parentId]="detail.id" [canManage]="canSupport"></app-crm-activities>
+  </section>
+</div>
+
+<div class="crm-backdrop" *ngIf="form" (click)="form = null">
+  <form class="crm-dialog" role="dialog" aria-modal="true" aria-labelledby="crm-ticket-title" (click)="$event.stopPropagation()" (ngSubmit)="save()">
+    <h3 id="crm-ticket-title">New support ticket</h3>
+    <div class="crm-form">
+      <label class="wide"><span>Subject <span class="req" aria-hidden="true">*</span></span><input class="hud-input" name="subject" [(ngModel)]="form.subject" maxlength="255" required /></label>
+      <label class="wide"><span>Issue <span class="req" aria-hidden="true">*</span></span><textarea class="hud-textarea" name="description" rows="4" [(ngModel)]="form.description" maxlength="10000" required></textarea></label>
+      <app-crm-contact-input [contactId]="form.contactId" [contactName]="form.contactName" (contactIdChange)="form.contactId = $event" (unmatched)="contactUnmatched = $event"></app-crm-contact-input>
+      <label>Company
+        <select class="hud-input" name="company" [(ngModel)]="form.companyId">
+          <option [ngValue]="null">None, or the contact's company</option>
+          <option *ngFor="let c of companies" [ngValue]="c.id">{{ c.name }}</option>
+        </select>
+      </label>
+      <label>Priority
+        <select class="hud-input" name="priority" [(ngModel)]="form.priority"><option *ngFor="let p of priorities" [value]="p">{{ p }}</option></select>
+      </label>
+      <label>Assigned to
+        <select class="hud-input" name="assignedTo" [(ngModel)]="form.assignedTo">
+          <option [ngValue]="null">Unassigned</option>
+          <option *ngFor="let t of team" [ngValue]="t.id">{{ t.name }}</option>
+        </select>
+      </label>
+    </div>
+    <p class="mx-callout error" *ngIf="formError" role="alert">{{ formError }}</p>
+    <div class="crm-dialog-foot">
+      <button type="button" class="btn btn-secondary btn-sm" (click)="form = null">Cancel</button>
+      <button type="submit" class="btn btn-primary btn-sm" [disabled]="busy">{{ busy ? 'Saving…' : 'Create ticket' }}</button>
+    </div>
+  </form>
+</div>

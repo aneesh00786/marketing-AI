@@ -1,0 +1,119 @@
+<div class="crm-stack" *ngIf="!detail">
+  <div class="crm-toolbar">
+    <input class="hud-input grow" type="search" [(ngModel)]="q" (ngModelChange)="onSearch()" placeholder="Search deals, contacts or companies…" aria-label="Search deals" />
+    <select *ngIf="view === 'list'" class="hud-input" [(ngModel)]="stage" (ngModelChange)="load()" aria-label="Filter by stage">
+      <option value="">All stages</option>
+      <option *ngFor="let s of stages" [value]="s">{{ s }}</option>
+    </select>
+    <select class="hud-input" [(ngModel)]="assignedTo" (ngModelChange)="load()" aria-label="Filter by team member">
+      <option value="">Everyone</option>
+      <option *ngFor="let t of team" [value]="t.id">{{ t.name }}</option>
+    </select>
+    <div class="mx-seg" role="group" aria-label="View">
+      <button type="button" [class.on]="view === 'pipeline'" [attr.aria-pressed]="view === 'pipeline'" (click)="setView('pipeline')">Pipeline</button>
+      <button type="button" [class.on]="view === 'list'" [attr.aria-pressed]="view === 'list'" (click)="setView('list')">List</button>
+    </div>
+    <button *ngIf="canDeals" type="button" class="btn btn-primary btn-sm" (click)="openForm()"><app-icon name="plus" [size]="15"></app-icon>New deal</button>
+  </div>
+
+  <p class="mx-callout error" *ngIf="error" role="alert">{{ error }} <button type="button" class="link-btn" (click)="load()">Try again</button></p>
+  <p class="muted small" *ngIf="loading && !deals.length">Loading…</p>
+  <p class="mx-empty" *ngIf="!loading && !error && !deals.length">{{ q || assignedTo || (view === 'list' && stage) ? 'No deals match.' : 'No deals yet. Create your first deal to start the pipeline.' }}</p>
+
+  <div class="crm-pipeline" *ngIf="view === 'pipeline' && deals.length">
+    <section *ngFor="let s of stages" class="crm-column" [class.drop]="dropStage === s" [attr.aria-label]="s"
+      (dragover)="canDeals && $event.preventDefault(); dropStage = canDeals ? s : null" (dragleave)="dropStage = null" (drop)="onDrop($event, s)">
+      <header><span class="mx-tag" [ngClass]="tone(s)">{{ s }}</span><span class="muted small">{{ dealsIn(s).length }}<ng-container *ngIf="totalIn(s)"> · {{ totalIn(s) | number:'1.0-2' }}</ng-container></span></header>
+      <article *ngFor="let d of dealsIn(s); trackBy: trackId" class="crm-card" [class.dragging]="dragId === d.id" [draggable]="canDeals" (dragstart)="onDragStart($event, d)" (dragend)="dragId = null; dropStage = null">
+        <button type="button" class="crm-row-link" (click)="open(d.id)">{{ d.name }}</button>
+        <span class="crm-sub" *ngIf="d.contactName || d.companyName">{{ d.contactName }}{{ d.contactName && d.companyName ? ' · ' : '' }}{{ d.companyName }}</span>
+        <b class="crm-card-value" *ngIf="d.value !== null">{{ d.value | number:'1.0-2' }}</b>
+        <span class="crm-sub" *ngIf="d.assigneeName">{{ d.assigneeName }}</span>
+        <select *ngIf="canDeals" class="hud-input crm-card-stage" [ngModel]="d.stage" (ngModelChange)="move(d, $event)" [ngModelOptions]="{ standalone: true }" [attr.aria-label]="'Stage of ' + d.name">
+          <option *ngFor="let o of stages" [value]="o">{{ o }}</option>
+        </select>
+      </article>
+    </section>
+  </div>
+
+  <div class="mx-table-wrap" *ngIf="view === 'list' && deals.length">
+    <table class="mx-table">
+      <thead><tr><th>Deal</th><th>Contact</th><th>Company</th><th class="num">Value</th><th>Stage</th><th>Assigned to</th><th>Expected close</th></tr></thead>
+      <tbody>
+        <tr *ngFor="let d of deals; trackBy: trackId">
+          <td><button type="button" class="crm-row-link" (click)="open(d.id)">{{ d.name }}</button></td>
+          <td>{{ d.contactName || '—' }}</td>
+          <td>{{ d.companyName || '—' }}</td>
+          <td class="num">{{ d.value === null ? '—' : (d.value | number:'1.0-2') }}</td>
+          <td><span class="mx-tag" [ngClass]="tone(d.stage)">{{ d.stage }}</span></td>
+          <td>{{ d.assigneeName || '—' }}</td>
+          <td>{{ d.expectedCloseDate ? (d.expectedCloseDate | date:'MMM d, y') : '—' }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="muted small" *ngIf="truncated">Showing the newest 500 deals.</p>
+</div>
+
+<div class="crm-stack" *ngIf="detail">
+  <div class="crm-detail-head">
+    <div class="crm-detail-title">
+      <button type="button" class="btn btn-secondary btn-sm" (click)="back()">← Deals</button>
+      <h3>{{ detail.name }}</h3>
+      <span class="mx-tag" [ngClass]="tone(detail.stage)">{{ detail.stage }}</span>
+    </div>
+    <div class="mx-actions" *ngIf="canDeals">
+      <select class="hud-input sm" [ngModel]="detail.stage" (ngModelChange)="move(detail, $event)" aria-label="Stage">
+        <option *ngFor="let o of stages" [value]="o">{{ o }}</option>
+      </select>
+      <button type="button" class="btn btn-secondary btn-sm" (click)="openForm(detail)">Edit</button>
+      <button type="button" class="btn btn-danger-soft btn-sm" (click)="remove()">Delete</button>
+    </div>
+  </div>
+  <section class="mx-panel">
+    <dl class="crm-facts">
+      <div><dt>Value</dt><dd>{{ detail.value === null ? '—' : (detail.value | number:'1.0-2') }}</dd></div>
+      <div><dt>Contact</dt><dd><button *ngIf="detail.contactId; else noContact" type="button" class="crm-row-link" (click)="openContact.emit(detail.contactId)">{{ detail.contactName }}</button><ng-template #noContact>—</ng-template></dd></div>
+      <div><dt>Company</dt><dd><button *ngIf="detail.companyId; else noCompany" type="button" class="crm-row-link" (click)="openCompany.emit(detail.companyId)">{{ detail.companyName }}</button><ng-template #noCompany>—</ng-template></dd></div>
+      <div><dt>Assigned to</dt><dd>{{ detail.assigneeName || 'Unassigned' }}</dd></div>
+      <div><dt>Expected close</dt><dd>{{ detail.expectedCloseDate ? (detail.expectedCloseDate | date:'MMM d, y') : '—' }}</dd></div>
+      <div *ngIf="detail.notes"><dt>Notes</dt><dd>{{ detail.notes }}</dd></div>
+    </dl>
+  </section>
+  <section class="mx-panel">
+    <app-crm-activities parent="deals" [parentId]="detail.id" [canManage]="canDeals"></app-crm-activities>
+  </section>
+</div>
+
+<div class="crm-backdrop" *ngIf="form" (click)="form = null">
+  <form class="crm-dialog" role="dialog" aria-modal="true" aria-labelledby="crm-deal-title" (click)="$event.stopPropagation()" (ngSubmit)="save()">
+    <h3 id="crm-deal-title">{{ form.id ? 'Edit deal' : 'New deal' }}</h3>
+    <div class="crm-form">
+      <label class="wide"><span>Deal name <span class="req" aria-hidden="true">*</span></span><input class="hud-input" name="name" [(ngModel)]="form.name" maxlength="200" required /></label>
+      <app-crm-contact-input [contactId]="form.contactId" [contactName]="form.contactName" (contactIdChange)="form.contactId = $event" (unmatched)="contactUnmatched = $event"></app-crm-contact-input>
+      <label>Company
+        <select class="hud-input" name="company" [(ngModel)]="form.companyId">
+          <option [ngValue]="null">{{ form.id ? 'None' : 'None, or the contact\'s company' }}</option>
+          <option *ngFor="let c of companies" [ngValue]="c.id">{{ c.name }}</option>
+        </select>
+      </label>
+      <label>Deal value<input class="hud-input" type="number" min="0" step="0.01" name="value" [(ngModel)]="form.value" /></label>
+      <label>Stage
+        <select class="hud-input" name="stage" [(ngModel)]="form.stage"><option *ngFor="let s of stages" [value]="s">{{ s }}</option></select>
+      </label>
+      <label>Assigned to
+        <select class="hud-input" name="assignedTo" [(ngModel)]="form.assignedTo">
+          <option [ngValue]="null">Unassigned</option>
+          <option *ngFor="let t of team" [ngValue]="t.id">{{ t.name }}</option>
+        </select>
+      </label>
+      <label>Expected close date<input class="hud-input" type="date" name="close" [(ngModel)]="form.expectedCloseDate" /></label>
+      <label class="wide">Notes<textarea class="hud-textarea" name="notes" rows="2" [(ngModel)]="form.notes" maxlength="5000"></textarea></label>
+    </div>
+    <p class="mx-callout error" *ngIf="formError" role="alert">{{ formError }}</p>
+    <div class="crm-dialog-foot">
+      <button type="button" class="btn btn-secondary btn-sm" (click)="form = null">Cancel</button>
+      <button type="submit" class="btn btn-primary btn-sm" [disabled]="busy">{{ busy ? 'Saving…' : 'Save' }}</button>
+    </div>
+  </form>
+</div>

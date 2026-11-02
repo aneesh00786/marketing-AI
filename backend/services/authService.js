@@ -236,6 +236,27 @@ async function createWorkspaceForUser(userId, { name, industry } = {}) {
   return sessionFor(user, workspace.id);
 }
 
+/** A session for the platform admin inside any workspace. Checked again on every request (middleware/auth.js). */
+async function platformAccessSession(user, workspace) {
+  const token = createToken({ userId: user.id, email: user.email, workspaceId: workspace.id, role: 'Workspace Owner', platformAccess: true });
+  return {
+    token,
+    user: { id: user.id, email: user.email, displayName: user.display_name },
+    workspace: { id: workspace.id, name: workspace.name, slug: workspace.slug, plan: workspace.plan, adminAccess: true, legacyModules: workspace.id === parseInt(process.env.LEGACY_WORKSPACE_ID || '1', 10) },
+    role: 'Workspace Owner',
+    workspaces: await listMemberships(user.id)
+  };
+}
+
+/** A workspace the platform admin creates for a user. The self-service limit on owned workspaces does not apply. */
+async function createWorkspaceForOwner(userId, { name, industry } = {}) {
+  const user = await get('SELECT * FROM users WHERE id = ?', [userId]);
+  if (!user) throw authError('User not found.', 404, 'NOT_FOUND');
+  return atomically(tx => createWorkspaceRecords(tx, {
+    name: cleanWorkspaceName(name), industry: String(industry || '').trim().slice(0, 100) || 'Software', ownerEmail: user.email, userId
+  }));
+}
+
 async function getUserMe(userId, workspaceId) {
   const user = await get('SELECT id, email, display_name, status, created_at FROM users WHERE id = ?', [userId]);
   const workspace = await get('SELECT * FROM workspaces WHERE id = ?', [workspaceId]);
@@ -270,6 +291,8 @@ module.exports = {
   loginUser,
   switchWorkspace,
   createWorkspaceForUser,
+  createWorkspaceForOwner,
+  platformAccessSession,
   listMemberships,
   getUserMe
 };

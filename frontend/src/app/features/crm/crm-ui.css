@@ -1,0 +1,54 @@
+/* CRM screens: built on the Mail Center design layer (mail-ui.css), with the same theme tokens. */
+:host { display: block; min-width: 0; }
+.muted { color: var(--text-muted); }
+.small { font-size: 0.8rem; }
+.mx-subtabs { overflow-y: hidden; }
+.crm-stack { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.crm-toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.crm-toolbar .grow { flex: 1 1 220px; min-width: 0; }
+.crm-toolbar select.hud-input { width: auto; max-width: 200px; }
+.crm-row-link { background: none; border: none; padding: 0; color: var(--accent-text); font: inherit; font-weight: 600; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
+.crm-row-link:hover { text-decoration: underline; }
+.crm-click-row { cursor: pointer; }
+.crm-click-row:hover .crm-row-link { text-decoration: underline; }
+.crm-open { white-space: nowrap; text-align: right; }
+.crm-row-link:focus-visible, .crm-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.crm-sub { display: block; font-size: 0.78rem; color: var(--text-muted); overflow-wrap: anywhere; }
+.crm-pager { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+
+/* Overview figures */
+.crm-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+.crm-stat { border: 1px solid var(--border); border-radius: 12px; background: var(--surface); padding: 14px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+button.crm-stat { font: inherit; color: var(--text); text-align: left; cursor: pointer; }
+button.crm-stat:hover { border-color: var(--accent); }
+button.crm-stat:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.crm-stat span { font-size: 0.76rem; font-weight: 600; color: var(--text-muted); }
+.crm-stat b { font-size: 1.5rem; font-weight: 650; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+
+/* Detail pages */
+.crm-detail-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px 16px; flex-wrap: wrap; }
+.crm-detail-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.crm-detail-title h3 { margin: 0; font-size: 1.15rem; font-weight: 650; overflow-wrap: anywhere; }
+.crm-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px 18px; margin: 0; }
+.crm-facts div { min-width: 0; }
+.crm-facts dt { font-size: 0.74rem; font-weight: 600; color: var(--text-muted); margin-bottom: 2px; }
+.crm-facts dd { margin: 0; font-size: 0.88rem; overflow-wrap: anywhere; white-space: pre-line; }
+.crm-columns { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 14px; align-items: start; }
+.crm-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.crm-list li { display: flex; justify-content: space-between; gap: 10px; align-items: center; padding: 8px 0; font-size: 0.85rem; min-width: 0; }
+.crm-list li + li { border-top: 1px solid var(--border); }
+
+/* Dialogs */
+.crm-backdrop { position: fixed; inset: 0; z-index: 1000; background: rgba(15, 18, 30, 0.5); display: grid; place-items: center; padding: 16px; overflow-y: auto; }
+.crm-dialog { width: min(560px, 100%); display: flex; flex-direction: column; gap: 12px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 14px; padding: 18px; box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25); min-width: 0; }
+.crm-dialog h3 { margin: 0; font-size: 1.1rem; font-weight: 650; }
+.crm-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; }
+.crm-form label { display: flex; flex-direction: column; gap: 4px; font-size: 0.8rem; font-weight: 600; color: var(--text-muted); min-width: 0; }
+.crm-form .wide { grid-column: 1 / -1; }
+.crm-dialog-foot { display: flex; justify-content: flex-end; gap: 8px; }
+.req { color: var(--danger-text); }
+
+@media (max-width: 900px) { .crm-columns { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 560px) { .crm-form { grid-template-columns: 1fr; } }
+.crm-issue { margin: 0; font-size: 0.88rem; line-height: 1.5; white-space: pre-line; overflow-wrap: anywhere; }
+.crm-ticket-controls { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }

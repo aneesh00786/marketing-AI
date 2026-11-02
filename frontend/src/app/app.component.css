@@ -706,3 +706,6 @@ button.dropdown-item:disabled { opacity: 0.6; cursor: default; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 /* Marketing email approval inside the mail settings popup */
+.admin-access-banner { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; padding: 10px 14px; border-radius: 10px; border: 1px solid rgba(245, 158, 11, 0.35); background: var(--warning-soft); color: var(--warning-text); font-size: 0.86rem; }
+.admin-access-banner b { font-weight: 650; }
+.admin-access-banner .link-btn { margin-left: auto; }
