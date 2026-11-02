@@ -30,6 +30,8 @@ router.use((req, res, next) => {
 });
 
 router.get('/config', requireCapability('leads.view'), wrap(async (req, res) => res.json({ success: true, config: await svc.config(req) })));
+router.get('/recent', requireCapability('leads.view'), wrap(async (req, res) => res.json({ success: true, searches: await svc.recentSearches(req) })));
+router.post('/targets', requireCapability('leads.manage'), aiRouteLimit('leads.discoveryTargets'), wrap(async (req, res) => res.json({ success: true, ...(await svc.suggestTargets(req, req.body)) })));
 router.post('/plan', requireCapability('leads.manage'), aiRouteLimit('leads.discoveryPlan'), wrap(async (req, res) => res.json({ success: true, plan: await svc.plan(req, req.body) })));
 
 /**

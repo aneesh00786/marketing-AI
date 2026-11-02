@@ -1,4 +1,5 @@
 const express = require('express');
+const { audit } = require('../../lib/audit');
 const { z } = require('zod');
 const { requireCapability } = require('../../middleware/auth');
 const leadService = require('./leadService');
@@ -51,6 +52,14 @@ router.get('/products', requireCapability('leads.view'), wrap(async (req, res) =
 router.get('/', requireCapability('leads.view'), wrap(async (req, res) => {
   const result = await leadService.listLeads(ws(req), req.query);
   res.json({ success: true, ...result, statuses: leadService.STATUSES });
+}));
+
+// Export: every lead matching the current filters. Recorded in the audit log (personal data leaves the app).
+router.get('/export', requireCapability('leads.view'), wrap(async (req, res) => {
+  const result = await leadService.exportLeads(ws(req), req.query);
+  await audit(req, 'leads.exported', { resourceType: 'lead', metadata: { count: result.leads.length, truncated: result.truncated,
+    filters: { productId: req.query.productId || null, status: req.query.status || null, q: req.query.q ? String(req.query.q).slice(0, 100) : null } } });
+  res.json({ success: true, ...result });
 }));
 
 router.post('/', requireCapability('leads.manage'), body(z.object(leadFields)), wrap(async (req, res) => {

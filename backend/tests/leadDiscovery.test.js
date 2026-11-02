@@ -124,7 +124,7 @@ test('results are parsed and mapped; missing fields stay unavailable; the key st
   assert.deepEqual([p3.eligible, p3.ineligibleReason], [false, 'permanently_closed']);
   assert.equal(r.data.results.length, 3, 'a place without an id is dropped');
   // Region scope: after the first query, the city seen in Google's results (Kochi) is searched too.
-  assert.deepEqual(r.data.summary, { found: 3, raw: 3, repeatsAcrossQueries: 0, duplicates: 0, possibleDuplicates: 0, eligible: 2, missingContact: 1, closed: 1, requests: 2, queries: 2, requested: 10 });
+  assert.deepEqual(r.data.summary, { found: 3, raw: 3, repeatsAcrossQueries: 0, alreadyInLeads: 0, duplicates: 0, possibleDuplicates: 0, eligible: 2, missingContact: 1, closed: 1, requests: 2, queries: 2, requested: 10 });
   assert.deepEqual(r.data.queries.map(q => q.query), [r.data.run.textQuery, r.data.run.textQuery.replace(' in Kerala, India', ' in Kochi, Kerala, India')]);
   assert.equal(r.data.attribution, 'Google Maps');
   assert.match(r.data.notice, /Each Google query returns at most 60 places/);
@@ -222,7 +222,8 @@ test('duplicates: place id, phone and website domain are reliable; a name-only m
   await db().run("INSERT INTO leads (workspace_id, name, phone, email, company_name, status, created_at) VALUES (?, 'Ravi', '0484-2000701', NULL, NULL, 'New', UTC_TIMESTAMP())", [ws.workspaceId]);
   await db().run("INSERT INTO leads (workspace_id, name, email, company_name, status, created_at) VALUES (?, 'Asha', 'asha@business702.in', NULL, 'New', UTC_TIMESTAMP())", [ws.workspaceId]);
   await db().run("INSERT INTO leads (workspace_id, name, email, company_name, status, created_at) VALUES (?, 'Joe', 'joe@gmail.com', 'Business 703 Pvt Ltd', 'New', UTC_TIMESTAMP())", [ws.workspaceId]);
-  const { r } = await searchWith(ws, base({ productId: wsProduct }), [{ places: [place(701), place(702), place(703, { websiteUri: 'https://gmail.com/' }), place(704)] }]);
+  // newOnly: false shows businesses already in the leads, marked as duplicates.
+  const { r } = await searchWith(ws, base({ productId: wsProduct, newOnly: false }), [{ places: [place(701), place(702), place(703, { websiteUri: 'https://gmail.com/' }), place(704)] }]);
   const by = Object.fromEntries(r.data.results.map(x => [x.name, x]));
   assert.equal(by['Business 701'].duplicate.reason, 'phone');
   assert.equal(by['Business 702'].duplicate.reason, 'website_domain');
@@ -236,16 +237,40 @@ test('duplicates: place id, phone and website domain are reliable; a name-only m
   assert.equal(imp.status, 200, JSON.stringify(imp.data));
   assert.equal(imp.data.created.length, 2);
   assert.equal(imp.data.duplicates.length, 2);
-  const again = await searchWith(ws, base({ productId: wsProduct }), [{ places: [place(704)] }]);
+  const again = await searchWith(ws, base({ productId: wsProduct, newOnly: false }), [{ places: [place(704)] }]);
   assert.equal(again.r.data.results[0].duplicate.reason, 'place_id', 'an imported place is recognised on later searches');
 });
 
-test('import: product link, no Google content stored, safe re-import and per-record outcomes', async () => {
+test('a repeat search skips businesses already in the leads and keeps paging until it has the number of new ones', async () => {
+  const ws = await h.createWorkspace({ name: 'New only' });
+  const wsProduct = await productFor(ws);
+  const first = await searchWith(ws, base({ productId: wsProduct, businessType: 'Wholesalers', maxResults: 3 }), [{ places: [place(601), place(602), place(603)] }]);
+  assert.equal(first.r.status, 200, JSON.stringify(first.r.data));
+  const imp = await api(ws, 'POST', `/runs/${first.r.data.run.id}/import`, { placeIds: first.r.data.results.map(x => x.placeId) });
+  assert.equal(imp.data.created.length, 3);
+  // Google ranks the same way again: page 1 is the imported three plus one new; page 2 has the rest.
+  const pages = [{ places: [place(601), place(602), place(603), place(604)], nextPageToken: 'p2' }, { places: [place(605), place(606), place(607)] }];
+  const second = await searchWith(ws, base({ productId: wsProduct, businessType: 'Wholesalers', maxResults: 3, city: 'Kochi', region: 'Kerala', scope: 'city' }), pages);
+  assert.equal(second.r.status, 200, JSON.stringify(second.r.data));
+  assert.deepEqual(second.r.data.results.map(x => x.name), ['Business 604', 'Business 605', 'Business 606']);
+  assert.ok(second.r.data.results.every(x => x.eligible && !x.duplicate));
+  assert.equal(second.r.data.summary.alreadyInLeads, 3);
+  assert.equal(second.r.data.coverage.stopReason, 'reached_target');
+  assert.match(second.r.data.coverage.explanation, /3 business\(es\) already in your leads were skipped/);
+  assert.equal(second.calls.length, 2, 'a page of known businesses does not stop paging');
+  assert.equal(second.r.data.run.newOnly, true);
+});
+
+test('import: product link, the reviewed details are saved on the lead, safe re-import and per-record outcomes', async () => {
   const { r } = await searchWith(A, base({ productId: prodA, aiQualify: false, city: 'Kochi', region: 'Kerala' }), [{ places: [place(801), place(802), place(803, { businessStatus: 'CLOSED_PERMANENTLY' })] }]);
   assert.equal(r.status, 200, JSON.stringify(r.data));
   assert.equal(r.data.run.productName, 'VanSales App');
   const [a, b, c] = r.data.results.map(x => x.placeId);
-  const imp = await api(A, 'POST', `/runs/${r.data.run.id}/import`, { placeIds: [a, b, c, 'ChIJnotInThisRun12345'] });
+  // Business 801 is imported with the details the user reviewed; 802 by an older client without them.
+  const shown = r.data.results[0];
+  const details = [{ placeId: a, name: shown.name, category: shown.category, address: shown.address, phone: shown.phone, website: shown.website, googleMapsUri: shown.googleMapsUri, rating: 4.2, ratingCount: 31 },
+    { placeId: 'ChIJnotInThisRun12345', name: 'Injected', phone: '+1 555 0100' }];
+  const imp = await api(A, 'POST', `/runs/${r.data.run.id}/import`, { placeIds: [a, b, c, 'ChIJnotInThisRun12345'], details });
   assert.equal(imp.status, 200, JSON.stringify(imp.data));
   assert.deepEqual([imp.data.created.length, imp.data.skipped.length, imp.data.failed.length, imp.data.duplicates.length], [2, 1, 1, 0]);
   assert.match(imp.data.skipped[0].reason, /permanently closed/);
@@ -257,19 +282,221 @@ test('import: product link, no Google content stored, safe re-import and per-rec
     assert.equal(l.product_id, prodA, 'linked to the selected product');
     assert.equal(l.product_interest, 'VanSales App');
     assert.equal(l.status, 'Imported');
-    assert.deepEqual([l.email, l.phone, l.company_name], [null, null, null]);
-    assert.match(l.name, /^Prospect \d+: Wholesale distributors .* \(Kochi, Kerala, India\)$/);
-    const row = JSON.stringify(l);
-    for (const v of ['Business 80', 'Market Road', '+91 484', 'business80', 'maps.google.com']) assert.ok(!row.includes(v), `${v} must not be stored`);
   }
+  const full = leads.find(l => l.place_id === a);
+  assert.deepEqual([full.name, full.company_name, full.phone], ['Business 801', 'Business 801', '+91 484 2000801']);
+  for (const v of ['Category: Wholesaler', 'Address: 801 Market Road, Kochi, Kerala 682001, India', 'Website: https://business801.in/', 'Google rating: 4.2 (31 reviews)', 'Google Maps: https://maps.google.com/?cid=1801']) assert.ok(full.notes.includes(v), v);
+  const bare = leads.find(l => l.place_id === b);
+  assert.deepEqual([bare.email, bare.phone, bare.company_name], [null, null, null], 'without details nothing is invented');
+  assert.match(bare.name, /^Prospect \d+: Wholesale distributors .* \(Kochi, Kerala, India\)$/);
+  assert.ok(!JSON.stringify(await db().all('SELECT name FROM leads WHERE workspace_id = ?', [A.workspaceId])).includes('Injected'), 'details for places outside the search are ignored');
   const again = await api(A, 'POST', `/runs/${r.data.run.id}/import`, { placeIds: [a] });
   assert.deepEqual([again.data.created.length, again.data.duplicates.length], [0, 1]);
   assert.match(again.data.duplicates[0].reason, /Already imported/);
+  const badUrl = await api(A, 'POST', `/runs/${r.data.run.id}/import`, { placeIds: [a], details: [{ placeId: a, website: 'javascript:alert(1)' }] });
+  assert.equal(badUrl.status, 400, 'only web addresses are accepted as websites');
 
   // Imported leads appear in the existing Leads CRM, flagged as Google Places leads.
   const list = await h.api('GET', '/api/v1/leads?limit=200', { token: A.token });
   const flagged = list.data.leads.filter(l => l.googlePlace).map(l => l.id);
   assert.ok(leads.every(l => flagged.includes(l.id)));
+});
+
+const fitReply = req => JSON.stringify({ results: [...new Set([...JSON.stringify(req).matchAll(/ChIJplace\d{4}abcdef/g)].map(m => m[0]))]
+  .map(placeId => ({ placeId, score: 40, confidence: 'low', evidence: 'Category is Wholesaler.', inference: true })) });
+const rateLimited = () => h.json(429, { error: { message: 'Rate limit reached on tokens per minute (TPM). Please try again in 0.01s.' } }, { 'retry-after': '0' });
+
+test('a busy AI service is waited for: product fit is retried after a rate limit', async () => {
+  let calls = 0;
+  const ai = { match: u => u.startsWith('https://api.groq.com/'), respond: (url, init) => (++calls === 1 ? rateLimited() : h.json(200, { choices: [{ message: { content: fitReply(JSON.parse(init.body)) } }] })) };
+  const { r } = await searchWith(A, base({ aiQualify: true }), [{ places: [place(951), place(952)] }], [ai]);
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.deepEqual(r.data.ai, { available: true, assessed: 2, limited: null });
+  assert.equal(calls, 2);
+});
+
+test('malformed AI JSON is asked for again: JSON mode is requested and a broken reply does not drop the batch', async () => {
+  const bodies = [];
+  const ai = { match: u => u.startsWith('https://api.groq.com/'), respond: (url, init) => {
+    const req = JSON.parse(init.body);
+    bodies.push(req);
+    if (bodies.length === 1) return h.json(400, { error: { code: 'json_validate_failed', message: 'Failed to generate JSON.' } });
+    if (bodies.length === 2) return h.json(200, { choices: [{ message: { content: '{"results":[{"placeId":"x","evidence":"says "hi""}]}' } }] });
+    return h.json(200, { choices: [{ message: { content: fitReply(req) } }] });
+  } };
+  const { r } = await searchWith(A, base({ aiQualify: true }), [{ places: [place(941), place(942)] }], [ai]);
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.deepEqual(r.data.ai, { available: true, assessed: 2, limited: null });
+  assert.equal(bodies.length, 3, 'rejected by Groq once, unparseable once, then answered');
+  assert.ok(bodies.every(b => b.response_format?.type === 'json_object'));
+});
+
+test('when the AI stays busy, businesses already assessed keep their fit and the rest are named', async () => {
+  let fitCalls = 0;
+  const ai = { match: u => u.startsWith('https://api.groq.com/'), respond: (url, init) => {
+    const req = JSON.parse(init.body);
+    if (!JSON.stringify(req).includes('ChIJplace')) return h.json(200, { choices: [{ message: { content: '{"categories":[]}' } }] });
+    return ++fitCalls === 1 ? h.json(200, { choices: [{ message: { content: fitReply(req) } }] }) : rateLimited();
+  } };
+  const many = Array.from({ length: 20 }, (_, i) => place(960 + i));
+  const { r } = await searchWith(A, base({ aiQualify: true }), [{ places: many, nextPageToken: 'next' }, { places: [place(985)] }], [ai]);
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.ai.available, true);
+  assert.equal(r.data.ai.assessed, 20);
+  assert.match(r.data.ai.limited, /assessed for 20 of 21 businesses; the AI service was busy/);
+  assert.equal(r.data.results.filter(x => x.fit).length, 20);
+  assert.equal(fitCalls, 1 + 4, 'the second batch was tried four times in all, then given up');
+});
+
+// Websites of the mocked businesses, served by a stub of the SSRF-safe page fetcher.
+const websiteContacts = require('../modules/leadDiscovery/websiteContacts');
+function stubWebsites(pages) {
+  const fetched = [];
+  const original = websiteContacts.deps.fetchText;
+  websiteContacts.deps.fetchText = async url => {
+    fetched.push(url);
+    const body = pages[url];
+    if (body === undefined) return { ok: false, status: 404, url, text: '', headers: new Headers() };
+    return { ok: true, status: 200, url, text: body, headers: new Headers({ 'content-type': url.endsWith('robots.txt') ? 'text/plain' : 'text/html' }) };
+  };
+  return { fetched, restore: () => { websiteContacts.deps.fetchText = original; } };
+}
+
+test('fields: only the chosen fields are requested from Google and returned', async () => {
+  const phoneOnly = await searchWith(A, base({ fields: ['phone'] }), [{ places: [place(931)] }]);
+  assert.equal(phoneOnly.r.status, 200, JSON.stringify(phoneOnly.r.data));
+  assert.deepEqual(phoneOnly.r.data.run.fields, ['phone']);
+  const row = phoneOnly.r.data.results[0];
+  assert.equal(row.phone, '+91 484 2000931');
+  for (const k of ['address', 'city', 'region', 'postalCode', 'website', 'email', 'contactPerson']) assert.equal(k in row, false, `${k} was not chosen`);
+  assert.equal(row.name, 'Business 931');
+  assert.match(phoneOnly.calls[0].headers['X-Goog-FieldMask'], /PhoneNumber/);
+
+  const addressOnly = await searchWith(A, base({ fields: ['address'] }), [{ places: [place(932)] }]);
+  assert.equal(addressOnly.r.status, 200);
+  assert.equal(addressOnly.r.data.run.includeContacts, false);
+  assert.doesNotMatch(addressOnly.calls[0].headers['X-Goog-FieldMask'], /websiteUri|PhoneNumber/, 'no contact-tier price without contact fields');
+  assert.equal(addressOnly.r.data.results[0].address, '932 Market Road, Kochi, Kerala 682001, India');
+  assert.equal(addressOnly.r.data.results[0].missingContact, false);
+
+  const bad = await api(A, 'POST', '/search', base({ fields: ['address', 'fax'] }));
+  assert.equal(bad.status, 400);
+
+  // Without a field list nothing is read from websites (older clients keep their behaviour).
+  const sites = stubWebsites({});
+  try {
+    const old = await searchWith(A, base(), [{ places: [place(933)] }]);
+    assert.equal(old.r.status, 200);
+    assert.deepEqual(old.r.data.run.fields, ['address', 'phone', 'website']);
+    assert.equal(sites.fetched.length, 0);
+  } finally { sites.restore(); }
+});
+
+test('email and contact person are read from the business website, respecting robots.txt, and kept on import', async () => {
+  const sites = stubWebsites({
+    'https://business921.in/robots.txt': 'User-agent: *\nDisallow: /private',
+    'https://business921.in/': '<a href="mailto:hello@gmail.com">Mail</a> <a href="mailto:Sales@Business921.in">Sales</a> <a href="/contact-us">Contact Us</a>',
+    'https://business921.in/contact-us': '<p>Contact Person: Mr. Ravi Kumar</p>',
+    'https://business922.in/robots.txt': 'User-agent: *\nDisallow: /',
+    'https://business922.in/': '<a href="mailto:owner@business922.in">x</a>',
+    'https://business924.in/': '<p>Welcome to our shop</p>'
+  });
+  let r;
+  try {
+    ({ r } = await searchWith(A, base({ fields: ['email', 'contactPerson'] }), [{ places: [place(921), place(922), place(923, { websiteUri: undefined }), place(924)] }]));
+  } finally { sites.restore(); }
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const by = Object.fromEntries(r.data.results.map(x => [x.name, x]));
+  assert.equal(by['Business 921'].email, 'sales@business921.in', 'the business\'s own domain is preferred');
+  assert.equal(by['Business 921'].contactPerson, 'Ravi Kumar');
+  assert.equal(by['Business 921'].contactSource, 'https://business921.in/contact-us');
+  assert.equal(by['Business 922'].email, null);
+  assert.equal(by['Business 922'].contactLookup, 'blocked');
+  assert.ok(!sites.fetched.includes('https://business922.in/'), 'a site that disallows robots is not read');
+  assert.equal(by['Business 923'].contactLookup, 'no_website');
+  assert.equal(by['Business 924'].contactLookup, 'not_found');
+  assert.equal(by['Business 924'].missingContact, true);
+  assert.equal('website' in by['Business 921'], false, 'website was not chosen, though it was used to find the email');
+  assert.equal(r.data.websiteLookup.checked, 3);
+  assert.equal(r.data.websiteLookup.emails, 1);
+  assert.equal(r.data.websiteLookup.contactPeople, 1);
+
+  const imp = await api(A, 'POST', `/runs/${r.data.run.id}/import`, { placeIds: [by['Business 921'].placeId, by['Business 924'].placeId] });
+  assert.equal(imp.status, 200, JSON.stringify(imp.data));
+  assert.equal(imp.data.created.length, 2);
+  const lead = await db().get('SELECT name, email, notes FROM leads WHERE id = ?', [imp.data.created.find(c => c.placeId === by['Business 921'].placeId).leadId]);
+  assert.equal(lead.email, 'sales@business921.in');
+  assert.equal(lead.name, 'Ravi Kumar', 'the contact person names the lead');
+  assert.match(lead.notes, /Contact person Ravi Kumar \(Contact Person\) and email sales@business921\.in found on the business's website \(https:\/\/business921\.in\/contact-us\)/);
+  const plain = await db().get('SELECT name, email FROM leads WHERE id = ?', [imp.data.created.find(c => c.placeId === by['Business 924'].placeId).leadId]);
+  assert.equal(plain.email, null);
+  assert.match(plain.name, /^Prospect \d+: /);
+
+  // A later search finds the same email: it is a reliable duplicate of the imported lead.
+  const again = stubWebsites({ 'https://business925.in/': '<a href="mailto:sales@business921.in">x</a>' });
+  try {
+    const second = await searchWith(A, base({ fields: ['email'] }), [{ places: [place(925)] }]);
+    assert.equal(second.r.status, 200);
+    assert.equal(second.r.data.results[0].duplicate.reason, 'email');
+    assert.equal(second.r.data.results[0].eligible, false);
+  } finally { again.restore(); }
+});
+
+test('rating, review count and map position are mapped from Google; rating needs the contact price tier', async () => {
+  const rated = place(911, { rating: 4.3, userRatingCount: 120, location: { latitude: 9.93, longitude: 76.26 } });
+  const odd = place(912, { rating: 7, userRatingCount: -1, location: { latitude: 'x' } });
+  const { r, calls } = await searchWith(A, base({ fields: ['phone'] }), [{ places: [rated, odd] }]);
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const [a, b] = r.data.results;
+  assert.deepEqual([a.rating, a.ratingCount, a.location], [4.3, 120, { lat: 9.93, lng: 76.26 }]);
+  assert.deepEqual([b.rating, b.ratingCount, b.location], [null, null, null], 'values outside what Google can return are not shown');
+  assert.match(calls[0].headers['X-Goog-FieldMask'], /places\.rating,places\.userRatingCount/);
+  assert.match(calls[0].headers['X-Goog-FieldMask'], /places\.location/);
+  const cheap = await searchWith(A, base({ fields: ['address'] }), [{ places: [place(913)] }]);
+  assert.doesNotMatch(cheap.calls[0].headers['X-Goog-FieldMask'], /rating/);
+});
+
+test('"who should I target?" suggests business types for the product, and says so when AI is busy', async () => {
+  const ai = h.groqRoute(() => JSON.stringify({ targets: [
+    { businessType: 'FMCG distributors', why: 'Field sales teams book orders.' },
+    { businessType: 'Wholesale grocers in Kochi', why: 'has a location, dropped' },
+    { businessType: 'Supermarkets', why: 'Buy from distributors.' }
+  ] }));
+  const mock = h.mockFetch([ai]);
+  let r;
+  try { r = await api(A, 'POST', '/targets', { productId: prodA }); } finally { mock.restore(); }
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.deepEqual(r.data.targets, [{ businessType: 'FMCG distributors', why: 'Field sales teams book orders.' }, { businessType: 'Supermarkets', why: 'Buy from distributors.' }]);
+  assert.equal(r.data.ai.available, true);
+
+  const down = h.mockFetch([{ match: u => u.startsWith('https://api.groq.com/'), respond: () => h.json(500, {}) }]);
+  try { r = await api(A, 'POST', '/targets', { productId: prodA }); } finally { down.restore(); }
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.data.targets, []);
+  assert.equal(r.data.ai.available, false);
+
+  const other = await api(A, 'POST', '/targets', { productId: prodB });
+  assert.ok([400, 404].includes(other.status), 'another workspace\'s product is refused');
+  assert.equal(other.data.targets, undefined);
+});
+
+test('recent searches list the user\'s own settings (no Google content), newest first, one per distinct search', async () => {
+  const ws = await h.createWorkspace({ name: 'Recent' });
+  const wsProduct = await productFor(ws);
+  const s1 = { productId: wsProduct, businessType: 'Bakeries', city: 'Kochi', region: 'Kerala', scope: 'city', fields: ['phone', 'email'] };
+  await searchWith(ws, base(s1), [{ places: [place(891)] }]);
+  await searchWith(ws, base({ productId: wsProduct, businessType: 'Florists' }), [{ places: [place(892)] }]);
+  // The same search typed differently ("florists", other fields) is listed once: the newest.
+  await searchWith(ws, base({ productId: wsProduct, businessType: 'florists ', fields: ['address'] }), [{ places: [place(893)] }]);
+  const r = await api(ws, 'GET', '/recent');
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.deepEqual(r.data.searches.map(x => x.search.businessType), ['florists', 'Bakeries']);
+  const bakery = r.data.searches[1];
+  assert.deepEqual([bakery.search.city, bakery.search.region, bakery.search.scope, bakery.search.fields, bakery.found], ['Kochi', 'Kerala', 'city', ['phone', 'email'], 1]);
+  assert.equal(bakery.productName, 'Route Planner');
+  assert.ok(!JSON.stringify(r.data).includes('Business 891'), 'no business details are kept');
+  const others = await api(A, 'GET', '/recent');
+  assert.ok(!others.data.searches.some(x => x.search.businessType === 'Bakeries'), 'only this workspace\'s searches');
 });
 
 test('product-aware AI fit is evidence-based, shown for review only, and optional', async () => {

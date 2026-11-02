@@ -33,6 +33,38 @@ function cleanCategories(list, max) {
   return out;
 }
 
+const targetSchema = z.object({
+  targets: z.array(z.object({ businessType: z.string().max(80), why: z.string().max(200) })).max(10)
+});
+
+/**
+ * "Who should I target?": kinds of businesses that could buy the product, from the product's own
+ * description and audience. Returns { targets: [{ businessType, why }], ai } and never invents a
+ * list without AI.
+ */
+async function suggestTargets(workspaceId, product, max = 5) {
+  const prompt = `A sales team sells this product and wants to find customers on Google Maps:
+${untrusted('product', JSON.stringify(productFacts(product)), 2000)}
+List up to ${max} specific KINDS OF BUSINESSES that are likely customers, phrased the way businesses are listed on Google Maps (e.g. "wholesale distributors", "supermarkets").
+Rules:
+- Only kinds of businesses (no locations, no company names, no job titles).
+- Each "why" is one short sentence linking it to the product's stated audience or features.
+- Do not include businesses that sell the same kind of product.
+Return JSON: {"targets":[{"businessType":"...","why":"..."}]}`;
+  try {
+    const { data } = await generateStructured({
+      workspaceId, prompt, schema: targetSchema, referenceType: 'lead_discovery_targets', maxTokens: 600, excludeProviders: LEADS_AI_EXCLUDE,
+      system: 'You are a B2B go-to-market analyst. Be specific and never invent facts about the product.'
+    });
+    const names = cleanCategories(data.targets.map(t => t.businessType), max);
+    const why = new Map(data.targets.map(t => [keyOf(t.businessType), t.why]));
+    return { targets: names.map(n => ({ businessType: n, why: why.get(keyOf(n)) || null })), ai: { available: true } };
+  } catch (err) {
+    if (!(err instanceof AiUnavailableError) && err.code !== 'QUOTA_EXCEEDED') throw err;
+    return { targets: [], ai: { available: false, reason: err.code === 'QUOTA_EXCEEDED' ? 'Monthly AI limit reached.' : 'AI is busy or unavailable right now. Try again in a minute, or type a business type yourself.' } };
+  }
+}
+
 const suggestionSchema = z.object({
   categories: z.array(z.object({ name: z.string().max(80), why: z.string().max(200) })).max(20)
 });
@@ -109,4 +141,4 @@ function subLocations(places, { scope, region, countryCode }, max) {
   return [...counts.values()].sort((a, b) => b.n - a.n || a.name.localeCompare(b.name)).slice(0, max).map(x => x.name);
 }
 
-module.exports = { suggestCategories, cleanCategories, subLocations };
+module.exports = { suggestCategories, cleanCategories, subLocations, suggestTargets };

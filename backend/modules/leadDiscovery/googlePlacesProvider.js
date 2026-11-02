@@ -18,10 +18,11 @@ const PAGE_SIZE = 20;
 const GOOGLE_MAX_RESULTS = 60;
 
 const SEARCH_FIELDS = ['places.id', 'places.displayName', 'places.formattedAddress', 'places.addressComponents', 'places.types',
-  'places.primaryType', 'places.primaryTypeDisplayName', 'places.businessStatus', 'places.googleMapsUri', 'nextPageToken'];
-const CONTACT_FIELDS = ['places.nationalPhoneNumber', 'places.internationalPhoneNumber', 'places.websiteUri'];
+  'places.primaryType', 'places.primaryTypeDisplayName', 'places.businessStatus', 'places.googleMapsUri', 'places.location', 'nextPageToken'];
+// Rating and review count are in the same (Enterprise) price tier as phone and website.
+const CONTACT_FIELDS = ['places.nationalPhoneNumber', 'places.internationalPhoneNumber', 'places.websiteUri', 'places.rating', 'places.userRatingCount'];
 const DETAIL_FIELDS = ['id', 'displayName', 'formattedAddress', 'addressComponents', 'types', 'primaryTypeDisplayName', 'businessStatus',
-  'googleMapsUri', 'nationalPhoneNumber', 'internationalPhoneNumber', 'websiteUri'];
+  'googleMapsUri', 'nationalPhoneNumber', 'internationalPhoneNumber', 'websiteUri', 'rating', 'userRatingCount', 'location'];
 
 const timeoutMs = () => parseInt(process.env.PLACES_TIMEOUT_MS || '10000', 10);
 const isConfigured = () => !!process.env.GOOGLE_PLACES_API_KEY;
@@ -116,7 +117,10 @@ function mapPlace(p) {
     phone: str(p.internationalPhoneNumber) || str(p.nationalPhoneNumber),
     website,
     googleMapsUri: str(p.googleMapsUri),
-    businessStatus: str(p.businessStatus)
+    businessStatus: str(p.businessStatus),
+    rating: Number.isFinite(p.rating) && p.rating >= 0 && p.rating <= 5 ? p.rating : null,
+    ratingCount: Number.isInteger(p.userRatingCount) && p.userRatingCount >= 0 ? p.userRatingCount : null,
+    location: Number.isFinite(p.location?.latitude) && Number.isFinite(p.location?.longitude) ? { lat: p.location.latitude, lng: p.location.longitude } : null
   };
 }
 

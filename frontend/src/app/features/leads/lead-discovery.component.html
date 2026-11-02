@@ -4,15 +4,37 @@
       <h3>🔎 AI Lead Discovery</h3>
       <p class="muted">Search Google Places for real businesses, review the results, then import the ones you choose into the Leads tab.</p>
     </div>
+    <button type="button" class="btn btn-secondary btn-sm" *ngIf="recent.length" (click)="recentOpen = true" [disabled]="phase === 'searching'">🕘 Recent searches ({{ recent.length }})</button>
   </div>
 
   <div class="note warn" *ngIf="config && !config.configured">
     Google Places is not set up on the server. An administrator needs to add <code>GOOGLE_PLACES_API_KEY</code> (Places API (New) enabled).
   </div>
 
+  <div class="recent-modal-backdrop" *ngIf="recentOpen" (click)="recentOpen = false">
+    <div class="recent-modal" role="dialog" aria-modal="true" aria-labelledby="recent-title" (click)="$event.stopPropagation()" (keydown.escape)="recentOpen = false">
+      <div class="recent-modal-head">
+        <h4 id="recent-title">Recent searches</h4>
+        <button type="button" class="icon-close" (click)="recentOpen = false" aria-label="Close">✕</button>
+      </div>
+      <p class="muted small">Use a search's settings, or run it again for businesses you have not imported yet.</p>
+      <div class="recent-row" *ngFor="let r of recent">
+        <div class="recent-text">{{ recentLabel(r) }}<div class="muted small">{{ r.found }} found, {{ r.imported }} imported<ng-container *ngIf="r.productName"> · {{ r.productName }}</ng-container> · {{ r.createdAt | date:'d MMM, h:mm a' }}</div></div>
+        <button type="button" class="btn btn-secondary btn-sm" (click)="useRecent(r); recentOpen = false">Use settings</button>
+        <button type="button" class="btn btn-primary btn-sm" (click)="recentOpen = false; useRecent(r, true)" [disabled]="!config?.configured" title="Runs it again for new businesses only">Search again</button>
+      </div>
+    </div>
+  </div>
+
   <form class="discovery-form" (ngSubmit)="search()">
+    <label>Target product *
+      <select class="hud-input" name="productId" [(ngModel)]="form.productId" required>
+        <option value="" disabled>{{ products.length ? 'Select a product…' : 'No products yet' }}</option>
+        <option *ngFor="let p of products" [value]="p.id">{{ p.name }}</option>
+      </select>
+    </label>
     <label>Business type or industry *
-      <input class="hud-input" name="businessType" [(ngModel)]="form.businessType" maxlength="120" required placeholder="e.g. Wholesale distributors" />
+      <input id="business-type" class="hud-input" name="businessType" [(ngModel)]="form.businessType" maxlength="120" required placeholder="e.g. Wholesale distributors" />
     </label>
     <div class="field">
       <label for="country-search">Country *</label>
@@ -40,40 +62,41 @@
       </select>
     </label>
     <label *ngIf="form.scope !== 'country'">State or region{{ form.scope === 'region' ? ' *' : '' }}
-      <input class="hud-input" name="region" [(ngModel)]="form.region" maxlength="80" [placeholder]="form.scope === 'region' ? 'e.g. Kerala' : 'optional, helps Google'" />
+      <input class="hud-input" name="region" [(ngModel)]="form.region" list="region-options" autocomplete="off" maxlength="80" [placeholder]="form.scope === 'region' ? 'e.g. Kerala' : 'optional, helps Google'" />
     </label>
+    <datalist id="region-options"><option *ngFor="let r of regionOptions" [value]="r"></option></datalist>
     <label *ngIf="form.scope === 'city'">City *
       <input class="hud-input" name="city" [(ngModel)]="form.city" maxlength="80" placeholder="e.g. Kochi" />
     </label>
-    <label>Extra keywords
-      <input class="hud-input" name="keywords" [(ngModel)]="form.keywords" maxlength="200" placeholder="optional, e.g. FMCG" />
-    </label>
-    <label>Target product *
-      <select class="hud-input" name="productId" [(ngModel)]="form.productId" required>
-        <option value="" disabled>{{ products.length ? 'Select a product…' : 'No products yet' }}</option>
-        <option *ngFor="let p of products" [value]="p.id">{{ p.name }}</option>
+    <label>Number of businesses
+      <select class="hud-input" name="maxResults" [ngModel]="form.maxResults" (ngModelChange)="onTargetChange($event)">
+        <option *ngFor="let n of targetOptions" [ngValue]="n">{{ n }} businesses</option>
       </select>
     </label>
-    <label>Target unique businesses
-      <input class="hud-input" type="number" name="maxResults" [(ngModel)]="form.maxResults" min="1" [max]="config?.maxResults || 300" />
-    </label>
-    <label>Google request budget
-      <input class="hud-input" type="number" name="maxRequests" [(ngModel)]="form.maxRequests" min="1" [max]="config?.maxRequests || 20" />
-    </label>
-    <div class="budget-line" *ngIf="config">
-      Up to {{ budgetInfo.maxPlaces }} places before duplicates (20 per request) · estimated cost at most ${{ budgetInfo.maxCost.toFixed(2) }}
-      ({{ form.includeContacts ? config.pricePer1000.withContacts : config.pricePer1000.withoutContacts }} USD per 1,000 requests, before Google's free monthly usage)
-      · {{ dailyRequestsLeft }} of {{ config.dailyRequestLimit }} requests left today
-      <div class="warn-text" *ngIf="budgetInfo.shortfall">A target of {{ form.maxResults }} is more than {{ form.maxRequests }} request(s) can return. Raise the budget or lower the target.</div>
-    </div>
-    <div class="checks">
-      <label class="check"><input type="checkbox" name="expandCategories" [(ngModel)]="form.expandCategories" /> Also search related business categories (AI suggests them)</label>
-      <label class="check"><input type="checkbox" name="includeContacts" [(ngModel)]="form.includeContacts" /> Include phone and website (higher Google price tier)</label>
-      <label class="check"><input type="checkbox" name="aiQualify" [(ngModel)]="form.aiQualify" /> Assess product fit with AI</label>
-      <label class="check"><input type="checkbox" name="review" [(ngModel)]="form.review" /> Review results before importing</label>
-    </div>
+    <label class="check new-only"><input type="checkbox" name="newOnly" [(ngModel)]="form.newOnly" /> Only new businesses: skip the ones already in your leads, so the number above is all new</label>
+    <fieldset class="field-picks">
+      <legend>Details to collect</legend>
+      <label class="check" *ngFor="let f of fieldChoices" [title]="f.hint"><input type="checkbox" [name]="'field-' + f.key" [attr.name]="'field-' + f.key" [(ngModel)]="form.fields[f.key]" /> {{ f.label }}</label>
+      <p class="muted small">Business name and category are always included. Phone, website, email and contact person use Google's higher price tier.<ng-container *ngIf="readsWebsites"> Email and contact person are read from each business's own website, when it publishes them, which makes the search take longer.</ng-container></p>
+    </fieldset>
+    <div class="budget-line" *ngIf="config">Costs at most ${{ maxCost.toFixed(2) }}, before Google's free monthly usage · {{ dailyRequestsLeft }} of {{ config.dailyRequestLimit }} Google requests left today</div>
+    <section class="more-options" aria-labelledby="more-options-title">
+      <h3 id="more-options-title" class="more-title">More options</h3>
+      <div class="more-body">
+        <label>Extra keywords
+          <input class="hud-input" name="keywords" [(ngModel)]="form.keywords" maxlength="200" placeholder="optional, e.g. FMCG" />
+        </label>
+        <div class="checks">
+          <label class="check"><input type="checkbox" name="expandCategories" [(ngModel)]="form.expandCategories" /> Also search related business categories (AI suggests them)</label>
+          <label class="check"><input type="checkbox" name="aiQualify" [(ngModel)]="form.aiQualify" /> Assess product fit with AI</label>
+          <label class="check"><input type="checkbox" name="review" [(ngModel)]="form.review" /> Review results before importing</label>
+        </div>
+        <p class="muted small">Each Google query returns at most 60 places, so a search runs several distinct queries (related categories, then the states or cities where results are) until it reaches your number of businesses or its cost limit. Results are limited by Google's coverage and ranking; they are never every business in an area.</p>
+      </div>
+    </section>
     <div class="form-actions">
-      <button class="btn btn-primary" type="submit" [disabled]="!canSearch">{{ phase === 'searching' ? 'Searching…' : 'Search businesses' }}</button>
+      <button class="btn btn-primary" type="submit" [disabled]="!canSearch">{{ phase === 'searching' ? 'Searching…' : 'Search ' + form.maxResults + ' businesses' }}</button>
+      <span class="muted small" *ngIf="config && phase !== 'searching'">Takes {{ estimateText }} · up to ${{ maxCost.toFixed(2) }}</span>
       <button class="btn btn-secondary" type="button" (click)="previewPlan()" [disabled]="!!searchBlockedReason || planning || phase === 'searching'">{{ planning ? 'Planning…' : 'Preview search plan' }}</button>
       <button class="btn btn-secondary" type="button" *ngIf="phase === 'searching'" (click)="cancelSearch()">Cancel</button>
       <span class="muted small" *ngIf="config && config.configured && searchBlockedReason">{{ searchBlockedReason }}</span>
@@ -81,7 +104,6 @@
     </div>
   </form>
 
-  <p class="muted small">Each Google query returns at most 60 places, so a search runs several distinct queries (related categories, then the states or cities where results are) until it reaches your target or its request budget. Results are limited by Google's coverage and ranking; they are never every business in an area.</p>
 
   <div class="plan" *ngIf="plan && planIsCurrent">
     <div><b>Search plan</b> · {{ plan.location }}</div>
@@ -106,8 +128,27 @@
       <span><b>{{ progress.requests }}</b> of {{ progress.maxRequests }} requests ({{ progress.maxRequests - progress.requests }} left)</span>
       <span><b>{{ progress.unique }}</b> of {{ progress.target }} unique businesses</span>
       <span><b>{{ progress.repeats }}</b> repeats skipped</span>
+      <span *ngIf="progress.alreadyInLeads"><b>{{ progress.alreadyInLeads }}</b> already in your leads skipped</span>
     </div>
     <div class="bar" *ngIf="progress.maxRequests"><span [style.width.%]="progress.requests / progress.maxRequests * 100"></span></div>
+  </div>
+  <div class="live" *ngIf="phase === 'searching' && liveRows.length">
+    <div class="muted small">Found so far: {{ liveRows.length }}. Duplicate checks{{ readsWebsites ? ', email' : '' }}{{ form.aiQualify ? ' and AI fit' : '' }} are added when the search finishes.</div>
+    <div class="table-wrap">
+      <table class="tbl results-tbl">
+        <thead><tr><th class="sl-cell">#</th><th>Business</th><th *ngIf="form.fields['email']">Email</th><th *ngIf="form.fields['contactPerson']">Contact person</th><th *ngIf="form.fields['address']">Address</th><th *ngIf="form.fields['phone']">Phone</th></tr></thead>
+        <tbody>
+          <tr *ngFor="let x of liveRows.slice(-50).reverse(); let i = index">
+            <td class="sl-cell" data-label="No.">{{ liveRows.length - i }}</td>
+            <td class="biz-cell"><strong>{{ x.name || 'Name not provided' }}</strong><div class="muted small">{{ x.category }}<ng-container *ngIf="x.rating != null"> · ★ {{ x.rating }} ({{ x.ratingCount || 0 }})</ng-container></div></td>
+            <td *ngIf="form.fields['email']" data-label="Email"><span class="one-line">{{ x.email || (x.contactLookup ? '—' : '…') }}</span></td>
+            <td *ngIf="form.fields['contactPerson']" data-label="Contact person">{{ x.contactPerson || (x.contactLookup ? '—' : '…') }}</td>
+            <td *ngIf="form.fields['address']" data-label="Address" class="address-cell">{{ x.address || '—' }}</td>
+            <td *ngIf="form.fields['phone']" data-label="Phone"><span class="one-line">{{ x.phone || '—' }}</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   </div>
   <div class="note error" *ngIf="error" role="alert">{{ error }}</div>
 
@@ -116,9 +157,10 @@
       <div><b>{{ data.summary.found }}</b><span>unique businesses</span></div>
       <div><b>{{ data.summary.raw }}</b><span>raw results ({{ data.summary.repeatsAcrossQueries }} repeats)</span></div>
       <div><b>{{ data.summary.eligible }}</b><span>eligible to import</span></div>
+      <div *ngIf="data.run.newOnly"><b>{{ data.summary.alreadyInLeads || 0 }}</b><span>already in your leads (skipped)</span></div>
       <div><b>{{ data.summary.duplicates }}</b><span>duplicates</span></div>
       <div><b>{{ data.summary.possibleDuplicates }}</b><span>possible duplicates</span></div>
-      <div><b>{{ data.summary.missingContact }}</b><span>no phone or website</span></div>
+      <div *ngIf="data.run.includeContacts"><b>{{ data.summary.missingContact }}</b><span>{{ missingContactLabel }}</span></div>
       <div><b>{{ data.summary.closed }}</b><span>excluded (closed)</span></div>
     </div>
     <p class="muted small">{{ data.summary.queries }} queries · {{ data.coverage.requestsUsed }} of {{ data.coverage.allowedRequests }} Google requests used ({{ stopText(data.coverage.stopReason) }}) · estimated cost ${{ data.coverage.estimatedCostUsd.toFixed(2) }} · imported leads will be linked to <b>{{ data.run.productName }}</b></p>
@@ -126,6 +168,7 @@
     <div class="note warn" *ngIf="data.partial">{{ data.partial.message }}</div>
     <div class="note warn" *ngIf="data.coverage.planAi && !data.coverage.planAi.available">{{ data.coverage.planAi.reason }}</div>
     <div class="note warn" *ngIf="data.ai?.limited">{{ data.ai.limited }}</div>
+    <div class="note" *ngIf="data.websiteLookup">Websites read: {{ data.websiteLookup.checked }}<ng-container *ngIf="shows('email')"> · email found for {{ data.websiteLookup.emails }}</ng-container><ng-container *ngIf="shows('contactPerson')"> · contact person found for {{ data.websiteLookup.contactPeople }}</ng-container><ng-container *ngIf="data.websiteLookup.withoutWebsite"> · {{ data.websiteLookup.withoutWebsite }} without a website</ng-container><ng-container *ngIf="data.websiteLookup.unreachable"> · {{ data.websiteLookup.unreachable }} could not be read</ng-container><ng-container *ngIf="data.websiteLookup.blocked"> · {{ data.websiteLookup.blocked }} do not allow reading</ng-container>. Only details the business publishes are shown; nothing is guessed.<ng-container *ngIf="data.websiteLookup.limited"> {{ data.websiteLookup.limited }}</ng-container></div>
     <div class="muted small">Categories searched ({{ data.coverage.categoriesFrom === 'ai' ? 'suggested by AI' : data.coverage.categoriesFrom === 'you' ? 'chosen by you' : 'your business type' }}): {{ data.coverage.categories.join(' · ') }}
       <button type="button" class="link-btn" (click)="showQueries = !showQueries">{{ showQueries ? 'Hide' : 'Show' }} queries</button></div>
     <div class="table-wrap" *ngIf="showQueries">
@@ -142,44 +185,89 @@
     </div>
     <div class="note warn" *ngIf="data.ai && !data.ai.available">{{ data.ai.reason }}</div>
 
+    <div class="filters" role="group" aria-label="Filter results">
+      <input class="hud-input sm" name="filterText" [(ngModel)]="filters.text" (ngModelChange)="onFilterChange()" placeholder="Filter by name, category…" aria-label="Filter by text" />
+      <label class="check" *ngIf="shows('email')"><input type="checkbox" name="hasEmail" [(ngModel)]="filters.hasEmail" (ngModelChange)="onFilterChange()" /> Has email</label>
+      <label class="check" *ngIf="shows('phone')"><input type="checkbox" name="hasPhone" [(ngModel)]="filters.hasPhone" (ngModelChange)="onFilterChange()" /> Has phone</label>
+      <label class="check"><input type="checkbox" name="onlyEligible" [(ngModel)]="onlyEligible" (ngModelChange)="onFilterChange()" /> Eligible only</label>
+      <select class="hud-input sm" name="minFit" *ngIf="hasFit" [(ngModel)]="filters.minFit" (ngModelChange)="onFilterChange()" aria-label="Minimum AI fit">
+        <option [ngValue]="0">Any AI fit</option><option [ngValue]="40">Fit 40+</option><option [ngValue]="60">Fit 60+</option><option [ngValue]="75">Fit 75+</option>
+      </select>
+      <select class="hud-input sm" name="minRating" *ngIf="hasRatings" [(ngModel)]="filters.minRating" (ngModelChange)="onFilterChange()" aria-label="Minimum rating">
+        <option [ngValue]="0">Any rating</option><option [ngValue]="3.5">★ 3.5+</option><option [ngValue]="4">★ 4.0+</option><option [ngValue]="4.5">★ 4.5+</option>
+      </select>
+      <select class="hud-input sm" name="city" *ngIf="cityOptions.length > 1" [(ngModel)]="filters.city" (ngModelChange)="onFilterChange()" aria-label="City">
+        <option value="">All cities</option><option *ngFor="let c of cityOptions" [value]="c">{{ c }}</option>
+      </select>
+      <select class="hud-input sm" name="sortBy" [(ngModel)]="sortBy" (ngModelChange)="onFilterChange()" aria-label="Sort by">
+        <option value="best">Sort: as found</option>
+        <option value="fit" *ngIf="hasFit">Sort: best AI fit</option>
+        <option value="rating" *ngIf="hasRatings">Sort: highest rating</option>
+        <option value="reviews" *ngIf="hasRatings">Sort: most reviews</option>
+        <option value="name">Sort: name A–Z</option>
+      </select>
+      <button type="button" class="link-btn" *ngIf="filtersActive" (click)="resetFilters(); onFilterChange()">Clear filters</button>
+      <span class="grow"></span>
+      <span class="muted small">Showing {{ visible.length }} of {{ data.results.length }}</span>
+      <div class="view-toggle" *ngIf="mappable" role="group" aria-label="View">
+        <button type="button" class="btn btn-sm" [class.btn-primary]="view === 'table'" [class.btn-secondary]="view !== 'table'" (click)="view = 'table'">Table</button>
+        <button type="button" class="btn btn-sm" [class.btn-primary]="view === 'map'" [class.btn-secondary]="view !== 'map'" (click)="showMap()">Map</button>
+      </div>
+    </div>
+
     <div class="toolbar">
-      <button class="btn btn-secondary btn-sm" (click)="selectAllEligible()" type="button">Select all eligible</button>
+      <button class="btn btn-secondary btn-sm" (click)="selectAllEligible()" type="button">{{ filtersActive ? 'Select shown eligible' : 'Select all eligible' }}</button>
       <button class="btn btn-secondary btn-sm" (click)="clearSelection()" type="button">Clear selection</button>
-      <label class="check"><input type="checkbox" [(ngModel)]="onlyEligible" (change)="page = 1" /> Show eligible only</label>
       <span class="grow"></span>
       <button class="btn btn-primary" type="button" (click)="importSelected()" [disabled]="!selected.size || phase === 'importing'" [title]="'Imported leads are linked to ' + data.run.productName">Import {{ selected.size }} selected for {{ data.run.productName }}</button>
     </div>
 
-    <div class="table-wrap">
-      <table class="tbl">
+    <div class="map-wrap" *ngIf="view === 'map'">
+      <div class="note" *ngIf="mapNote">{{ mapNote }}</div>
+      <div #mapEl class="map" *ngIf="config?.mapsBrowserKey" aria-label="Map of the results"></div>
+    </div>
+    <div class="table-wrap" *ngIf="view === 'table'">
+      <table class="tbl results-tbl">
         <thead>
           <tr>
-            <th></th><th>Business</th><th>Address</th><th>Phone</th><th>Website</th><th>Duplicate check</th><th>Fit for {{ data.run.productName }} (AI)</th>
+            <th class="freeze freeze-1"></th><th class="sl-cell freeze freeze-2">#</th><th class="freeze freeze-3 freeze-edge">Business</th><th *ngIf="shows('contactPerson')">Contact person</th><th *ngIf="shows('email')">Email</th><th *ngIf="shows('address')">Address</th><th *ngIf="shows('phone')">Phone</th><th *ngIf="shows('website')">Website</th><th>Duplicate check</th><th>Fit for {{ data.run.productName }} (AI)</th>
           </tr>
         </thead>
         <tbody>
-          <tr *ngFor="let x of pageRows" [class.dim]="!x.eligible">
-            <td><input type="checkbox" [checked]="selected.has(x.placeId)" [disabled]="!x.eligible" (change)="toggle(x)" [attr.aria-label]="'Select ' + (x.name || 'business')" /></td>
-            <td>
+          <tr *ngFor="let x of pageRows; let i = index" [class.dim]="!x.eligible">
+            <td class="pick-cell freeze freeze-1"><input type="checkbox" [checked]="selected.has(x.placeId)" [disabled]="!x.eligible" (change)="toggle(x)" [attr.aria-label]="'Select ' + (x.name || 'business')" /></td>
+            <td class="sl-cell freeze freeze-2" data-label="No.">{{ (page - 1) * pageSize + i + 1 }}</td>
+            <td class="biz-cell freeze freeze-3 freeze-edge">
               <strong>{{ x.name || 'Name not provided by Google' }}</strong>
               <div class="muted small">{{ x.category || 'Category not provided' }}</div>
+              <div class="rating small" *ngIf="x.rating != null">★ {{ x.rating }} <span class="muted">({{ x.ratingCount || 0 }} reviews)</span></div>
               <div class="tag closed" *ngIf="x.ineligibleReason === 'permanently_closed'">Permanently closed</div>
               <div class="tag ok" *ngIf="x.ineligibleReason === 'imported'">Imported to Leads</div>
-            </td>
-            <td>{{ x.address || '—' }}<div class="muted small" *ngIf="!x.address">Not provided by Google</div></td>
-            <td>{{ x.phone || '—' }}<app-call-button [phone]="x.phone" [name]="x.name"></app-call-button><div class="muted small" *ngIf="!x.phone && data.run.includeContacts">Not provided by Google</div><div class="muted small" *ngIf="!data.run.includeContacts">Not requested</div></td>
-            <td>
-              <a *ngIf="x.website" [href]="x.website" target="_blank" rel="noopener noreferrer">{{ x.website }}</a>
-              <span *ngIf="!x.website">—</span><div class="muted small" *ngIf="!x.website && data.run.includeContacts">Not provided by Google</div>
               <div><a *ngIf="x.googleMapsUri" [href]="x.googleMapsUri" target="_blank" rel="noopener noreferrer" class="small">Open in Google Maps</a></div>
             </td>
-            <td>
+            <td *ngIf="shows('contactPerson')" data-label="Contact person">
+              <ng-container *ngIf="x.contactPerson">{{ x.contactPerson }}<div class="muted small" *ngIf="x.contactRole">{{ x.contactRole }}</div>
+                <div><a *ngIf="x.contactSource" [href]="x.contactSource" target="_blank" rel="noopener noreferrer" class="small">Source page</a></div></ng-container>
+              <ng-container *ngIf="!x.contactPerson">—<div class="muted small">{{ lookupText(x.contactLookup) }}</div></ng-container>
+            </td>
+            <td *ngIf="shows('email')" data-label="Email">
+              <ng-container *ngIf="x.email"><a class="one-line" [href]="'mailto:' + x.email" [title]="x.email">{{ x.email }}</a>
+                <div><a *ngIf="x.emailSource" [href]="x.emailSource" target="_blank" rel="noopener noreferrer" class="small">Source page</a></div></ng-container>
+              <ng-container *ngIf="!x.email">—<div class="muted small">{{ lookupText(x.contactLookup) }}</div></ng-container>
+            </td>
+            <td *ngIf="shows('address')" data-label="Address" class="address-cell">{{ x.address || '—' }}<div class="muted small" *ngIf="!x.address">Not provided by Google</div></td>
+            <td *ngIf="shows('phone')" data-label="Phone"><span class="one-line phone-line">{{ x.phone || '—' }}<app-call-button [phone]="x.phone" [name]="x.name"></app-call-button></span><div class="muted small" *ngIf="!x.phone">Not provided by Google</div></td>
+            <td *ngIf="shows('website')" data-label="Website">
+              <a *ngIf="x.website" class="one-line" [href]="x.website" target="_blank" rel="noopener noreferrer" [title]="x.website">{{ siteLabel(x.website) }}</a>
+              <span *ngIf="!x.website">—</span><div class="muted small" *ngIf="!x.website">Not provided by Google</div>
+            </td>
+            <td data-label="Duplicate check">
               <span class="tag dup" *ngIf="x.duplicate">{{ matchText(x) }}</span>
               <span class="tag maybe" *ngIf="x.possibleDuplicate">{{ matchText(x) }}</span>
               <span class="muted small" *ngIf="!x.duplicate && !x.possibleDuplicate">No match found</span>
-              <div class="tag maybe" *ngIf="x.missingContact">No phone or website</div>
+              <div class="tag maybe" *ngIf="x.missingContact">{{ missingContactLabel | titlecase }}</div>
             </td>
-            <td>
+            <td data-label="AI fit" class="fit-cell">
               <ng-container *ngIf="x.fit">
                 <b>{{ x.fit.score }}/100</b> · {{ x.fit.confidence }} confidence
                 <div class="tag maybe" *ngIf="x.fit.inference">Inferred, not confirmed</div>
@@ -188,16 +276,16 @@
               <span class="muted small" *ngIf="!x.fit">{{ data.ai ? 'Not assessed' : 'AI fit not requested' }}</span>
             </td>
           </tr>
-          <tr *ngIf="!pageRows.length"><td colspan="7" class="empty-state">No businesses to show.</td></tr>
+          <tr *ngIf="!pageRows.length"><td [attr.colspan]="columnCount" class="empty-state">{{ filtersActive ? 'No businesses match these filters.' : 'No businesses to show.' }}</td></tr>
         </tbody>
       </table>
     </div>
-    <div class="pager" *ngIf="pageCount > 1">
+    <div class="pager" *ngIf="pageCount > 1 && view === 'table'">
       <button class="btn btn-secondary btn-sm" type="button" (click)="page = page - 1" [disabled]="page <= 1">‹ Previous</button>
       <span>Page {{ page }} of {{ pageCount }}</span>
       <button class="btn btn-secondary btn-sm" type="button" (click)="page = page + 1" [disabled]="page >= pageCount">Next ›</button>
     </div>
-    <p class="attribution">Business data: <span class="google">Google Maps</span>. Shown for review only and not stored; imported leads show these details live from Google.</p>
+    <p class="attribution">Business data: <span class="google">Google Maps</span>. The details shown here are saved on the leads you import.<ng-container *ngIf="shows('email') || shows('contactPerson')"> Email and contact person come from each business's own website.</ng-container></p>
   </ng-container>
 
   <div class="note ok" *ngIf="outcome" role="status">

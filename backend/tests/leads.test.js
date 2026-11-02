@@ -289,3 +289,29 @@ test('mail contact picker semantics: product filter combines with name/email/com
   assert.equal(legacyLead.emailIssue, 'invalid', 'older rows with malformed emails say why');
   assert.equal(linked.data.lead.emailIssue, null);
 });
+
+test('export: every lead matching the filters (not just one page), only this workspace, and audited', async () => {
+  const ws = await h.createWorkspace({ name: 'Export' });
+  const p = await product(ws.workspaceId, 'Exported Product');
+  for (let i = 0; i < 55; i++) await create(ws.token, { name: `Export Lead ${i}`, email: `lead${i}@export.example.org`, phone: `+61 3 9000 ${String(1000 + i)}`, status: i % 2 ? 'New' : 'Contacted', productId: p });
+  await create(B.token, { name: 'Other tenant lead' });
+
+  const all = await h.api('GET', '/api/v1/leads/export', { token: ws.token });
+  assert.equal(all.status, 200, JSON.stringify(all.data));
+  assert.equal(all.data.leads.length, 55, 'more than one page of 50');
+  assert.equal(all.data.truncated, false);
+  assert.ok(all.data.leads.every(l => l.name.startsWith('Export Lead')), 'only this workspace');
+  const first = all.data.leads.find(l => l.name === 'Export Lead 0');
+  assert.deepEqual([first.email, first.phone, first.productName, first.status], ['lead0@export.example.org', '+61 3 9000 1000', 'Exported Product', 'Contacted']);
+
+  const filtered = await h.api('GET', '/api/v1/leads/export?status=New&q=Lead%201', { token: ws.token });
+  assert.ok(filtered.data.leads.length > 0);
+  assert.ok(filtered.data.leads.every(l => l.status === 'New' && l.name.includes('Lead 1')));
+
+  const logged = await h.db().get("SELECT metadata_json AS metadata FROM audit_logs WHERE workspace_id = ? AND action = 'leads.exported' ORDER BY id DESC LIMIT 1", [ws.workspaceId]);
+  assert.ok(logged, 'the export is in the audit log');
+  assert.match(String(logged.metadata), /"count":\d+/);
+
+  const anon = await h.api('GET', '/api/v1/leads/export', {});
+  assert.equal(anon.status, 401);
+});

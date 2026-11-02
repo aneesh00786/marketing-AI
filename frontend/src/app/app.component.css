@@ -178,7 +178,7 @@ code { font-family: var(--font-mono); font-size: 0.85em; }
 .tone-info { background: var(--info-soft); color: var(--info-text); }
 
 .content {
-  flex: 1; width: 100%; max-width: 1480px; margin: 0 auto;
+  flex: 1; width: 100%; margin: 0;
   padding: 24px 28px 48px;
   display: flex; flex-direction: column; gap: 20px;
   animation: fadeUp 0.25s var(--ease);
@@ -709,3 +709,52 @@ button.dropdown-item:disabled { opacity: 0.6; cursor: default; }
 .admin-access-banner { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; padding: 10px 14px; border-radius: 10px; border: 1px solid rgba(245, 158, 11, 0.35); background: var(--warning-soft); color: var(--warning-text); font-size: 0.86rem; }
 .admin-access-banner b { font-weight: 650; }
 .admin-access-banner .link-btn { margin-left: auto; }
+
+/* Leads table: emails, phones and status stay on one line; the table scrolls sideways when wide,
+   and on phones each lead becomes a card with labelled rows. */
+.leads-table .one-line { white-space: nowrap; }
+.leads-table .sl-cell { width: 1%; white-space: nowrap; color: var(--text-muted); font-variant-numeric: tabular-nums; text-align: right; }
+.leads-table .one-line a { color: var(--accent-text, var(--accent)); text-decoration: none; }
+.leads-table .one-line a:hover { text-decoration: underline; }
+.leads-table .phone-line { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.leads-table .contact-cell { min-width: 200px; }
+.leads-table .company-cell { min-width: 170px; }
+.leads-table .product-cell { min-width: 170px; }
+.leads-table th { white-space: nowrap; }
+.leads-table .actions-cell .button-group { flex-wrap: nowrap; }
+@media (max-width: 760px) {
+  .full-table { max-height: none; }
+  .leads-table thead { display: none; }
+  .leads-table, .leads-table tbody, .leads-table tr, .leads-table td { display: block; width: 100%; }
+  .leads-table tr { border-bottom: 1px solid var(--border); padding: 10px 12px; }
+  .leads-table td { border: 0; padding: 4px 0; display: flex; gap: 10px; align-items: baseline; }
+  .leads-table td[data-label]::before { content: attr(data-label); flex: 0 0 96px; font-size: 0.74rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.03em; }
+  .leads-table td.contact-cell { display: block; min-width: 0; padding-bottom: 6px; }
+  .leads-table td.sl-cell { width: auto; text-align: left; font-size: 0.78rem; }
+  .leads-table td.contact-cell::before { display: none; }
+  .leads-table .one-line { min-width: 0; }
+  .leads-table .one-line a { overflow: hidden; text-overflow: ellipsis; display: inline-block; max-width: 100%; vertical-align: bottom; }
+  .leads-table .advice-cell, .leads-table .company-cell, .leads-table .product-cell { min-width: 0; max-width: none; }
+  .leads-table .actions-cell { display: block; padding-top: 8px; }
+  .leads-table .actions-cell::before { display: none; }
+  .leads-table .actions-cell .button-group { flex-wrap: wrap; }
+  .leads-table td.empty-state { display: block; }
+  .leads-table td.empty-state::before { display: none; }
+}
+
+/* Leads table: the number and Contact columns stay in place while the table scrolls sideways. */
+@media (min-width: 761px) {
+  .leads-table .freeze { position: sticky; z-index: 2; background: var(--bg-elev); }
+  .leads-table th.freeze { z-index: 3; background: var(--surface); }
+  .leads-table .freeze-1 { left: 0; width: 52px; min-width: 52px; max-width: 52px; }
+  .leads-table .freeze-2 { left: 52px; }
+  .leads-table .freeze-edge { box-shadow: inset -1px 0 0 var(--border), 6px 0 8px -6px rgba(0, 0, 0, 0.18); }
+  .leads-table tbody tr:hover .freeze { background: var(--surface-hover); }
+}
+
+/* Leads export menu */
+.export-menu { position: relative; display: inline-block; }
+.export-options { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; min-width: 220px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 12px 30px rgba(0,0,0,.15); padding: 6px; display: flex; flex-direction: column; }
+.export-options button { text-align: left; background: none; border: 0; padding: 9px 10px; border-radius: 6px; color: var(--text); font-size: 0.86rem; cursor: pointer; }
+.export-options button:hover { background: var(--surface-hover); }
+.export-hint { padding: 6px 10px 4px; font-size: 0.74rem; color: var(--text-muted); border-top: 1px solid var(--border); margin-top: 4px; }

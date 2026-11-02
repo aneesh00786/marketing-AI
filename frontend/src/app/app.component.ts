@@ -1082,6 +1082,42 @@ export class AppComponent implements OnInit, OnDestroy {
     return { name: '', phone: '', email: '', company_name: '', estimated_budget: '', notes: '', productId: null, status: 'New' };
   }
 
+  leadExportOpen = false;
+  leadExporting = false;
+
+  /** Downloads every lead matching the current filters as Excel or CSV. */
+  exportLeads(format: 'xlsx' | 'csv'): void {
+    this.leadExportOpen = false;
+    this.leadExporting = true;
+    const params: any = {};
+    if (this.leadFilters.productId) params.productId = this.leadFilters.productId;
+    if (this.leadFilters.status) params.status = this.leadFilters.status;
+    if (this.leadFilters.q.trim()) params.q = this.leadFilters.q.trim();
+    this.apiService.exportLeads(params).subscribe({
+      next: (res) => {
+        this.leadExporting = false;
+        const rows = leadExportRows(res.leads || [], format === 'csv');
+        const sheet = XLSX.utils.json_to_sheet(rows);
+        sheet['!cols'] = Object.keys(rows[0] || {}).map(k => ({ wch: Math.min(Math.max(k.length, ...rows.map(r => String((r as any)[k] ?? '').length)) + 2, 60) }));
+        const day = new Date().toISOString().slice(0, 10);
+        if (format === 'csv') {
+          // A byte-order mark lets Excel open the file with accented names intact.
+          const blob = new Blob(['\ufeff' + XLSX.utils.sheet_to_csv(sheet)], { type: 'text/csv;charset=utf-8' });
+          downloadBlob(blob, `leads-${day}.csv`);
+        } else {
+          const wb = XLSX.utils.book_new();
+          XLSX.utils.book_append_sheet(wb, sheet, 'Leads');
+          XLSX.writeFile(wb, `leads-${day}.xlsx`);
+        }
+        this.showToast(res.truncated ? `Exported the first ${res.max} leads. Narrow the filters to export the rest.` : `Exported ${rows.length} lead(s).`);
+      },
+      error: (err) => {
+        this.leadExporting = false;
+        this.showToast(err?.error?.error || 'Export failed.');
+      }
+    });
+  }
+
   loadLeads(): void {
     this.leadsLoading = true;
     const params: any = { page: this.leadPage, limit: this.leadPageSize };
@@ -1829,4 +1865,45 @@ export class AppComponent implements OnInit, OnDestroy {
       }
     });
   }
+}
+
+/**
+ * Spreadsheet rows for a leads export. For CSV, text that a spreadsheet would run as a formula
+ * (starting with =, @, + or -) is prefixed with ' so it stays plain text; phone numbers like
+ * +61 3 9000 1000 are left as they are.
+ */
+export function leadExportRows(leads: any[], forCsv: boolean): Record<string, string | number>[] {
+  const safe = (v: any): string => {
+    const s = v === null || v === undefined ? '' : String(v);
+    if (!forCsv) return s;
+    return /^[=@\t\r]/.test(s) || (/^[+-]/.test(s) && !/^[+-][\d\s().-]+$/.test(s)) ? `'${s}` : s;
+  };
+  return leads.map((l, i) => ({
+    '#': i + 1,
+    Name: safe(l.name),
+    Company: safe(l.companyName),
+    Email: safe(l.email),
+    Phone: safe(l.phone),
+    Product: safe(l.productName),
+    Budget: safe(l.estimatedBudget),
+    Status: safe(l.status),
+    'Lead score': l.score ?? '',
+    Category: safe(l.category),
+    'Marketing consent': safe(l.marketingConsent),
+    Source: l.googlePlace ? 'AI Lead Discovery' : 'Leads CRM',
+    'AI advice': safe(l.aiSuggestion),
+    Notes: safe(l.notes),
+    Created: safe(l.createdAt ? String(l.createdAt).slice(0, 10) : '')
+  }));
+}
+
+function downloadBlob(blob: Blob, name: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

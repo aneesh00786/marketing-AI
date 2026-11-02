@@ -234,6 +234,11 @@ test('streaming search sends progress then the result; validation errors return 
   assert.equal(result.type, 'result');
   assert.equal(result.summary.found, 25);
   assert.ok(!JSON.stringify(lines).includes('test-places-key-coverage'), 'the key is never streamed');
+  // Businesses arrive while the search runs, before the final result.
+  const streamed = progress.flatMap(p => p.rows || []);
+  assert.equal(streamed.length, 25);
+  assert.deepEqual(new Set(streamed.map(x => x.placeId)), new Set(result.results.map(x => x.placeId)));
+  assert.ok(lines.findIndex(l => l.rows) < lines.length - 1);
   assert.equal(bad.status, 400);
   assert.equal(bad.data.code, 'VALIDATION_ERROR');
 });

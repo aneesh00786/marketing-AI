@@ -1,5 +1,17 @@
 const { get, all } = require('../db/database');
 
+const GROQ_MAX_ATTEMPTS = 4;
+// Groq's limits are per minute, so up to a minute of waiting lets a busy request through.
+const GROQ_MAX_WAIT_MS = 60000;
+
+/** How long Groq asks us to wait after a rate limit: its header, else its message, plus a margin. */
+function groqRetryDelayMs(res, data) {
+  const header = Number(res.headers?.get?.('retry-after'));
+  const fromMessage = Number((/try again in ([\d.]+)s/i.exec(String(data?.error?.message || '')) || [])[1]);
+  const seconds = Number.isFinite(header) && header >= 0 ? header : Number.isFinite(fromMessage) ? fromMessage : 2;
+  return Math.ceil(seconds * 1000) + 250;
+}
+
 /**
  * Universal Multi-Provider AI Inference Engine
  * Supports: Groq, OpenAI, Google Gemini, OpenRouter, Local Ollama, and Dynamic Generative Intelligence
@@ -81,26 +93,42 @@ async function generateAiResponse(prompt, systemInstruction = '', workspaceId = 
   // 3. Try Groq (Ultra-fast ~300ms latency, free tier available)
   const apiKeyGroq = process.env.GROQ_API_KEY;
   if (apiKeyGroq) {
+    // Groq retires models; the default must be one it still serves (set GROQ_MODEL to choose another).
+    const groqModel = process.env.GROQ_MODEL || 'openai/gpt-oss-20b';
+    const body = JSON.stringify({
+      model: groqModel,
+      messages: [
+        { role: 'system', content: systemInstruction || 'You are Mark, personal executive AI assistant and strategic business advisor to the founder. Be concise, elegant, and highly actionable.' },
+        { role: 'user', content: query }
+      ],
+      // Callers that parse JSON ask for Groq's JSON mode, which stops malformed JSON (e.g. an unescaped quote).
+      temperature: options.json ? 0.3 : 0.7,
+      ...(options.json ? { response_format: { type: 'json_object' } } : {}),
+      max_tokens: maxTokens || 800
+    });
     try {
-      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKeyGroq}`
-        },
-        body: JSON.stringify({
-          model: process.env.GROQ_MODEL || 'llama-3.1-8b-instant',
-          messages: [
-            { role: 'system', content: systemInstruction || 'You are Mark, personal executive AI assistant and strategic business advisor to the founder.' },
-            { role: 'user', content: query }
-          ],
-          temperature: 0.7,
-          max_tokens: maxTokens || 800
-        })
-      });
-      const data = await res.json();
-      if (data.choices?.[0]?.message?.content) {
-        return { text: data.choices[0].message.content.trim(), provider: 'Groq (Llama 3.1)' };
+      // Groq limits tokens per minute; on a busy minute it says how long to wait, so wait and try again.
+      for (let attempt = 1, waited = 0; ; attempt++) {
+        const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKeyGroq}` },
+          body
+        });
+        const data = await res.json();
+        if (data.choices?.[0]?.message?.content) {
+          return { text: data.choices[0].message.content.trim(), provider: `Groq (${groqModel})` };
+        }
+        // In JSON mode Groq rejects a reply that is not valid JSON (json_validate_failed); asking again usually succeeds.
+        const invalidJson = res.status === 400 && data.error?.code === 'json_validate_failed';
+        const wait = res.status === 429 ? groqRetryDelayMs(res, data) : invalidJson ? 0 : null;
+        if (wait !== null && attempt < GROQ_MAX_ATTEMPTS && waited + wait <= GROQ_MAX_WAIT_MS) {
+          waited += wait;
+          await new Promise(resolve => setTimeout(resolve, wait));
+          continue;
+        }
+        // Say why, so a refused key or a retired model is not silently reported as "AI unavailable".
+        console.warn(`Groq did not answer (HTTP ${res.status}, model ${groqModel}): ${String(data.error?.message || 'no reply text').slice(0, 200)}`);
+        break;
       }
     } catch (e) {
       console.warn('Groq inference skipped:', e.message);

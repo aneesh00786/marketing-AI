@@ -299,6 +299,17 @@
       </div>
       <div class="header-actions" *ngIf="leadsTab === 'crm'">
         <button class="btn btn-accent" (click)="showExcelImportModal = true; leadImportResult = null">📂 Import Excel / CSV</button>
+        <div class="export-menu">
+          <button class="btn btn-secondary" type="button" (click)="leadExportOpen = !leadExportOpen" [disabled]="leadExporting || !leadTotal" aria-haspopup="menu" [attr.aria-expanded]="leadExportOpen"
+                  [title]="leadTotal ? 'Download the ' + leadTotal + ' lead(s) that match the current filters' : 'No leads to export'">
+            {{ leadExporting ? 'Exporting…' : '⬇ Export' }}
+          </button>
+          <div class="export-options" *ngIf="leadExportOpen" role="menu">
+            <button type="button" role="menuitem" (click)="exportLeads('xlsx')">Excel (.xlsx)</button>
+            <button type="button" role="menuitem" (click)="exportLeads('csv')">CSV (.csv)</button>
+            <div class="export-hint">{{ leadTotal }} lead(s) matching the current filters</div>
+          </div>
+        </div>
         <button class="btn btn-secondary" (click)="qualifyAllLeads()" [disabled]="isQualifyingAll" title="Refresh rule-based scores and generate AI advice (up to 50 leads per run)">
           {{ isQualifyingAll ? 'Working…' : '⚡ Rescore & AI advice' }}
         </button>
@@ -328,10 +339,11 @@
     </div>
 
     <div class="table-container full-table">
-      <table class="data-table">
+      <table class="data-table leads-table">
         <thead>
           <tr>
-            <th>Contact</th>
+            <th class="sl-cell freeze freeze-1">#</th>
+            <th class="freeze freeze-2 freeze-edge">Contact</th>
             <th>Company</th>
             <th>Email</th>
             <th>Phone</th>
@@ -344,34 +356,35 @@
           </tr>
         </thead>
         <tbody>
-          <tr *ngFor="let ld of leads">
-            <td><strong>{{ ld.name }}</strong>
-              <div *ngIf="ld.googlePlace"><span class="chip" title="Found with AI Lead Discovery. Business details are shown live from Google Maps and not stored.">📍 Google Places</span></div>
+          <tr *ngFor="let ld of leads; let i = index">
+            <td class="sl-cell freeze freeze-1" data-label="No.">{{ (leadPage - 1) * leadPageSize + i + 1 }}</td>
+            <td data-label="Contact" class="contact-cell freeze freeze-2 freeze-edge"><strong>{{ ld.name }}</strong>
+              <div *ngIf="ld.googlePlace"><span class="chip" title="Found with AI Lead Discovery (Google Places). Use Live details to see Google's current listing.">📍 Google Places</span></div>
               <div class="lead-sub" *ngIf="ld.notes" [title]="ld.notes">📝 {{ ld.notes | slice:0:50 }}{{ ld.notes.length > 50 ? '…' : '' }}</div></td>
-            <td>{{ dash(ld.companyName) }}</td>
-            <td>{{ dash(ld.email) }}</td>
-            <td>{{ dash(ld.phone) }}<app-call-button [phone]="ld.phone" [name]="ld.name"></app-call-button></td>
-            <td>
+            <td data-label="Company" class="company-cell">{{ dash(ld.companyName) }}</td>
+            <td data-label="Email" class="one-line"><a *ngIf="ld.email" [href]="'mailto:' + ld.email" [title]="ld.email">{{ ld.email }}</a><ng-container *ngIf="!ld.email">—</ng-container></td>
+            <td data-label="Phone" class="one-line"><span class="phone-line">{{ dash(ld.phone) }}<app-call-button [phone]="ld.phone" [name]="ld.name"></app-call-button></span></td>
+            <td data-label="Product" class="product-cell">
               <span class="chip" *ngIf="ld.productName">{{ ld.productName }}</span>
               <span class="lead-muted" *ngIf="!ld.productName && !ld.productMissing">No product selected</span>
               <span class="lead-warn" *ngIf="ld.productMissing">Product removed</span>
               <div class="lead-warn" *ngIf="ld.productReviewNote" [title]="ld.productReviewNote">⚠ Needs product review</div>
             </td>
-            <td>{{ dash(ld.estimatedBudget) }}</td>
-            <td>{{ dash(ld.status) }}</td>
-            <td>
+            <td data-label="Budget">{{ dash(ld.estimatedBudget) }}</td>
+            <td data-label="Status" class="one-line">{{ dash(ld.status) }}</td>
+            <td data-label="Lead score">
               <div class="score-pill" *ngIf="ld.score !== null" [class.score-hot]="ld.category === 'Hot'" [class.score-warm]="ld.category === 'Warm'" [class.score-cold]="ld.category === 'Cold'"
                    [title]="scoreFactorsText(ld)">
                 {{ ld.score }}/100 · {{ ld.category || '—' }}
               </div>
               <span *ngIf="ld.score === null">—</span>
             </td>
-            <td class="advice-cell">
+            <td class="advice-cell" data-label="AI advice">
               <span class="advice-text" *ngIf="ld.aiSuggestion" [title]="ld.aiSuggestion">{{ ld.aiSuggestion }}</span>
               <span class="lead-muted" *ngIf="!ld.aiSuggestion">{{ ld.aiStatus === 'unavailable' ? 'AI unavailable' : 'No AI advice yet' }}</span>
               <div class="lead-muted" *ngIf="ld.aiSuggestion && ld.aiStatus === 'unavailable'">Last refresh: AI unavailable</div>
             </td>
-            <td>
+            <td data-label="Actions" class="actions-cell">
               <div class="button-group">
                 <button class="btn btn-secondary btn-sm" (click)="openEditLead(ld)">Edit</button>
                 <button class="btn btn-secondary btn-sm" *ngIf="ld.googlePlace" (click)="viewPlaceDetails(ld)" title="Show this business's details live from Google Maps">📍 Live details</button>
@@ -382,10 +395,10 @@
             </td>
           </tr>
           <tr *ngIf="!leadsLoading && leads.length === 0">
-            <td colspan="10" class="empty-state">No leads match. Click "📂 Import Excel / CSV" or "+ Add Lead" to get started.</td>
+            <td colspan="11" class="empty-state">No leads match. Click "📂 Import Excel / CSV" or "+ Add Lead" to get started.</td>
           </tr>
           <tr *ngIf="leadsLoading && leads.length === 0">
-            <td colspan="10" class="empty-state">Loading leads…</td>
+            <td colspan="11" class="empty-state">Loading leads…</td>
           </tr>
         </tbody>
       </table>

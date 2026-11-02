@@ -150,6 +150,11 @@ export class ApiService {
     return this.http.get(`${this.baseUrl}/leads`, { params });
   }
 
+  /** Every lead matching the filters (no paging), for export. */
+  exportLeads(params: Record<string, any> = {}): Observable<any> {
+    return this.http.get(`${this.baseUrl}/leads/export`, { params });
+  }
+
   getLeadProducts(): Observable<any> {
     return this.http.get(`${this.baseUrl}/leads/products`);
   }

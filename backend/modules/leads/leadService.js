@@ -149,7 +149,8 @@ async function selectLead() {
   LEFT JOIN digital_products p ON p.workspace_id = l.workspace_id AND p.id = l.product_id`;
 }
 
-async function listLeads(workspaceId, { productId, status, q, source, page = 1, limit = 50 } = {}) {
+/** The WHERE clause for the Leads list filters (also used by the export). */
+async function leadWhere(workspaceId, { productId, status, q, source } = {}) {
   const where = ['l.workspace_id = ?'];
   const params = [workspaceId];
   // source: 'discovery' = found with AI Lead Discovery (Google Places), 'crm' = all other leads.
@@ -170,11 +171,24 @@ async function listLeads(workspaceId, { productId, status, q, source, page = 1, 
     const like = `%${String(q).slice(0, 100)}%`;
     params.push(like, like, like, like);
   }
+  return { where, params };
+}
+
+async function listLeads(workspaceId, { productId, status, q, source, page = 1, limit = 50 } = {}) {
+  const { where, params } = await leadWhere(workspaceId, { productId, status, q, source });
   const lim = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 200);
   const pg = Math.max(parseInt(page, 10) || 1, 1);
   const rows = await all(`${await selectLead()} WHERE ${where.join(' AND ')} ORDER BY l.id DESC LIMIT ${lim} OFFSET ${(pg - 1) * lim}`, params);
   const total = await get(`SELECT COUNT(*) AS c FROM leads l WHERE ${where.join(' AND ')}`, params);
   return { leads: rows.map(present), total: Number(total?.c || 0), page: pg, limit: lim };
+}
+
+const EXPORT_MAX = 10000;
+/** Every lead matching the Leads list filters (no paging), newest first, for export. */
+async function exportLeads(workspaceId, filters = {}) {
+  const { where, params } = await leadWhere(workspaceId, filters);
+  const rows = await all(`${await selectLead()} WHERE ${where.join(' AND ')} ORDER BY l.id DESC LIMIT ${EXPORT_MAX + 1}`, params);
+  return { leads: rows.slice(0, EXPORT_MAX).map(present), truncated: rows.length > EXPORT_MAX, max: EXPORT_MAX };
 }
 
 async function requireLead(workspaceId, id) {
@@ -451,6 +465,7 @@ ${lines.map(l => (l.startsWith('A few things it does:')
 
 module.exports = {
   STATUSES,
+  exportLeads,
   LEADS_AI_EXCLUDE,
   parseBudget,
   scoreLead,
