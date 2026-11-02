@@ -3,7 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { apiRoot } from '../../core/api-base';
-import { AuthStateService } from '../../core/auth-state.service';
+import { APP_REQUEST_HEADER, AuthStateService } from '../../core/auth-state.service';
 import { CallButtonComponent } from '../../shared/calling/call-button.component';
 import { REGIONS } from './regions';
 
@@ -318,11 +318,12 @@ export class LeadDiscoveryComponent implements OnInit, OnDestroy {
       this.error = 'Your session changed in another tab. Reload this page to continue.';
       return;
     }
-    const token = this.auth.token;
     try {
+      // The session cookie goes with the request; the app header marks it as coming from the app.
       const res = await fetch(`${this.base}/search`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson', ...APP_REQUEST_HEADER },
         body: JSON.stringify(body),
         signal: this.abort.signal
       });

@@ -1,18 +1,27 @@
 import { Injectable, NgZone, OnDestroy } from '@angular/core';
 import { Subject } from 'rxjs';
 
-const TOKEN_KEY = 'tradesage_token';
+// The sign-in token lives only in an HttpOnly cookie the page cannot read. The browser keeps a
+// non-secret marker of the session (id, user, workspace) so tabs can tell when it changes.
+const SESSION_KEY = 'marketech_session';
 const USER_KEY = 'tradesage_user';
 const WORKSPACE_KEY = 'tradesage_workspace';
+// Where earlier versions kept the token itself; removed on load so it is not left behind.
+const LEGACY_TOKEN_KEY = 'tradesage_token';
+
+/** Header the app adds to its API requests (the server requires it for cookie-authenticated changes). */
+export const APP_REQUEST_HEADER = { 'X-Requested-With': 'marketech' };
+
+export interface SessionMarker { id: string | null; userId: number | string; workspaceId: number | string }
 
 /** How the shared session changed in another tab, compared with the one this tab is using. */
 export type SessionChangeKind = 'signed-out' | 'signed-in' | 'other-user' | 'switched-workspace' | 'replaced';
 
 /**
- * Holds the signed-in session. The token proves identity only; the server
+ * Holds the signed-in session. The cookie proves identity only; the server
  * resolves workspace membership and permissions on every request.
  *
- * The session is stored in localStorage, which all tabs share. Each tab keeps the session it
+ * The session marker is stored in localStorage, which all tabs share. Each tab keeps the session it
  * started with (or set itself); when another tab switches workspace, signs out or signs in, the
  * stored session no longer matches and this tab is "stale": it stops sending API requests and
  * reports the change once through sessionChanged$, so it never shows or submits data under the
@@ -23,17 +32,18 @@ export class AuthStateService implements OnDestroy {
   readonly sessionExpired$ = new Subject<void>();
   readonly sessionChanged$ = new Subject<SessionChangeKind>();
 
-  private tabToken: string | null;
+  private tabSession: string | null;
   private tabUser: any;
   private tabWorkspace: any;
   private notifiedFor: string | null | undefined = undefined;
   private readonly onStorage = (e: StorageEvent) => {
-    if (e.key === TOKEN_KEY || e.key === null) this.zone.run(() => this.checkSession());
+    if (e.key === SESSION_KEY || e.key === null) this.zone.run(() => this.checkSession());
   };
   private readonly onFocus = () => this.zone.run(() => this.checkSession());
 
   constructor(private zone: NgZone) {
-    this.tabToken = this.storedToken;
+    try { localStorage.removeItem(LEGACY_TOKEN_KEY); } catch { /* storage unavailable */ }
+    this.tabSession = this.storedSession;
     this.tabUser = this.readJson(USER_KEY);
     this.tabWorkspace = this.readJson(WORKSPACE_KEY);
     if (typeof window !== 'undefined') {
@@ -61,14 +71,9 @@ export class AuthStateService implements OnDestroy {
     try { return JSON.parse(this.read(key) || 'null'); } catch { return null; }
   }
 
-  /** The session currently stored (possibly written by another tab). */
-  private get storedToken(): string | null {
-    return this.read(TOKEN_KEY);
-  }
-
-  /** The token of the session this tab is using. */
-  get token(): string | null {
-    return this.tabToken;
+  /** The session marker currently stored (possibly written by another tab). */
+  private get storedSession(): string | null {
+    return this.read(SESSION_KEY);
   }
 
   get user(): any {
@@ -80,24 +85,18 @@ export class AuthStateService implements OnDestroy {
   }
 
   get isLoggedIn(): boolean {
-    return !!this.tabToken;
+    return !!this.tabSession;
   }
 
   /** True when another tab replaced or ended the session this tab is showing. */
   get isStale(): boolean {
-    return this.storedToken !== this.tabToken;
-  }
-
-  /** Token to send with a request from this tab, or null when the tab is stale (do not send). */
-  get requestToken(): string | null {
-    if (this.checkSession()) return null;
-    return this.tabToken;
+    return this.storedSession !== this.tabSession;
   }
 
   /** Detects a session change made elsewhere; reports it once. Returns true when stale. */
   checkSession(): boolean {
-    const stored = this.storedToken;
-    if (stored === this.tabToken) return false;
+    const stored = this.storedSession;
+    if (stored === this.tabSession) return false;
     if (this.notifiedFor !== stored) {
       this.notifiedFor = stored;
       this.sessionChanged$.next(this.describeChange(stored));
@@ -107,25 +106,26 @@ export class AuthStateService implements OnDestroy {
 
   private describeChange(stored: string | null): SessionChangeKind {
     if (!stored) return 'signed-out';
-    if (!this.tabToken) return 'signed-in';
-    // Display only: the server verifies tokens; the payload just tells user/workspace apart.
-    const mine = decodePayload(this.tabToken);
-    const theirs = decodePayload(stored);
+    if (!this.tabSession) return 'signed-in';
+    const mine = parseMarker(this.tabSession);
+    const theirs = parseMarker(stored);
     if (mine?.userId == null || theirs?.userId == null) return 'replaced';
     if (String(mine.userId) !== String(theirs.userId)) return 'other-user';
     if (String(mine.workspaceId) !== String(theirs.workspaceId)) return 'switched-workspace';
     return 'replaced';
   }
 
-  setSession(res: { token: string; user: any; workspace: any }): void {
+  /** Records a session the server just started (its cookie is already set by the response). */
+  setSession(res: { session?: SessionMarker; user: any; workspace: any }): void {
+    const marker = res.session ? JSON.stringify({ id: res.session.id ?? null, userId: res.session.userId, workspaceId: res.session.workspaceId }) : null;
     try {
-      localStorage.setItem(TOKEN_KEY, res.token);
+      if (marker) localStorage.setItem(SESSION_KEY, marker); else localStorage.removeItem(SESSION_KEY);
       localStorage.setItem(USER_KEY, JSON.stringify(res.user || null));
       localStorage.setItem(WORKSPACE_KEY, JSON.stringify(res.workspace || null));
     } catch { /* storage unavailable: session lasts for this page only */ }
-    this.tabToken = this.storedToken;
-    this.tabUser = this.tabToken ? res.user || null : null;
-    this.tabWorkspace = this.tabToken ? res.workspace || null : null;
+    this.tabSession = this.storedSession ?? marker;
+    this.tabUser = this.tabSession ? res.user || null : null;
+    this.tabWorkspace = this.tabSession ? res.workspace || null : null;
     this.notifiedFor = undefined;
   }
 
@@ -133,30 +133,24 @@ export class AuthStateService implements OnDestroy {
   clear(): void {
     if (!this.isStale) {
       try {
-        localStorage.removeItem(TOKEN_KEY);
+        localStorage.removeItem(SESSION_KEY);
         localStorage.removeItem(USER_KEY);
         localStorage.removeItem(WORKSPACE_KEY);
       } catch { /* ignore */ }
       this.notifiedFor = undefined;
     }
-    this.tabToken = null;
+    this.tabSession = null;
     this.tabUser = null;
     this.tabWorkspace = null;
   }
 
   expire(): void {
-    if (!this.tabToken) return;
+    if (!this.tabSession) return;
     this.clear();
     this.sessionExpired$.next();
   }
 }
 
-function decodePayload(token: string): any {
-  try {
-    const part = token.split('.')[1] || '';
-    const json = atob(part.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(part.length / 4) * 4, '='));
-    return JSON.parse(json);
-  } catch {
-    return null;
-  }
+function parseMarker(marker: string): any {
+  try { return JSON.parse(marker); } catch { return null; }
 }

@@ -58,7 +58,7 @@ export class AppComponent implements OnInit, OnDestroy {
       items: [
         { route: 'products', label: 'Digital Products', icon: 'products', subtitle: 'Your products, live website features and AI extraction' },
         { route: 'crm', label: 'CRM', icon: 'briefcase', subtitle: 'Customers, companies, deals and support' },
-        { route: 'leads', label: 'Leads CRM', icon: 'leads', subtitle: 'AI-scored leads, Excel import and follow-up advice' },
+        { route: 'leads', label: 'Leads', icon: 'leads', subtitle: 'AI-scored leads, Excel import and follow-up advice' },
         { route: 'appointments', label: 'Demos', icon: 'calendar', subtitle: 'Booked demos and appointments' }
       ]
     },
@@ -660,7 +660,18 @@ export class AppComponent implements OnInit, OnDestroy {
     }
   }
 
-  logout(): void {
+  /**
+   * Sign out. The server is told first, so this sign-in stops working everywhere it may have been
+   * copied; the browser is cleared either way (also when the server cannot be reached).
+   */
+  logout(everywhere = false): void {
+    if (everywhere && !confirm('Sign out on every device? You will need to sign in again everywhere.')) return;
+    const done = () => this.clearSession();
+    const call = everywhere ? this.apiService.signOutEverywhere() : this.apiService.signOutOnServer();
+    call.subscribe({ next: done, error: done });
+  }
+
+  private clearSession(): void {
     this.voiceManualStop = true;
     this.clearVoiceRetry();
     this.removeVoiceGestureHandler();
@@ -1890,7 +1901,7 @@ export function leadExportRows(leads: any[], forCsv: boolean): Record<string, st
     'Lead score': l.score ?? '',
     Category: safe(l.category),
     'Marketing consent': safe(l.marketingConsent),
-    Source: l.googlePlace ? 'AI Lead Discovery' : 'Leads CRM',
+    Source: l.googlePlace ? 'AI Lead Discovery' : 'Leads',
     'AI advice': safe(l.aiSuggestion),
     Notes: safe(l.notes),
     Created: safe(l.createdAt ? String(l.createdAt).slice(0, 10) : '')

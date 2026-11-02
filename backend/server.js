@@ -6,6 +6,7 @@ const os = require('os');
 
 const { initDatabase, get, all, run, queryTraivoMySQL } = require('./db/database');
 const authService = require('./services/authService');
+const { audit } = require('./lib/audit');
 const telnyxService = require('./services/telnyxService');
 const marketingService = require('./services/marketingService');
 const videoService = require('./services/videoService');
@@ -53,12 +54,33 @@ app.set('trust proxy', process.env.TRUST_PROXY === '1' ? 1 : false);
 const allowedOrigins = [process.env.FRONTEND_URL, process.env.APP_BASE_URL, ...(process.env.CORS_ORIGINS || '').split(',')]
   .map(o => (o || '').trim())
   .filter(Boolean);
+// Security headers on every response.
+app.disable('x-powered-by');
+const httpsSite = /^https:\/\//i.test(process.env.APP_BASE_URL || '');
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  // Other sites may not show this app inside a frame (clickjacking); its own pages still can.
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Content-Security-Policy', "frame-ancestors 'self'; object-src 'none'; base-uri 'self'");
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  // The microphone is used by browser calling and the voice assistant; nothing else is needed.
+  res.setHeader('Permissions-Policy', 'microphone=(self), camera=(), geolocation=(), payment=(), usb=()');
+  // HTTPS only on return visits, when the site is served over https in production.
+  if (process.env.NODE_ENV === 'production' && httpsSite) res.setHeader('Strict-Transport-Security', 'max-age=15552000; includeSubDomains');
+  next();
+});
+
 app.use(cors({
   origin(origin, cb) {
     if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
     return cb(null, false);
-  }
+  },
+  // The session cookie is sent by the app's own origins only (the list above).
+  credentials: true
 }));
+// Session tokens leave the server only as an HttpOnly cookie for the browser app (lib/sessionCookie).
+const sessionCookie = require('./lib/sessionCookie');
+app.use('/api', sessionCookie.sessionResponses);
 // Keep the raw body for webhook signature verification.
 app.use(express.json({
   limit: '2mb',
@@ -94,6 +116,8 @@ app.use('/api', apiGate({
   publicPaths: [
     '/api/v1/auth/login', '/api/auth/login',
     '/api/v1/auth/register', '/api/auth/register',
+    // Sign-out checks the session itself, so it can always clear the cookie (even an expired one).
+    '/api/v1/auth/logout', '/api/auth/logout',
     '/api/status',
     // Telephony provider webhooks (carrier-originated, no user session).
     '/api/v1/telnyx/inbound', '/api/telnyx/inbound',
@@ -288,8 +312,34 @@ app.get(['/api/v1/auth/me', '/api/auth/me'], async (req, res) => {
   }
 });
 
-app.post(['/api/v1/auth/logout', '/api/auth/logout'], (req, res) => {
-  res.json({ success: true, message: 'Logged out successfully' });
+// Sign out: this sign-in stops working on the server at once (not only in this browser).
+app.post(['/api/v1/auth/logout', '/api/auth/logout'], async (req, res) => {
+  try {
+    sessionCookie.clearSessionCookie(req, res);
+    const header = req.headers.authorization || '';
+    const token = header.startsWith('Bearer ') ? header.slice(7).trim() : sessionCookie.readSessionCookie(req);
+    const auth = token ? await require('./middleware/auth').resolveAuth(token) : null;
+    // Already signed out or expired: nothing more to end on the server.
+    if (!auth) return res.json({ success: true, ended: false, message: 'Signed out.' });
+    req.auth = auth;
+    const ended = await authService.signOut(auth);
+    await audit(req, 'auth.signed_out', { resourceType: 'user', resourceId: auth.userId });
+    res.json({ success: true, ended, message: 'Signed out.' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: 'Sign-out failed. Please try again.' });
+  }
+});
+
+// Sign out everywhere: every sign-in of this user, on every device, stops working.
+app.post(['/api/v1/auth/logout-all', '/api/auth/logout-all'], async (req, res) => {
+  try {
+    const ended = await authService.signOutEverywhere(req.auth.userId);
+    sessionCookie.clearSessionCookie(req, res);
+    await audit(req, 'auth.signed_out_everywhere', { resourceType: 'user', resourceId: req.auth.userId });
+    res.json({ success: true, ended, message: ended ? 'Signed out on every device.' : 'Sign-out everywhere is not available until the database is updated (migration 031).' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: 'Sign-out failed. Please try again.' });
+  }
 });
 
 // ==========================================

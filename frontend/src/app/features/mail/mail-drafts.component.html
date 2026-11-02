@@ -100,7 +100,7 @@
         <p class="hint" *ngIf="selected.batch_id">The recipient of a product email comes from its lead record.</p>
         <p class="hint">Product: {{ selected.product_name || 'none (generic draft)' }}</p>
         <div class="callout warn" *ngIf="detailMismatch" role="status">
-          {{ selected.contact.name }} is {{ selected.contact.productId ? 'linked to ' + (productName(selected.contact.productId) || 'another product') : 'not linked to any product' }} in Leads CRM, not {{ selected.product_name || 'this draft\'s product' }}. The recipient stays as it is; use Change Contact to choose a contact linked to the product.
+          {{ selected.contact.name }} is {{ selected.contact.productId ? 'linked to ' + (productName(selected.contact.productId) || 'another product') : 'not linked to any product' }} in Leads, not {{ selected.product_name || 'this draft\'s product' }}. The recipient stays as it is; use Change Contact to choose a contact linked to the product.
         </div>
       </div>
 
@@ -206,7 +206,7 @@
       <!-- Recipient -->
       <div class="md-field">
         <span class="md-label">Recipient <span class="muted">(optional)</span></span>
-        <p class="hint">Choose a contact from Leads CRM; their details personalise the draft. Without one, the draft cannot be sent until you select a contact.<ng-container *ngIf="form.productId !== null"> The list starts with contacts linked to {{ productName(form.productId) }}.</ng-container></p>
+        <p class="hint">Choose a contact from Leads; their details personalise the draft. Without one, the draft cannot be sent until you select a contact.<ng-container *ngIf="form.productId !== null"> The list starts with contacts linked to {{ productName(form.productId) }}.</ng-container></p>
         <div class="rcard" *ngIf="contact">
           <span class="ravatar" aria-hidden="true">{{ (contact.name || '?').charAt(0).toUpperCase() }}</span>
           <span class="rinfo"><strong>{{ contact.name }}</strong><span>{{ contact.email }}</span><small *ngIf="contact.company">{{ contact.company }}</small></span>
@@ -222,7 +222,7 @@
           <span class="muted small">or create a generic draft and choose the contact later</span>
         </div>
         <div class="callout warn" *ngIf="contactMismatch" role="status">
-          {{ contact?.name }} is {{ contact?.productId ? 'linked to ' + (productName(contact?.productId ?? null) || 'another product') : 'not linked to any product' }} in Leads CRM, not {{ productName(form.productId) }}.
+          {{ contact?.name }} is {{ contact?.productId ? 'linked to ' + (productName(contact?.productId ?? null) || 'another product') : 'not linked to any product' }} in Leads, not {{ productName(form.productId) }}.
           <ng-container *ngIf="contactDecisionNeeded">Keep this contact for the draft, or choose another one.
             <span class="row-actions">
               <button type="button" class="btn btn-secondary btn-sm" (click)="keepContact()">Keep this contact</button>

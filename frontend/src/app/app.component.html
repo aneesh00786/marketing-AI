@@ -143,6 +143,7 @@
               <app-icon [name]="theme.isDark ? 'sun' : 'moon'" [size]="16"></app-icon>
               <span class="grow">{{ theme.isDark ? 'Light theme' : 'Dark theme' }}</span>
             </button>
+            <button class="dropdown-item" (click)="logout(true)" title="Ends every sign-in of your account, on every device"><app-icon name="logout" [size]="16"></app-icon><span class="grow">Sign out everywhere</span></button>
             <button class="dropdown-item danger" (click)="logout()"><app-icon name="logout" [size]="16"></app-icon><span class="grow">Sign out</span></button>
           </div>
         </div>
@@ -294,7 +295,7 @@
   <section *ngIf="currentRoute === 'leads'" class="hud-panel full-width-panel">
     <div class="panel-header">
       <div>
-        <h2>Leads CRM</h2>
+        <h2>Leads</h2>
         <p class="subtitle">Leads linked to your products. Lead scores are rule-based (contact details, budget and buying-intent words); follow-up advice comes from AI when a provider is available.</p>
       </div>
       <div class="header-actions" *ngIf="leadsTab === 'crm'">

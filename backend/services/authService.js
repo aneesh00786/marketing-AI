@@ -34,7 +34,9 @@ function createToken(payload) {
   const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
   const iat = Math.floor(Date.now() / 1000);
   const exp = iat + TOKEN_TTL_SECONDS;
-  const body = Buffer.from(JSON.stringify({ ...payload, iat, exp })).toString('base64url');
+  // jti: this sign-in's ID, so it alone can be signed out; sv: the user's session version at sign-in.
+  const jti = crypto.randomBytes(16).toString('hex');
+  const body = Buffer.from(JSON.stringify({ ...payload, sv: Number(payload.sv) || 0, jti, iat, exp })).toString('base64url');
   const signature = crypto.createHmac('sha256', JWT_SECRET).update(`${header}.${body}`).digest('base64url');
   return `${header}.${body}.${signature}`;
 }
@@ -138,7 +140,7 @@ async function sessionFor(user, workspaceId) {
   const workspaces = await listMemberships(user.id);
   const membership = workspaces.find(w => w.id === id);
   if (!membership) throw authError('You are not an active member of that workspace.', 403, 'NOT_A_MEMBER');
-  const token = createToken({ userId: user.id, email: user.email, workspaceId: id, role: membership.role });
+  const token = createToken({ userId: user.id, email: user.email, workspaceId: id, role: membership.role, sv: user.session_version });
   return {
     token,
     user: { id: user.id, email: user.email, displayName: user.display_name },
@@ -238,7 +240,7 @@ async function createWorkspaceForUser(userId, { name, industry } = {}) {
 
 /** A session for the platform admin inside any workspace. Checked again on every request (middleware/auth.js). */
 async function platformAccessSession(user, workspace) {
-  const token = createToken({ userId: user.id, email: user.email, workspaceId: workspace.id, role: 'Workspace Owner', platformAccess: true });
+  const token = createToken({ userId: user.id, email: user.email, workspaceId: workspace.id, role: 'Workspace Owner', platformAccess: true, sv: user.session_version });
   return {
     token,
     user: { id: user.id, email: user.email, displayName: user.display_name },
@@ -282,7 +284,33 @@ async function getUserMe(userId, workspaceId) {
   };
 }
 
+const toUtcDatetime = seconds => new Date(seconds * 1000).toISOString().slice(0, 19).replace('T', ' ');
+
+/**
+ * Ends one sign-in (the token in `auth`) on the server, so a copy of it stops working at once.
+ * Returns false when sign-out support (migration 031) is not in the database yet.
+ */
+async function signOut(auth) {
+  const { revocationReady } = require('../middleware/auth');
+  if (!(await revocationReady()) || !auth?.tokenId) return false;
+  const expires = auth.tokenExp || Math.floor(Date.now() / 1000) + TOKEN_TTL_SECONDS;
+  await run('INSERT IGNORE INTO revoked_tokens (jti, user_id, expires_at) VALUES (?, ?, ?)', [String(auth.tokenId), auth.userId || null, toUtcDatetime(expires)]);
+  // Entries are only needed until the token would have expired anyway.
+  await run('DELETE FROM revoked_tokens WHERE expires_at < UTC_TIMESTAMP()');
+  return true;
+}
+
+/** Ends every sign-in of this user, on every device (also used after a password reset). */
+async function signOutEverywhere(userId) {
+  const { revocationReady } = require('../middleware/auth');
+  if (!(await revocationReady())) return false;
+  await run('UPDATE users SET session_version = session_version + 1, updated_at = UTC_TIMESTAMP() WHERE id = ?', [userId]);
+  return true;
+}
+
 module.exports = {
+  signOut,
+  signOutEverywhere,
   hashPassword,
   verifyPassword,
   createToken,

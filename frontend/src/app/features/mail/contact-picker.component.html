@@ -3,8 +3,8 @@
     <header class="cp-head">
       <div>
         <h3 id="cp-title">{{ mode === 'create' ? 'Add new contact' : (mode === 'manual' ? 'Use an address that is not a contact' : title) }}</h3>
-        <p class="cp-sub" *ngIf="mode === 'search'">Contacts come from Leads CRM.</p>
-        <p class="cp-sub" *ngIf="mode === 'create'">Saved to Leads CRM. Adding a contact does not record marketing consent.</p>
+        <p class="cp-sub" *ngIf="mode === 'search'">Contacts come from Leads.</p>
+        <p class="cp-sub" *ngIf="mode === 'create'">Saved to Leads. Adding a contact does not record marketing consent.</p>
         <p class="cp-sub" *ngIf="mode === 'manual'">The draft is not linked to a contact in Leads. Use this only for one-off emails.</p>
       </div>
       <button type="button" class="cp-x" (click)="closed.emit()" aria-label="Close">✕</button>
@@ -24,7 +24,7 @@
           </label>
           <input #searchBox type="search" class="hud-input" [(ngModel)]="query" (ngModelChange)="search()" placeholder="Search by name, email or company" aria-label="Search contacts" aria-controls="cp-results" />
         </div>
-        <p class="cp-scope" *ngIf="productFilter !== 'all'">Showing contacts linked to <strong>{{ productFilter === 'none' ? 'no product' : productName(productFilter) }}</strong> in Leads CRM. Choose “All contacts” to see everyone.</p>
+        <p class="cp-scope" *ngIf="productFilter !== 'all'">Showing contacts linked to <strong>{{ productFilter === 'none' ? 'no product' : productName(productFilter) }}</strong> in Leads. Choose “All contacts” to see everyone.</p>
         <div class="cp-note warn" *ngIf="noneUsable" role="status">None of these contacts has an email address that can receive mail, so none can be selected. Update their emails in Leads, or add a new contact.</div>
         <div class="cp-list" id="cp-results" role="listbox" aria-label="Contacts" [attr.aria-busy]="loading">
           <div class="cp-state" *ngIf="loading && !results.length"><span class="cp-spin" aria-hidden="true"></span> Loading contacts…</div>
@@ -70,7 +70,7 @@
         </label>
         <label class="cp-check" *ngIf="assignableProductId !== null">
           <input type="checkbox" name="cpAssign" [(ngModel)]="draft.assignProduct" />
-          Link this contact to <strong>{{ productName(assignableProductId) }}</strong> in Leads CRM
+          Link this contact to <strong>{{ productName(assignableProductId) }}</strong> in Leads
         </label>
         <div class="cp-note warn" *ngIf="duplicate" role="alert">
           <strong>{{ duplicate.name }}</strong> already uses this email address{{ duplicate.companyName ? ' (' + duplicate.companyName + ')' : '' }}.

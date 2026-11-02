@@ -41,6 +41,9 @@ async function main() {
   if (!password || password.length < 10) throw new Error('Password must be at least 10 characters.');
 
   await run("UPDATE users SET password_hash = ?, status = 'Active', updated_at = UTC_TIMESTAMP() WHERE id = ?", [hashPassword(password), user.id]);
+  // A new password ends every existing sign-in of this user (once migration 031 is applied).
+  const ended = await require('../services/authService').signOutEverywhere(user.id);
+  if (ended) console.log('All existing sign-ins of this user were ended.');
   console.log(`Password updated for ${email}.`);
 }
 

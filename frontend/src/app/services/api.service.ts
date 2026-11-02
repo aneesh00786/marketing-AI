@@ -12,13 +12,9 @@ export class ApiService {
 
   constructor(private http: HttpClient) {}
 
+  /** No token here: the auth interceptor sends the HttpOnly session cookie and the app header. */
   private getHeaders(): HttpHeaders {
-    const token = typeof localStorage !== 'undefined' ? localStorage.getItem('tradesage_token') : null;
-    let headers = new HttpHeaders();
-    if (token) {
-      headers = headers.set('Authorization', `Bearer ${token}`);
-    }
-    return headers;
+    return new HttpHeaders();
   }
 
   // 1. Authentication
@@ -74,9 +70,19 @@ export class ApiService {
     return this.http.get(`${this.baseUrl}/auth/me`, { headers: this.getHeaders() });
   }
 
+  /** Ends this sign-in on the server (a copy of the token stops working too). */
+  signOutOnServer(): Observable<any> {
+    return this.http.post(`${this.baseUrl}/auth/logout`, {});
+  }
+
+  /** Ends every sign-in of this user, on every device. */
+  signOutEverywhere(): Observable<any> {
+    return this.http.post(`${this.baseUrl}/auth/logout-all`, {});
+  }
+
   logout(): void {
     if (typeof localStorage !== 'undefined') {
-      localStorage.removeItem('tradesage_token');
+      localStorage.removeItem('marketech_session');
       localStorage.removeItem('tradesage_user');
       localStorage.removeItem('tradesage_workspace');
     }

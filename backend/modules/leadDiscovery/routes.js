@@ -4,6 +4,8 @@ const { requireCapability } = require('../../middleware/auth');
 const { aiRouteLimit, rateLimit } = require('../../lib/rateLimit');
 const svc = require('./discoveryService');
 
+const KEEP_ALIVE_MS = parseInt(process.env.DISCOVERY_KEEP_ALIVE_MS || '15000', 10);
+
 /**
  * AI Lead Discovery (Google Places API (New)). Mounted at /api/v1/leads/discovery.
  * Searching and importing cost money and create leads: leads.manage. Live details: leads.view.
@@ -51,6 +53,9 @@ router.post('/search', requireCapability('leads.manage'), aiRouteLimit('leads.di
   // X-Accel-Buffering: no lets progress through an nginx proxy without buffering.
   res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' });
   const send = obj => { if (!res.writableEnded) res.write(`${JSON.stringify(obj)}\n`); };
+  // Quiet stretches (e.g. waiting for a busy AI service) must not look idle to a proxy, which would
+  // close the connection (nginx proxy_read_timeout): a small keep-alive line goes out every 15 s.
+  const keepAlive = setInterval(() => send({ type: 'ping' }), KEEP_ALIVE_MS);
   try {
     const result = await svc.executeSearch(req, prep, { onProgress: p => send({ type: 'progress', ...p }), signal: controller.signal });
     if (result) send({ type: 'result', success: true, ...result });
@@ -58,6 +63,8 @@ router.post('/search', requireCapability('leads.manage'), aiRouteLimit('leads.di
     // Only our own errors (with an HTTP status) carry a user-facing message; others are logged.
     if (!err.status) console.error('Lead discovery search failed:', err);
     send({ type: 'error', success: false, code: err.status ? err.code : 'SERVER_ERROR', error: err.status ? err.message : 'Search failed. Please try again.' });
+  } finally {
+    clearInterval(keepAlive);
   }
   res.end();
 }));

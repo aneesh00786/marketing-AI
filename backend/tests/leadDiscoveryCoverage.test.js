@@ -3,6 +3,8 @@ process.env.AI_ROUTE_RATE_MAX = '1000';
 process.env.LEAD_DISCOVERY_DAILY_SEARCHES = '1000';
 process.env.LEAD_DISCOVERY_DAILY_REQUESTS = '100000';
 
+// Short keep-alive interval so the streaming test can see it.
+process.env.DISCOVERY_KEEP_ALIVE_MS = '40';
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const h = require('./helpers');
@@ -241,6 +243,25 @@ test('streaming search sends progress then the result; validation errors return 
   assert.ok(lines.findIndex(l => l.rows) < lines.length - 1);
   assert.equal(bad.status, 400);
   assert.equal(bad.data.code, 'VALIDATION_ERROR');
+});
+
+test('a slow search sends keep-alive lines so a proxy does not close it, and still ends with the result', async () => {
+  const t = `Slow ${uniq()}`;
+  const book = { [`${t} in India`]: [ids('k', 1, 3)] };
+  const calls = [];
+  const slow = google(book, calls);
+  const respond = slow.respond;
+  slow.respond = (url, init) => new Promise(resolve => setTimeout(() => resolve(respond(url, init)), 250));
+  const mock = h.mockFetch([slow]);
+  let r;
+  try {
+    r = await api(A, 'POST', '/search', { businessType: t, countryCode: 'IN', productId: prodA, aiQualify: false, categories: [t], scope: 'country', maxRequests: 1 }, { Accept: 'application/x-ndjson' });
+  } finally { mock.restore(); }
+  assert.equal(r.status, 200);
+  const lines = String(r.data).trim().split('\n').map(l => JSON.parse(l));
+  assert.ok(lines.some(l => l.type === 'ping'), 'keep-alive lines were sent while waiting');
+  assert.equal(lines.at(-1).type, 'result');
+  assert.equal(lines.at(-1).summary.found, 3);
 });
 
 test('imports work for more than one page of results and stay linked to the product', async () => {

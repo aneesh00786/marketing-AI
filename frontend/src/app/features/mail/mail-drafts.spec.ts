@@ -303,7 +303,7 @@ describe('MailDraftsComponent', () => {
     comp.setFormProduct(8);
     fixture.detectChanges();
     expect(comp.contactDecisionNeeded).toBeTrue();
-    expect(el().textContent).toContain('Dana is linked to BusTrack in Leads CRM, not FleetPro');
+    expect(el().textContent).toContain('Dana is linked to BusTrack in Leads, not FleetPro');
     expect(button('Generate Draft')!.disabled).toBeTrue();
     comp.generate();
     http.expectNone(r => r.url.endsWith('/api/drafts/generate'));
@@ -323,7 +323,7 @@ describe('MailDraftsComponent', () => {
   it('the detail view keeps an existing recipient from another product, explains it, and replaces nothing on its own', () => {
     init([draft({ product_id: 7, lead_id: 4, contact: { id: 4, name: 'Priya Shah', email: 'priya@acme.io', company: null, productId: 8 } })]);
     expect(comp.detailMismatch).toBeTrue();
-    expect(el().textContent).toContain('Priya Shah is linked to FleetPro in Leads CRM, not BusTrack');
+    expect(el().textContent).toContain('Priya Shah is linked to FleetPro in Leads, not BusTrack');
     expect(el().querySelector('.md-detail .rcard')!.textContent).toContain('priya@acme.io');
     http.expectNone(r => r.method === 'PATCH');
     expect(comp.sendBlocker).toBeNull();

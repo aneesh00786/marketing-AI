@@ -130,11 +130,11 @@ export class SpeechService {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 2200);
 
-      let token: string | null = null;
-      try { token = localStorage.getItem('tradesage_token'); } catch { token = null; }
+      // The HttpOnly session cookie authenticates the request; the app header marks it as ours.
       const res = await fetch(`${apiRoot()}/api/v1/telnyx/synthesize`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'marketech' },
         body: JSON.stringify({
           text: clean,
           voice: voiceId || 'Telnyx.Ultra.f786b574-daa5-4673-aa0c-cbe3e8534c02'

@@ -8,13 +8,13 @@ import { LeadDiscoveryComponent } from '../features/leads/lead-discovery.compone
 
 // Cross-tab session sync. "Another tab" is simulated the way the browser does it: the shared
 // localStorage is written directly, then a 'storage' event is dispatched in this window.
-const TOKEN_KEY = 'tradesage_token';
+// The token itself is never in storage (it is an HttpOnly cookie); only a session marker is.
+const TOKEN_KEY = 'marketech_session';
 const USER_KEY = 'tradesage_user';
 const WORKSPACE_KEY = 'tradesage_workspace';
 
 function fakeToken(userId: number, workspaceId: number, nonce = Math.random()): string {
-  const b64 = (o: object) => btoa(JSON.stringify(o)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-  return `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64({ userId, workspaceId, nonce })}.signature`;
+  return JSON.stringify({ id: `s${String(nonce).slice(2, 12)}`, userId, workspaceId });
 }
 
 function store(token: string | null, user: any = null, workspace: any = null): void {
@@ -58,14 +58,16 @@ describe('Cross-tab session sync', () => {
   }
 
   /** Sends a request and reports whether it reached the network, and the error code if blocked. */
-  function attempt(method: 'GET' | 'POST', body: any = null): { sent: boolean; blockedCode: string | null; authHeader: string | null } {
+  function attempt(method: 'GET' | 'POST', body: any = null): { sent: boolean; blockedCode: string | null; authHeader: string | null; appHeader: string | null; withCredentials: boolean } {
     let blockedCode: string | null = null;
     const obs = method === 'GET' ? http.get(API) : http.post(API, body);
     obs.subscribe({ next: () => {}, error: (e: HttpErrorResponse) => { blockedCode = e.error?.code || null; } });
     const pending = httpMock.match(API);
     const authHeader = pending[0]?.request.headers.get('Authorization') || null;
+    const appHeader = pending[0]?.request.headers.get('X-Requested-With') || null;
+    const withCredentials = !!pending[0]?.request.withCredentials;
     pending.forEach(p => p.flush({ success: true }));
-    return { sent: pending.length > 0, blockedCode, authHeader };
+    return { sent: pending.length > 0, blockedCode, authHeader, appHeader, withCredentials };
   }
 
   beforeEach(() => {
@@ -81,12 +83,21 @@ describe('Cross-tab session sync', () => {
     localStorage.clear();
   });
 
-  it('sends requests with this tab\'s token while the session is unchanged', () => {
+  it('sends requests with the session cookie and the app header, never a token, while the session is unchanged', () => {
     expect(auth.isStale).toBeFalse();
     const r = attempt('GET');
     expect(r.sent).toBeTrue();
-    expect(r.authHeader).toBe(`Bearer ${tokenA1}`);
+    expect(r.withCredentials).toBeTrue();
+    expect(r.appHeader).toBe('marketech');
+    expect(r.authHeader).toBeNull();
     expect(changes).toEqual([]);
+  });
+
+  it('a token left in storage by an earlier version is removed on load', () => {
+    TestBed.resetTestingModule();
+    localStorage.setItem('tradesage_token', 'old.jwt.value');
+    boot();
+    expect(localStorage.getItem('tradesage_token')).toBeNull();
   });
 
   it('workspace switched in another tab: reported once, this tab keeps showing its own context and sends nothing', () => {
@@ -95,7 +106,6 @@ describe('Cross-tab session sync', () => {
     expect(auth.isStale).toBeTrue();
     // This tab still describes the workspace it loaded (it never mixes in the other tab's).
     expect(auth.workspace.id).toBe(1);
-    expect(auth.token).toBe(tokenA1);
 
     const get = attempt('GET');
     expect(get.sent).toBeFalse();
@@ -142,22 +152,18 @@ describe('Cross-tab session sync', () => {
     expect(attempt('GET').sent).toBeFalse();
   });
 
-  it('switching workspace in this tab (setSession) is not stale and uses the new token', () => {
-    const tokenA2 = fakeToken(1, 2);
-    auth.setSession({ token: tokenA2, user: userA, workspace: ws2 });
+  it('switching workspace in this tab (setSession) is not stale and keeps sending requests', () => {
+    auth.setSession({ session: { id: 'new', userId: 1, workspaceId: 2 }, user: userA, workspace: ws2 });
     expect(auth.isStale).toBeFalse();
     expect(changes).toEqual([]);
     expect(auth.workspace.id).toBe(2);
-    expect(attempt('GET').authHeader).toBe(`Bearer ${tokenA2}`);
+    expect(JSON.parse(localStorage.getItem(TOKEN_KEY) || 'null')).toEqual({ id: 'new', userId: 1, workspaceId: 2 });
+    expect(attempt('GET').sent).toBeTrue();
   });
 
-  it('a request carrying the stored token explicitly still goes out with this tab\'s token only', () => {
-    let blocked = false;
-    http.get(API, { headers: { Authorization: 'Bearer something-else' } }).subscribe({ error: () => { blocked = true; } });
-    const req = httpMock.expectOne(API);
-    expect(req.request.headers.get('Authorization')).toBe(`Bearer ${tokenA1}`);
-    req.flush({});
-    expect(blocked).toBeFalse();
+  it('nothing that looks like a token is written to storage by a sign-in response', () => {
+    auth.setSession({ token: 'header.payload.signature', session: { id: 'x', userId: 1, workspaceId: 1 }, user: userA, workspace: ws1 } as any);
+    expect(JSON.stringify({ ...localStorage })).not.toContain('header.payload.signature');
   });
 
   it('a stale tab signing out (or a late 401) does not erase the other tab\'s newer session', () => {

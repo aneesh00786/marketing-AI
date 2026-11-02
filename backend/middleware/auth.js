@@ -10,6 +10,28 @@ const { capabilitiesForRole } = require('../lib/permissions');
  */
 const LEGACY_WORKSPACE_ID = parseInt(process.env.LEGACY_WORKSPACE_ID || '1', 10);
 
+// Sign-out support arrives with migration 031. Until it is applied, sessions work as before (no
+// revocation) instead of every request failing; the check is repeated every minute.
+let revocation = { ready: false, checkedAt: 0 };
+async function revocationReady() {
+  if (!revocation.ready && Date.now() - revocation.checkedAt > 60000) {
+    const row = await get(`SELECT
+        (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'session_version') AS col,
+        (SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'revoked_tokens') AS tbl`);
+    revocation = { ready: Number(row?.col) > 0 && Number(row?.tbl) > 0, checkedAt: Date.now() };
+  }
+  return revocation.ready;
+}
+
+/** False when this token was signed out, or the user signed out everywhere / had the password reset since. */
+async function sessionStillValid(payload) {
+  if (!(await revocationReady())) return true;
+  const user = await get('SELECT session_version FROM users WHERE id = ?', [payload.userId]);
+  if (!user || (Number(payload.sv) || 0) !== (Number(user.session_version) || 0)) return false;
+  if (payload.jti && await get('SELECT 1 AS x FROM revoked_tokens WHERE jti = ? LIMIT 1', [String(payload.jti)])) return false;
+  return true;
+}
+
 function readBearer(req) {
   const header = req.headers.authorization || '';
   return header.startsWith('Bearer ') ? header.slice(7).trim() : null;
@@ -43,7 +65,12 @@ async function resolvePlatformAccess(payload) {
 async function resolveAuth(token) {
   const payload = authService.verifyToken(token);
   if (!payload || !payload.userId || !payload.workspaceId) return null;
-  if (payload.platformAccess) return resolvePlatformAccess(payload);
+  if (!(await sessionStillValid(payload))) return null;
+  const session = { tokenId: payload.jti || null, tokenExp: payload.exp || null };
+  if (payload.platformAccess) {
+    const auth = await resolvePlatformAccess(payload);
+    return auth ? { ...auth, ...session } : null;
+  }
 
   const member = await get(
     `SELECT m.workspace_id, m.user_id, m.role, m.status, u.email, u.display_name, u.status AS user_status
@@ -62,6 +89,7 @@ async function resolveAuth(token) {
     role: member.role,
     email: member.email,
     displayName: member.display_name,
+    ...session,
     // Role capabilities plus per-member grants the role currently qualifies for (fails closed).
     capabilities: await require('../lib/capabilityGrants').effectiveCapabilities(member.workspace_id, member.user_id, member.role)
   };
@@ -70,7 +98,14 @@ async function resolveAuth(token) {
 function requireAuth() {
   return async function requireAuthMiddleware(req, res, next) {
     try {
-      const token = readBearer(req);
+      // A Bearer header (API clients) or the browser's HttpOnly session cookie.
+      const bearer = readBearer(req);
+      const sessionCookie = require('../lib/sessionCookie');
+      const token = bearer || sessionCookie.readSessionCookie(req);
+      // Cookie-authenticated changes must come from the app itself (cross-site request forgery).
+      if (!bearer && token && sessionCookie.UNSAFE.has(req.method) && !sessionCookie.fromBrowser(req)) {
+        return res.status(403).json({ success: false, error: 'This request was refused (missing app header).', code: 'CSRF_REJECTED' });
+      }
       const auth = token ? await resolveAuth(token) : null;
       if (!auth) {
         return res.status(401).json({ success: false, error: 'Authentication required.', code: 'UNAUTHENTICATED' });
@@ -147,6 +182,7 @@ function legacyWorkspaceOnly() {
 }
 
 module.exports = {
+  revocationReady,
   LEGACY_WORKSPACE_ID,
   resolveAuth,
   requireAuth,

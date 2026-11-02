@@ -1,11 +1,11 @@
 import { HttpErrorResponse, HttpInterceptorFn } from '@angular/common/http';
 import { inject } from '@angular/core';
 import { catchError, throwError } from 'rxjs';
-import { AuthStateService } from './auth-state.service';
+import { APP_REQUEST_HEADER, AuthStateService } from './auth-state.service';
 import { apiRoot } from './api-base';
 
 /**
- * Attaches the bearer token to API calls and returns the user to sign-in when it is rejected.
+ * Sends the session cookie with API calls and returns the user to sign-in when it is rejected.
  * When another tab has replaced or ended the session, API calls from this tab are not sent at
  * all, so nothing is read or written under a workspace this tab is no longer showing.
  */
@@ -20,10 +20,10 @@ export const authInterceptor: HttpInterceptorFn = (req, next) => {
       error: { success: false, code: 'SESSION_CHANGED', error: 'Your session changed in another tab. Reload this page to continue.' }
     }));
   }
-  const token = auth.token;
-  // A token from storage set by request code is replaced with this tab's own session token.
-  const authed = isApi && token
-    ? req.clone({ setHeaders: { Authorization: `Bearer ${token}` } })
+  // The session cookie goes with API calls (also to localhost:8000 during `ng serve`); the app
+  // header lets the server accept cookie-authenticated changes. No token is ever read here.
+  const authed = isApi
+    ? req.clone({ withCredentials: true, setHeaders: APP_REQUEST_HEADER })
     : req;
   return next(authed).pipe(
     catchError((err: HttpErrorResponse) => {
