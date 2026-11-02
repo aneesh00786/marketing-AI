@@ -674,13 +674,18 @@ async function syncIncomingEmails(workspaceId) {
     };
   } catch (err) {
     console.error('IMAP sync error:', err.message);
-    const isAuthErr = err.authenticationFailed || 
+    // The server's own reply (e.g. Zoho's) says more than err.message, such as when IMAP is switched off.
+    const fullErr = String(err.response || err.responseText || err.message || '');
+    const isImapDisabled = /enable IMAP|IMAP access is disabled|contact your administrator/i.test(fullErr);
+    const isAuthErr = err.authenticationFailed ||
       err.serverResponseCode === 'AUTHENTICATIONFAILED' ||
-      (err.message && (err.message.includes('AUTHENTICATIONFAILED') || err.message.includes('Invalid credentials') || err.message.includes('Command failed')));
+      fullErr.includes('AUTHENTICATIONFAILED') || fullErr.includes('Invalid credentials') || fullErr.includes('Command failed');
 
-    const friendlyError = isAuthErr
-      ? 'Mailbox authentication failed. Check the IMAP username and app password in Mail Settings.'
-      : `IMAP connection error (${config.imap_host}): ${err.message}`;
+    const friendlyError = isImapDisabled
+      ? 'IMAP access is turned off for this mailbox. In Zoho Mail, open Settings > Mail Accounts > IMAP Access and turn it on, then sync again.'
+      : isAuthErr
+        ? 'Mailbox authentication failed. Check the IMAP username and app password in Mail Settings.'
+        : `IMAP connection error (${config.imap_host}): ${err.message}`;
 
     return {
       success: false,

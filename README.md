@@ -53,14 +53,14 @@ An enterprise-grade, AI-driven marketing and B2B sales acceleration operating sy
              ┌───────────────────────┴──────┐        ┌──────┴──────────────────────┐
              │         MySQL Database       │        │   External Integrations     │
              │   (27 Schema Tables, DDL)    │        │  - Telnyx Voice API         │
-             │     Seed Script (seed.js)    │        │  - Custom SMTP / IMAP       │
+             │     Migrations (db/migrate)  │        │  - Custom SMTP / IMAP       │
              └──────────────────────────────┘        │  - Gemini / OpenRouter AI   │
                                                      └─────────────────────────────┘
 ```
 
 - **Frontend**: Angular 18 (Standalone Components, Signals, Reactive Forms, Lucide Icons)
 - **Backend**: Node.js, Express, Cheerio (live web extraction), Nodemailer
-- **Database**: MySQL 8.0+ (InnoDB, UTF-8 MB4) with automated migration & seeder script (`seed.js`)
+- **Database**: MySQL 8.0+ (InnoDB, UTF-8 MB4), schema built only by migrations (`node db/migrate.js`)
 - **Telephony**: Telnyx TeXML Voice Application & Webhooks
 
 ---
@@ -106,14 +106,16 @@ TELNYX_PHONE_NUMBER=+1 (800) 555-SAGE
 
 ---
 
-### Step 3: Initialize & Seed MySQL Database
-Run the idempotent seeder to create the `tradesage` database, create all 27 tables, and seed baseline data:
+### Step 3: Create the MySQL Database
+The database is built only by migrations (`backend/migrations`). For a new install this creates the
+`tradesage` database and all tables; on an existing database it applies only what is missing:
 ```bash
 # Inside backend/
 npm install
-npm run seed
+node db/migrate.js --create-database
 ```
-*(Or directly: `node seed.js`)*
+No demo data or credentials are inserted. The first account you register (Sign up) owns workspace 1
+and is the platform admin.
 
 ---
 
@@ -149,7 +151,7 @@ marketing-AI/
 │   │   ├── emailService.js        # SMTP / IMAP dispatch & retrieval
 │   │   ├── marketingService.js    # Campaign & social post orchestration
 │   │   └── telnyxService.js       # Voice AI call flow handlers
-│   ├── seed.js                    # Complete MySQL schema creation & table seeder
+│   ├── migrations/                # The database schema, applied in order by db/migrate.js
 │   ├── server.js                  # Express REST API application
 │   ├── .env.example               # Template environment configuration
 │   └── package.json
@@ -177,7 +179,7 @@ marketing-AI/
 
 ## 🔒 Security Best Practices
 - Never commit production passwords or `.env` files.
-- The `seed.js` script verifies credentials and runs schema updates idempotently without dropping user data.
+- `node db/migrate.js` applies pending migrations only and never drops user data (`--status` lists them).
 - User email credentials are used exclusively for direct SMTP/IMAP transport and are not shared with external third-party models.
 
 ---

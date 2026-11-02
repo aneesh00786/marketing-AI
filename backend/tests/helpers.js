@@ -25,7 +25,6 @@ process.env.SOCIAL_AI_MONTHLY_REQUEST_LIMIT = '1000000';
 process.env.FRONTEND_URL = 'http://localhost:4200';
 
 const crypto = require('crypto');
-const mysql = require('mysql2/promise');
 
 // No test may reach a real host. Unmocked requests to providers (AI, ZeptoMail, Zoho, social APIs),
 // SMTP/IMAP connections and DNS lookups of public names fail as unreachable instead; only local
@@ -61,23 +60,9 @@ let prepared = null;
 async function prepareDatabase() {
   if (prepared) return prepared;
   prepared = (async () => {
-    const conn = await mysql.createConnection({
-      host: process.env.DB_HOST || '127.0.0.1',
-      port: parseInt(process.env.DB_PORT || '3306', 10),
-      user: process.env.DB_USER || 'root',
-      password: process.env.DB_PASSWORD || ''
-    });
-    await conn.query(`CREATE DATABASE IF NOT EXISTS \`${process.env.DB_NAME}\` DEFAULT CHARACTER SET utf8mb4`);
-    const [rows] = await conn.query('SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?', [process.env.DB_NAME, 'workspaces']);
-    await conn.end();
-    if (rows.length === 0) {
-      const { seedMySQL } = require('../seed');
-      const log = console.log;
-      console.log = () => {};
-      try { await seedMySQL(); } finally { console.log = log; }
-    }
+    // The test database is built the same way as every other: by the migrations alone.
     const { migrate } = require('../db/migrate');
-    await migrate({ log: () => {} });
+    await migrate({ log: () => {}, createDatabase: true });
     // Isolate runs: jobs left queued by an earlier run must not be picked up by this one.
     const { run } = require('../db/database');
     await run("UPDATE background_jobs SET status = 'cancelled' WHERE status IN ('queued', 'running')");

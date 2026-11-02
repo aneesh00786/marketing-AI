@@ -17,9 +17,8 @@ if not exist node_modules (
 )
 
 echo.
-echo [2/3] Verifying database schema, foundational records and migrations...
-call node seed.js
-call node db\migrate.js
+echo [2/3] Applying database migrations...
+call node db\migrate.js --create-database
 if errorlevel 1 (
     echo Migration failed - fix the error above before starting.
     pause

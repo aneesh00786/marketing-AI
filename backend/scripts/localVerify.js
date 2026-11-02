@@ -111,10 +111,9 @@ async function main() {
 
   // ------------------------------------------------------------ fresh install to 023
   const env = childEnv({ DB_NAME: target, NODE_ENV: 'development' });
-  const seed = run('node', ['seed.js'], { cwd: BACKEND, env });
-  record('fresh install: base schema (seed.js)', seed.status === 0, seed.status === 0 ? '' : (seed.stderr || seed.stdout).slice(-300));
-  const to023 = run('node', ['db/migrate.js', '--until=023_social_media_library'], { cwd: BACKEND, env });
-  record('fresh install: migrations up to 023 (production\'s current schema)', to023.status === 0, (to023.stderr || '').slice(-200));
+  // A new database is built by the migrations alone (000_base_schema first); nothing else creates tables.
+  const to023 = run('node', ['db/migrate.js', '--create-database', '--until=023_social_media_library'], { cwd: BACKEND, env });
+  record('fresh install: migrations 000 to 023 build the database from nothing', to023.status === 0, (to023.stderr || to023.stdout || '').slice(-300));
   const { migrate, backupProblem } = require('../db/migrate');
   const status023 = await migrate({ databaseName: target, statusOnly: true, log: () => {} });
   record('status at 023: 024 to 030 pending', status023.pending.join(',') === '024_mail_tracking,025_compose_purpose_and_grants,026_mail_provider_apps,027_mail_campaign_contacts,028_global_crm,029_crm_call_logs,030_lead_discovery_contacts', `pending: ${status023.pending.join(', ')}`);

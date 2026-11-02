@@ -14,9 +14,8 @@ if (-not (Test-Path "node_modules")) {
     Write-Host "`n[1/3] Backend dependencies verified." -ForegroundColor Green
 }
 
-Write-Host "`n[2/3] Verifying database schema, foundational records and migrations..." -ForegroundColor Yellow
-node seed.js
-node db/migrate.js
+Write-Host "`n[2/3] Applying database migrations..." -ForegroundColor Yellow
+node db/migrate.js --create-database
 if ($LASTEXITCODE -ne 0) { Write-Host "Migration failed - fix the error above before starting." -ForegroundColor Red; exit 1 }
 
 Write-Host "Starting the social publishing worker in a separate window..." -ForegroundColor Yellow

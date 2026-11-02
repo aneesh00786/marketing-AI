@@ -150,9 +150,20 @@ async function backupProblem(backupPath, databaseName, appliedIds = null) {
 }
 
 // until: apply pending migrations only up to and including this id (rehearsals: reproduce an older schema).
-async function migrate({ databaseName = process.env.DB_NAME || 'tradesage', statusOnly = false, log = console.log, backupPath = null, env = process.env, until = null } = {}) {
+async function migrate({ databaseName = process.env.DB_NAME || 'tradesage', statusOnly = false, log = console.log, backupPath = null, env = process.env, until = null, createDatabase = false } = {}) {
   if ((process.env.DB_CLIENT || 'mysql') !== 'mysql') {
     throw new Error('Migrations require DB_CLIENT=mysql.');
+  }
+  // A new install: create the empty database first (only when asked, so a mistyped name is never created).
+  if (createDatabase && !statusOnly) {
+    if (!/^[A-Za-z0-9_$-]{1,64}$/.test(databaseName)) throw new Error(`Invalid database name "${databaseName}".`);
+    const { database, ...server } = connectionConfig(databaseName);
+    const admin = await mysql.createConnection(server);
+    try {
+      await admin.query(`CREATE DATABASE IF NOT EXISTS \`${databaseName}\` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
+    } finally {
+      await admin.end();
+    }
   }
   const conn = await mysql.createConnection(connectionConfig(databaseName));
   try {
@@ -214,8 +225,9 @@ if (require.main === module) {
   const statusOnly = process.argv.includes('--status');
   const backupArg = process.argv.find(a => a.startsWith('--backup='));
   const untilArg = process.argv.find(a => a.startsWith('--until='));
+  const createDatabase = process.argv.includes('--create-database');
   // An empty --until= is an error (never "no limit"), so a typo cannot apply every pending migration.
-  migrate({ statusOnly, backupPath: backupArg ? backupArg.slice('--backup='.length) : null, until: untilArg !== undefined ? untilArg.slice('--until='.length) : null })
+  migrate({ statusOnly, backupPath: backupArg ? backupArg.slice('--backup='.length) : null, until: untilArg !== undefined ? untilArg.slice('--until='.length) : null, createDatabase })
     .then(() => process.exit(0))
     .catch(err => {
       console.error('Migration failed:', err.message);

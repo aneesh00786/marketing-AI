@@ -4,7 +4,6 @@
   "description": "Marketing AI - Autonomous B2B Sales & Marketing Platform with Mark Voice OS",
   "scripts": {
     "start": "cd backend && node server.js",
-    "seed": "cd backend && node seed.js",
     "build:frontend": "cd frontend && npm install && npm run build",
     "migrate": "cd backend && node db/migrate.js",
     "worker": "cd backend && node workers/socialWorker.js",

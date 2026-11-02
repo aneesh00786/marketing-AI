@@ -63,7 +63,7 @@ test('--until: unknown or empty ids are refused (never "apply everything"), and 
   await assert.rejects(migrate({ databaseName: SCRATCH_DB, until: '', log: () => {} }), /--until needs a migration id/);
   await assert.rejects(
     migrate({ databaseName: SCRATCH_DB, until: '001_social_marketing_hub', env: { NODE_ENV: 'production' }, log: () => {} }),
-    err => err.code === 'BACKUP_REQUIRED' && /Pending: 001_social_marketing_hub\./.test(err.message),
+    err => err.code === 'BACKUP_REQUIRED' && /Pending: 000_base_schema, 001_social_marketing_hub\./.test(err.message),
     'production still needs a verified backup, and only the migrations up to --until are pending'
   );
   const cli = require('child_process').spawnSync('node', ['db/migrate.js', '--until='], { cwd: path.join(__dirname, '..'), env: { ...process.env, DB_NAME: SCRATCH_DB, NODE_ENV: '' }, encoding: 'utf8' });
