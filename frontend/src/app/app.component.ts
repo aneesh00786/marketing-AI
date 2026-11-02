@@ -1197,6 +1197,24 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   /** Display helper: missing values show as an em dash, never as invented data. */
+  // Full notes tooltip for the Leads table. Fixed-positioned so the scrolling table never clips it.
+  noteTip: { text: string; top: number; left: number } | null = null;
+
+  showNoteTip(event: Event, text: string): void {
+    const el = event.target as HTMLElement | null;
+    if (!el || !text) return;
+    const r = el.getBoundingClientRect();
+    const width = Math.min(380, window.innerWidth - 16);
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8));
+    // Below the line, or above it when there is no room underneath.
+    const top = r.bottom + 220 > window.innerHeight ? Math.max(8, r.top - 8 - 200) : r.bottom + 6;
+    this.noteTip = { text, top, left };
+  }
+
+  @HostListener('document:wheel')
+  @HostListener('window:resize')
+  hideNoteTip(): void { if (this.noteTip) this.noteTip = null; }
+
   dash(v: any): string {
     return v === null || v === undefined || v === '' ? '—' : String(v);
   }

@@ -360,8 +360,8 @@
           <tr *ngFor="let ld of leads; let i = index">
             <td class="sl-cell freeze freeze-1" data-label="No.">{{ (leadPage - 1) * leadPageSize + i + 1 }}</td>
             <td data-label="Contact" class="contact-cell freeze freeze-2 freeze-edge"><strong>{{ ld.name }}</strong>
-              <div *ngIf="ld.googlePlace"><span class="chip" title="Found with AI Lead Discovery (Google Places). Use Live details to see Google's current listing.">📍 Google Places</span></div>
-              <div class="lead-sub" *ngIf="ld.notes" [title]="ld.notes">📝 {{ ld.notes | slice:0:50 }}{{ ld.notes.length > 50 ? '…' : '' }}</div></td>
+              <div class="lead-sub has-note-tip" *ngIf="ld.notes" tabindex="0" [attr.aria-label]="'Notes: ' + ld.notes"
+                   (mouseenter)="showNoteTip($event, ld.notes)" (mouseleave)="hideNoteTip()" (focus)="showNoteTip($event, ld.notes)" (blur)="hideNoteTip()">📝 {{ ld.notes | slice:0:50 }}{{ ld.notes.length > 50 ? '…' : '' }}</div></td>
             <td data-label="Company" class="company-cell">{{ dash(ld.companyName) }}</td>
             <td data-label="Email" class="one-line"><a *ngIf="ld.email" [href]="'mailto:' + ld.email" [title]="ld.email">{{ ld.email }}</a><ng-container *ngIf="!ld.email">—</ng-container></td>
             <td data-label="Phone" class="one-line"><span class="phone-line">{{ dash(ld.phone) }}<app-call-button [phone]="ld.phone" [name]="ld.name"></app-call-button></span></td>
@@ -1234,6 +1234,9 @@
       </div>
     </div>
   </div>
+
+  <!-- Full lead notes, shown while hovering the short notes line in the Leads table -->
+  <div *ngIf="noteTip" class="note-tip" role="tooltip" [style.top.px]="noteTip.top" [style.left.px]="noteTip.left">{{ noteTip.text }}</div>
 
   <!-- Floating Toast Notification -->
   <div *ngIf="toastMessage" class="toast-popup" role="status" aria-live="polite">
