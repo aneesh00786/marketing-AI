@@ -293,12 +293,18 @@
   </ng-container>
 
   <section *ngIf="currentRoute === 'leads'" class="hud-panel full-width-panel">
+    <div class="leads-tabs" role="tablist" aria-label="Leads">
+      <button role="tab" [class.on]="leadsTab === 'crm'" [attr.aria-selected]="leadsTab === 'crm'" (click)="showLeadsTab('crm')">👥 Leads <span class="tab-count">{{ leadTotal }}</span></button>
+      <button role="tab" [class.on]="leadsTab === 'discovery'" [attr.aria-selected]="leadsTab === 'discovery'" (click)="showLeadsTab('discovery')">🔎 AI Lead Discovery</button>
+    </div>
+
+    <ng-container *ngIf="leadsTab === 'crm'">
     <div class="panel-header">
       <div>
         <h2>Leads</h2>
         <p class="subtitle">Leads linked to your products. Lead scores are rule-based (contact details, budget and buying-intent words); follow-up advice comes from AI when a provider is available.</p>
       </div>
-      <div class="header-actions" *ngIf="leadsTab === 'crm'">
+      <div class="header-actions">
         <button class="btn btn-accent" (click)="showExcelImportModal = true; leadImportResult = null">📂 Import Excel / CSV</button>
         <div class="export-menu">
           <button class="btn btn-secondary" type="button" (click)="leadExportOpen = !leadExportOpen" [disabled]="leadExporting || !leadTotal" aria-haspopup="menu" [attr.aria-expanded]="leadExportOpen"
@@ -318,12 +324,6 @@
       </div>
     </div>
 
-    <div class="leads-tabs" role="tablist" aria-label="Leads">
-      <button role="tab" [class.on]="leadsTab === 'crm'" [attr.aria-selected]="leadsTab === 'crm'" (click)="showLeadsTab('crm')">👥 Leads <span class="tab-count">{{ leadTotal }}</span></button>
-      <button role="tab" [class.on]="leadsTab === 'discovery'" [attr.aria-selected]="leadsTab === 'discovery'" (click)="showLeadsTab('discovery')">🔎 AI Lead Discovery</button>
-    </div>
-
-    <ng-container *ngIf="leadsTab === 'crm'">
     <div class="lead-filters">
       <select class="hud-input" [(ngModel)]="leadFilters.productId" (change)="applyLeadFilters()" aria-label="Filter by product">
         <option value="">All products</option>
