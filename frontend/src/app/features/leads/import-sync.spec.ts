@@ -22,7 +22,7 @@ describe('Import sync (consent + Zoho list)', () => {
     expect(importSyncProblem(o)).toContain('name for the new Zoho list');
     o.listName = ' Trade show ';
     expect(importSyncProblem(o)).toBe('');
-    expect(importSyncBody(o)).toEqual({ consent: { method: 'imported_with_proof', obtainedAt: '2026-10-01', evidence: 'Trade show sheet', attest: true }, zohoList: { name: 'Trade show' } });
+    expect(importSyncBody(o)).toEqual({ consent: { method: 'web_form', obtainedAt: '2026-10-01', evidence: 'Trade show sheet', attest: true }, zohoList: { name: 'Trade show' } });
     const e = newImportSync('L1');
     expect(e.list).toBe('existing');
     expect(importSyncBody(e)).toEqual({ zohoList: { key: 'L1' } });

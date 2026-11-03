@@ -14,7 +14,6 @@ export interface ImportSync {
 }
 
 export const CONSENT_METHOD_LABELS: { value: string; label: string }[] = [
-  { value: 'imported_with_proof', label: 'Imported list with proof of consent' },
   { value: 'web_form', label: 'Website form' },
   { value: 'double_opt_in', label: 'Double opt-in (confirmed by email)' },
   { value: 'checkbox_at_signup', label: 'Tick box at sign-up' },
@@ -24,7 +23,7 @@ export const CONSENT_METHOD_LABELS: { value: string; label: string }[] = [
 ];
 
 export function newImportSync(listKey = ''): ImportSync {
-  return { consent: false, method: 'imported_with_proof', obtainedAt: new Date().toISOString().slice(0, 10), evidence: '', attest: false, list: listKey ? 'existing' : 'none', listKey, listName: '' };
+  return { consent: false, method: 'web_form', obtainedAt: new Date().toISOString().slice(0, 10), evidence: '', attest: false, list: listKey ? 'existing' : 'none', listKey, listName: '' };
 }
 
 /** Why the import cannot start yet ('' when it can). */

@@ -62,8 +62,7 @@ export class ProductEmailsComponent implements OnInit, OnDestroy {
     { value: 'checkbox_at_signup', label: 'Consent checkbox at account sign-up' },
     { value: 'written', label: 'Written / signed consent' },
     { value: 'event_signup', label: 'Event or trade-show sign-up' },
-    { value: 'customer_request', label: 'Customer asked to receive emails' },
-    { value: 'imported_with_proof', label: 'Imported list with proof of consent' }
+    { value: 'customer_request', label: 'Customer asked to receive emails' }
   ];
   private poll: any = null;
   previewId: number | null = null;

@@ -106,7 +106,7 @@ describe('ZohoListsComponent (Zoho Campaigns → Contact lists)', () => {
     const req = http.expectOne(r => r.method === 'POST' && r.url.endsWith('/api/v1/leads/import-bulk'));
     expect(req.request.body.leads.length).toBe(1);
     expect(req.request.body.zohoList).toEqual({ name: 'Trade show' });
-    expect(req.request.body.consent).toEqual({ method: 'imported_with_proof', obtainedAt: '2026-10-01', evidence: 'Sign-up sheet', attest: true });
+    expect(req.request.body.consent).toEqual({ method: 'web_form', obtainedAt: '2026-10-01', evidence: 'Sign-up sheet', attest: true });
     req.flush({ message: 'Imported 1 lead.', imported: 1, duplicates: [], consentRecorded: 1, zoho: { list: { name: 'Trade show' }, added: 1, skipped: 0, error: null } });
     http.expectOne(r => r.url.endsWith('/zoho-lists')).flush({ lists: LISTS, canAdd: true, canRemove: true });
     fixture.detectChanges();
