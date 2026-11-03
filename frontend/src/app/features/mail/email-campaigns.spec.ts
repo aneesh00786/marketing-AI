@@ -114,6 +114,8 @@ describe('EmailCampaignsComponent: Choose Template', () => {
   const previewCmp = () => fixture.debugElement.query(By.directive(EmailPreviewComponent)).componentInstance as EmailPreviewComponent;
 
   it('the campaign HTML renders in a visible, sandboxed preview', () => {
+    comp.step = 3; // the Email content step
+    fixture.detectChanges();
     toPreview();
     const frame = el().querySelector('.ec-preview iframe') as HTMLIFrameElement;
     expect(frame.getAttribute('sandbox')).toBe('');
@@ -352,11 +354,11 @@ describe('EmailCampaignsComponent: Choose Template', () => {
   it('the item menu offers Delete only for campaigns that can still change, and asks first', () => {
     comp.campaigns = LIST.map(c => ({ ...c }));
     fixture.detectChanges();
-    const menuFor = (i: number) => { (el().querySelectorAll('.ec-kebab')[i] as HTMLButtonElement).click(); fixture.detectChanges(); return Array.from(el().querySelectorAll('.ec-menu button')).map(b => b.textContent!.trim()); };
+    const menuFor = (i: number) => { (el().querySelectorAll('.ec-kebab')[i] as HTMLButtonElement).click(); fixture.detectChanges(); return Array.from(el().querySelectorAll('.ec-item .ec-menu button')).map(b => b.textContent!.trim()); };
     expect(menuFor(2)).withContext('submitted to Zoho').toEqual(['Open', 'Duplicate']);
     expect(menuFor(0)).toEqual(['Open', 'Duplicate', 'Delete']);
     spyOn(window, 'confirm').and.returnValue(false);
-    (Array.from(el().querySelectorAll('.ec-menu button')).find(b => b.textContent!.trim() === 'Delete') as HTMLButtonElement).click();
+    (Array.from(el().querySelectorAll('.ec-item .ec-menu button')).find(b => b.textContent!.trim() === 'Delete') as HTMLButtonElement).click();
     expect(window.confirm).toHaveBeenCalled();
     // declined: no DELETE request (checked in afterEach)
   });
@@ -407,11 +409,22 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     (Array.from(el().querySelectorAll('.ec-page-head button')).find(b => b.textContent!.includes('New Campaign')) as HTMLButtonElement).click();
     fixture.detectChanges();
     const items = Array.from(el().querySelectorAll('.ec-create-menu button')).map(b => b.querySelector('b')!.textContent!.trim());
-    expect(items).toEqual(['Blank campaign', 'From a template']);
-    (el().querySelectorAll('.ec-create-menu button')[1] as HTMLButtonElement).click();
+    expect(items).toEqual(['Blank campaign', 'Sample email', 'From a template', 'New email template']);
+    (el().querySelectorAll('.ec-create-menu button')[2] as HTMLButtonElement).click();
     fixture.detectChanges();
     expect(comp.picker).toBe('new');
     http.expectOne(r => /\/mail\/templates$/.test(r.url)).flush({ templates: [] });
+  });
+
+  it('"New email template" in the New Campaign menu asks to open the template editor, without creating anything', () => {
+    let asked = 0;
+    comp.createTemplate.subscribe(() => asked++);
+    (Array.from(el().querySelectorAll('.ec-page-head button')).find(b => b.textContent!.includes('New Campaign')) as HTMLButtonElement).click();
+    fixture.detectChanges();
+    (Array.from(el().querySelectorAll('.ec-create-menu button')).find(b => b.textContent!.includes('New email template')) as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect(asked).toBe(1);
+    expect(el().querySelector('.ec-create-menu')).withContext('the menu closes').toBeNull();
   });
 
   it('list items show a sandboxed thumbnail when the list has one', () => {
@@ -464,7 +477,7 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     fixture.detectChanges();
     expect(el().querySelector('[role=dialog]')!.textContent).toContain('kim@client.io');
     expect(el().querySelector('[role=dialog]')!.textContent).toContain('Customers');
-    (el().querySelector('.zc-close') as HTMLButtonElement).click();
+    (el().querySelector('app-zoho-list-contacts .zc-close') as HTMLButtonElement).click();
     fixture.detectChanges();
     expect(el().querySelector('[role=dialog]')).toBeNull();
   });
@@ -484,14 +497,143 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     expect(comp.dirty).toBeTrue();
   });
 
-  it('the send confirmation names the lists and the selected contacts; Cancel sends nothing', () => {
+  it('the send confirmation popup names the lists and the selected contacts; Cancel sends nothing', () => {
     (comp as any).setSelected({ id: 5, name: 'Autumn', status: 'approved', approved: true, version: 3, html: ORIGINAL, lists: [{ key: 'L1', name: 'Customers' }], contactCount: 2 });
-    const ask = spyOn(window, 'confirm').and.returnValue(false);
     comp.send();
-    expect(ask.calls.mostRecent().args[0]).toContain('Recipients: Zoho lists Customers and 2 selected contacts (added to Zoho first).');
+    fixture.detectChanges();
+    const dialog = () => el().querySelector('[role=dialog][aria-labelledby=ec-send-title]') as HTMLElement | null;
+    expect(dialog()!.textContent).toContain('Zoho lists Customers and 2 selected contacts (added to Zoho first)');
+    (Array.from(dialog()!.querySelectorAll('button')).find(b => b.textContent!.trim() === 'Cancel') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect(dialog()).withContext('Cancel closes the popup').toBeNull();
+    http.expectNone(r => r.url.endsWith('/send'));
     (comp as any).setSelected({ id: 5, name: 'Autumn', status: 'approved', approved: true, version: 3, html: ORIGINAL, lists: [], contactCount: 1 });
     comp.send();
-    expect(ask.calls.mostRecent().args[0]).toContain('Recipients: 1 selected contact (added to Zoho first).');
+    expect(comp.sendConfirm!.recipients).toBe('1 selected contact (added to Zoho first)');
+  });
+
+  it('Send now in the popup sends once, with confirm: true', () => {
+    (comp as any).setSelected({ id: 5, name: 'Autumn', status: 'approved', approved: true, version: 3, html: ORIGINAL, lists: [{ key: 'L1', name: 'Customers' }] });
+    comp.send();
+    fixture.detectChanges();
+    (Array.from(el().querySelectorAll('[aria-labelledby=ec-send-title] button')).find(b => b.textContent!.includes('Send now')) as HTMLButtonElement).click();
+    comp.confirmSend(); // a second click while sending does nothing
+    const req = http.expectOne(r => r.method === 'POST' && r.url.endsWith('/campaigns/5/send'));
+    expect(req.request.body).toEqual({ confirm: true });
+    req.flush({ campaign: { id: 5, name: 'Autumn', status: 'submitted', version: 3, html: ORIGINAL, lists: [] } });
+    http.expectOne(r => /\/mail\/campaigns$/.test(r.url)).flush({ campaigns: [] });
+    expect(comp.sendConfirm).toBeNull();
+  });
+
+  it('merge tags (as in Zoho): subject and editor insert Zoho tags with the default value typed in', () => {
+    const typeFallback = (scope: Element, v: string) => {
+      const inp = scope.querySelector('.ec-merge-ask input') as HTMLInputElement;
+      inp.value = v; inp.dispatchEvent(new Event('input'));
+    };
+    comp.form.subject = 'Big news';
+    fixture.detectChanges();
+    button('Add first name').click(); fixture.detectChanges();
+    expect(el().textContent).toContain("If we don't have any name for a contact, what should the email say instead?");
+    expect(comp.subjectAsk!.fallback).withContext('a subject is not a greeting').toBe('you');
+    const preview = () => Array.from(el().querySelectorAll('.ec-subject-preview li b')).map(b => b.textContent!.trim());
+    expect(preview()).toEqual(['Big news Priya', 'Big news Big Red Packaging team', 'Big news you']);
+    typeFallback(el(), 'Customer|x');
+    fixture.detectChanges();
+    expect(preview()[2]).toBe('Big news Customerx');
+    button('Insert').click();
+    expect(comp.form.subject).toBe('Big news $[FNAME|Customerx]$');
+    expect(comp.subjectAsk).toBeNull();
+
+    comp.step = 3;
+    fixture.detectChanges();
+    (el().querySelector('#ec-edit-html') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    const openPanel = () => { button('Personalize').click(); fixture.detectChanges(); };
+    const choose = (label: string) => { openPanel(); (Array.from(el().querySelectorAll('.ec-personalize-panel button')).find(x => x.querySelector('b')!.textContent!.trim() === label) as HTMLButtonElement).click(); fixture.detectChanges(); };
+    openPanel();
+    expect(Array.from(el().querySelectorAll('.ec-personalize-panel b')).map(x => x.textContent!.trim())).toEqual(['First name', 'Last name', 'View in browser link', 'Update profile link', 'Forward to a friend link', 'Your company address']);
+    expect(el().querySelector('.ec-personalize-panel')!.textContent).toContain('e.g. “Hi Priya,”');
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); fixture.detectChanges();
+    expect(el().querySelector('.ec-personalize-panel')).withContext('Escape closes it').toBeNull();
+    // A contact field: the default value is asked first (prefilled "there"), then inserted, with a space after a word.
+    comp.form.html = '<p>Hello,</p>';
+    fixture.detectChanges();
+    const box = el().querySelector('textarea[aria-label="Email HTML"]') as HTMLTextAreaElement;
+    box.focus(); box.setSelectionRange(8, 8);
+    choose('First name');
+    expect((el().querySelector('.ec-merge-ask input') as HTMLInputElement)).toBeTruthy();
+    button('Insert').click();
+    fixture.detectChanges();
+    expect(comp.form.html).toBe('<p>Hello $[FNAME|there]$,</p>');
+    // A link goes in straight away as a link Zoho fills in.
+    const b2 = el().querySelector('textarea[aria-label="Email HTML"]') as HTMLTextAreaElement;
+    b2.focus(); b2.setSelectionRange(0, 0);
+    choose('View in browser link');
+    expect(comp.form.html.startsWith('<a href="$[LI:VIEWINBROWSER]$">View in browser</a>')).withContext(comp.form.html).toBeTrue();
+    expect(el().querySelector('.ec-merge-ask')).toBeNull();
+  });
+
+  it('sender (as in Zoho): addresses grouped by domain, verified ones marked, name filled in, new address checked', () => {
+    comp.campaigns = [
+      { id: 1, fromEmail: 'News@Acme.com.au', fromName: 'Acme News', status: 'submitted' },
+      { id: 2, fromEmail: 'sales@acme.com.au', fromName: '', status: 'draft' },
+      { id: 3, fromEmail: 'hello@beta.io', fromName: 'Beta', status: 'failed' },
+      { id: 4, fromEmail: 'me@gmail.com', status: 'draft' }
+    ];
+    comp.form.fromName = '';
+    comp.form.fromEmail = '';
+    fixture.detectChanges();
+    const sel = () => el().querySelector('#ec-sender-select') as HTMLSelectElement;
+    expect(Array.from(sel().querySelectorAll('optgroup')).map(g => g.label)).toEqual(['acme.com.au', 'beta.io']);
+    expect(Array.from(sel().options).map(o => o.textContent!.trim())).toEqual(['Choose a sender address', 'news@acme.com.au ✓', 'sales@acme.com.au', 'hello@beta.io', '+ Add sender address…']);
+    sel().value = 'news@acme.com.au'; sel().dispatchEvent(new Event('change')); fixture.detectChanges();
+    expect(comp.form.fromEmail).toBe('news@acme.com.au');
+    expect(comp.form.fromName).toBe('Acme News');
+    expect(el().textContent).toContain('Verified: Zoho has already sent a campaign from this address');
+    sel().value = 'hello@beta.io'; sel().dispatchEvent(new Event('change')); fixture.detectChanges();
+    expect(comp.form.fromName).withContext('a typed name is kept').toBe('Acme News');
+    expect(el().textContent).toContain('Not used with Zoho yet');
+
+    sel().value = '__add'; sel().dispatchEvent(new Event('change')); fixture.detectChanges();
+    const box = el().querySelector('.ec-sender-add input') as HTMLInputElement;
+    box.value = 'boss@yahoo.com'; box.dispatchEvent(new Event('input'));
+    button('Use address').click(); fixture.detectChanges();
+    expect(el().textContent).toContain('Zoho does not send from Gmail, Yahoo');
+    expect(comp.form.fromEmail).toBe('hello@beta.io');
+    box.value = ' Team@NewCo.com '; box.dispatchEvent(new Event('input'));
+    button('Use address').click(); fixture.detectChanges();
+    expect(comp.form.fromEmail).toBe('team@newco.com');
+    expect(Array.from(sel().querySelectorAll('optgroup')).map(g => g.label)).toEqual(['acme.com.au', 'beta.io', 'newco.com']);
+    expect(sel().value).toBe('team@newco.com');
+  });
+
+  it('Sample email: creates a campaign with the ready-made layout, Zoho merge tags and [bracketed] parts to fill in', () => {
+    try { localStorage.setItem('tradesage_workspace', JSON.stringify({ name: 'Acme <Packaging>' })); } catch { /* storage blocked */ }
+    comp.form = null; comp.selected = null; fixture.detectChanges();
+    comp.newCampaign('sample');
+    const req = http.expectOne(r => r.method === 'POST' && /\/mail\/campaigns$/.test(r.url));
+    const b = req.request.body;
+    expect(b.name).toBe('Sample campaign');
+    expect(b.subject).toBe('A quick idea for $[FNAME|you]$');
+    for (const tag of ['Hi $[FNAME|there]$,', '$[LI:UNSUBSCRIBE]$', '$[LI:VIEWINBROWSER]$', '$[HF:ORGADDRESS]$', '$[LI:UPDATEPROFILE]$', '[Your name]', 'https://example.com']) expect(b.html).toContain(tag);
+    expect(b.html).toContain('Acme &lt;Packaging&gt;');
+    expect(b.html).not.toContain('<Packaging>');
+    req.flush({ campaign: { id: 8, name: 'Sample campaign', status: 'draft', version: 1, html: b.html, subject: b.subject, lists: [] } });
+    http.match(r => r.method === 'GET').forEach(r => r.flush(r.request.url.endsWith('/campaigns/8') ? { campaign: { id: 8, name: 'Sample campaign', status: 'draft', version: 1, html: b.html, lists: [] } } : { campaigns: [] }));
+    expect(comp.form?.name).toBe('Sample campaign');
+    try { localStorage.removeItem('tradesage_workspace'); } catch { /* storage blocked */ }
+  });
+
+  it('steps: a draft opens on Details; Review runs the checks; a sent campaign opens on Review', () => {
+    expect(comp.step).toBe(1);
+    expect(comp.stepDone(3)).withContext('the campaign has content').toBeTrue();
+    expect(comp.stepDone(2)).withContext('no recipients yet').toBeFalse();
+    comp.goStep(4);
+    http.expectOne(r => r.method === 'POST' && r.url.endsWith('/campaigns/5/validate')).flush({ validation: { ready: false, problems: ['Add a subject.'], warnings: [] } });
+    fixture.detectChanges();
+    expect(el().querySelector('.ec-checks')!.textContent).toContain('Add a subject.');
+    (comp as any).setSelected({ id: 7, name: 'Sent one', status: 'submitted', version: 2, html: ORIGINAL, lists: [] });
+    expect(comp.step).toBe(4);
   });
 
   it('Zoho contacts can be picked only while the campaign can change and the connection allows it', () => {
@@ -526,9 +668,8 @@ describe('EmailCampaignsComponent: Choose Template', () => {
   it('the send confirmation does not count contacts already covered by a ticked list', () => {
     (comp as any).setSelected({ id: 5, name: 'Autumn', status: 'approved', approved: true, version: 3, html: ORIGINAL, lists: [{ key: 'L1', name: 'Customers' }] });
     comp.onContacts([{ id: 1, sourceListKey: 'L1', eligible: true }, { id: 2, leadId: 4, eligible: true }]);
-    const ask = spyOn(window, 'confirm').and.returnValue(false);
     comp.send();
-    expect(ask.calls.mostRecent().args[0]).toContain('Zoho lists Customers and 1 selected contact (added to Zoho first)');
+    expect(comp.sendConfirm!.recipients).toContain('Zoho lists Customers and 1 selected contact (added to Zoho first)');
   });
 
   // ---- Duplicate ----

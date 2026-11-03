@@ -44,6 +44,20 @@ describe('EmailTemplatesComponent', () => {
   });
   afterEach(() => http.verify());
 
+  it('startNew (from Campaigns → New email template) opens a new, unsaved blank template', () => {
+    fixture = TestBed.createComponent(EmailTemplatesComponent);
+    comp = fixture.componentInstance;
+    comp.startNew = true;
+    fixture.detectChanges();
+    http.expectOne(`${BASE}/categories`).flush({ categories: ['Custom'], tokens: [], canManage: true, limits: { htmlKb: 1024, zipMb: 10 } });
+    http.expectOne(r => r.url === BASE).flush({ templates: [], total: 0, page: 1, pageSize: 12 });
+    fixture.detectChanges();
+    expect(comp.editing).toBeTruthy();
+    expect(comp.editing.id).withContext('not saved until the user clicks Save').toBeNull();
+    expect(comp.editing.name).toBe('Untitled template');
+    http.expectNone(r => r.method === 'POST');
+  });
+
   it('previews template HTML only inside a sandboxed iframe; nothing runs in the app', () => {
     init();
     comp.open({ id: 7 });

@@ -30,6 +30,9 @@ const OPT_OUT_LISTS = 50; // most recent generated lists read for opt-outs befor
 const OPT_OUT_STATUS = { unsub: 'unsubscribed', bounce: 'bounced' };
 const SYNC_LIST_RE = /^Marketech campaign \d+ v\d+ [a-f0-9]{6}$/;
 const EMPTY_CODES = ['2203', '995']; // Zoho reports an empty result as an error code
+// Names sent per campaign send: one Zoho call each, kept well inside Zoho's 500 calls/minute.
+const NAME_SYNC_MAX = 300;
+const NAME_SYNC_CONCURRENCY = 4;
 
 const normalize = e => String(e || '').trim().toLowerCase();
 const isSyncList = name => SYNC_LIST_RE.test(String(name || ''));
@@ -262,6 +265,81 @@ async function markSynced(ids, version) {
   if (ids.length) await run(`UPDATE mail_campaign_contacts SET synced_version = ? WHERE id IN (${placeholders(ids.length)})`, [version, ...ids]);
 }
 
+/** Words that show a "name" is really a business (Google often puts the business in the name). */
+const BUSINESS_WORD_RE = /\b(pty|ltd|limited|llc|llp|inc|corp|corporation|company|group|holdings|packaging|foods?|bakery|distribut\w*|wholesale|supplies|supply|services?|solutions|trading|traders|enterprises?|industries|international|australia|restaurant|cafe|store|shop|studio|agency|clinic|hotel|team|sales|support|office|enquiries|reception|admin)\b/i;
+/** The stand-in name lead discovery gives a place Google returned without a name ("Prospect 3: Packaging supplier (Sydney)"). */
+const PROSPECT_RE = /^prospect\s+\d+\s*:/i;
+/** Legal endings dropped from a business name in a greeting ("Khushboo Foods Pty Ltd" → "Khushboo Foods"). */
+const LEGAL_SUFFIX_RE = /[\s,]+(pty\.?\s*ltd\.?|proprietary\s+limited|pvt\.?\s*ltd\.?|private\s+limited|ltd\.?|limited|llc|llp|plc|inc\.?|incorporated|corp\.?|corporation|co\.|gmbh)\s*$/i;
+
+/**
+ * The person's first and last name for Zoho's name merge tags, or null when the lead has no
+ * person name: no name, the name is the business or the email (Google leads without a contact
+ * person), or the name is clearly a business ("Nimbin Bakery").
+ */
+function personName(c) {
+  const name = String(c?.name || '').replace(/\s+/g, ' ').trim();
+  if (!name || name.length > 100) return null;
+  const same = v => v && name.toLowerCase() === String(v).trim().toLowerCase();
+  if (same(c.company) || same(c.email) || /@/.test(name) || PROSPECT_RE.test(name) || BUSINESS_WORD_RE.test(name)) return null;
+  const [first, ...rest] = name.split(' ');
+  return { first: first.slice(0, 50), last: rest.join(' ').slice(0, 50) };
+}
+
+/**
+ * A business name tidied for a greeting: Google's extras after "|", " - " or "(" and legal endings
+ * are dropped ("Pacific Packaging Australia | Melbourne" → "Pacific Packaging Australia",
+ * "A & J Australia Pty Ltd - Packaging Supplies Sydney" → "A & J Australia"). Null when nothing
+ * usable is left or it is too long for a greeting.
+ */
+function businessName(raw) {
+  let n = String(raw || '').replace(/\s+/g, ' ').trim();
+  if (!n || /@|https?:|www\./i.test(n) || PROSPECT_RE.test(n)) return null;
+  n = n.split(/\s+[|–—-]\s+|\s*\(|\s*\|\s*/)[0].trim();
+  for (let i = 0; i < 3 && LEGAL_SUFFIX_RE.test(n); i++) n = n.replace(LEGAL_SUFFIX_RE, '').trim();
+  n = n.replace(/[\s,.;:&-]+$/, '').replace(/^THE\b/, 'The');
+  if (n.length < 2 || n.length > 40) return null;
+  return n;
+}
+
+/**
+ * The name Zoho's First name tag shows for a lead: the person's name, or for a business lead
+ * without a contact person, the business ("Big Red Packaging team"). Null: the tag's default is used.
+ */
+function greetingName(c) {
+  const person = personName(c);
+  if (person) return person;
+  const biz = businessName(c?.company) || businessName(c?.name);
+  if (!biz) return null;
+  return { first: /\bteam$/i.test(biz) ? biz : `${biz} team`, last: '', business: true };
+}
+
+/**
+ * Sends the names of contacts just added from leads to Zoho, so $[FNAME]$ / $[LNAME]$ are filled.
+ * Best effort: a failure never stops the send (the merge tag's default is used for that person).
+ * Contacts picked from a Zoho list are skipped: Zoho already has their details.
+ */
+async function syncNames(workspaceId, listKey, contacts) {
+  const row = await zoho.connectionRow(workspaceId);
+  const named = contacts.filter(c => c.leadId).map(c => ({ c, n: greetingName(c) })).filter(x => x.n);
+  if (!named.length) return { sent: 0, failed: 0, skipped: 0, allowed: true };
+  if (!zoho.canSyncNames(row)) return { sent: 0, failed: 0, skipped: named.length, allowed: false };
+  const todo = named.slice(0, NAME_SYNC_MAX);
+  let sent = 0, failed = 0, next = 0;
+  const worker = async () => {
+    while (next < todo.length) {
+      const { c, n } = todo[next++];
+      const info = { 'Contact Email': c.email, 'First Name': n.first, ...(n.last ? { 'Last Name': n.last } : {}) };
+      try {
+        await zoho.writeCall(workspaceId, 'json/listsubscribe', { listkey: listKey, contactinfo: JSON.stringify(info), source: 'Marketech.ai' });
+        sent++;
+      } catch { failed++; }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(NAME_SYNC_CONCURRENCY, todo.length) }, worker));
+  return { sent, failed, skipped: named.length - todo.length, allowed: true };
+}
+
 /** Creates the generated list with its first addresses, or finds it if an earlier try made it. */
 async function createList(workspaceId, name, first) {
   try {
@@ -321,8 +399,9 @@ async function syncForSend(ctx, row, { listKeys }) {
     await zoho.writeCall(workspaceId, 'addlistsubscribersinbulk', { listkey: listKey, emailids: part.map(c => c.email).join(',') });
     await markSynced(part.map(c => c.id), row.version);
   }
-  await audit(ctx, 'mail.campaign_contacts_synced', { resourceType: 'mail_campaign', resourceId: row.id, metadata: { added: todo.length, skipped: contacts.length - inList.length - todo.length, optOutsImported: imported } });
+  const names = todo.length ? await syncNames(workspaceId, listKey, todo) : { sent: 0, failed: 0, skipped: 0 };
+  await audit(ctx, 'mail.campaign_contacts_synced', { resourceType: 'mail_campaign', resourceId: row.id, metadata: { added: todo.length, skipped: contacts.length - inList.length - todo.length, optOutsImported: imported, namesSent: names.sent, namesFailed: names.failed, namesSkipped: names.skipped } });
   return listKey;
 }
 
-module.exports = { MAX_CONTACTS, assess, notOnLists, selection, setLeads, addFromZoho, copySelection, removeContacts, syncForSend, fetchLists, readListPage, isSyncList, PAGE_SIZE };
+module.exports = { MAX_CONTACTS, personName, businessName, greetingName, syncNames, assess, notOnLists, selection, setLeads, addFromZoho, copySelection, removeContacts, syncForSend, fetchLists, readListPage, isSyncList, PAGE_SIZE };

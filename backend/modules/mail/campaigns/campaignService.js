@@ -4,6 +4,16 @@ const { run, get, all } = require('../../../db/database');
 const { audit } = require('../../../lib/audit');
 const { toDbDateTime } = require('../../../lib/time');
 const { unresolvedPlaceholders, TOKEN_RE } = require('../../../lib/mailContent');
+
+/**
+ * Personalization in campaigns works as in Zoho: the Merge Tags menu writes Zoho's own tags with a
+ * default value ($[FNAME|there]$; email only, so no social sharing default), which Zoho fills per recipient. Older campaigns written
+ * with {{first_name}} / {{last_name}} are converted to those tags when Zoho imports them.
+ */
+const ZOHO_MERGE = { first_name: '$[FNAME|there]$', last_name: '$[LNAME||]$' };
+const PERSONAL_TOKEN_RE = /\{\{\s*(first_name|last_name)\s*\}\}/gi;
+const toZohoMergeTags = text => String(text || '').replace(PERSONAL_TOKEN_RE, (m, k) => ZOHO_MERGE[k.toLowerCase()]);
+const usesNames = (...parts) => parts.some(p => new RegExp(PERSONAL_TOKEN_RE.source, 'i').test(String(p || '')) || /\$\[(FNAME|LNAME)\b/i.test(String(p || '')));
 const { sanitizeEmailHtml } = require('../../../lib/emailHtml');
 const { workerAuthorizationProblem } = require('../../../lib/workerAuthorization');
 const zoho = require('../zoho/zohoService');
@@ -245,17 +255,25 @@ async function validateRow(ctx, row, { checkZoho = true } = {}) {
   if (!html.trim()) problems.push('Add the email content.');
   if (html.length > MAX_HTML) problems.push(`Content exceeds ${MAX_HTML} characters.`);
   const placeholders = unresolvedPlaceholders({ subject: String(row.subject || '').replace(ZOHO_TAG_RE, ''), html: html.replace(ZOHO_TAG_RE, '') });
-  const tokens = placeholders.filter(p => new RegExp(`^${TOKEN_RE.source}$`).test(p));
-  const brackets = placeholders.filter(p => !tokens.includes(p));
+  const tokens = placeholders.filter(p => new RegExp(`^${TOKEN_RE.source}$`).test(p) && !new RegExp(`^${PERSONAL_TOKEN_RE.source}$`, 'i').test(p));
+  const brackets = placeholders.filter(p => !new RegExp(`^${TOKEN_RE.source}$`).test(p));
   if (brackets.length) problems.push(`Replace the placeholders: ${brackets.join(', ')}.`);
-  if (tokens.length) problems.push(`Personalization tokens are not filled for Zoho delivery yet: ${tokens.join(', ')}. Replace them with text (or use Zoho merge tags such as $[LI:UNSUBSCRIBE]$).`);
+  if (tokens.length) problems.push(`These personalization fields cannot be filled by Zoho: ${tokens.join(', ')}. Only {{first_name}} and {{last_name}} are supported in campaigns; replace the others with text.`);
   const keys = parse(row.list_keys_json, []);
   const contacts = contactsSvc.notOnLists(await contactsSvc.assess(ws(ctx), row.id), keys);
   const eligible = contacts.filter(c => c.eligible).length;
   if (!keys.length && !eligible) problems.push(contacts.length ? 'None of the selected contacts can be emailed. Choose others or a Zoho mailing list.' : 'Choose at least one Zoho mailing list or contact.');
   if (eligible) warnings.push(`${eligible} selected contact(s) will be added to a new Zoho list when you send.`);
+  if (usesNames(row.subject, html)) {
+    warnings.push('Personalized with merge tags: each person sees their own name, and leads without a contact person see their business name (e.g. "Big Red Packaging team"). Anyone with no name in Zoho sees the tag\'s default value. Zoho does not fill merge tags in test emails; send to a list named "Test List" to check.');
+    if (eligible && checkZoho) {
+      const conn = await zoho.connectionRow(ws(ctx)).catch(() => null);
+      if (conn && !zoho.canSyncNames(conn)) warnings.push('Reconnect Zoho Campaigns (Settings) to send your leads\' names to Zoho. Until then, selected leads see the default value instead of their name.');
+    }
+  }
   if (contacts.length > eligible) warnings.push(`${contacts.length - eligible} selected contact(s) cannot be emailed and will be skipped.`);
   if (html && !UNSUB_TAG_RE.test(html)) warnings.push('No unsubscribe link: add $[LI:UNSUBSCRIBE]$ (or $[LI:ORG_OPTOUT]$). Without it Zoho adds its default footer or holds the campaign.');
+  if (/href=["']https?:\/\/(www\.)?example\.(com|org|net)\b/i.test(html)) problems.push('Replace the sample link (example.com) with your own web page.');
   if (/<img[^>]+src=["'](?!https:\/\/|data:)/i.test(html)) warnings.push('Some images do not use https:// URLs; they may not show in Zoho.');
   if (!publicBaseUrl()) problems.push('The server needs a public https APP_BASE_URL: Zoho imports the content from a Marketech.ai link.');
   warnings.push('Sending limits depend on your Zoho plan and policies; Marketech.ai cannot read them. The sender address must be verified in Zoho.');
@@ -350,7 +368,7 @@ async function send(ctx, id, { confirm } = {}) {
         campaignname: `${String(row.name).slice(0, 100)} ${marker(row)}`,
         from_email: row.from_email,
         ...(row.from_name ? { from_name: row.from_name } : {}),
-        subject: row.subject,
+        subject: toZohoMergeTags(row.subject),
         content_url: `${publicBaseUrl()}/api/v1/mail/campaigns/content/${token}`,
         list_details: JSON.stringify(Object.fromEntries(keys.map(k => [k, []]))),
         ...(row.topic_id ? { topicId: row.topic_id } : {})
@@ -470,7 +488,7 @@ async function contentByToken(token) {
     "SELECT html_content FROM mail_campaigns WHERE content_token_hash = ? AND content_token_expires_at > UTC_TIMESTAMP() AND approved_version = version AND status IN ('submitting', 'submitted', 'needs_review', 'failed')",
     [hash]
   );
-  return row ? row.html_content : null;
+  return row ? toZohoMergeTags(row.html_content) : null;
 }
 
 /**
@@ -538,4 +556,4 @@ async function listContacts(ctx, listKey, { status = 'subscribed', page = 1 } = 
   return { contacts, page: p, pageSize: contactsSvc.PAGE_SIZE, hasMore };
 }
 
-module.exports = { list, getOne, create, update, duplicate, remove, getContacts, setContactLeads, addContactsFromZoho, removeContacts, leadOptions, zohoAudiences, listContacts, validate, approve, send, refresh, resolve, contentByToken, recipientActivity, RECIPIENT_ACTIONS, contactsIn };
+module.exports = { list, getOne, create, update, duplicate, remove, getContacts, setContactLeads, addContactsFromZoho, removeContacts, leadOptions, zohoAudiences, listContacts, validate, approve, send, refresh, resolve, contentByToken, recipientActivity, RECIPIENT_ACTIONS, contactsIn, toZohoMergeTags };

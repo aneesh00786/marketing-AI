@@ -13,6 +13,12 @@ import { CampaignContactsComponent } from './campaign-contacts.component';
 import { CampaignContactRowsComponent } from './campaign-contact-rows.component';
 import { EmailPreviewComponent as ThumbPreview } from './email-preview.component';
 import { CampaignMetricsComponent } from './campaign-metrics.component';
+import { ZohoListsComponent } from './zoho-lists.component';
+/** Same checks as the server (campaignService PUBLIC_DOMAINS). */
+const SENDER_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+const PUBLIC_MAIL_RE = /@(gmail|googlemail|yahoo|ymail|hotmail|outlook|live|msn|aol|icloud|me|mac|gmx|yandex|proton|protonmail|mail|zoho|rediffmail)\.[a-z.]+$/i;
+import { SAMPLE_SUBJECT, sampleCampaignHtml } from './sample-email';
+import { CONTACT_FIELDS, ContactField, contactTag, fallbackExample, fallbackQuestion } from './merge-tags';
 
 /** A sent campaign's figures are read from Zoho when it is opened, at most this often. */
 const REPORT_MAX_AGE_MS = 5 * 60 * 1000;
@@ -26,7 +32,7 @@ const REPORT_MAX_AGE_MS = 5 * 60 * 1000;
 @Component({
   selector: 'app-email-campaigns',
   standalone: true,
-  imports: [CommonModule, IconComponent, FormsModule, ZohoCampaignsComponent, TemplatePickerComponent, EmailContentEditorComponent, ThumbPreview, ZohoListContactsComponent, CampaignContactsComponent, CampaignContactRowsComponent, CampaignMetricsComponent],
+  imports: [CommonModule, IconComponent, FormsModule, ZohoCampaignsComponent, TemplatePickerComponent, EmailContentEditorComponent, ThumbPreview, ZohoListContactsComponent, CampaignContactsComponent, CampaignContactRowsComponent, CampaignMetricsComponent, ZohoListsComponent],
   templateUrl: './email-campaigns.component.html',
   styleUrls: ['../command/command-center.component.css', './mail-ui.css', './email-campaigns.component.css']
 })
@@ -39,6 +45,8 @@ export class EmailCampaignsComponent implements OnInit {
   @Output() toast = new EventEmitter<string>();
   /** Open Settings → Zoho Campaigns (where the Zoho API credentials are entered). */
   @Output() openSettings = new EventEmitter<void>();
+  /** Open Email Templates with a new blank template ("New Campaign" menu → New email template). */
+  @Output() createTemplate = new EventEmitter<void>();
 
   private base = `${apiRoot()}/api/v1/mail/campaigns`;
   zoho: any = null;
@@ -57,6 +65,15 @@ export class EmailCampaignsComponent implements OnInit {
   listSort: 'newest' | 'oldest' | 'name' = 'newest';
   menuFor: number | null = null;
   showCreateMenu = false;
+  /** The open campaign's "More" menu, the Zoho connection popup and the send confirmation popup. */
+  moreOpen = false;
+  zohoOpen = false;
+  sendConfirm: { name: string; subject: string; recipients: string } | null = null;
+  /** Guided editing: 1 Details, 2 Recipients, 3 Email content, 4 Review & send. */
+  readonly steps = [
+    { n: 1, title: 'Details' }, { n: 2, title: 'Recipients' }, { n: 3, title: 'Email content' }, { n: 4, title: 'Review & send' }
+  ];
+  step = 1;
   /** The Zoho mailing list whose contacts are being viewed. */
   contactsList: any = null;
   /** The saved selection once loaded, and the part picked from each Zoho list (shown on its row). */
@@ -100,13 +117,27 @@ export class EmailCampaignsComponent implements OnInit {
     });
   }
 
-  newCampaign(): void {
+  /**
+   * Blank: a short email with an unsubscribe link. Sample: a ready-made layout (greeting with the
+   * contact's name, offer, button, footer) whose [bracketed] parts must be filled in before approval.
+   */
+  newCampaign(kind: 'blank' | 'sample' = 'blank'): void {
     if (!this.confirmDiscard()) return;
     this.busy = 'create';
-    this.http.post<any>(this.base, { name: 'Untitled campaign', html: '<p>Hello,</p>\n<p></p>\n<p><a href="$[LI:UNSUBSCRIBE]$">Unsubscribe</a></p>' }).subscribe({
-      next: r => { this.busy = ''; this.open(r.campaign); this.load(); },
+    const body = kind === 'sample'
+      ? { name: 'Sample campaign', subject: SAMPLE_SUBJECT, html: sampleCampaignHtml(this.workspaceName()) }
+      : { name: 'Untitled campaign', html: '<p>Hello,</p>\n<p></p>\n<p><a href="$[LI:UNSUBSCRIBE]$">Unsubscribe</a></p>' };
+    this.http.post<any>(this.base, body).subscribe({
+      next: r => {
+        this.busy = ''; this.open(r.campaign); this.load();
+        if (kind === 'sample') this.toast.emit('Sample email added. Replace the [bracketed] text and the button link, then review it in Email content.');
+      },
       error: e => { this.busy = ''; this.toast.emit(this.err(e)); }
     });
+  }
+
+  private workspaceName(): string {
+    try { return String(JSON.parse(localStorage.getItem('tradesage_workspace') || '{}')?.name || ''); } catch { return ''; }
   }
 
   // ---------- Campaign list ----------
@@ -132,8 +163,178 @@ export class EmailCampaignsComponent implements OnInit {
 
   toggleMenu(id: number, ev: Event): void { ev.stopPropagation(); this.menuFor = this.menuFor === id ? null : id; }
 
-  @HostListener('document:click') closeMenu(): void { this.menuFor = null; this.showCreateMenu = false; }
-  @HostListener('document:keydown.escape') escMenu(): void { this.menuFor = null; this.showCreateMenu = false; }
+  @HostListener('document:click') closeMenu(): void { this.menuFor = null; this.showCreateMenu = false; this.moreOpen = false; }
+  @HostListener('document:keydown.escape') escMenu(): void { this.menuFor = null; this.showCreateMenu = false; this.moreOpen = false; this.zohoOpen = false; this.sendConfirm = null; }
+
+  toggleMore(ev: Event): void { ev.stopPropagation(); this.moreOpen = !this.moreOpen; this.menuFor = null; this.showCreateMenu = false; }
+
+  // ---------- Steps ----------
+  get hasContent(): boolean { return !!String(this.form?.html || '').replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').trim(); }
+  /** Selected contacts that are not already covered by a ticked list. */
+  get extraContacts(): number {
+    const keys = this.form ? this.form.listKeys as Set<string> : new Set<string>();
+    return this.allContacts ? this.allContacts.filter(c => c.eligible && !keys.has(c.sourceListKey)).length : (this.selected?.contactCount ?? 0);
+  }
+  get recipientSummary(): string {
+    const lists = this.form ? this.form.listKeys.size : 0;
+    const people = this.extraContacts;
+    return [lists && `${lists} Zoho list${lists === 1 ? '' : 's'}`, people && `${people} contact${people === 1 ? '' : 's'}`].filter(Boolean).join(' + ');
+  }
+  get fromText(): string {
+    const f = this.form || {};
+    if (!f.fromName && !f.fromEmail) return 'Zoho account default';
+    return f.fromName && f.fromEmail ? `${f.fromName} <${f.fromEmail}>` : (f.fromName || f.fromEmail);
+  }
+  stepDone(n: number): boolean {
+    if (!this.form) return false;
+    if (n === 1) return !!String(this.form.name || '').trim() && !!String(this.form.subject || '').trim();
+    if (n === 2) return !!this.recipientSummary;
+    if (n === 3) return this.hasContent;
+    return !!this.selected?.approved || ['submitted', 'submitting'].includes(this.selected?.status);
+  }
+  stepHint(n: number): string {
+    if (n === 1) return this.stepDone(1) ? 'Name and subject set' : 'Name and subject';
+    if (n === 2) return this.recipientSummary || 'Lists or leads';
+    if (n === 3) return this.hasContent ? 'Content added' : 'Design the email';
+    if (this.selected?.status === 'submitted') return 'Sent';
+    if (this.selected?.approved) return 'Approved, ready to send';
+    return 'Check and approve';
+  }
+  goStep(n: number): void {
+    if (n < 1 || n > 4) return;
+    this.step = n;
+    // Arriving at Review runs the checks, so problems show without an extra click.
+    if (n === 4 && this.selected && !this.validation && this.busy !== 'validate') this.validate();
+  }
+  /** Campaigns, or Zoho Campaigns → Contact lists. */
+  view: 'campaigns' | 'lists' = 'campaigns';
+
+  // ---------- Sender ("From"), picked like Zoho's sender address dropdown ----------
+  /** True while a new sender address is being typed. */
+  senderAdding = false;
+  newSender = '';
+  senderError = '';
+
+  /**
+   * Sender addresses grouped by domain, as in Zoho. Zoho's API cannot list verified senders, so
+   * these are the addresses used in this workspace's campaigns: each with the last sender name
+   * used with it and whether Zoho has accepted a campaign from it (which shows it is verified).
+   */
+  get senderGroups(): { domain: string; items: { email: string; name: string; sentBefore: boolean }[] }[] {
+    const seen = new Map<string, { email: string; name: string; sentBefore: boolean }>();
+    for (const c of this.campaigns || []) {
+      const email = String(c?.fromEmail || '').trim().toLowerCase();
+      if (!SENDER_RE.test(email) || PUBLIC_MAIL_RE.test(email)) continue;
+      const s = seen.get(email) || { email, name: '', sentBefore: false };
+      if (!s.name && c.fromName) s.name = String(c.fromName);
+      if (c.status === 'submitted') s.sentBefore = true;
+      seen.set(email, s);
+    }
+    const current = String(this.form?.fromEmail || '').trim().toLowerCase();
+    if (current && !seen.has(current)) seen.set(current, { email: current, name: '', sentBefore: false });
+    const groups = new Map<string, { email: string; name: string; sentBefore: boolean }[]>();
+    for (const s of seen.values()) {
+      const d = s.email.split('@')[1] || '';
+      groups.set(d, [...(groups.get(d) || []), s]);
+    }
+    return [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([domain, items]) => ({ domain, items: items.sort((a, b) => a.email.localeCompare(b.email)) }));
+  }
+
+  /** The picked sender, with what is known about it. */
+  get currentSender(): { email: string; name: string; sentBefore: boolean } | null {
+    const e = String(this.form?.fromEmail || '').trim().toLowerCase();
+    if (!e) return null;
+    for (const g of this.senderGroups) for (const s of g.items) if (s.email === e) return s;
+    return null;
+  }
+
+  /** Picking an address also fills in the sender name last used with it, when none is typed. */
+  pickSender(value: string, sel?: HTMLSelectElement): void {
+    if (!this.editable || !this.form) return;
+    if (value === '__add') {
+      this.senderAdding = true; this.newSender = ''; this.senderError = '';
+      if (sel) sel.value = this.form.fromEmail || '';
+      return;
+    }
+    this.form.fromEmail = value;
+    const s = this.currentSender;
+    if (s?.name && !String(this.form.fromName || '').trim()) this.form.fromName = s.name;
+  }
+
+  /** "Add sender address": checked here as Zoho would (format, no public mailbox domains). */
+  addSender(): void {
+    const e = String(this.newSender || '').trim().toLowerCase();
+    if (!SENDER_RE.test(e)) { this.senderError = 'Enter a full email address, e.g. news@yourdomain.com.'; return; }
+    if (PUBLIC_MAIL_RE.test(e)) { this.senderError = 'Zoho does not send from Gmail, Yahoo, Outlook or other public mailboxes. Use an address on your own domain.'; return; }
+    if (this.form) this.form.fromEmail = e;
+    this.senderAdding = false; this.newSender = ''; this.senderError = '';
+  }
+
+  readonly contactFields = CONTACT_FIELDS;
+  readonly fallbackQuestion = fallbackQuestion;
+  readonly fallbackExample = fallbackExample;
+  /** The contact field going into the subject, waiting for its default value. */
+  subjectAsk: { field: ContactField; label: string; fallback: string } | null = null;
+  /** Where the cursor was when the subject box was left (-1: never clicked, the tag goes at the end). */
+  subjectCaret = -1;
+  private subjectAt = -1;
+
+  /**
+   * Subject "Merge tags" menu: uses the last cursor position, then asks for the default value (as Zoho
+   * does). A subject is not a greeting, so the first-name default starts as "you", not "there".
+   */
+  pickSubjectTag(key: string, _box?: HTMLInputElement): void {
+    const f = CONTACT_FIELDS.find(x => x.key === key);
+    if (!f || !this.editable || !this.form) return;
+    this.subjectAt = this.subjectCaret;
+    this.subjectAsk = { field: f.key, label: f.label, fallback: f.key === 'first' ? 'you' : f.fallback };
+  }
+
+  /** The subject with the tag inserted at the remembered cursor position, and where the tag ends. */
+  private subjectWith(tag: string): { text: string; end: number } {
+    const s = String(this.form?.subject || '');
+    const at = this.subjectAt >= 0 && this.subjectAt <= s.length ? this.subjectAt : s.length;
+    const before = s.slice(0, at);
+    const token = `${before && !/\s$/.test(before) ? ' ' : ''}${tag}`;
+    const after = s.slice(at);
+    return { text: (before + token + (after && !/^[\s,.!?;:]/.test(after) ? ' ' : '') + after).slice(0, 255), end: at + token.length };
+  }
+
+  /**
+   * The subject as three kinds of recipient will see it, while the default value is typed:
+   * a person, a business lead without a contact person, and a contact with no name at all.
+   */
+  get subjectPreview(): { who: string; text: string }[] {
+    const ask = this.subjectAsk;
+    if (!ask || !this.form) return [];
+    const subject = this.subjectWith(contactTag(ask.field, ask.fallback)).text;
+    const fill = (first: string | null, last: string | null) => subject
+      .replace(/\$\[FNAME(?:\|([^|\]]*))?(?:\|[^\]]*)?\]\$/g, (_m, fb) => first ?? (fb || ''))
+      .replace(/\$\[LNAME(?:\|([^|\]]*))?(?:\|[^\]]*)?\]\$/g, (_m, fb) => last ?? (fb || ''))
+      .replace(/\s+/g, ' ').trim();
+    return [
+      { who: 'Priya Nair', text: fill('Priya', 'Nair') },
+      { who: 'Business lead, no contact person', text: fill('Big Red Packaging team', null) },
+      { who: 'No name at all', text: fill(null, null) }
+    ];
+  }
+
+  /** Inserts the Zoho merge tag (e.g. $[FNAME|you]$) at the remembered cursor position. */
+  confirmSubjectTag(box?: HTMLInputElement): void {
+    const ask = this.subjectAsk;
+    if (!ask || !this.editable || !this.form) { this.subjectAsk = null; return; }
+    const { text, end } = this.subjectWith(contactTag(ask.field, ask.fallback));
+    this.subjectAsk = null;
+    this.form.subject = text;
+    if (box) setTimeout(() => { try { box.focus(); box.setSelectionRange(end, end); } catch { /* not focusable */ } });
+  }
+
+  /** Next step; unsaved edits are saved first. */
+  next(): void {
+    if (this.dirty) this.save(() => this.goStep(this.step + 1));
+    else this.goStep(this.step + 1);
+  }
 
   /** The recipient-lists "Connect Zoho" button uses the same connect flow as the Zoho panel. */
   connectZoho(): void { this.zohoPanel?.connect(); }
@@ -179,7 +380,8 @@ export class EmailCampaignsComponent implements OnInit {
   }
 
   private setSelected(c: any): void {
-    if (this.selected?.id !== c.id) this.onContacts(null);
+    const fresh = this.selected?.id !== c.id;
+    if (fresh) { this.onContacts(null); this.subjectCaret = -1; this.subjectAsk = null; this.senderAdding = false; this.senderError = ''; }
     this.selected = c;
     this.validation = null;
     this.form = {
@@ -187,6 +389,7 @@ export class EmailCampaignsComponent implements OnInit {
       topicId: c.topicId || '', listKeys: new Set((c.lists || []).map((l: any) => l.key))
     };
     this.original = this.snapshot();
+    if (fresh) this.step = this.editable ? 1 : 4;
   }
 
   onContacts(list: any[] | null): void {
@@ -271,17 +474,26 @@ export class EmailCampaignsComponent implements OnInit {
     });
   }
 
-  send(): void {
+  /** Who the saved campaign goes to, as shown in the send confirmation. */
+  sendRecipients(): string {
     const lists = (this.selected.lists || []).map((l: any) => l.name || l.key).join(', ');
     // A ticked list already covers the contacts picked from it.
     const keys = new Set((this.selected.lists || []).map((l: any) => l.key));
     const contacts = this.allContacts ? this.allContacts.filter(c => c.eligible && !keys.has(c.sourceListKey)).length : this.selected.contactCount ?? 0;
-    const to = [lists && `Zoho lists ${lists}`, contacts && `${contacts} selected contact${contacts === 1 ? '' : 's'} (added to Zoho first)`].filter(Boolean).join(' and ');
-    if (!confirm(`Send "${this.selected.name}" through Zoho now?\n\nRecipients: ${to}.\nYour Zoho plan's sending limits apply. This cannot be undone.`)) return;
+    return [lists && `Zoho lists ${lists}`, contacts && `${contacts} selected contact${contacts === 1 ? '' : 's'} (added to Zoho first)`].filter(Boolean).join(' and ');
+  }
+
+  /** Opens the confirmation popup; nothing is sent until "Send now". */
+  send(): void {
+    this.sendConfirm = { name: this.selected.name, subject: this.selected.subject || '', recipients: this.sendRecipients() };
+  }
+
+  confirmSend(): void {
+    if (!this.sendConfirm || this.busy === 'send') return;
     this.busy = 'send';
     this.http.post<any>(`${this.base}/${this.selected.id}/send`, { confirm: true }).subscribe({
-      next: r => { this.busy = ''; this.setSelected(r.campaign); this.load(); this.toast.emit('Zoho accepted the campaign for sending. Delivery figures appear as Zoho sends.'); },
-      error: e => { this.busy = ''; this.toast.emit(this.err(e)); this.open(this.selected); this.load(); }
+      next: r => { this.busy = ''; this.sendConfirm = null; this.setSelected(r.campaign); this.load(); this.toast.emit('Zoho accepted the campaign for sending. Delivery figures appear as Zoho sends.'); },
+      error: e => { this.busy = ''; this.sendConfirm = null; this.toast.emit(this.err(e)); this.open(this.selected); this.load(); }
     });
   }
 

@@ -39,3 +39,22 @@ textarea.code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; fon
 .ec-toolbar + .ec-code { margin-top: 0; }
 @media (max-width: 1400px) { .ec-count { display: none; } }
 .ec-unsub { display: inline-flex; align-items: center; gap: 8px; align-self: flex-start; font-size: 0.86rem; font-weight: 600; color: var(--text); cursor: pointer; }
+
+/* Merge tag default value (Zoho asks for one when a contact field is inserted) */
+.ec-merge-ask { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; padding: 10px 12px; border: 1px solid var(--border); border-top: 0; background: var(--surface-2, rgba(127,127,127,.06)); }
+.ec-merge-ask label { display: flex; flex-direction: column; gap: 4px; flex: 1 1 220px; font-size: 0.82rem; }
+.ec-merge-ask input { max-width: 260px; }
+.ec-merge-ask .ec-ask-q { font-weight: 600; }
+.ec-merge-ask .ec-ask-eg { color: var(--text-muted, #64748b); font-size: 0.78rem; }
+
+/* 👤 Personalize: plain options with a short description, instead of a merge-tag dropdown */
+.ec-personalize { position: relative; display: inline-flex; }
+.ec-personalize-btn { white-space: nowrap; }
+.ec-personalize-panel { position: absolute; z-index: 30; top: calc(100% + 6px); right: 0; width: 280px; max-width: calc(100vw - 32px); padding: 6px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface, #fff); box-shadow: 0 10px 30px rgba(0,0,0,.15); }
+.ec-personalize-panel button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; padding: 8px 10px; border: 0; border-radius: 8px; background: none; color: var(--text); text-align: left; cursor: pointer; font: inherit; }
+.ec-personalize-panel button:hover, .ec-personalize-panel button:focus-visible { background: var(--surface-2, rgba(127,127,127,.1)); }
+.ec-personalize-panel b { font-size: 0.86rem; font-weight: 600; }
+.ec-personalize-panel small { font-size: 0.76rem; color: var(--text-muted); }
+.ec-pp-head { margin: 4px 10px 6px; font-size: 0.76rem; color: var(--text-muted); }
+.ec-pp-sep { height: 1px; margin: 4px 6px; background: var(--border); }
+@media (max-width: 600px) { .ec-personalize-panel { right: auto; left: 0; } }

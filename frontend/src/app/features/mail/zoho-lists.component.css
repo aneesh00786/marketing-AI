@@ -1,0 +1,55 @@
+:host { display: block; }
+.zl { display: flex; flex-direction: column; gap: 12px; padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); min-width: 0; }
+.zl-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.zl-head h3 { margin: 0 0 4px; }
+.zl-tools { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.zl-search { display: flex; align-items: center; gap: 6px; flex: 1 1 240px; max-width: 360px; color: var(--text-muted); }
+.zl-search input { flex: 1; min-width: 0; }
+.zl-check { display: inline-flex; align-items: center; gap: 6px; font-size: 0.82rem; color: var(--text-muted); }
+.zl-empty { padding: 24px; text-align: center; border: 1px dashed var(--border); border-radius: 10px; color: var(--text-muted); }
+.zl-table { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.zl-row { display: grid; grid-template-columns: minmax(0, 1fr) 90px 240px; gap: 12px; align-items: center; padding: 10px 14px; border-top: 1px solid var(--border); }
+.zl-row:first-child { border-top: 0; }
+.zl-th { background: var(--surface-2, rgba(127,127,127,.06)); font-size: 0.76rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: .03em; }
+.zl-crow { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) 100px; }
+.zl-name { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; overflow-wrap: anywhere; }
+.zl-badge { font-size: 0.7rem; padding: 1px 8px; border-radius: 999px; background: var(--surface-2, rgba(127,127,127,.12)); color: var(--text-muted); }
+.zl-count { font-variant-numeric: tabular-nums; }
+.zl-email { overflow-wrap: anywhere; }
+.zl-actions { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
+.zl-foot { margin: 0; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* Popups (same look as the campaign popups) */
+.zc-backdrop { position: fixed; inset: 0; z-index: 1000; background: rgba(15, 18, 30, 0.5); display: grid; place-items: center; padding: 16px; }
+.zc-card { width: min(720px, 100%); max-height: calc(100vh - 32px); overflow: auto; display: flex; flex-direction: column; gap: 12px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 14px; padding: 18px; box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25); min-width: 0; box-sizing: border-box; }
+.zc-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.zc-head h3 { margin: 0 0 4px; overflow-wrap: anywhere; }
+.zc-close { border: none; background: none; color: var(--text-muted); cursor: pointer; padding: 4px; border-radius: 6px; display: inline-flex; }
+.zc-close:hover { background: var(--surface-2); color: var(--text); }
+.zl-field { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; border: 0; min-width: 0; font-size: 13px; font-weight: 600; }
+.zl-field legend { padding: 0; margin-bottom: 6px; }
+.zl-field textarea { resize: vertical; font-weight: normal; }
+.zl-lead-search { display: flex; gap: 6px; flex-wrap: wrap; }
+.zl-lead-search input { flex: 1 1 220px; min-width: 0; }
+.zl-leads { max-height: 240px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
+.zl-lead { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-top: 1px solid var(--border); font-weight: normal; cursor: pointer; }
+.zl-lead:first-child { border-top: 0; }
+.zl-lead span { display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; }
+.zl-lead small { color: var(--text-muted); font-size: 0.76rem; }
+.zl-skipped ul { margin: 4px 0 0; padding-left: 18px; font-size: 0.8rem; }
+.zl-form-foot { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.zl-form-foot > span { flex: 1 1 200px; }
+.zl-problem { color: var(--danger, #dc2626); }
+.zl-pager { display: flex; align-items: center; justify-content: center; gap: 10px; }
+
+@media (max-width: 600px) {
+  .zl-row, .zl-crow { grid-template-columns: minmax(0, 1fr) auto; }
+  .zl-row > :nth-child(3) { grid-column: 1 / -1; justify-content: flex-start; }
+  .zl-th > :nth-child(3) { display: none; }
+}
+
+.zl-head-actions { display: inline-flex; gap: 8px; flex-wrap: wrap; }
+.zl-file { display: inline-flex; align-self: flex-start; align-items: center; gap: 8px; padding: 10px 14px; border: 1px dashed var(--border-strong, var(--border)); border-radius: 10px; cursor: pointer; font-weight: 600; font-size: 0.88rem; }
+.zl-file input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.zl-file:focus-within { outline: 2px solid var(--primary, #4f46e5); outline-offset: 2px; }

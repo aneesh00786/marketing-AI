@@ -1,4 +1,4 @@
-import { Component, EventEmitter, HostListener, OnInit, Output } from '@angular/core';
+import { Component, EventEmitter, HostListener, Input, OnInit, Output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { IconComponent } from '../../shared/icon.component';
 import { FormsModule } from '@angular/forms';
@@ -24,6 +24,8 @@ export type TemplateUseTarget = 'email' | 'campaign' | 'draft';
   styleUrls: ['../command/command-center.component.css', './mail-ui.css', './email-templates.component.css']
 })
 export class EmailTemplatesComponent implements OnInit {
+  /** Open straight into a new blank template (Campaigns → New Campaign → "New email template"). */
+  @Input() startNew = false;
   @Output() toast = new EventEmitter<string>();
   @Output() use = new EventEmitter<{ template: any; target: TemplateUseTarget }>();
 
@@ -61,6 +63,7 @@ export class EmailTemplatesComponent implements OnInit {
   constructor(private http: HttpClient) {}
 
   ngOnInit(): void {
+    if (this.startNew) this.newBlank();
     // On phones the ZIP explanation starts folded so the list is visible straight away.
     try { this.zipInfoOpen = !(window.innerWidth < 700); } catch { /* no window */ }
     // Permissions come from the template API itself (not from any other module's status).

@@ -1,9 +1,11 @@
-import { Component, EventEmitter, Input, OnChanges, Output, SimpleChanges, ViewChild } from '@angular/core';
+import { Component, EventEmitter, HostListener, Input, OnChanges, Output, SimpleChanges, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { IconComponent } from '../../shared/icon.component';
 import { EmailPreviewComponent } from './email-preview.component';
 import { VisualHtmlEditorComponent } from './visual-html-editor.component';
 import { HtmlCodeEditorComponent } from './html-code-editor.component';
+import { FormsModule } from '@angular/forms';
+import { CONTACT_FIELDS, ContactField, INFO_TAGS, LINK_TAGS, contactTag, fallbackExample, fallbackQuestion } from './merge-tags';
 
 const UNSUB_LINK = '<p style="text-align:center;font-size:12px;"><a href="$[LI:UNSUBSCRIBE]$">Unsubscribe</a></p>';
 const UNSUB_TAG = /\$\[LI:(?:UNSUBSCRIBE|ORG_OPTOUT)\]\$/i;
@@ -20,7 +22,7 @@ const UNSUB_ANCHOR = /<a\b[^>]*\$\[LI:(?:UNSUBSCRIBE|ORG_OPTOUT)\]\$[^>]*>[\s\S]
 @Component({
   selector: 'app-email-content-editor',
   standalone: true,
-  imports: [CommonModule, IconComponent, EmailPreviewComponent, VisualHtmlEditorComponent, HtmlCodeEditorComponent],
+  imports: [CommonModule, FormsModule, IconComponent, EmailPreviewComponent, VisualHtmlEditorComponent, HtmlCodeEditorComponent],
   templateUrl: './email-content-editor.component.html',
   styleUrls: ['../command/command-center.component.css', './mail-ui.css', './email-content-editor.component.css']
 })
@@ -129,6 +131,57 @@ export class EmailContentEditorComponent implements OnChanges {
     if (!url) return;
     if (this.visualExec('insertHTML', `<img src="${url}" alt="" style="max-width:100%;height:auto;" />`)) return;
     this.replaceSelection(`<img src="${url}" alt="" style="max-width:100%;height:auto;" />`);
+  }
+
+  readonly contactFields = CONTACT_FIELDS;
+  readonly fallbackQuestion = fallbackQuestion;
+  readonly fallbackExample = fallbackExample;
+  readonly linkTags = LINK_TAGS;
+  readonly infoTags = INFO_TAGS;
+  /** The 👤 Personalize panel is open. */
+  personalizeOpen = false;
+  /** A contact field waiting for its default value (Zoho asks for one the same way). */
+  mergeAsk: { field: ContactField; label: string; fallback: string } | null = null;
+
+  /**
+   * The Merge Tags menu (as in Zoho's editor). Contact fields ask for a default value first; links
+   * and organization tags go in at once. Zoho fills every tag per recipient when it sends.
+   */
+  pickMergeTag(key: string): void {
+    if (!key || !this.editable) return;
+    const field = CONTACT_FIELDS.find(f => f.key === key);
+    if (field) { this.mergeAsk = { field: field.key, label: field.label, fallback: field.fallback }; return; }
+    const link = LINK_TAGS.find(l => l.key === key);
+    if (link) {
+      const a = `<a href="${link.tag}">${link.text}</a>`;
+      if (!this.visualExec('insertHTML', a)) this.replaceSelection(a);
+      this.toast.emit(`${link.label} link added. Zoho fills in the address when it sends.`);
+      return;
+    }
+    const info = INFO_TAGS.find(i => i.key === key);
+    if (info) this.insertTagText(info.tag);
+  }
+
+  @HostListener('document:keydown.escape') closePersonalize(): void { this.personalizeOpen = false; }
+  @HostListener('document:click', ['$event']) clickAway(e: Event): void {
+    if (this.personalizeOpen && !(e.target as HTMLElement)?.closest?.('.ec-personalize')) this.personalizeOpen = false;
+  }
+
+  /** Inserts the contact field with the default value typed in the prompt. */
+  confirmMergeTag(): void {
+    const ask = this.mergeAsk;
+    this.mergeAsk = null;
+    if (!ask || !this.editable) return;
+    this.insertTagText(contactTag(ask.field, ask.fallback));
+    this.toast.emit(`${ask.label} added. Each contact sees their own ${ask.label.toLowerCase()}.`);
+  }
+
+  /** "Hello" + tag → "Hello $[FNAME…]$": a space is added after a letter, digit or punctuation. */
+  private insertTagText(tag: string): void {
+    const box = this.box;
+    const before = this.editMode === 'visual' ? (this.visual?.charBeforeCursor() ?? '') : (box ? box.value.charAt(box.selectionStart - 1) : '');
+    const text = before && /[\p{L}\p{N},.!?;:]/u.test(before) ? ' ' + tag : tag;
+    if (!this.visualExec('insertText', text)) this.replaceSelection(text);
   }
 
   history(cmd: 'undo' | 'redo'): void {

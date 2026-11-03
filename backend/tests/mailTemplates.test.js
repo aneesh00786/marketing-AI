@@ -333,10 +333,11 @@ test('Email Campaigns: a template is copied into a new campaign; edits stay inde
   assert.doesNotMatch(edited.data.campaign.html, /<script/, 'campaign HTML sanitized on save');
   assert.equal((await h.api('POST', '/api/v1/mail/campaigns', { token: B.token, body: { name: 'x', templateId: tpl.data.template.id } })).status, 404, 'another workspace\'s template');
 
-  // Personalization tokens are flagged for Zoho delivery.
-  const tok = await h.api('POST', '/api/v1/mail/campaigns', { token: A.token, body: { name: 'Tok', html: '<p>Hi {{first_name}}</p>' } });
+  // {{first_name}} is filled by Zoho (merge tag); a token Zoho cannot fill, such as {{company}}, is flagged.
+  const tok = await h.api('POST', '/api/v1/mail/campaigns', { token: A.token, body: { name: 'Tok', html: '<p>Hi {{first_name}} at {{company}}</p>' } });
   const v = await h.api('POST', `/api/v1/mail/campaigns/${tok.data.campaign.id}/validate`, { token: A.token });
-  assert.ok(v.data.validation.problems.some(p => /Personalization tokens.*\{\{first_name\}\}/.test(p)));
+  assert.ok(v.data.validation.problems.some(p => /cannot be filled by Zoho: \{\{company\}\}/.test(p)), JSON.stringify(v.data.validation.problems));
+  assert.ok(!v.data.validation.problems.some(p => /\{\{first_name\}\}\./.test(p)), 'first_name is supported');
 });
 
 test('Mail Drafts: a draft starts from a template copy; its {{tokens}} must be filled before approval', async () => {

@@ -305,7 +305,9 @@ async function importLeads(ctx, rows) {
   const products = await all('SELECT id, name FROM digital_products WHERE workspace_id = ?', [workspaceId]);
   const byId = new Map(products.map(p => [p.id, p]));
   const byName = new Map(products.map(p => [p.name.trim().toLowerCase(), p]));
-  const existingEmails = new Set((await all("SELECT LOWER(email) AS e FROM leads WHERE workspace_id = ? AND email IS NOT NULL AND email <> ''", [workspaceId])).map(r => r.e));
+  // email → id of the first lead with it: a duplicate row reports which lead it matched.
+  const existingEmails = new Map();
+  for (const r of await all("SELECT id, LOWER(email) AS e FROM leads WHERE workspace_id = ? AND email IS NOT NULL AND email <> '' ORDER BY id", [workspaceId])) if (!existingEmails.has(r.e)) existingEmails.set(r.e, r.id);
 
   const result = { imported: 0, skipped: [], flagged: [], duplicates: [], leadIds: [] };
   for (const [i, raw] of rows.entries()) {
@@ -316,7 +318,7 @@ async function importLeads(ctx, rows) {
     if (data.error) { result.skipped.push({ row: rowNo, reason: data.error }); continue; }
     if (!data.name) { result.skipped.push({ row: rowNo, reason: 'Missing name' }); continue; }
     if (data.email && existingEmails.has(data.email.toLowerCase())) {
-      result.duplicates.push({ row: rowNo, email: data.email });
+      result.duplicates.push({ row: rowNo, email: data.email, leadId: existingEmails.get(data.email.toLowerCase()) });
       continue;
     }
 
@@ -341,7 +343,7 @@ async function importLeads(ctx, rows) {
       [workspaceId, data.name, data.email, data.phone, data.company_name, data.estimated_budget, data.notes, data.status || 'Imported',
         product?.id || null, product?.name || rawName || data.product_interest || null, reviewNote, score, category]
     );
-    if (data.email) existingEmails.add(data.email.toLowerCase());
+    if (data.email && !existingEmails.has(data.email.toLowerCase())) existingEmails.set(data.email.toLowerCase(), ins.lastID);
     result.imported += 1;
     result.leadIds.push(ins.lastID);
     await automationEvents.emit(workspaceId, 'lead.created', { subjectType: 'lead', subjectId: ins.lastID, payload: { source: 'import', status: data.status || 'Imported' }, key: `lead.created:${ins.lastID}` });

@@ -1,3 +1,4 @@
+import { By } from '@angular/platform-browser';
 import { Component, EventEmitter, Input, Output } from '@angular/core';
 import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
@@ -26,9 +27,9 @@ class DraftsStub {
 @Component({ selector: 'app-product-emails', standalone: true, template: '<p class="stub-pe">product emails</p>' })
 class ProductEmailsStub { @Output() toast = new EventEmitter<string>(); }
 @Component({ selector: 'app-email-campaigns', standalone: true, template: '<p class="stub-campaigns">campaigns</p>' })
-class CampaignsStub { @Input() oauthResult: any; @Input() startTemplate: any; @Output() toast = new EventEmitter<string>(); }
+class CampaignsStub { @Input() oauthResult: any; @Input() startTemplate: any; @Output() toast = new EventEmitter<string>(); @Output() createTemplate = new EventEmitter<void>(); }
 @Component({ selector: 'app-email-templates', standalone: true, template: '<p class="stub-templates">templates</p>' })
-class TemplatesStub { @Output() toast = new EventEmitter<string>(); @Output() use = new EventEmitter<any>(); }
+class TemplatesStub { @Input() startNew = false; @Output() toast = new EventEmitter<string>(); @Output() use = new EventEmitter<any>(); }
 @Component({ selector: 'app-mail-activity-charts', standalone: true, template: '<p class="stub-charts">charts</p>' })
 class ChartsStub { static last: ChartsStub | null = null; @Output() openSent = new EventEmitter<string | null>(); constructor() { ChartsStub.last = this; } }
 @Component({ selector: 'app-mail-logs', standalone: true, template: '<p class="stub-logs">logs</p>' })
@@ -103,7 +104,7 @@ describe('MailCenterComponent', () => {
 
   it('shows one set of sections; Product Emails only while its feature is on', () => {
     init();
-    expect(tabs().map(t => t.textContent!.trim().replace(/\s*\d+$/, ''))).toEqual(['Overview', 'Inbox', 'Sent Mail', 'Drafts', 'Approvals', 'Campaigns', 'Email Templates', 'Logs', 'Settings']);
+    expect(tabs().map(t => t.textContent!.trim().replace(/\s*\d+$/, ''))).toEqual(['Overview', 'Inbox', 'Sent Mail', 'Drafts', 'Approvals', 'Zoho Campaigns', 'Email Templates', 'Logs', 'Settings']);
     fixture.destroy();
     init({ productEmails: true });
     expect(tab('Product Emails')).toBeTruthy();
@@ -119,12 +120,28 @@ describe('MailCenterComponent', () => {
     tab('Approvals').click();
     fixture.detectChanges();
     expect(el().querySelector('.stub-drafts')!.textContent).toBe('approvals', 'Approvals reuses the drafts component in its approvals view');
-    tab('Campaigns').click();
+    tab('Zoho Campaigns').click();
     fixture.detectChanges();
     expect(el().querySelector('.stub-campaigns')).toBeTruthy();
     tab('Email Templates').click();
     fixture.detectChanges();
     expect(el().querySelector('.stub-templates')).toBeTruthy();
+  });
+
+  it('Campaigns → "New email template" opens Email Templates on a new template, once', () => {
+    init();
+    tab('Zoho Campaigns').click();
+    fixture.detectChanges();
+    fixture.debugElement.query(By.directive(CampaignsStub)).componentInstance.createTemplate.emit();
+    fixture.detectChanges();
+    expect(sections[sections.length - 1]).toBe('templates');
+    const stub = () => fixture.debugElement.query(By.directive(TemplatesStub)).componentInstance as TemplatesStub;
+    expect(stub().startNew).toBeTrue();
+    tab('Overview').click();
+    fixture.detectChanges();
+    tab('Email Templates').click();
+    fixture.detectChanges();
+    expect(stub().startNew).withContext('opening the tab normally shows the list').toBeFalse();
   });
 
   it('tabs follow the keyboard pattern: arrows, Home and End move and open; only the active tab is in the tab order', fakeAsync(() => {

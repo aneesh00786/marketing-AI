@@ -42,6 +42,20 @@
         <button type="button" class="ec-tb" title="Bulleted list" aria-label="Bulleted list" (click)="insertList()"><app-icon name="list" [size]="16"></app-icon></button>
         <button type="button" class="ec-tb" title="Link" aria-label="Link" (click)="insertLink()"><app-icon name="link" [size]="16"></app-icon></button>
         <button type="button" class="ec-tb" title="Image (https:// URL)" aria-label="Image" (click)="insertImage()"><app-icon name="image" [size]="16"></app-icon></button>
+        <ng-container *ngIf="purpose === 'campaign'">
+          <span class="ec-tb-sep" aria-hidden="true"></span>
+          <span class="ec-personalize">
+            <button type="button" class="btn btn-secondary btn-sm ec-personalize-btn" aria-haspopup="true" [attr.aria-expanded]="personalizeOpen"
+                    title="Add the contact's name or a Zoho link; Zoho fills it in for each recipient" (click)="personalizeOpen = !personalizeOpen">👤 Personalize</button>
+            <div class="ec-personalize-panel" *ngIf="personalizeOpen" role="menu" aria-label="Personalize">
+              <p class="ec-pp-head">Zoho fills these in for each recipient.</p>
+              <button type="button" role="menuitem" *ngFor="let f of contactFields" (click)="personalizeOpen = false; pickMergeTag(f.key)"><b>{{ f.label }}</b><small>{{ f.help }}</small></button>
+              <div class="ec-pp-sep" role="separator"></div>
+              <button type="button" role="menuitem" *ngFor="let l of linkTags" (click)="personalizeOpen = false; pickMergeTag(l.key)"><b>{{ l.label }}</b><small>{{ l.help }}</small></button>
+              <button type="button" role="menuitem" *ngFor="let i of infoTags" (click)="personalizeOpen = false; pickMergeTag(i.key)"><b>{{ i.label }}</b><small>{{ i.help }}</small></button>
+            </div>
+          </span>
+        </ng-container>
         <span class="ec-tb-sep" aria-hidden="true"></span>
         <button type="button" class="ec-tb" title="Undo" aria-label="Undo" (click)="history('undo')"><app-icon name="undo" [size]="16"></app-icon></button>
         <button type="button" class="ec-tb" title="Redo" aria-label="Redo" (click)="history('redo')"><app-icon name="redo" [size]="16"></app-icon></button>
@@ -49,6 +63,13 @@
         <span class="ec-spacer"></span>
         <span class="muted small ec-count" *ngIf="editMode === 'html'">{{ html.length | number }} characters</span>
       </div>
+      <form class="ec-merge-ask" *ngIf="mergeAsk" (ngSubmit)="confirmMergeTag()" aria-label="Merge tag default value">
+        <label><span class="ec-ask-q">{{ fallbackQuestion(mergeAsk.field) }}</span>
+          <input class="hud-input" name="fallback" [(ngModel)]="mergeAsk.fallback" maxlength="40" placeholder="e.g. there, Customer, friend" />
+          <small class="ec-ask-eg">{{ fallbackExample(mergeAsk.field, mergeAsk.fallback) }}</small></label>
+        <button type="submit" class="btn btn-primary btn-sm">Insert</button>
+        <button type="button" class="btn btn-secondary btn-sm" (click)="mergeAsk = null">Cancel</button>
+      </form>
       <app-visual-html-editor *ngIf="editMode === 'visual'" class="ec-visual" [html]="html" (htmlChange)="setHtml($event)"
         [disabled]="!editable" [title]="'Edit ' + (name || purposeNoun) + ' visually'"></app-visual-html-editor>
       <app-html-code-editor #code *ngIf="editMode === 'html'" class="ec-code" [value]="html" (valueChange)="setHtml($event)" [disabled]="!editable"
@@ -56,7 +77,7 @@
       <ul class="ec-hints" *ngIf="editable && contentHints.length" aria-live="polite">
         <li *ngFor="let h of contentHints">{{ h }}</li>
       </ul>
-      <p class="ec-guide" *ngIf="purpose === 'campaign'"><app-icon name="info" [size]="16"></app-icon><span>Include <code>$[LI:UNSUBSCRIBE]$</code> for the unsubscribe link (Zoho requires one). Use https:// image URLs.</span></p>
+      <p class="ec-guide" *ngIf="purpose === 'campaign'"><app-icon name="info" [size]="16"></app-icon><span>Use <b>👤 Personalize</b> to add the contact&rsquo;s name or Zoho links; Zoho fills them in for each recipient. They are not filled in test emails: to check, send to a Zoho list named &ldquo;Test List&rdquo;. Include <code>$[LI:UNSUBSCRIBE]$</code> for the unsubscribe link (Zoho requires one). Use https:// image URLs.</span></p>
       <p class="ec-guide" *ngIf="purpose === 'template'"><app-icon name="info" [size]="16"></app-icon><span>Placeholders such as <code ngNonBindable>{{first_name}}</code> are filled for each email. For Zoho campaigns include <code>$[LI:UNSUBSCRIBE]$</code> (other marketing emails get an unsubscribe link added automatically). Use https:// image URLs.</span></p>
     </ng-container>
 

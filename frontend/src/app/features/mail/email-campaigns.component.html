@@ -1,33 +1,50 @@
 <section class="ec">
   <header class="mx-head ec-page-head">
     <div>
-      <h2>Campaigns</h2>
-      <p class="mx-desc">Create and approve email campaigns. Zoho Campaigns delivers them to the lists and contacts you choose.</p>
+      <h2>Zoho Campaigns</h2>
+      <p class="mx-desc">{{ view === 'lists' ? 'Manage the mailing lists your campaigns are sent to.' : 'Write an email, choose who gets it, approve it, then send it through Zoho Campaigns.' }}</p>
     </div>
-    <div class="mx-actions" *ngIf="canCompose">
-      <div class="ec-create">
+    <div class="mx-actions">
+      <!-- Zoho connection: a small status chip; the details and setup open in a popup -->
+      <button type="button" class="ec-zoho-chip" (click)="zohoOpen = true" [class.ok]="zohoReady" [class.warn]="zoho && !zohoReady"
+              [title]="zohoReady ? 'Zoho Campaigns is connected. Click to manage the connection.' : 'Zoho Campaigns must be connected before a campaign can be sent.'">
+        <span class="ec-zoho-dot" aria-hidden="true"></span>{{ !zoho ? 'Checking Zoho…' : zohoReady ? 'Zoho connected' : 'Zoho not connected' }}
+        <app-icon name="settings" [size]="14"></app-icon>
+      </button>
+      <div class="ec-create" *ngIf="canCompose && view === 'campaigns'">
         <button class="btn btn-primary btn-sm" (click)="toggleCreateMenu($event)" [attr.aria-expanded]="showCreateMenu" aria-haspopup="menu" [disabled]="busy === 'create'">
           <app-icon name="plus" [size]="15"></app-icon>{{ busy === 'create' ? 'Creating…' : 'New Campaign' }}<app-icon name="chevron-down" [size]="14"></app-icon>
         </button>
         <div class="ec-create-menu" role="menu" *ngIf="showCreateMenu" (click)="$event.stopPropagation()">
           <button type="button" role="menuitem" (click)="showCreateMenu = false; newCampaign()"><b>Blank campaign</b><small>Start with a simple email and an unsubscribe link</small></button>
+          <button type="button" role="menuitem" (click)="showCreateMenu = false; newCampaign('sample')"><b>Sample email</b><small>A ready-made layout with a personal greeting, offer, button and footer to edit</small></button>
           <button type="button" role="menuitem" (click)="showCreateMenu = false; picker = 'new'"><b>From a template</b><small>Copy one of your email templates into a new campaign</small></button>
+          <div class="ec-create-sep" role="separator"></div>
+          <button type="button" role="menuitem" (click)="showCreateMenu = false; createTemplate.emit()"><b>New email template</b><small>Design a reusable template in Email Templates</small></button>
         </div>
       </div>
     </div>
   </header>
 
-  <app-zoho-campaigns [oauthResult]="oauthResult" (toast)="toast.emit($event)" (statusChange)="onZohoStatus($event)" (openSettings)="openSettings.emit()"></app-zoho-campaigns>
+  <div class="mx-callout warn ec-zoho-callout" *ngIf="zoho && !zohoReady" role="status">
+    <app-icon name="info" [size]="16"></app-icon>
+    <span>You can write and approve campaigns now. To send them, Zoho Campaigns must be connected{{ zoho?.canConfigure ? '' : ' by an Owner or Admin' }}.</span>
+    <button type="button" class="btn btn-secondary btn-sm" (click)="zohoOpen = true">{{ zoho?.canConfigure ? 'Set up Zoho' : 'Details' }}</button>
+  </div>
   <div class="note error" *ngIf="error" role="alert">{{ error }}</div>
 
-  <div class="ec-grid" [class.has-sel]="!!selected">
+  <!-- Campaigns | Contact lists (Zoho's lists, managed here) -->
+  <div class="mx-seg ec-views" role="group" aria-label="Show">
+    <button type="button" [class.on]="view === 'campaigns'" [attr.aria-pressed]="view === 'campaigns'" (click)="view = 'campaigns'">Campaigns</button>
+    <button type="button" [class.on]="view === 'lists'" [attr.aria-pressed]="view === 'lists'" (click)="view = 'lists'">Contact lists</button>
+  </div>
+  <app-zoho-lists *ngIf="view === 'lists'" [zohoReady]="zohoReady" [canManage]="canSend" (toast)="toast.emit($event)" (openZoho)="zohoOpen = true"></app-zoho-lists>
+
+  <div class="ec-grid" [class.has-sel]="!!selected" [hidden]="view !== 'campaigns'">
     <!-- ============ Campaign list ============ -->
     <aside class="ec-listpanel" aria-labelledby="ec-list-title">
       <div class="ec-list-head">
-        <h3 id="ec-list-title">Campaigns</h3>
-        <div class="mx-actions" *ngIf="canCompose">
-          <button class="btn btn-primary btn-sm" (click)="newCampaign()" [disabled]="busy === 'create'"><app-icon name="plus" [size]="15"></app-icon>New campaign</button>
-        </div>
+        <h3 id="ec-list-title">Your campaigns <span class="muted small" *ngIf="campaigns.length">({{ campaigns.length }})</span></h3>
       </div>
       <label class="ec-search">
         <app-icon name="search" [size]="15"></app-icon>
@@ -49,7 +66,10 @@
         </select>
       </div>
 
-      <p class="ec-empty" *ngIf="!campaigns.length">No campaigns yet.<ng-container *ngIf="canCompose"> Start with “New campaign”.</ng-container></p>
+      <div class="ec-empty" *ngIf="!campaigns.length">
+        <p>No campaigns yet.</p>
+        <button *ngIf="canCompose" type="button" class="btn btn-primary btn-sm" (click)="newCampaign()" [disabled]="busy === 'create'"><app-icon name="plus" [size]="15"></app-icon>Create your first campaign</button>
+      </div>
       <p class="ec-empty" *ngIf="campaigns.length && !visibleCampaigns.length">No campaigns match. <button type="button" class="link-btn" (click)="listQuery = ''; listStatus = ''">Clear filters</button></p>
 
       <ul class="ec-list" *ngIf="visibleCampaigns.length">
@@ -85,94 +105,236 @@
 
     <!-- ============ Editor ============ -->
     <div class="ec-detail ec-detail-empty" *ngIf="!selected || !form">
-      <p>{{ campaigns.length ? 'Select a campaign to edit it.' : 'Create a campaign to start.' }}</p>
+      <div class="ec-howto">
+        <h3>How a campaign works</h3>
+        <ol>
+          <li><b>Details</b> — name the campaign and write the subject line.</li>
+          <li><b>Recipients</b> — pick Zoho mailing lists and/or your leads.</li>
+          <li><b>Email content</b> — design the email, or start from a template.</li>
+          <li><b>Review &amp; send</b> — check it, approve it, and send it through Zoho.</li>
+        </ol>
+        <p class="muted small">{{ campaigns.length ? 'Select a campaign on the left to continue, or create a new one.' : 'Create a campaign to start.' }}</p>
+      </div>
     </div>
 
     <div class="ec-detail" *ngIf="selected && form">
       <div class="ec-detail-head">
         <div class="ec-detail-status">
-          <button type="button" class="btn btn-secondary btn-sm ec-back" (click)="close()">← Campaigns</button>
+          <button type="button" class="btn btn-secondary btn-sm ec-back" (click)="close()">← Zoho Campaigns</button>
           <h3>{{ form.name || 'Untitled campaign' }}</h3>
           <span class="mx-tag" [ngClass]="tone(selected.status)">{{ statusLabel(selected.status) }}</span>
-          <span class="muted small">Version {{ selected.version }}{{ selected.approved ? ' · approved' : '' }} · Last saved {{ (selected.updatedAt || selected.createdAt) | date:'MMM d, y, h:mm a' }}</span>
           <span class="mx-tag warn" *ngIf="dirty">Unsaved changes</span>
+          <span class="muted small ec-saved">Last saved {{ (selected.updatedAt || selected.createdAt) | date:'MMM d, h:mm a' }}</span>
         </div>
         <div class="ec-actions">
-          <button class="btn btn-secondary btn-sm" (click)="validate()" [disabled]="busy === 'validate'"><app-icon name="check" [size]="15"></app-icon>Validate</button>
-          <button *ngIf="editable" class="btn btn-secondary btn-sm" (click)="save()" [disabled]="busy === 'save'"><app-icon name="save" [size]="15"></app-icon>Save</button>
-          <button *ngIf="canSend && selected.status === 'draft'" class="btn btn-primary btn-sm" (click)="approve()" [disabled]="busy === 'approve'"><app-icon name="send" [size]="15"></app-icon>Approve</button>
-          <button *ngIf="canSend && selected.approved && (selected.status === 'approved' || selected.status === 'failed')" class="btn btn-primary btn-sm" (click)="send()" [disabled]="busy === 'send' || !zohoReady"><app-icon name="send" [size]="15"></app-icon>Send through Zoho</button>
-          <button *ngIf="selected.status === 'submitted' || selected.status === 'needs_review' || selected.zohoPrepared" class="btn btn-secondary btn-sm" (click)="refresh()" [disabled]="busy === 'refresh'"><app-icon name="refresh" [size]="15"></app-icon>Refresh status</button>
-          <button *ngIf="canCompose" class="btn btn-secondary btn-sm" (click)="duplicate(selected)" [disabled]="busy === 'duplicate'"><app-icon name="plus" [size]="15"></app-icon>Duplicate</button>
-          <button *ngIf="editable" class="btn btn-danger-soft btn-sm" (click)="remove()"><app-icon name="trash" [size]="15"></app-icon>Delete</button>
-          <button class="btn btn-secondary btn-sm" (click)="close()"><app-icon name="x" [size]="15"></app-icon>{{ dirty ? 'Cancel' : 'Close' }}</button>
+          <button *ngIf="editable" class="btn btn-secondary btn-sm" (click)="save()" [disabled]="busy === 'save' || !dirty" [title]="dirty ? 'Save your changes' : 'Nothing to save'"><app-icon name="save" [size]="15"></app-icon>Save</button>
+          <div class="ec-more">
+            <button type="button" class="btn btn-secondary btn-sm" (click)="toggleMore($event)" [attr.aria-expanded]="moreOpen" aria-haspopup="menu" aria-label="More actions"><app-icon name="more" [size]="15"></app-icon>More</button>
+            <div class="ec-menu" role="menu" [hidden]="!moreOpen" (click)="$event.stopPropagation()">
+              <button type="button" role="menuitem" (click)="moreOpen = false; goStep(4)">Check for problems</button>
+              <button type="button" role="menuitem" *ngIf="selected.status === 'submitted' || selected.status === 'needs_review' || selected.zohoPrepared" (click)="moreOpen = false; refresh()" [disabled]="busy === 'refresh'">Refresh status from Zoho</button>
+              <button type="button" role="menuitem" *ngIf="canCompose" (click)="moreOpen = false; duplicate(selected)" [disabled]="busy === 'duplicate'">Duplicate</button>
+              <button type="button" role="menuitem" class="danger" *ngIf="editable" (click)="moreOpen = false; remove()">Delete</button>
+            </div>
+          </div>
+          <button class="btn btn-secondary btn-sm" (click)="close()" [attr.aria-label]="dirty ? 'Cancel' : 'Close'"><app-icon name="x" [size]="15"></app-icon>{{ dirty ? 'Cancel' : 'Close' }}</button>
         </div>
       </div>
 
       <div class="review" *ngIf="selected.status === 'needs_review'" role="alert">
         <b>Outcome unknown.</b> Zoho did not confirm the last {{ selected.submitStage === 'create' ? 'preparation' : 'send' }} request. "Refresh status" settles it when Zoho shows the result. It is never resent automatically.
-        <button *ngIf="canSend" class="btn btn-secondary btn-sm" (click)="resolve()">Mark as not done</button>
+        <div class="ec-inline-actions">
+          <button class="btn btn-secondary btn-sm" (click)="refresh()" [disabled]="busy === 'refresh'"><app-icon name="refresh" [size]="15"></app-icon>Refresh status</button>
+          <button *ngIf="canSend" class="btn btn-secondary btn-sm" (click)="resolve()">Mark as not done</button>
+        </div>
       </div>
       <div class="note error" *ngIf="selected.status === 'failed' && selected.providerMessage">{{ selected.providerMessage }}</div>
 
       <!-- Results exist only once Zoho has the campaign -->
       <app-campaign-metrics *ngIf="!['draft', 'approved'].includes(selected.status)" [campaignId]="selected.id" [report]="selected.report" [zohoStatus]="selected.zohoStatus" [lastCheckedAt]="selected.lastCheckedAt" [status]="selected.status" [canViewRecipients]="canSend"></app-campaign-metrics>
 
+      <!-- Steps: every step stays on the page (hidden when not current) so nothing typed is lost -->
+      <nav class="ec-steps" aria-label="Campaign steps">
+        <button type="button" *ngFor="let s of steps" class="ec-step" [class.on]="step === s.n" [class.done]="stepDone(s.n)" (click)="goStep(s.n)" [attr.aria-current]="step === s.n ? 'step' : null">
+          <span class="ec-step-num" aria-hidden="true"><app-icon *ngIf="stepDone(s.n) && step !== s.n" name="check" [size]="13"></app-icon><ng-container *ngIf="!stepDone(s.n) || step === s.n">{{ s.n }}</ng-container></span>
+          <span class="ec-step-text"><b>{{ s.title }}</b><small>{{ stepHint(s.n) }}</small></span>
+        </button>
+      </nav>
+
       <div class="ec-form">
-        <div class="row2">
-          <label><span>Campaign name <span class="req" aria-hidden="true">*</span></span><input class="hud-input" [(ngModel)]="form.name" maxlength="150" [disabled]="!editable" required /></label>
-          <label><span>Subject <span class="req" aria-hidden="true">*</span></span><input class="hud-input" [(ngModel)]="form.subject" maxlength="255" [disabled]="!editable" placeholder="Enter subject line…" required /></label>
-        </div>
-        <div class="row2">
-          <label>Sender name <input class="hud-input" [(ngModel)]="form.fromName" maxlength="100" [disabled]="!editable" placeholder="e.g. John Smith" /></label>
-          <label>Sender email (verified in Zoho) <input class="hud-input" type="email" [(ngModel)]="form.fromEmail" maxlength="255" [disabled]="!editable" placeholder="news@yourdomain.com" /></label>
-        </div>
-
-        <fieldset class="lists">
-          <legend><app-icon name="leads" [size]="15"></app-icon>Recipients</legend>
-          <div class="ec-lists-empty" *ngIf="!zohoReady">
-            <span class="ec-lists-icon" aria-hidden="true"><app-icon name="leads" [size]="18"></app-icon></span>
-            <span>Connect Zoho Campaigns to choose lists.</span>
-            <button type="button" class="btn btn-secondary btn-sm" *ngIf="zoho?.canConfigure" (click)="connectZoho()" [disabled]="!zoho?.serverConfigured"
-              [title]="zoho?.serverConfigured ? '' : 'Enter the Zoho API credentials in Settings → Zoho Campaigns first'"><app-icon name="link" [size]="14"></app-icon>Connect Zoho</button>
+        <!-- Step 1: Details -->
+        <section class="ec-pane" [hidden]="step !== 1" aria-label="Details">
+          <p class="ec-pane-help">What the email is called here, and what people see in their inbox. Use <b>👤 Add first name</b> to greet each contact by name.</p>
+          <div class="row2">
+            <label><span>Campaign name <span class="req" aria-hidden="true">*</span></span><input class="hud-input" [(ngModel)]="form.name" maxlength="150" [disabled]="!editable" required placeholder="e.g. November product update" /><small class="ec-help">Only you see this.</small></label>
+            <label><span>Subject line <span class="req" aria-hidden="true">*</span></span><input #subjectBox class="hud-input" (blur)="subjectCaret = subjectBox.selectionStart ?? -1" [(ngModel)]="form.subject" maxlength="255" [disabled]="!editable" placeholder="e.g. New features to save you time" required />
+              <span class="ec-subject-tools">
+                <small class="ec-help">Shown in the recipient's inbox.</small>
+                <button *ngIf="editable && !subjectAsk" type="button" class="link-btn ec-subject-name" (click)="pickSubjectTag('first', subjectBox)">👤 Add first name</button>
+              </span>
+              <span class="ec-merge-ask" *ngIf="subjectAsk" role="group" aria-label="Merge tag default value">
+                <span class="ec-help ec-ask-q">{{ fallbackQuestion(subjectAsk.field) }}</span>
+                <input class="hud-input" [(ngModel)]="subjectAsk.fallback" maxlength="40" placeholder="e.g. you, there, friend" [attr.aria-label]="fallbackQuestion(subjectAsk.field)" (keydown.enter)="$event.preventDefault(); confirmSubjectTag(subjectBox)" />
+                <button type="button" class="btn btn-primary btn-sm" (click)="confirmSubjectTag(subjectBox)">Insert</button>
+                <button type="button" class="btn btn-secondary btn-sm" (click)="subjectAsk = null">Cancel</button>
+                <span class="ec-help ec-ask-eg">How the subject will look:</span>
+                <ul class="ec-subject-preview">
+                  <li *ngFor="let p of subjectPreview"><span>{{ p.who }}</span> <b>{{ p.text || '(empty subject)' }}</b></li>
+                </ul>
+              </span></label>
           </div>
-          <p class="muted small" *ngIf="zohoReady && audiences && !audiences.lists.length">No mailing lists in the connected Zoho account.</p>
-          <ng-container *ngFor="let l of audiences?.lists || []">
-            <div class="ec-list-row">
-              <label class="check">
-                <!-- Part-ticked: only some of this list's contacts are selected -->
-                <input type="checkbox" [checked]="form.listKeys.has(l.key)" [indeterminate]="!form.listKeys.has(l.key) && !!picksByList.get(l.key)" (change)="toggleList(l.key)" [disabled]="!editable" />
-                {{ l.name || l.key }} <span class="muted small" *ngIf="l.contacts !== null">({{ l.contacts }} contacts)</span>
-                <span class="muted small" *ngIf="!form.listKeys.has(l.key) && picksByList.get(l.key) as picks">· {{ picks.length }} selected</span>
-              </label>
-              <button *ngIf="canSend" type="button" class="link-btn ec-view-contacts" (click)="contactsList = l">View contacts</button>
+          <div class="row2">
+            <label>Sender name <input class="hud-input" [(ngModel)]="form.fromName" maxlength="100" [disabled]="!editable" placeholder="e.g. John from Acme" /><small class="ec-help">Who the email appears to be from. Picking an address fills in the name last used with it.</small></label>
+            <div class="ec-sender">
+              <label for="ec-sender-select">Sender address</label>
+              <select *ngIf="!senderAdding" id="ec-sender-select" #senderSel class="hud-input" [disabled]="!editable" (change)="pickSender(senderSel.value, senderSel)">
+                <option value="" [selected]="!form.fromEmail" disabled>Choose a sender address</option>
+                <optgroup *ngFor="let g of senderGroups" [label]="g.domain">
+                  <option *ngFor="let s of g.items" [value]="s.email" [selected]="s.email === (form.fromEmail || '').toLowerCase()">{{ s.email }}{{ s.sentBefore ? ' ✓' : '' }}</option>
+                </optgroup>
+                <option *ngIf="editable" value="__add">+ Add sender address…</option>
+              </select>
+              <div class="ec-sender-add" *ngIf="senderAdding" role="group" aria-label="Add sender address">
+                <input id="ec-sender-select" class="hud-input" type="email" [(ngModel)]="newSender" maxlength="255" placeholder="news@yourdomain.com" aria-label="New sender address"
+                       (keydown.enter)="$event.preventDefault(); addSender()" (keydown.escape)="senderAdding = false" />
+                <button type="button" class="btn btn-primary btn-sm" (click)="addSender()">Use address</button>
+                <button type="button" class="btn btn-secondary btn-sm" (click)="senderAdding = false; senderError = ''">Cancel</button>
+                <small class="ec-sender-err" *ngIf="senderError" role="alert">{{ senderError }}</small>
+                <small class="ec-help">Zoho only sends from verified addresses. Add and verify it in Zoho first: <b>Settings → Deliverability → Manage Senders → Add Sender</b>, then click the link in the verification email.</small>
+              </div>
+              <ng-container *ngIf="!senderAdding">
+                <small class="ec-help ec-sender-ok" *ngIf="currentSender?.sentBefore">✓ Verified: Zoho has already sent a campaign from this address.</small>
+                <small class="ec-help" *ngIf="form.fromEmail && !currentSender?.sentBefore">Not used with Zoho yet. Make sure it is verified in Zoho (<b>Settings → Deliverability → Manage Senders</b>, green dot).</small>
+                <small class="ec-help" *ngIf="!form.fromEmail">An address on your own domain, verified in Zoho Campaigns.</small>
+              </ng-container>
             </div>
-            <app-campaign-contact-rows *ngIf="!form.listKeys.has(l.key) && picksByList.get(l.key) as picks" [contacts]="picks" [editable]="editable" (remove)="removeContact($event)"></app-campaign-contact-rows>
-          </ng-container>
-          <p class="muted small" *ngIf="!audiences && selected.lists.length">Selected: {{ selectedListNames }}</p>
-          <app-campaign-contacts [campaignId]="selected.id" [editable]="editable" [canSync]="canSyncContacts" [canReconnect]="!!zoho?.canConfigure" [zohoLists]="audiences?.lists ?? null"
-            (contactsChange)="onContacts($event)" (changed)="onCampaignChanged($event)" (reconnect)="connectZoho()" (toast)="toast.emit($event)"></app-campaign-contacts>
-          <label *ngIf="audiences?.topics?.length">Topic
-            <select class="hud-input" [(ngModel)]="form.topicId" [disabled]="!editable">
-              <option value="">None</option>
-              <option *ngFor="let t of audiences!.topics" [value]="t.id">{{ t.name || t.id }}</option>
-            </select>
-          </label>
-        </fieldset>
+          </div>
+        </section>
 
-        <section class="ec-content-card">
-        <app-email-content-editor [html]="form.html" (htmlChange)="form.html = $event" [editable]="editable" [contentKey]="selected.id"
-          [name]="form.name" purpose="campaign" (chooseTemplate)="picker = 'load'" (toast)="toast.emit($event)"></app-email-content-editor>
+        <!-- Step 2: Recipients -->
+        <section class="ec-pane" [hidden]="step !== 2" aria-label="Recipients">
+          <p class="ec-pane-help">Choose who receives this email. You can use Zoho mailing lists, your leads, or both.
+            <b *ngIf="recipientSummary">Selected: {{ recipientSummary }}.</b></p>
+
+          <fieldset class="lists ec-rcard">
+            <legend><app-icon name="campaigns" [size]="15"></app-icon>Zoho mailing lists</legend>
+            <div class="ec-lists-empty" *ngIf="!zohoReady">
+              <span class="ec-lists-icon" aria-hidden="true"><app-icon name="leads" [size]="18"></app-icon></span>
+              <span>Connect Zoho Campaigns to choose mailing lists.</span>
+              <button type="button" class="btn btn-secondary btn-sm" (click)="zohoOpen = true"><app-icon name="link" [size]="14"></app-icon>{{ zoho?.canConfigure ? 'Set up Zoho' : 'Details' }}</button>
+            </div>
+            <p class="muted small" *ngIf="zohoReady && audiences && !audiences.lists.length">No mailing lists in the connected Zoho account.</p>
+            <ng-container *ngFor="let l of audiences?.lists || []">
+              <div class="ec-list-row">
+                <label class="check">
+                  <!-- Part-ticked: only some of this list's contacts are selected -->
+                  <input type="checkbox" [checked]="form.listKeys.has(l.key)" [indeterminate]="!form.listKeys.has(l.key) && !!picksByList.get(l.key)" (change)="toggleList(l.key)" [disabled]="!editable" />
+                  {{ l.name || l.key }} <span class="muted small" *ngIf="l.contacts !== null">({{ l.contacts }} contacts)</span>
+                  <span class="muted small" *ngIf="!form.listKeys.has(l.key) && picksByList.get(l.key) as picks">· {{ picks.length }} selected</span>
+                </label>
+                <button *ngIf="canSend" type="button" class="link-btn ec-view-contacts" (click)="contactsList = l">View contacts</button>
+              </div>
+              <app-campaign-contact-rows *ngIf="!form.listKeys.has(l.key) && picksByList.get(l.key) as picks" [contacts]="picks" [editable]="editable" (remove)="removeContact($event)"></app-campaign-contact-rows>
+            </ng-container>
+            <p class="muted small" *ngIf="!audiences && selected.lists.length">Selected: {{ selectedListNames }}</p>
+            <label *ngIf="audiences?.topics?.length" class="ec-topic">Topic (optional)
+              <select class="hud-input" [(ngModel)]="form.topicId" [disabled]="!editable">
+                <option value="">None</option>
+                <option *ngFor="let t of audiences!.topics" [value]="t.id">{{ t.name || t.id }}</option>
+              </select>
+            </label>
+          </fieldset>
+
+          <fieldset class="lists ec-rcard">
+            <legend><app-icon name="leads" [size]="15"></app-icon>Your leads</legend>
+            <p class="muted small ec-rcard-help">Pick leads from Marketech.ai. Only leads with marketing consent can be emailed.</p>
+            <app-campaign-contacts [campaignId]="selected.id" [editable]="editable" [canSync]="canSyncContacts" [canReconnect]="!!zoho?.canConfigure" [zohoLists]="audiences?.lists ?? null"
+              (contactsChange)="onContacts($event)" (changed)="onCampaignChanged($event)" (reconnect)="connectZoho()" (toast)="toast.emit($event)"></app-campaign-contacts>
+          </fieldset>
+        </section>
+
+        <!-- Step 3: Email content -->
+        <section class="ec-pane ec-content-card" [hidden]="step !== 3" aria-label="Email content">
+          <app-email-content-editor [html]="form.html" (htmlChange)="form.html = $event" [editable]="editable" [contentKey]="selected.id"
+            [name]="form.name" purpose="campaign" (chooseTemplate)="picker = 'load'" (toast)="toast.emit($event)"></app-email-content-editor>
+        </section>
+
+        <!-- Step 4: Review & send -->
+        <section class="ec-pane" [hidden]="step !== 4" aria-label="Review and send">
+          <dl class="ec-summary">
+            <div><dt>Campaign</dt><dd>{{ form.name || '—' }}</dd><button type="button" class="link-btn" (click)="goStep(1)" *ngIf="editable">Edit</button></div>
+            <div><dt>Subject</dt><dd>{{ form.subject || 'Not set' }}</dd><button type="button" class="link-btn" (click)="goStep(1)" *ngIf="editable">Edit</button></div>
+            <div><dt>From</dt><dd>{{ fromText }}</dd><button type="button" class="link-btn" (click)="goStep(1)" *ngIf="editable">Edit</button></div>
+            <div><dt>Recipients</dt><dd>{{ recipientSummary || 'None chosen yet' }}</dd><button type="button" class="link-btn" (click)="goStep(2)" *ngIf="editable">Edit</button></div>
+            <div><dt>Email</dt><dd>{{ hasContent ? 'Content added' : 'No content yet' }}</dd><button type="button" class="link-btn" (click)="goStep(3)">{{ editable ? 'Edit' : 'View' }}</button></div>
+          </dl>
+
+          <div class="validation" aria-live="polite">
+            <p class="muted small" *ngIf="busy === 'validate'">Checking the campaign…</p>
+            <ng-container *ngIf="validation">
+              <p *ngIf="validation.ready" class="mx-callout ok"><app-icon name="check" [size]="15"></app-icon>Everything looks good. {{ selected.status === 'draft' ? 'Approve it, then send.' : '' }}</p>
+              <div *ngIf="validation.problems.length" class="mx-callout error ec-checks"><b>Fix before approving:</b><ul class="problems"><li *ngFor="let p of validation.problems">{{ p }}</li></ul></div>
+              <div *ngIf="validation.warnings.length" class="mx-callout warn ec-checks"><b>Worth a look:</b><ul class="warnings"><li *ngFor="let w of validation.warnings">{{ w }}</li></ul></div>
+            </ng-container>
+            <button type="button" class="link-btn" (click)="validate()" [disabled]="busy === 'validate'" *ngIf="busy !== 'validate'">{{ validation ? 'Check again' : 'Check for problems' }}</button>
+          </div>
+
+          <p class="muted small" *ngIf="!canSend && editable">An Owner or Admin approves and sends campaigns.</p>
+          <p class="muted small" *ngIf="selected.status === 'submitted'">This campaign has been handed to Zoho. Delivery figures are shown above.</p>
         </section>
       </div>
 
-      <div class="validation" *ngIf="validation">
-        <p *ngIf="validation.ready" class="ok-text">Ready to approve and send.</p>
-        <ul *ngIf="validation.problems.length" class="problems"><li *ngFor="let p of validation.problems">{{ p }}</li></ul>
-        <ul *ngIf="validation.warnings.length" class="warnings"><li *ngFor="let w of validation.warnings">{{ w }}</li></ul>
-      </div>
+      <!-- Step footer: one clear next action -->
+      <footer class="ec-stepfoot">
+        <button type="button" class="btn btn-secondary btn-sm" (click)="goStep(step - 1)" [disabled]="step === 1">← Back</button>
+        <span class="muted small ec-stepcount">Step {{ step }} of 4</span>
+        <ng-container *ngIf="step < 4">
+          <button type="button" class="btn btn-primary btn-sm" (click)="next()" [disabled]="busy === 'save'">{{ dirty ? 'Save & continue' : 'Next' }} →</button>
+        </ng-container>
+        <ng-container *ngIf="step === 4">
+          <button *ngIf="editable && dirty" class="btn btn-secondary btn-sm" (click)="save()" [disabled]="busy === 'save'"><app-icon name="save" [size]="15"></app-icon>Save changes</button>
+          <button *ngIf="canSend && selected.status === 'draft'" class="btn btn-primary btn-sm" (click)="approve()" [disabled]="busy === 'approve' || dirty" [title]="dirty ? 'Save your changes first' : ''"><app-icon name="check" [size]="15"></app-icon>Approve</button>
+          <button *ngIf="canSend && selected.approved && (selected.status === 'approved' || selected.status === 'failed')" class="btn btn-primary btn-sm" (click)="send()" [disabled]="busy === 'send' || !zohoReady || dirty"
+                  [title]="!zohoReady ? 'Connect Zoho Campaigns first' : dirty ? 'Save your changes first' : ''"><app-icon name="send" [size]="15"></app-icon>Send through Zoho…</button>
+        </ng-container>
+      </footer>
     </div>
   </div>
+
+  <!-- Popup: Zoho connection. Always on the page (hidden when closed) so the campaign screen knows the status. -->
+  <div class="zc-backdrop ec-pop" [hidden]="!zohoOpen" (click)="zohoOpen = false">
+    <div class="zc-card ec-pop-card" [attr.role]="zohoOpen ? 'dialog' : null" [attr.aria-modal]="zohoOpen ? 'true' : null" aria-label="Zoho Campaigns connection" (click)="$event.stopPropagation()">
+      <header class="zc-head">
+        <div><h3>Zoho Campaigns</h3><p class="mx-desc">Zoho delivers your campaigns. Connect it once for this workspace.</p></div>
+        <button type="button" class="zc-close" (click)="zohoOpen = false" aria-label="Close"><app-icon name="x" [size]="18"></app-icon></button>
+      </header>
+      <app-zoho-campaigns [oauthResult]="oauthResult" (toast)="toast.emit($event)" (statusChange)="onZohoStatus($event)" (openSettings)="zohoOpen = false; openSettings.emit()"></app-zoho-campaigns>
+    </div>
+  </div>
+
+  <!-- Popup: confirm sending -->
+  <div class="zc-backdrop ec-pop" *ngIf="sendConfirm" (click)="sendConfirm = null">
+    <div class="zc-card ec-pop-card ec-send-card" role="dialog" aria-modal="true" aria-labelledby="ec-send-title" (click)="$event.stopPropagation()">
+      <header class="zc-head">
+        <div><h3 id="ec-send-title">Send this campaign now?</h3><p class="mx-desc">Zoho starts sending as soon as you confirm. This cannot be undone.</p></div>
+        <button type="button" class="zc-close" (click)="sendConfirm = null" aria-label="Close"><app-icon name="x" [size]="18"></app-icon></button>
+      </header>
+      <dl class="ec-summary">
+        <div><dt>Campaign</dt><dd>{{ sendConfirm.name }}</dd></div>
+        <div><dt>Subject</dt><dd>{{ sendConfirm.subject || '—' }}</dd></div>
+        <div><dt>Recipients</dt><dd>{{ sendConfirm.recipients || 'None' }}</dd></div>
+      </dl>
+      <p class="muted small">Your Zoho plan's sending limits apply.</p>
+      <footer class="zc-foot">
+        <span></span>
+        <div class="ec-inline-actions">
+          <button type="button" class="btn btn-secondary btn-sm" (click)="sendConfirm = null">Cancel</button>
+          <button type="button" class="btn btn-primary btn-sm" (click)="confirmSend()" [disabled]="busy === 'send'"><app-icon name="send" [size]="15"></app-icon>{{ busy === 'send' ? 'Sending…' : 'Send now' }}</button>
+        </div>
+      </footer>
+    </div>
+  </div>
+
   <app-zoho-list-contacts *ngIf="contactsList" [listKey]="contactsList.key" [listName]="contactsList.name" [total]="contactsList.contacts ?? null"
     [campaignId]="selected?.id ?? null" [selectable]="canPickFromZoho" [selectedContacts]="picksByList.get(contactsList.key)" (added)="onZohoContactsAdded($event)" (closed)="contactsList = null"></app-zoho-list-contacts>
   <app-template-picker *ngIf="picker" [subtitle]="picker === 'new' ? 'A new campaign is created from the template you choose.' : 'Replaces this campaign\'s HTML content. Nothing changes until you click Use This Template.'" (picked)="onTemplatePicked($event)" (closed)="picker = null"></app-template-picker>

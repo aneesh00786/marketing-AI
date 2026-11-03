@@ -44,6 +44,8 @@ export class MailCenterComponent implements OnInit {
   @Input() draftTemplate: { id: number; name: string } | null = null;
   @Input() draftProduct: { id: number } | null = null;
   @Input() campaignStartTemplate: { id: number; name: string } | null = null;
+  /** Set by Campaigns → New Campaign → "New email template": Email Templates opens a blank template. */
+  templateStartNew = false;
   @Input() zohoOauthResult: { zoho?: string; reason?: string } | null = null;
   @Output() templateConsumed = new EventEmitter<void>();
   @Output() productConsumed = new EventEmitter<void>();
@@ -112,6 +114,7 @@ export class MailCenterComponent implements OnInit {
   }
 
   go(section: MailSection, opts: { status?: string | null; draftId?: number | null } = {}): void {
+    if (section !== 'templates') this.templateStartNew = false;
     if (section === 'sent') this.sentStatus = opts.status ?? null;
     if (section !== 'settings') this.settingsTab = null;
     this.draftStatus = opts.status ?? null;

@@ -105,7 +105,7 @@
     <div *ngSwitchCase="'zoho'" class="ms-zoho">
       <app-zoho-app-settings (toast)="toast.emit($event)" (changed)="zohoConn.loadStatus()"></app-zoho-app-settings>
       <app-zoho-campaigns #zohoConn [inSettings]="true" (toast)="toast.emit($event)"></app-zoho-campaigns>
-      <p class="mx-desc">Campaigns themselves are written and approved in <button type="button" class="link-btn" (click)="openSection.emit('campaigns')">Campaigns</button>.</p>
+      <p class="mx-desc">Campaigns themselves are written and approved in <button type="button" class="link-btn" (click)="openSection.emit('campaigns')">Zoho Campaigns</button>.</p>
     </div>
   </div>
 </section>

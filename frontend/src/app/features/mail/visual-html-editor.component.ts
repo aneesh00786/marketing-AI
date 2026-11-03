@@ -90,6 +90,15 @@ export class VisualHtmlEditorComponent implements AfterViewInit, OnChanges, OnDe
   ngOnDestroy(): void { this.detach(); }
 
   /** Runs an editing command (bold, createLink, insertHTML, undo…) in the email. */
+  /** The character just before the cursor in the email ('' at the start or when there is no cursor). */
+  charBeforeCursor(): string {
+    const sel = this.doc?.getSelection();
+    if (!sel || !sel.rangeCount) return '';
+    const r = sel.getRangeAt(0);
+    const node = r.startContainer;
+    return node.nodeType === Node.TEXT_NODE ? String(node.textContent || '').charAt(r.startOffset - 1) : '';
+  }
+
   exec(command: string, value?: string): boolean {
     const d = this.doc;
     if (!d || this.disabled) return false;

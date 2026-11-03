@@ -45,6 +45,14 @@ router.get('/audiences', requireCapability('mail.compose'), wrap(async (req, res
 // Leads and selected contacts are addresses from Leads CRM: leads.view as well.
 router.get('/lead-options', requireCapability('mail.compose', 'leads.view'), wrap(async (req, res) => res.json({ success: true, ...(await svc.leadOptions(req, req.query)) })));
 router.post('/', requireCapability('mail.compose'), wrap(async (req, res) => res.json({ success: true, campaign: await svc.create(req, req.body) })));
+// Zoho Campaigns → Contact lists (like Zoho's Manage Lists). Before /:id so "zoho-lists" is not an id.
+const lists = require('../zoho/zohoLists');
+const listsLimit = require('../../../lib/rateLimit').rateLimit({ windowMs: 60 * 1000, max: 20, keyFn: req => `zoho-lists:${req.auth.workspaceId}`, message: 'Too many list changes. Wait a minute and try again.' });
+router.get('/zoho-lists', requireCapability('mail.send'), wrap(async (req, res) => res.json({ success: true, ...(await lists.lists(req)) })));
+router.post('/zoho-lists', requireCapability('mail.send', 'leads.view'), listsLimit, wrap(async (req, res) => res.json({ success: true, ...(await lists.create(req, req.body)) })));
+router.post('/zoho-lists/:listKey/contacts', requireCapability('mail.send', 'leads.view'), listsLimit, wrap(async (req, res) => res.json({ success: true, ...(await lists.addContacts(req, req.params.listKey, req.body)) })));
+router.post('/zoho-lists/:listKey/remove', requireCapability('mail.send'), listsLimit, wrap(async (req, res) => res.json({ success: true, ...(await lists.removeContact(req, req.params.listKey, req.body)) })));
+
 router.get('/:id', requireCapability('mail.view'), wrap(async (req, res) => res.json({ success: true, campaign: await svc.getOne(req, req.params.id) })));
 router.patch('/:id', requireCapability('mail.compose'), wrap(async (req, res) => res.json({ success: true, campaign: await svc.update(req, req.params.id, req.body) })));
 router.post('/:id/duplicate', requireCapability('mail.compose'), wrap(async (req, res) => res.json({ success: true, ...(await svc.duplicate(req, req.params.id)) })));

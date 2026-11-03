@@ -319,8 +319,8 @@ export class ApiService {
   }
 
   // 22. Bulk Lead Import & AI Qualification
-  importLeadsBulk(leads: any[]): Observable<any> {
-    return this.http.post(`${this.baseUrl}/leads/import-bulk`, { leads });
+  importLeadsBulk(leads: any[], extras: { consent?: any; zohoList?: any } = {}): Observable<any> {
+    return this.http.post(`${this.baseUrl}/leads/import-bulk`, { leads, ...extras });
   }
 
   qualifyLeadWithAi(leadId: number): Observable<any> {

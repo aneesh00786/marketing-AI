@@ -1,0 +1,75 @@
+<div class="ltz-backdrop" (click)="close()">
+  <div class="ltz-card" role="dialog" aria-modal="true" aria-labelledby="ltz-title" (click)="$event.stopPropagation()">
+    <div class="ltz-head">
+      <div>
+        <h3 id="ltz-title">Add leads to a Zoho list</h3>
+        <p class="ltz-desc">The list can then be chosen when you send a campaign. Leads go to Zoho with their names, so “Hi {{ '{' }}first name{{ '}' }}” works.</p>
+      </div>
+      <button type="button" class="ltz-x" aria-label="Close" (click)="close()">✕</button>
+    </div>
+
+    <ng-container *ngIf="!result">
+      <div class="ltz-warn" *ngIf="listsError" role="status">{{ listsError }}</div>
+
+      <fieldset class="ltz-box" [disabled]="!!listsError">
+        <legend>Zoho list</legend>
+        <div class="ltz-radios">
+          <label><input type="radio" name="ltz-target" value="existing" [(ngModel)]="target" [disabled]="!lists.length" /> Existing list</label>
+          <label><input type="radio" name="ltz-target" value="new" [(ngModel)]="target" /> New list</label>
+        </div>
+        <select *ngIf="target === 'existing'" class="hud-input" [(ngModel)]="listKey" aria-label="Zoho list">
+          <option value="">Choose a list…</option>
+          <option *ngFor="let l of lists" [value]="l.key">{{ l.name || l.key }}{{ l.contacts != null ? ' (' + l.contacts + ')' : '' }}</option>
+        </select>
+        <input *ngIf="target === 'new'" class="hud-input" [(ngModel)]="listName" maxlength="100" placeholder="e.g. Sydney packaging buyers" aria-label="New list name" />
+      </fieldset>
+
+      <fieldset class="ltz-box">
+        <legend>Leads <span class="ltz-muted" *ngIf="picked.size">({{ picked.size }} selected)</span></legend>
+        <div class="ltz-tools">
+          <input class="hud-input" type="search" [(ngModel)]="q" (keydown.enter)="search()" placeholder="Search name, email or company" aria-label="Search leads" />
+          <select class="hud-input" [(ngModel)]="show" (change)="search()" aria-label="Show">
+            <option value="eligible">Can be emailed</option>
+            <option value="all">All leads</option>
+          </select>
+          <button type="button" class="btn btn-secondary btn-sm" (click)="search()">Search</button>
+          <button type="button" class="btn btn-secondary btn-sm" (click)="selectAllShown()" [disabled]="!eligibleCount">Select all shown</button>
+          <button type="button" class="btn btn-secondary btn-sm" *ngIf="picked.size" (click)="clear()">Clear</button>
+        </div>
+        <p class="ltz-muted" *ngIf="loading">Loading leads…</p>
+        <div class="ltz-empty" *ngIf="!loading && !leads.length">
+          <ng-container *ngIf="show === 'eligible'">
+            No leads can be emailed yet. A lead can be added to Zoho once its <b>marketing consent is recorded with proof</b>
+            (import with consent, or Mail Center › Product Emails › Record consent).
+            <button type="button" class="link" (click)="show = 'all'; search()">Show all leads</button>
+          </ng-container>
+          <ng-container *ngIf="show === 'all'">No leads match.</ng-container>
+        </div>
+        <div class="ltz-list" *ngIf="!loading && leads.length">
+          <label class="ltz-lead" *ngFor="let l of leads" [class.off]="!l.eligible">
+            <input type="checkbox" [disabled]="!l.eligible" [checked]="picked.has(l.id)" (change)="toggle(l)" />
+            <span><b>{{ l.name }}</b><small>{{ l.email || 'no email' }}{{ l.company && l.company !== l.name ? ' · ' + l.company : '' }}</small>
+              <small class="ltz-why" *ngIf="!l.eligible">{{ l.reasons?.[0] }}</small></span>
+          </label>
+        </div>
+        <p class="ltz-muted" *ngIf="show === 'all' && total > eligibleCount">{{ total - eligibleCount }} of {{ total }} leads cannot be added yet (reason shown under each).</p>
+      </fieldset>
+
+      <div class="ltz-foot">
+        <span class="ltz-muted">{{ problem || picked.size + ' lead(s) will be added.' }}</span>
+        <button type="button" class="btn btn-secondary btn-sm" (click)="close()">Cancel</button>
+        <button type="button" class="btn btn-primary btn-sm" [disabled]="!!problem || saving" (click)="submit()">{{ saving ? 'Adding in Zoho…' : 'Add to Zoho list' }}</button>
+      </div>
+    </ng-container>
+
+    <ng-container *ngIf="result">
+      <div class="ltz-done" role="status">✓ {{ result.added }} lead(s) added to “{{ result.list?.name }}”.</div>
+      <div class="ltz-warn" *ngIf="result.skipped.length"><b>{{ result.skipped.length }} not added:</b>
+        <ul><li *ngFor="let s of result.skipped.slice(0, 10)">{{ s.email }}: {{ s.reason }}</li></ul></div>
+      <div class="ltz-foot">
+        <button type="button" class="btn btn-secondary btn-sm" (click)="close()">Close</button>
+        <button type="button" class="btn btn-primary btn-sm" (click)="openCampaigns.emit()">Create a campaign →</button>
+      </div>
+    </ng-container>
+  </div>
+</div>

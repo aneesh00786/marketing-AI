@@ -2,6 +2,10 @@ import { Component, OnInit, OnDestroy, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import * as XLSX from 'xlsx';
+import { parseLeadSheet } from './features/leads/lead-sheet';
+import { ImportSync, importSyncBody, importSyncProblem, newImportSync } from './features/leads/import-sync';
+import { ImportSyncOptionsComponent } from './features/leads/import-sync-options.component';
+import { LeadsToZohoComponent } from './features/leads/leads-to-zoho.component';
 import { ApiService } from './services/api.service';
 import { SpeechService } from './services/speech.service';
 import { AuthStateService, SessionChangeKind } from './core/auth-state.service';
@@ -28,7 +32,7 @@ import { findTokens, fillTokens, defaultTokenValues } from './features/mail/temp
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [CommonModule, FormsModule, LoginComponent, SocialHubComponent, CommandCenterComponent, IconComponent, DashboardComponent, LeadDiscoveryComponent, CrmComponent, PlatformAdminComponent, CallButtonComponent, SoftphoneComponent, MembersComponent, TemplatePickerComponent, MailCenterComponent, EmailPreviewComponent],
+  imports: [CommonModule, FormsModule, LoginComponent, SocialHubComponent, CommandCenterComponent, IconComponent, DashboardComponent, LeadDiscoveryComponent, CrmComponent, PlatformAdminComponent, CallButtonComponent, SoftphoneComponent, MembersComponent, TemplatePickerComponent, MailCenterComponent, EmailPreviewComponent, ImportSyncOptionsComponent, LeadsToZohoComponent],
   templateUrl: './app.component.html',
   styleUrls: ['./app.component.css']
 })
@@ -1251,39 +1255,25 @@ export class AppComponent implements OnInit, OnDestroy {
     this.excelFileName = file.name;
     this.leadImportResult = null;
     if (!this.leadProducts.length) this.loadLeadProducts();
+    parseLeadSheet(file).then(({ rows, skippedNoName }) => {
+      this.excelSkippedNoName = skippedNoName;
+      this.excelPreviewRows = rows;
+      this.showToast(`Parsed ${rows.length} leads from "${file.name}".${skippedNoName ? ` ${skippedNoName} rows without a name will be skipped.` : ''}`);
+    }).catch(err => this.showToast(err.message));
+    event.target.value = '';
+  }
 
-    const pick = (row: any, keys: string[]) => {
-      for (const k of keys) {
-        const v = row[k];
-        if (v !== undefined && v !== null && String(v).trim() !== '') return String(v).trim();
-      }
-      return '';
-    };
-    const reader = new FileReader();
-    reader.onload = (e: any) => {
-      try {
-        const wb = XLSX.read(e.target.result, { type: 'array' });
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        const rawJson: any[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
-        // Map known column names only; blank cells stay blank (no invented values).
-        const rows = rawJson.map((row: any) => ({
-          name: pick(row, ['Name', 'name', 'Contact Name', 'Full Name', 'Contact']),
-          companyName: pick(row, ['Company', 'company', 'Company Name', 'Organisation', 'Organization']),
-          email: pick(row, ['Email', 'email', 'E-mail', 'Email Address']),
-          phone: pick(row, ['Phone', 'phone', 'Mobile', 'Phone Number', 'Contact Number']),
-          product: pick(row, ['Product', 'product', 'Product Name', 'Interest', 'interest']),
-          productId: pick(row, ['Product ID', 'product_id', 'productId', 'Product Id']),
-          estimatedBudget: pick(row, ['Budget', 'budget', 'Estimated Budget', 'Deal Value']),
-          notes: pick(row, ['Notes', 'notes', 'Comments'])
-        }));
-        this.excelSkippedNoName = rows.filter(r => !r.name).length;
-        this.excelPreviewRows = rows.filter(r => r.name);
-        this.showToast(`Parsed ${this.excelPreviewRows.length} leads from "${file.name}".${this.excelSkippedNoName ? ` ${this.excelSkippedNoName} rows without a name will be skipped.` : ''}`);
-      } catch (err: any) {
-        this.showToast(`Error reading spreadsheet: ${err.message}`);
-      }
-    };
-    reader.readAsArrayBuffer(file);
+  /** Leads → "Add to Zoho list" popup. */
+  showLeadsToZoho = false;
+
+  /** Consent and Zoho list for the Excel import (see ImportSyncOptionsComponent). */
+  importSync: ImportSync = newImportSync();
+  get canSendCampaigns(): boolean { return !!this.myCaps?.has('mail.send'); }
+  get importSyncProblem(): string { return importSyncProblem(this.importSync); }
+  openExcelImport(): void {
+    this.showExcelImportModal = true;
+    this.leadImportResult = null;
+    this.importSync = newImportSync();
   }
 
   /** Preview-only product match (the server re-validates against the workspace on import). */
@@ -1306,7 +1296,8 @@ export class AppComponent implements OnInit, OnDestroy {
   confirmImportExcelLeads(): void {
     if (this.excelPreviewRows.length === 0) return;
     this.isImportingLeads = true;
-    this.apiService.importLeadsBulk(this.excelPreviewRows).subscribe({
+    if (this.importSyncProblem) { this.showToast(this.importSyncProblem); return; }
+    this.apiService.importLeadsBulk(this.excelPreviewRows, importSyncBody(this.importSync)).subscribe({
       next: (res) => {
         this.isImportingLeads = false;
         this.showToast(res.message);
