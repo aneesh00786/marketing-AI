@@ -8,7 +8,7 @@ import { parseLeadSheet, LeadSheetRow } from '../leads/lead-sheet';
 import { ImportSync, importSyncBody, importSyncProblem, newImportSync } from '../leads/import-sync';
 import { ImportSyncOptionsComponent } from '../leads/import-sync-options.component';
 
-interface ZList { key: string; name: string | null; contacts: number | null; campaignList: boolean; }
+interface ZList { key: string; name: string | null; contacts: number | null; campaignList: boolean; hidden?: boolean; }
 interface ManualContact { name: string; company: string; email: string; phone: string; }
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const emptyContact = (): ManualContact => ({ name: '', company: '', email: '', phone: '' });
@@ -47,6 +47,8 @@ export class ZohoListsComponent implements OnInit {
   canRemove = false;
   query = '';
   showCampaignLists = false;
+  showHidden = false;
+  canDeleteInZoho = false;
 
   /** The add / new-list popup. */
   form: { mode: 'create' | 'add'; list: ZList | null; name: string; emails: string; manual: ManualContact[]; draft: ManualContact; picked: Map<number, LeadOpt>; skipped: { email: string; reason: string }[] } | null = null;
@@ -65,7 +67,7 @@ export class ZohoListsComponent implements OnInit {
   load(): void {
     this.loading = true; this.error = '';
     this.http.get<any>(`${this.base}/zoho-lists`).subscribe({
-      next: r => { this.loading = false; this.lists = r.lists || []; this.canAdd = !!r.canAdd; this.canRemove = !!r.canRemove; this.plan = r.plan || null; },
+      next: r => { this.loading = false; this.lists = r.lists || []; this.canAdd = !!r.canAdd; this.canRemove = !!r.canRemove; this.canDeleteInZoho = !!r.canDeleteInZoho; this.plan = r.plan || null; },
       error: e => { this.loading = false; this.error = this.err(e); }
     });
   }
@@ -108,11 +110,51 @@ export class ZohoListsComponent implements OnInit {
     });
   }
 
+  get hiddenCount(): number { return this.lists.filter(l => l.hidden).length; }
+
+  // ---------- Delete a list: from Marketech.ai only, or in Zoho ----------
+  deleting: { list: ZList; mode: 'hide' | 'zoho'; busy: boolean } | null = null;
+
+  openDelete(l: ZList): void { this.deleting = { list: l, mode: 'hide', busy: false }; }
+
+  /** Why "Delete in Zoho" cannot be chosen ('' when it can). */
+  get zohoDeleteBlock(): string {
+    if (!this.canConfigure) return 'Only an Owner or Admin can delete lists in Zoho.';
+    if (!this.canDeleteInZoho) return 'Reconnect Zoho once to allow deleting lists.';
+    return '';
+  }
+
+  confirmDelete(): void {
+    const d = this.deleting;
+    if (!d || d.busy || (d.mode === 'zoho' && this.zohoDeleteBlock)) return;
+    d.busy = true;
+    const key = encodeURIComponent(d.list.key);
+    const name = d.list.name || d.list.key;
+    const req = d.mode === 'hide'
+      ? this.http.post<any>(`${this.base}/zoho-lists/${key}/hide`, {})
+      : this.http.delete<any>(`${this.base}/zoho-lists/${key}`, { body: { confirm: true } });
+    req.subscribe({
+      next: () => {
+        this.deleting = null;
+        this.toast.emit(d.mode === 'hide' ? `“${name}” removed from Marketech.ai. It is still in Zoho.` : `“${name}” deleted in Zoho Campaigns. Its contacts are still in your Zoho account.`);
+        this.load();
+      },
+      error: e => { d.busy = false; this.toast.emit(this.err(e)); }
+    });
+  }
+
+  unhide(l: ZList): void {
+    this.http.post<any>(`${this.base}/zoho-lists/${encodeURIComponent(l.key)}/unhide`, {}).subscribe({
+      next: () => { this.toast.emit(`“${l.name || l.key}” is shown again.`); this.load(); },
+      error: e => this.toast.emit(this.err(e))
+    });
+  }
+
   get campaignListCount(): number { return this.lists.filter(l => l.campaignList).length; }
 
   get visibleLists(): ZList[] {
     const q = this.query.trim().toLowerCase();
-    return this.lists.filter(l => (this.showCampaignLists || !l.campaignList) && (!q || String(l.name || '').toLowerCase().includes(q)));
+    return this.lists.filter(l => (this.showCampaignLists || !l.campaignList) && (this.showHidden || !l.hidden) && (!q || String(l.name || '').toLowerCase().includes(q)));
   }
 
   // ---------- New list / add contacts ----------

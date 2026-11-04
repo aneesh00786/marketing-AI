@@ -17,8 +17,9 @@ process.env.APP_BASE_URL = 'https://app.marketech.test';
 const DELIVERY_SCOPES = 'ZohoCampaigns.campaign.CREATE,ZohoCampaigns.campaign.READ,ZohoCampaigns.campaign.UPDATE,ZohoCampaigns.contact.READ';
 const ALL_SCOPES = `${DELIVERY_SCOPES},ZohoCampaigns.contact.CREATE`;
 // What the app asks for: contact.UPDATE is optional (names for personalization).
-const REQUESTED_SCOPES = `${ALL_SCOPES},ZohoCampaigns.contact.UPDATE`;
-const NAME_SCOPES = REQUESTED_SCOPES;
+const REQUESTED_SCOPES = `${ALL_SCOPES},ZohoCampaigns.contact.UPDATE,ZohoCampaigns.contact.DELETE`;
+const NAME_SCOPES = `${ALL_SCOPES},ZohoCampaigns.contact.UPDATE`;
+const DELETE_SCOPES = REQUESTED_SCOPES;
 
 // Zoho campaign keys are unique per account, across tests too.
 let keySeq = 9000 + Math.floor(Math.random() * 1e6) * 10;
@@ -76,6 +77,13 @@ function fakeZoho() {
           acct.lists.push({ listkey: key, listname: params.listname, noofcontacts: '0' });
           acct.added = { ...acct.added, [key]: params.emailids.split(',') };
           return h.json(200, { status: 'success', code: 0, listkey: key, message: 'List created' });
+        }
+        if (endpoint === 'deletemailinglist') {
+          assert.equal(init.method, 'GET', 'documented as GET');
+          assert.equal(params.deletecontacts, 'off', 'contacts are never deleted');
+          acct.lists = acct.lists.filter(l => l.listkey !== params.listkey);
+          acct.deletedLists = [...(acct.deletedLists || []), params.listkey];
+          return h.json(200, { status: 'success', code: '0', message: 'List(s) are deleted successfully!' });
         }
         if (endpoint === 'addlistsubscribersinbulk') {
           if (z.bulkResponder) { const r = z.bulkResponder(params, acct); if (r) return r; }
@@ -1181,6 +1189,40 @@ test('greetingName: leads without a contact person are greeted as the business, 
 });
 
 // ------------------------------------------------------------------ Zoho Campaigns → Contact lists
+
+test('delete a list: remove from Marketech.ai only (hidden, restorable) or delete in Zoho (contacts kept, opt-outs saved first)', async () => {
+  const { ws, acct } = await freshConnected('Delete list', { connect: { scope: DELETE_SCOPES }, account: { lists: [
+    { listkey: 'L1', listname: 'Old fair', noofcontacts: '2' }, { listkey: 'L2', listname: 'Customers', noofcontacts: '9' }
+  ] } });
+  acct.contacts = { L1: [{ contact_email: 'left@fair.io', state: 'unsub' }] };
+  const r0 = await capi(ws, 'GET', '/zoho-lists');
+  assert.equal(r0.data.canDeleteInZoho, true);
+  // Remove from Marketech.ai only.
+  assert.equal((await capi(ws, 'POST', '/zoho-lists/L2/hide', {})).status, 200);
+  assert.equal((await capi(ws, 'GET', '/zoho-lists')).data.lists.find(l => l.key === 'L2').hidden, true);
+  assert.deepEqual((await capi(ws, 'GET', '/audiences')).data.lists.map(l => l.key), ['L1'], 'hidden lists are not offered for campaigns');
+  assert.equal((await capi(ws, 'POST', '/zoho-lists/L2/unhide', {})).status, 200);
+  assert.equal((await capi(ws, 'GET', '/zoho-lists')).data.lists.find(l => l.key === 'L2').hidden, false);
+  assert.ok(acct.lists.some(l => l.listkey === 'L2'), 'Zoho untouched');
+  // Delete in Zoho: Owners and Admins, with confirmation.
+  const mm = await h.addMember(ws.workspaceId, 'Marketing Manager');
+  assert.equal((await capi(mm, 'DELETE', '/zoho-lists/L1', { confirm: true })).status, 403);
+  assert.equal((await capi(ws, 'DELETE', '/zoho-lists/L1', {})).status, 400);
+  const del = await capi(ws, 'DELETE', '/zoho-lists/L1', { confirm: true });
+  assert.equal(del.status, 200, JSON.stringify(del.data));
+  assert.deepEqual(acct.deletedLists, ['L1']);
+  const sup = await db().get('SELECT reason FROM email_suppressions WHERE workspace_id = ? AND email = ?', [ws.workspaceId, 'left@fair.io']);
+  assert.equal(sup.reason, 'unsubscribed', 'the list\'s unsubscribes are kept');
+  assert.equal((await capi(ws, 'DELETE', '/zoho-lists/L1', { confirm: true })).status, 404);
+});
+
+test('delete a list in Zoho needs the delete permission: older connections are asked to reconnect', async () => {
+  const { ws } = await freshConnected('Delete list old', { connect: { scope: NAME_SCOPES } });
+  assert.equal((await capi(ws, 'GET', '/zoho-lists')).data.canDeleteInZoho, false);
+  const r = await capi(ws, 'DELETE', '/zoho-lists/L1', { confirm: true });
+  assert.equal(r.status, 409);
+  assert.equal(r.data.code, 'ZOHO_SCOPES_MISSING');
+});
 
 test('plan limit: admins set the contact limit; lists show it with usage (campaign lists not counted)', async () => {
   const { ws } = await freshConnected('Plan limit', { account: { lists: [

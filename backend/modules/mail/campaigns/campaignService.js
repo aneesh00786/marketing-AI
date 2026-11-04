@@ -267,7 +267,8 @@ function topicProblem(row, topics) {
 /** Mailing lists and topics of the connected Zoho account, to choose recipients from. */
 async function zohoAudiences(ctx) {
   await zoho.assertReady(ws(ctx));
-  const lists = (await contactsSvc.fetchLists(ws(ctx))).filter(l => !contactsSvc.isSyncList(l.name));
+  const hidden = await require('../zoho/zohoLists').hiddenKeys(ws(ctx));
+  const lists = (await contactsSvc.fetchLists(ws(ctx))).filter(l => !contactsSvc.isSyncList(l.name) && !hidden.has(l.key));
   const topics = await fetchTopics(ws(ctx));
   return { lists, topics, note: 'Lists and consent are managed in Zoho Campaigns. Contacts you select are added to a new Zoho list when the campaign is sent.' };
 }

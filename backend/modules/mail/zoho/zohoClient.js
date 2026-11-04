@@ -30,15 +30,19 @@ const CONTACT_SYNC_SCOPE = 'ZohoCampaigns.contact.CREATE';
 // Optional: lets selected leads' names reach Zoho (listsubscribe), so name merge tags are filled.
 // Connections without it still send; names then fall back to the merge tag's default.
 const CONTACT_UPDATE_SCOPE = 'ZohoCampaigns.contact.UPDATE';
-const SCOPES = [...DELIVERY_SCOPES, CONTACT_SYNC_SCOPE, CONTACT_UPDATE_SCOPE];
+// Deleting a mailing list (Contact lists → Delete → "Delete in Zoho"). Contacts are never deleted.
+const CONTACT_DELETE_SCOPE = 'ZohoCampaigns.contact.DELETE';
+const SCOPES = [...DELIVERY_SCOPES, CONTACT_SYNC_SCOPE, CONTACT_UPDATE_SCOPE, CONTACT_DELETE_SCOPE];
 const READ_ENDPOINTS = new Set(['recentcampaigns', 'getcampaigndetails', 'campaignreports', 'getmailinglists', 'topics', 'getcampaignrecipientsdata', 'getlistsubscribers']);
 // Reads Zoho documents as POST (form body). Still reads: a failure is a plain error, never "outcome unknown".
 const READ_POST_ENDPOINTS = new Set(['getcampaignrecipientsdata']);
 // Write calls whose outcome can be unknown after a timeout; never retried automatically.
 const WRITE_ENDPOINTS = new Set(['createCampaign', 'sendcampaign']);
 // Contact and list changes (campaign sync and Zoho Campaigns → Contact lists). Safe to repeat, so a
-// failure is a plain error. Deleting lists or campaigns is never allowed.
+// failure is a plain error. Deleting campaigns or contacts is never allowed.
 const SYNC_ENDPOINTS = new Set(['addlistandcontacts', 'addlistsubscribersinbulk', 'json/listsubscribe', 'json/listunsubscribe']);
+// Deleting a mailing list (only with deletecontacts=off, enforced in call()). Documented as GET.
+const LIST_DELETE_ENDPOINTS = new Set(['deletemailinglist']);
 const TIMEOUT_MS = 20000;
 const NOT_CONNECTED_CODES = new Set(['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'EHOSTUNREACH', 'ENETUNREACH', 'UND_ERR_CONNECT_TIMEOUT']);
 
@@ -148,7 +152,8 @@ const isSuccess = d => d && (String(d.status).toLowerCase() === 'success' || ['0
  */
 async function call(dc, accessToken, endpoint, params = {}) {
   const isSend = WRITE_ENDPOINTS.has(endpoint);
-  if (!isSend && !READ_ENDPOINTS.has(endpoint) && !SYNC_ENDPOINTS.has(endpoint)) throw new Error(`Zoho endpoint "${endpoint}" is not allowed.`);
+  if (!isSend && !READ_ENDPOINTS.has(endpoint) && !SYNC_ENDPOINTS.has(endpoint) && !LIST_DELETE_ENDPOINTS.has(endpoint)) throw new Error(`Zoho endpoint "${endpoint}" is not allowed.`);
+  if (LIST_DELETE_ENDPOINTS.has(endpoint) && params.deletecontacts !== 'off') throw new Error('Deleting contacts in Zoho is not allowed.');
   const query = new URLSearchParams({ resfmt: 'JSON', ...params });
   const usePost = isSend || READ_POST_ENDPOINTS.has(endpoint) || SYNC_ENDPOINTS.has(endpoint);
   const url = `${dc.campaigns}/api/v1.1/${endpoint}${usePost ? '' : `?${query}`}`;
@@ -183,6 +188,7 @@ async function call(dc, accessToken, endpoint, params = {}) {
 module.exports = {
   DATA_CENTERS,
   SCOPES,
+  CONTACT_DELETE_SCOPE,
   DELIVERY_SCOPES,
   CONTACT_SYNC_SCOPE,
   CONTACT_UPDATE_SCOPE,

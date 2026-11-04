@@ -123,6 +123,48 @@ describe('ZohoListsComponent (Zoho Campaigns → Contact lists)', () => {
     expect(comp.form).toBeNull();
   });
 
+  it('Delete asks where: remove from Marketech.ai only, or delete in Zoho (admins, after reconnecting)', () => {
+    TestBed.configureTestingModule({ imports: [ZohoListsComponent], providers: [provideHttpClient(), provideHttpClientTesting()] });
+    http = TestBed.inject(HttpTestingController);
+    fixture = TestBed.createComponent(ZohoListsComponent);
+    comp = fixture.componentInstance;
+    Object.assign(comp, { zohoReady: true, canManage: true, canConfigure: false });
+    fixture.detectChanges();
+    http.expectOne(r => r.url.endsWith('/zoho-lists')).flush({ lists: structuredClone(LISTS), canAdd: true, canRemove: true, canDeleteInZoho: false });
+    fixture.detectChanges();
+    button('Delete').click(); fixture.detectChanges();
+    const dlg = () => el().querySelector('.zl-del-card') as HTMLElement;
+    expect(dlg().textContent).toContain('Remove from Marketech.ai only');
+    const zohoRadio = dlg().querySelector('input[value=zoho]') as HTMLInputElement;
+    expect(zohoRadio.disabled).toBeTrue();
+    expect(dlg().textContent).toContain('Only an Owner or Admin can delete lists in Zoho.');
+    comp.canConfigure = true; fixture.detectChanges();
+    expect(dlg().textContent).toContain('Reconnect Zoho once to allow deleting lists.');
+    comp.canDeleteInZoho = true; fixture.detectChanges();
+    expect(zohoRadio.disabled).toBeFalse();
+    // Remove from Marketech.ai only
+    button('Remove from Marketech.ai').click();
+    http.expectOne(r => r.method === 'POST' && r.url.endsWith('/zoho-lists/L1/hide')).flush({ hidden: true });
+    http.expectOne(r => r.url.endsWith('/zoho-lists')).flush({ lists: [{ ...LISTS[0], hidden: true }, LISTS[1]], canAdd: true, canRemove: true, canDeleteInZoho: true });
+    fixture.detectChanges();
+    expect(comp.deleting).toBeNull();
+    expect(el().querySelectorAll('.zl-row:not(.zl-th)').length).withContext('hidden list not shown').toBe(0);
+    (Array.from(el().querySelectorAll('.zl-check')).find(l => l.textContent!.includes('removed from Marketech.ai'))!.querySelector('input') as HTMLInputElement).click(); fixture.detectChanges();
+    expect(el().textContent).toContain('Removed from Marketech.ai');
+    button('Show again').click();
+    http.expectOne(r => r.method === 'POST' && r.url.endsWith('/zoho-lists/L1/unhide')).flush({ hidden: false });
+    http.expectOne(r => r.url.endsWith('/zoho-lists')).flush({ lists: structuredClone(LISTS), canAdd: true, canRemove: true, canDeleteInZoho: true });
+    fixture.detectChanges();
+    // Delete in Zoho
+    button('Delete').click(); fixture.detectChanges();
+    comp.deleting!.mode = 'zoho'; fixture.detectChanges();
+    button('Delete in Zoho').click();
+    const del = http.expectOne(r => r.method === 'DELETE' && r.url.endsWith('/zoho-lists/L1'));
+    expect(del.request.body).toEqual({ confirm: true });
+    del.flush({ deleted: true });
+    http.expectOne(r => r.url.endsWith('/zoho-lists')).flush({ lists: [LISTS[1]], canAdd: true, canRemove: true, canDeleteInZoho: true });
+  });
+
   it('plan limit: shows contacts against the limit; admins set it; adding past it warns', () => {
     TestBed.configureTestingModule({ imports: [ZohoListsComponent], providers: [provideHttpClient(), provideHttpClientTesting()] });
     http = TestBed.inject(HttpTestingController);

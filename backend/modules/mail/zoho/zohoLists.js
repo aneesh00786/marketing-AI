@@ -64,14 +64,23 @@ async function setPlan(ctx, body) {
   return { contactLimit: limit };
 }
 
-/** Every Zoho list, with the lists Marketech.ai made for a campaign marked, and the plan usage. */
+/** Keys of the lists this workspace removed from Marketech.ai (they stay in Zoho). */
+async function hiddenKeys(workspaceId) {
+  const rows = await all('SELECT list_key FROM mail_hidden_lists WHERE workspace_id = ? AND provider = ?', [workspaceId, 'zoho_campaigns']).catch(() => []);
+  return new Set(rows.map(r => r.list_key));
+}
+
+/** Every Zoho list, with the lists Marketech.ai made for a campaign and the hidden ones marked, and the plan usage. */
 async function lists(ctx) {
   await zoho.assertReady(ws(ctx));
   const found = await contacts.fetchLists(ws(ctx));
+  const hidden = await hiddenKeys(ws(ctx));
+  const conn = await zoho.connectionRow(ws(ctx));
   return {
-    lists: found.map(l => ({ ...l, campaignList: contacts.isSyncList(l.name) })),
-    canAdd: zoho.canSyncContacts(await zoho.connectionRow(ws(ctx))),
-    canRemove: zoho.canSyncNames(await zoho.connectionRow(ws(ctx))),
+    lists: found.map(l => ({ ...l, campaignList: contacts.isSyncList(l.name), hidden: hidden.has(l.key) })),
+    canAdd: zoho.canSyncContacts(conn),
+    canRemove: zoho.canSyncNames(conn),
+    canDeleteInZoho: zoho.canDeleteLists(conn),
     plan: { contactLimit: await contactLimit(ws(ctx)), usage: usageOf(found) }
   };
 }
@@ -177,4 +186,40 @@ async function removeContact(ctx, listKey, body) {
   return { removed: email };
 }
 
-module.exports = { lists, create, addContacts, removeContact, setPlan, MAX_ADD };
+/** Removes a list from Marketech.ai only: hidden in Contact lists and campaign recipients; Zoho is not touched. */
+async function hideList(ctx, listKey) {
+  const list = await findList(ctx, listKey);
+  await run(`INSERT INTO mail_hidden_lists (workspace_id, provider, list_key, list_name, hidden_by) VALUES (?, 'zoho_campaigns', ?, ?, ?)
+     ON DUPLICATE KEY UPDATE list_name = VALUES(list_name)`, [ws(ctx), list.key, String(list.name || '').slice(0, 200) || null, ctx.auth.userId]);
+  await audit(ctx, 'mail.zoho_list_hidden', { resourceType: 'mail_provider', resourceId: 'zoho_campaigns', metadata: { listKey: list.key } });
+  return { hidden: true, list: { key: list.key, name: list.name } };
+}
+
+async function unhideList(ctx, listKey) {
+  if (!LIST_KEY_RE.test(String(listKey || ''))) throw httpError(400, 'Unknown list.', 'VALIDATION_ERROR');
+  await run('DELETE FROM mail_hidden_lists WHERE workspace_id = ? AND provider = ? AND list_key = ?', [ws(ctx), 'zoho_campaigns', listKey]);
+  await audit(ctx, 'mail.zoho_list_unhidden', { resourceType: 'mail_provider', resourceId: 'zoho_campaigns', metadata: { listKey } });
+  return { hidden: false };
+}
+
+/**
+ * Deletes a list in Zoho Campaigns (so it is gone here too). Its contacts stay in the Zoho account
+ * (deletecontacts=off; deleting contacts is never done from Marketech.ai). The list's unsubscribes
+ * and bounces are copied to the stop-list first; if they cannot be read, nothing is deleted.
+ */
+async function deleteList(ctx, listKey, body) {
+  if (!body || body.confirm !== true) throw httpError(400, 'Explicit confirmation (confirm: true) is required.', 'CONFIRMATION_REQUIRED');
+  const list = await findList(ctx, listKey);
+  if (!zoho.canDeleteLists(await zoho.connectionRow(ws(ctx)))) throw httpError(409, 'Reconnect Zoho Campaigns once to allow deleting lists.', 'ZOHO_SCOPES_MISSING');
+  try {
+    await contacts.importOptOutsFrom(ws(ctx), [list.key]);
+  } catch (err) {
+    throw httpError(502, `The list was not deleted: its unsubscribes could not be read from Zoho first (${err.message}). Try again later.`, 'OPT_OUTS_UNREADABLE');
+  }
+  await zoho.writeCall(ws(ctx), 'deletemailinglist', { listkey: list.key, deletecontacts: 'off' });
+  await run('DELETE FROM mail_hidden_lists WHERE workspace_id = ? AND provider = ? AND list_key = ?', [ws(ctx), 'zoho_campaigns', list.key]);
+  await audit(ctx, 'mail.zoho_list_deleted', { resourceType: 'mail_provider', resourceId: 'zoho_campaigns', metadata: { listKey: list.key, contacts: list.contacts ?? null } });
+  return { deleted: true, list: { key: list.key, name: list.name } };
+}
+
+module.exports = { lists, create, addContacts, removeContact, setPlan, hideList, unhideList, deleteList, hiddenKeys, MAX_ADD };

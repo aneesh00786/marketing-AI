@@ -54,6 +54,11 @@ router.put('/zoho-plan', requireCapability('mail.configure'), wrap(async (req, r
 router.post('/zoho-lists', requireCapability('mail.send', 'leads.view'), listsLimit, wrap(async (req, res) => res.json({ success: true, ...(await lists.create(req, req.body)) })));
 router.post('/zoho-lists/:listKey/contacts', requireCapability('mail.send', 'leads.view'), listsLimit, wrap(async (req, res) => res.json({ success: true, ...(await lists.addContacts(req, req.params.listKey, req.body)) })));
 router.post('/zoho-lists/:listKey/remove', requireCapability('mail.send'), listsLimit, wrap(async (req, res) => res.json({ success: true, ...(await lists.removeContact(req, req.params.listKey, req.body)) })));
+// Remove a list from Marketech.ai only (it stays in Zoho), or show it again.
+router.post('/zoho-lists/:listKey/hide', requireCapability('mail.send'), listsLimit, wrap(async (req, res) => res.json({ success: true, ...(await lists.hideList(req, req.params.listKey)) })));
+router.post('/zoho-lists/:listKey/unhide', requireCapability('mail.send'), listsLimit, wrap(async (req, res) => res.json({ success: true, ...(await lists.unhideList(req, req.params.listKey)) })));
+// Delete a list in Zoho (its contacts stay in the account): Owners and Admins.
+router.delete('/zoho-lists/:listKey', requireCapability('mail.configure'), listsLimit, wrap(async (req, res) => res.json({ success: true, ...(await lists.deleteList(req, req.params.listKey, req.body)) })));
 
 router.get('/:id', requireCapability('mail.view'), wrap(async (req, res) => res.json({ success: true, campaign: await svc.getOne(req, req.params.id) })));
 router.patch('/:id', requireCapability('mail.compose'), wrap(async (req, res) => res.json({ success: true, campaign: await svc.update(req, req.params.id, req.body) })));

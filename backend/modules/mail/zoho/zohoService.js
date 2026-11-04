@@ -132,6 +132,7 @@ function missingScopes(row) {
 const canSyncContacts = row => parseScopes(row?.scopes).includes(zoho.CONTACT_SYNC_SCOPE);
 /** True when the connection may update contact fields (names) in Zoho. */
 const canSyncNames = row => parseScopes(row?.scopes).includes(zoho.CONTACT_UPDATE_SCOPE);
+const canDeleteLists = row => parseScopes(row?.scopes).includes(zoho.CONTACT_DELETE_SCOPE);
 
 function presentConnection(row) {
   if (!row || row.status === 'disconnected') return { connected: false, status: row ? row.status : 'not_connected' };
@@ -144,6 +145,7 @@ function presentConnection(row) {
     missingScopes: missingScopes(row),
     canSyncContacts: canSyncContacts(row),
     canSyncNames: canSyncNames(row),
+    canDeleteLists: canDeleteLists(row),
     connectedAt: row.connected_at,
     lastCheckedAt: row.last_checked_at,
     lastError: row.last_error
@@ -337,6 +339,7 @@ async function assertContactSync(workspaceId) {
 module.exports = {
   PROVIDER,
   canSyncNames,
+  canDeleteLists,
   canSyncContacts,
   connectionRow,
   appConfig,

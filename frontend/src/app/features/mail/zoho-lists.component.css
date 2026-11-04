@@ -100,3 +100,16 @@
 .zl-plan-edit { display: flex; align-items: flex-end; gap: 8px; flex-wrap: wrap; flex: 1; }
 .zl-plan-edit label { display: flex; flex-direction: column; gap: 4px; font-size: 0.82rem; font-weight: 600; flex: 0 1 280px; }
 .zl-limit-warn { margin: 0; font-size: 0.82rem; }
+
+/* Delete a list */
+.zl-del { color: var(--danger-text, #b91c1c); }
+.zl-del-card { width: min(560px, 100%); }
+.zl-del-opt { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; cursor: pointer; font-weight: normal; }
+.zl-del-opt.on { border-color: var(--accent); background: rgba(79, 70, 229, 0.06); }
+.zl-del-opt.off { cursor: not-allowed; opacity: 0.7; }
+.zl-del-opt input { margin-top: 3px; }
+.zl-del-opt span { display: flex; flex-direction: column; gap: 3px; }
+.zl-del-opt small { color: var(--text-muted); font-size: 0.8rem; line-height: 1.4; }
+.zl-del-opt .zl-del-why { color: var(--danger-text, #b91c1c); }
+.zl-del-go { background: var(--danger, #dc2626); color: #fff; border: 0; }
+.zl-del-go:disabled { opacity: 0.6; }
