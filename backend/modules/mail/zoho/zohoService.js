@@ -232,6 +232,8 @@ async function handleCallback(query) {
     );
     tokenCache.delete(ctx.auth.workspaceId);
     await audit(ctx, 'mail.zoho.connected', { resourceType: 'mail_provider', resourceId: PROVIDER, metadata: { location: dc.location } });
+    // One-time copy of the Zoho lists and contacts into Marketech.ai (runs in the worker).
+    await require('../contacts/zohoImport').queueImport(ctx.auth.workspaceId, ctx.auth.userId).catch(() => null);
     return resultRedirect({ zoho: 'connected' });
   } catch (err) {
     await audit(ctx, 'mail.zoho.connect_failed', { resourceType: 'mail_provider', resourceId: PROVIDER, metadata: { code: err.code || 'ERROR' } });

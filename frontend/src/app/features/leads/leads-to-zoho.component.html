@@ -2,8 +2,8 @@
   <div class="ltz-card" role="dialog" aria-modal="true" aria-labelledby="ltz-title" (click)="$event.stopPropagation()">
     <div class="ltz-head">
       <div>
-        <h3 id="ltz-title">Add leads to a Zoho list</h3>
-        <p class="ltz-desc">The list can then be chosen when you send a campaign. Leads go to Zoho with their names, so “Hi {{ '{' }}first name{{ '}' }}” works.</p>
+        <h3 id="ltz-title">Add leads to a contact list</h3>
+        <p class="ltz-desc">The list is kept in Marketech.ai and can be chosen when you send a campaign. Their names go to Zoho with them, so “Hi {{ '{' }}first name{{ '}' }}” works.</p>
       </div>
       <button type="button" class="ltz-x" aria-label="Close" (click)="close()">✕</button>
     </div>
@@ -12,16 +12,16 @@
       <div class="ltz-warn" *ngIf="listsError" role="status">{{ listsError }}</div>
 
       <fieldset class="ltz-box" [disabled]="!!listsError">
-        <legend>Zoho list</legend>
+        <legend>Contact list</legend>
         <div class="ltz-radios">
-          <label><input type="radio" name="ltz-target" value="existing" [(ngModel)]="target" [disabled]="!lists.length" /> Existing list</label>
+          <label><input type="radio" name="ltz-target" value="existing" [(ngModel)]="target" [attr.disabled]="lists.length ? null : true" /> Existing list</label>
           <label><input type="radio" name="ltz-target" value="new" [(ngModel)]="target" /> New list</label>
         </div>
-        <select *ngIf="target === 'existing'" class="hud-input" [(ngModel)]="listKey" aria-label="Zoho list">
+        <select *ngIf="target === 'existing'" class="hud-input" [(ngModel)]="listKey" aria-label="Contact list">
           <option value="">Choose a list…</option>
-          <option *ngFor="let l of lists" [value]="l.key">{{ l.name || l.key }}{{ l.contacts != null ? ' (' + l.contacts + ')' : '' }}</option>
+          <option *ngFor="let l of lists" [value]="l.id">{{ l.name }} ({{ l.total }})</option>
         </select>
-        <input *ngIf="target === 'new'" class="hud-input" [(ngModel)]="listName" maxlength="100" placeholder="e.g. Sydney packaging buyers" aria-label="New list name" />
+        <input *ngIf="target === 'new'" class="hud-input" [(ngModel)]="listName" maxlength="150" placeholder="e.g. Sydney packaging buyers" aria-label="New list name" />
       </fieldset>
 
       <fieldset class="ltz-box">
@@ -57,7 +57,7 @@
       <div class="ltz-foot">
         <span class="ltz-muted">{{ problem || picked.size + ' lead(s) will be added.' }}</span>
         <button type="button" class="btn btn-secondary btn-sm" (click)="close()">Cancel</button>
-        <button type="button" class="btn btn-primary btn-sm" [disabled]="!!problem || saving" (click)="submit()">{{ saving ? 'Adding in Zoho…' : 'Add to Zoho list' }}</button>
+        <button type="button" class="btn btn-primary btn-sm" [disabled]="!!problem || saving" (click)="submit()">{{ saving ? 'Adding…' : 'Add to list' }}</button>
       </div>
     </ng-container>
 

@@ -8,7 +8,7 @@ import { CONSENT_METHOD_LABELS, ImportSync } from './import-sync';
 /**
  * The two optional steps of an Excel / CSV import, shown under the file preview:
  * 1. Marketing consent (optional): needed only for Product Emails; Zoho handles consent itself.
- * 2. Zoho list: add the imported contacts to an existing Zoho Campaigns list or a new one.
+ * 2. Contact list: also add the imported contacts to a contact list here (existing or new); Zoho gets them when a campaign is sent to it.
  * It edits the ImportSync object it is given; the import itself is sent by the parent.
  */
 @Component({
@@ -34,19 +34,19 @@ import { CONSENT_METHOD_LABELS, ImportSync } from './import-sync';
     </fieldset>
 
     <fieldset class="iso-box" *ngIf="canZoho">
-      <legend>Zoho Campaigns list</legend>
+      <legend>Contact list <span class="iso-opt">(optional)</span></legend>
       <div class="iso-radios">
-        <label><input type="radio" name="iso-list" value="none" [(ngModel)]="sync.list" /> Don't add to Zoho</label>
-        <label><input type="radio" name="iso-list" value="existing" [(ngModel)]="sync.list" [disabled]="!lists.length" /> Add to a list</label>
-        <label><input type="radio" name="iso-list" value="new" [(ngModel)]="sync.list" [disabled]="!!listsError" /> New list</label>
+        <label><input type="radio" name="iso-list" value="none" [(ngModel)]="sync.list" /> Leads only</label>
+        <label><input type="radio" name="iso-list" value="existing" [(ngModel)]="sync.list" [attr.disabled]="lists.length ? null : true" /> Add to a list</label>
+        <label><input type="radio" name="iso-list" value="new" [(ngModel)]="sync.list" [attr.disabled]="listsError ? true : null" /> New list</label>
       </div>
-      <select *ngIf="sync.list === 'existing'" class="hud-input" [(ngModel)]="sync.listKey" aria-label="Zoho list">
+      <select *ngIf="sync.list === 'existing'" class="hud-input" [(ngModel)]="sync.listKey" aria-label="Contact list">
         <option value="">Choose a list…</option>
-        <option *ngFor="let l of lists" [value]="l.key">{{ l.name || l.key }}{{ l.contacts != null ? ' (' + l.contacts + ')' : '' }}</option>
+        <option *ngFor="let l of lists" [value]="l.id">{{ l.name }} ({{ l.total }})</option>
       </select>
-      <input *ngIf="sync.list === 'new'" class="hud-input" [(ngModel)]="sync.listName" maxlength="100" placeholder="e.g. Trade show Oct 2026" aria-label="New list name" />
+      <input *ngIf="sync.list === 'new'" class="hud-input" [(ngModel)]="sync.listName" maxlength="150" placeholder="e.g. Trade show Oct 2026" aria-label="New list name" />
       <p class="iso-help" *ngIf="listsError">{{ listsError }}</p>
-      <p class="iso-help" *ngIf="sync.list !== 'none'">Contacts who unsubscribed, bounced or have no valid email are not added.</p>
+      <p class="iso-help" *ngIf="sync.list !== 'none'">Kept in Marketech.ai (Zoho Campaigns › Contact lists). People who unsubscribed or bounced are never emailed.</p>
     </fieldset>
   </div>`,
   styles: [`
@@ -68,23 +68,20 @@ import { CONSENT_METHOD_LABELS, ImportSync } from './import-sync';
 })
 export class ImportSyncOptionsComponent implements OnInit {
   @Input({ required: true }) sync!: ImportSync;
-  /** The user may add contacts to Zoho lists (mail.send). */
+  /** The user may add contacts to contact lists (mail.send). */
   @Input() canZoho = false;
   readonly methods = CONSENT_METHOD_LABELS;
   readonly today = new Date().toISOString().slice(0, 10);
-  lists: { key: string; name: string | null; contacts: number | null }[] = [];
+  lists: { id: number; name: string; total: number }[] = [];
   listsError = '';
 
   constructor(private http: HttpClient) {}
 
   ngOnInit(): void {
     if (!this.canZoho) return;
-    this.http.get<any>(`${apiRoot()}/api/v1/mail/campaigns/zoho-lists`).subscribe({
-      next: r => {
-        this.lists = (r.lists || []).filter((l: any) => !l.campaignList || l.key === this.sync.listKey);
-        if (!r.canAdd) { this.listsError = 'Reconnect Zoho (Mail Center › Zoho Campaigns) to add contacts to lists.'; this.sync.list = 'none'; }
-      },
-      error: e => { this.listsError = e?.error?.error || 'Zoho Campaigns is not connected.'; this.sync.list = 'none'; }
+    this.http.get<any>(`${apiRoot()}/api/v1/mail/campaigns/contact-lists`).subscribe({
+      next: r => { this.lists = r.lists || []; if (!this.lists.length && this.sync.list === 'existing') this.sync.list = 'new'; },
+      error: e => { this.listsError = e?.error?.error || 'Contact lists could not be loaded.'; this.sync.list = 'none'; }
     });
   }
 }

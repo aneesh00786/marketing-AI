@@ -44,6 +44,7 @@ const ZOHO_TAG_RE = /\$\[[^\]\n]{1,80}\]\$/g;
 const UNSUB_TAG_RE = /\$\[LI:(UNSUBSCRIBE|ORG_OPTOUT)\]\$/i;
 const KEY_RE = /^[A-Za-z0-9_-]{1,100}$/;
 const norm = s => String(s || '').toLowerCase().replace(/[^a-z]/g, '');
+const UPLOAD_STALL_MS = 30 * 60 * 1000;
 const SENT_LIKE = new Set(['sent', 'inprogress', 'scheduled', 'sending']);
 
 const fields = {
@@ -53,6 +54,8 @@ const fields = {
   fromEmail: z.union([z.literal(''), z.string().trim().email('Enter a valid sender email.').max(255)]).nullable(),
   html: z.string().max(MAX_HTML, `Content is limited to ${MAX_HTML} characters (Zoho's limit).`).nullable(),
   lists: z.array(z.object({ key: z.string().regex(KEY_RE), name: z.string().max(200).optional() }).strict()).max(20),
+  // Contact lists kept in Marketech.ai: put into Zoho for the send, removed from Zoho once sent.
+  mailListIds: z.array(z.number().int().positive()).max(20),
   topicId: z.union([z.literal(''), z.string().regex(KEY_RE)]).nullable()
 };
 // templateId: start from a saved template (its HTML is copied into the campaign).
@@ -74,6 +77,10 @@ function present(row, { full = false } = {}) {
     fromEmail: row.from_email,
     ...(full ? { html: row.html_content || '' } : {}),
     lists: keys.map(k => ({ key: k, name: names[k] || null })),
+    mailListIds: parse(row.mail_list_ids_json, []),
+    upload: row.upload_total != null ? { total: row.upload_total, done: row.upload_done || 0 } : null,
+    tempListsRemoved: !!row.temp_lists_deleted_at,
+    tempListsPending: !!row.temp_lists_json && !row.temp_lists_deleted_at,
     topicId: row.topic_id,
     status: row.status,
     version: row.version,
@@ -114,7 +121,34 @@ async function list(ctx, { thumbs = false } = {}) {
 async function getOne(ctx, id) {
   const row = await requireRow(ctx, id);
   const { n } = await get('SELECT COUNT(*) AS n FROM mail_campaign_contacts WHERE workspace_id = ? AND campaign_id = ?', [ws(ctx), row.id]);
-  return { ...present(row, { full: true }), contactCount: Number(n) };
+  return { ...present(row, { full: true }), contactCount: Number(n), mailLists: await mailListsOf(ws(ctx), parse(row.mail_list_ids_json, [])) };
+}
+
+/**
+ * The chosen Marketech.ai lists with their counts: everyone who can be emailed (subscribed, not on
+ * the stop-list) and how many of them are not in Zoho yet (they add to the Zoho plan's contacts).
+ */
+async function mailListsOf(workspaceId, ids) {
+  if (!ids.length) return [];
+  const rows = await all(
+    `SELECT l.id, l.name,
+       COUNT(DISTINCT CASE WHEN m.status = 'subscribed' AND s.email IS NULL THEN c.id END) AS reachable,
+       COUNT(DISTINCT CASE WHEN m.status = 'subscribed' AND s.email IS NULL AND c.in_zoho = 0 THEN c.id END) AS new_to_zoho
+     FROM mail_lists l
+     LEFT JOIN mail_list_members m ON m.list_id = l.id
+     LEFT JOIN mail_contacts c ON c.id = m.contact_id
+     LEFT JOIN email_suppressions s ON s.workspace_id = l.workspace_id AND s.email = c.email
+     WHERE l.workspace_id = ? AND l.id IN (${ids.map(() => '?').join(',')})
+     GROUP BY l.id`, [workspaceId, ...ids]);
+  const byId = new Map(rows.map(r => [r.id, r]));
+  return ids.map(id => byId.get(id)).filter(Boolean).map(r => ({ id: r.id, name: r.name, reachable: Number(r.reachable) || 0, newToZoho: Number(r.new_to_zoho) || 0 }));
+}
+
+/** Refuses list ids from another workspace (or deleted lists). */
+async function checkMailLists(ctx, ids) {
+  if (!ids || !ids.length) return;
+  const found = await all(`SELECT id FROM mail_lists WHERE workspace_id = ? AND id IN (${ids.map(() => '?').join(',')})`, [ws(ctx), ...ids]);
+  if (found.length !== new Set(ids).size) throw httpError(400, 'Some chosen lists no longer exist. Choose them again.', 'VALIDATION_ERROR');
 }
 
 function columnsFrom(v) {
@@ -126,6 +160,10 @@ function columnsFrom(v) {
     const val = k === 'html' && v[k] ? sanitizeEmailHtml(v[k]) : v[k];
     sets.push(`${col} = ?`);
     params.push(val === '' ? null : val);
+  }
+  if (v.mailListIds !== undefined) {
+    sets.push('mail_list_ids_json = ?');
+    params.push(JSON.stringify([...new Set(v.mailListIds)]));
   }
   if (v.lists !== undefined) {
     sets.push('list_keys_json = ?', 'list_names_json = ?');
@@ -141,6 +179,7 @@ async function create(ctx, input) {
     if (v.html === undefined) v.html = html;
   }
   delete v.templateId;
+  await checkMailLists(ctx, v.mailListIds);
   const { sets, params } = columnsFrom(v);
   const cols = sets.map(s => s.split(' = ')[0]);
   const ins = await run(
@@ -172,6 +211,7 @@ async function resetToDraft(ctx, row, sets = [], params = []) {
 async function update(ctx, id, input) {
   const row = await editableRow(ctx, id);
   const v = updateSchema.parse(input || {});
+  await checkMailLists(ctx, v.mailListIds);
   const { sets, params } = columnsFrom(v);
   if (!sets.length) throw httpError(400, 'Nothing to update.', 'VALIDATION_ERROR');
   await resetToDraft(ctx, row, sets, params);
@@ -186,9 +226,9 @@ async function update(ctx, id, input) {
 async function duplicate(ctx, id) {
   const row = await requireRow(ctx, id);
   const ins = await run(
-    `INSERT INTO mail_campaigns (workspace_id, name, subject, from_name, from_email, html_content, list_keys_json, list_names_json, topic_id, status, version, created_by, updated_by, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', 1, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
-    [ws(ctx), `${String(row.name).slice(0, 143)} (copy)`, row.subject, row.from_name, row.from_email, row.html_content, row.list_keys_json, row.list_names_json, row.topic_id, ctx.auth.userId, ctx.auth.userId]
+    `INSERT INTO mail_campaigns (workspace_id, name, subject, from_name, from_email, html_content, list_keys_json, list_names_json, mail_list_ids_json, topic_id, status, version, created_by, updated_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', 1, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+    [ws(ctx), `${String(row.name).slice(0, 143)} (copy)`, row.subject, row.from_name, row.from_email, row.html_content, row.list_keys_json, row.list_names_json, row.mail_list_ids_json, row.topic_id, ctx.auth.userId, ctx.auth.userId]
   );
   const contacts = await contactsSvc.copySelection(ws(ctx), row.id, ins.lastID);
   await audit(ctx, 'mail.campaign_duplicated', { resourceType: 'mail_campaign', resourceId: ins.lastID, metadata: { from: row.id, ...contacts } });
@@ -267,10 +307,11 @@ function topicProblem(row, topics) {
 /** Mailing lists and topics of the connected Zoho account, to choose recipients from. */
 async function zohoAudiences(ctx) {
   await zoho.assertReady(ws(ctx));
-  const hidden = await require('../zoho/zohoLists').hiddenKeys(ws(ctx));
-  const lists = (await contactsSvc.fetchLists(ws(ctx))).filter(l => !contactsSvc.isSyncList(l.name) && !hidden.has(l.key));
+  const lists = (await contactsSvc.fetchLists(ws(ctx))).filter(l => !contactsSvc.isSyncList(l.name));
   const topics = await fetchTopics(ws(ctx));
-  return { lists, topics, note: 'Lists and consent are managed in Zoho Campaigns. Contacts you select are added to a new Zoho list when the campaign is sent.' };
+  const all_ = await require('../contacts/listService').lists(ctx);
+  const mailLists = all_.lists.map(l => ({ id: l.id, name: l.name, reachable: l.reachable, total: l.total, inZoho: l.inZoho }));
+  return { lists, mailLists, topics, note: 'Lists and consent are managed in Zoho Campaigns. Contacts you select are added to a new Zoho list when the campaign is sent.' };
 }
 
 function publicBaseUrl() {
@@ -299,7 +340,20 @@ async function validateRow(ctx, row, { checkZoho = true } = {}) {
   const keys = parse(row.list_keys_json, []);
   const contacts = contactsSvc.notOnLists(await contactsSvc.assess(ws(ctx), row.id), keys);
   const eligible = contacts.filter(c => c.eligible).length;
-  if (!keys.length && !eligible) problems.push(contacts.length ? 'None of the selected contacts can be emailed. Choose others or a Zoho mailing list.' : 'Choose at least one Zoho mailing list or contact.');
+  const mailLists = await mailListsOf(ws(ctx), parse(row.mail_list_ids_json, []));
+  const listPeople = mailLists.reduce((n, l) => n + l.reachable, 0);
+  if (parse(row.mail_list_ids_json, []).length && mailLists.length !== parse(row.mail_list_ids_json, []).length) problems.push('Some chosen lists were deleted. Choose the lists again (Recipients).');
+  if (!keys.length && !eligible && !listPeople) {
+    problems.push(mailLists.length ? 'Nobody in the chosen lists can be emailed (all unsubscribed or bounced). Choose other lists.' : contacts.length ? 'None of the selected contacts can be emailed. Choose others or a list.' : 'Choose at least one contact list.');
+  }
+  if (listPeople) {
+    const fresh = mailLists.reduce((n, l) => n + l.newToZoho, 0);
+    warnings.push(`${listPeople.toLocaleString('en-US')} contact(s) from ${mailLists.map(l => `"${l.name}"`).join(', ')} are put into Zoho for this send; the temporary Zoho list is deleted once Zoho reports it sent.`);
+    if (fresh) {
+      const limit = await require('../zoho/zohoLists').contactLimitOf(ws(ctx));
+      warnings.push(`${fresh.toLocaleString('en-US')} of them are not in Zoho yet and will add to your Zoho plan's contact count${limit ? ` (limit ${limit.toLocaleString('en-US')})` : ''}. They stay in Zoho after the send.`);
+    }
+  }
   if (eligible) warnings.push(`${eligible} selected contact(s) will be added to a new Zoho list when you send.`);
   if (usesNames(row.subject, html)) {
     warnings.push('Personalized with merge tags: each person sees their own name, and leads without a contact person see their business name (e.g. "Big Red Packaging team"). Anyone with no name in Zoho sees the tag\'s default value. Zoho does not fill merge tags in test emails; send to a list named "Test List" to check.');
@@ -398,10 +452,27 @@ async function send(ctx, id, { confirm } = {}) {
   if (!claim.changes) throw httpError(409, 'This campaign is being submitted right now.', 'SUBMIT_IN_PROGRESS');
   await audit(ctx, 'mail.campaign_submit_started', { resourceType: 'mail_campaign', resourceId: row.id, metadata: { version: row.version } });
 
+  // Marketech.ai lists are put into Zoho first: that takes a while for large lists, so the
+  // worker does it (with progress), then delivers. Nothing is emailed before the upload finishes.
+  const uploads = parse(row.mail_list_ids_json, []);
+  if (uploads.length && !(row.zoho_key_version === row.version && row.zoho_campaign_key)) {
+    await setState(row.id, 'submitting', { submit_stage: 'upload', upload_total: null, upload_done: 0 });
+    await require('../../social/jobsService').enqueue(ws(ctx), 'zoho_campaign_upload', { campaignId: row.id, version: row.version },
+      { idempotencyKey: `zoho_campaign_upload:${row.id}:${row.version}:${Date.now()}`, createdBy: ctx.auth.userId, maxAttempts: 1 });
+    return getOne(ctx, row.id);
+  }
+  return deliver(ctx, row);
+}
+
+/**
+ * Creates the Zoho campaign for this version (at most once) with its lists, and sends it.
+ * extraKeys: Zoho lists made for this send from Marketech.ai lists.
+ */
+async function deliver(ctx, row, extraKeys = []) {
   // Step 1: the Zoho delivery object for this version (created at most once).
   let key = row.zoho_key_version === row.version ? row.zoho_campaign_key : null;
   if (!key) {
-    const keys = parse(row.list_keys_json, []);
+    const keys = [...parse(row.list_keys_json, []), ...extraKeys];
     await setState(row.id, 'submitting', { submit_stage: 'sync' });
     // The topic first: an account with topic management refuses a campaign without one.
     let topicId = null;
@@ -543,6 +614,11 @@ async function refresh(ctx, id) {
     }
     return getOne(ctx, row.id);
   }
+  if (row.status === 'submitting' && row.submit_stage === 'upload' && Date.now() - new Date(row.updated_at).getTime() > UPLOAD_STALL_MS) {
+    // The worker stopped while uploading (nothing was emailed): it can be sent again.
+    await run("UPDATE mail_campaigns SET status = 'failed', provider_message = 'Uploading the lists to Zoho stopped before sending. Nothing was emailed. Send again.' WHERE id = ? AND status = 'submitting' AND submit_stage = 'upload'", [row.id]);
+    return getOne(ctx, row.id);
+  }
   if (!row.zoho_campaign_key) return getOne(ctx, row.id);
   const d = await zoho.readCall(ws(ctx), 'getcampaigndetails', { campaignkey: row.zoho_campaign_key, campaigntype: 'normal' });
   const report = first(d['campaign-reports']);
@@ -556,6 +632,10 @@ async function refresh(ctx, id) {
   if (picked) picked.insights = insightsOf(d);
   await run('UPDATE mail_campaigns SET zoho_status = ?, report_json = ?, last_checked_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP() WHERE id = ?',
     [d.campaign_status || null, picked ? JSON.stringify(picked) : null, row.id]);
+  // Sent: the temporary Zoho lists made from Marketech.ai lists are removed (contacts stay in Zoho).
+  if (norm(d.campaign_status) === 'sent' && row.temp_lists_json && !row.temp_lists_deleted_at) {
+    await require('../contacts/zohoUpload').cleanupTempLists(row).catch(() => false);
+  }
   if (row.status === 'needs_review' && SENT_LIKE.has(norm(d.campaign_status))) {
     await run("UPDATE mail_campaigns SET status = 'submitted', submit_stage = NULL, submitted_at = COALESCE(submitted_at, UTC_TIMESTAMP()) WHERE id = ? AND status = 'needs_review'", [row.id]);
     await audit(ctx, 'mail.campaign_reconciled', { resourceType: 'mail_campaign', resourceId: row.id, metadata: { stage: row.submit_stage, zohoStatus: d.campaign_status } });
@@ -716,4 +796,4 @@ async function listContacts(ctx, listKey, { status = 'subscribed', page = 1 } = 
   return { contacts, page: p, pageSize: contactsSvc.PAGE_SIZE, hasMore };
 }
 
-module.exports = { list, getOne, create, update, duplicate, remove, getContacts, setContactLeads, addContactsFromZoho, removeContacts, leadOptions, zohoAudiences, listContacts, validate, approve, send, refresh, resolve, contentByToken, recipientActivity, RECIPIENT_ACTIONS, contactsIn, toZohoMergeTags };
+module.exports = { deliver, failSubmission: (...a) => fail(...a), list, getOne, create, update, duplicate, remove, getContacts, setContactLeads, addContactsFromZoho, removeContacts, leadOptions, zohoAudiences, listContacts, validate, approve, send, refresh, resolve, contentByToken, recipientActivity, RECIPIENT_ACTIONS, contactsIn, toZohoMergeTags };

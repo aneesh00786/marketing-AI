@@ -11,7 +11,7 @@ import { EmailContentEditorComponent } from './email-content-editor.component';
 import { ZohoListContactsComponent } from './zoho-list-contacts.component';
 import { EmailPreviewComponent as ThumbPreview } from './email-preview.component';
 import { CampaignMetricsComponent } from './campaign-metrics.component';
-import { ZohoListsComponent } from './zoho-lists.component';
+import { ContactListsComponent } from './contact-lists.component';
 /** Same checks as the server (campaignService PUBLIC_DOMAINS). */
 const SENDER_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const PUBLIC_MAIL_RE = /@(gmail|googlemail|yahoo|ymail|hotmail|outlook|live|msn|aol|icloud|me|mac|gmx|yandex|proton|protonmail|mail|zoho|rediffmail)\.[a-z.]+$/i;
@@ -20,6 +20,7 @@ import { CONTACT_FIELDS, ContactField, contactTag, fallbackExample, fallbackQues
 
 /** A sent campaign's figures are read from Zoho when it is opened, at most this often. */
 const REPORT_MAX_AGE_MS = 5 * 60 * 1000;
+const UPLOAD_POLL_MS = 4000;
 /** After sending: check soon, then less often (seconds), about 15 minutes in all. */
 const REPORT_POLL_S = [10, 20, 30, 60, 60, 120, 120, 300, 300];
 
@@ -32,7 +33,7 @@ const REPORT_POLL_S = [10, 20, 30, 60, 60, 120, 120, 300, 300];
 @Component({
   selector: 'app-email-campaigns',
   standalone: true,
-  imports: [CommonModule, IconComponent, FormsModule, ZohoCampaignsComponent, TemplatePickerComponent, EmailContentEditorComponent, ThumbPreview, ZohoListContactsComponent, CampaignMetricsComponent, ZohoListsComponent],
+  imports: [CommonModule, IconComponent, FormsModule, ZohoCampaignsComponent, TemplatePickerComponent, EmailContentEditorComponent, ThumbPreview, ZohoListContactsComponent, CampaignMetricsComponent, ContactListsComponent],
   templateUrl: './email-campaigns.component.html',
   styleUrls: ['../command/command-center.component.css', './mail-ui.css', './email-campaigns.component.css']
 })
@@ -53,7 +54,7 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
   campaigns: any[] = [];
   selected: any = null;      // the campaign being edited/viewed (full)
   form: any = null;          // editable copy
-  audiences: { lists: any[]; topics: any[] } | null = null;
+  audiences: { lists: any[]; topics: any[]; mailLists?: any[] } | null = null;
   validation: any = null;
   busy = '';
   error = '';
@@ -179,10 +180,22 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
     return this.allContacts ? this.allContacts.filter(c => c.eligible && !keys.has(c.sourceListKey)).length : (this.selected?.contactCount ?? 0);
   }
   get recipientSummary(): string {
+    const mine = this.form ? this.form.mailListIds.size : 0;
     const lists = this.form ? this.form.listKeys.size : 0;
     const people = this.extraContacts;
-    return [lists && `${lists} Zoho list${lists === 1 ? '' : 's'}`, people && `${people} contact${people === 1 ? '' : 's'}`].filter(Boolean).join(' + ');
+    return [mine && `${mine} list${mine === 1 ? '' : 's'}`, lists && `${lists} Zoho list${lists === 1 ? '' : 's'}`, people && `${people} contact${people === 1 ? '' : 's'}`].filter(Boolean).join(' + ');
   }
+
+  /** Marketech.ai lists to choose from (Recipients). */
+  get mailListOptions(): any[] { return this.audiences?.mailLists || []; }
+
+  /** People who can be emailed in the chosen lists (a person in two lists is counted in each). */
+  get chosenPeople(): number {
+    const ids = this.form?.mailListIds as Set<number> | undefined;
+    return ids ? this.mailListOptions.filter(l => ids.has(l.id)).reduce((n, l) => n + (l.reachable || 0), 0) : 0;
+  }
+
+  toggleMailList(id: number): void { this.form.mailListIds.has(id) ? this.form.mailListIds.delete(id) : this.form.mailListIds.add(id); }
   get fromText(): string {
     const f = this.form || {};
     if (!f.fromName && !f.fromEmail) return 'Zoho account default';
@@ -408,7 +421,36 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
     }, (REPORT_POLL_S[step] ?? 60) * 1000);
   }
 
-  ngOnDestroy(): void { clearTimeout(this.reportPoll); }
+  /** While the lists are uploaded to Zoho (worker), the campaign is checked every few seconds. */
+  private uploadPoll: any = null;
+  private watchUpload(id: number): void {
+    clearTimeout(this.uploadPoll);
+    this.uploadPoll = setTimeout(() => {
+      if (this.selected?.id !== id) return;
+      this.http.post<any>(`${this.base}/${id}/refresh`, {}).subscribe({
+        next: r => {
+          if (this.selected?.id !== id) return;
+          this.selected = r.campaign;
+          if (r.campaign.status === 'submitting') this.watchUpload(id);
+          else { this.load(); if (r.campaign.status === 'submitted') this.pollReport(id); }
+        },
+        error: () => this.watchUpload(id)
+      });
+    }, UPLOAD_POLL_MS);
+  }
+
+  /** "Putting your lists into Zoho: 1,200 of 7,219" while the worker uploads. */
+  get uploadText(): string {
+    const c = this.selected;
+    if (c?.status !== 'submitting' || c.submitStage !== 'upload') return c?.status === 'submitting' ? 'Sending through Zoho…' : '';
+    const u = c.upload;
+    if (!u || !u.total) return 'Getting your lists ready for Zoho…';
+    return `Putting your lists into Zoho: ${Number(u.done).toLocaleString('en-US')} of ${Number(u.total).toLocaleString('en-US')} contacts. The campaign is sent as soon as this finishes.`;
+  }
+
+  get uploadPct(): number { const u = this.selected?.upload; return u?.total ? Math.min(100, Math.round((u.done / u.total) * 100)) : 0; }
+
+  ngOnDestroy(): void { clearTimeout(this.reportPoll); clearTimeout(this.uploadPoll); }
 
   private setSelected(c: any): void {
     const fresh = this.selected?.id !== c.id;
@@ -417,10 +459,11 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
     this.validation = null;
     this.form = {
       name: c.name, subject: c.subject || '', fromName: c.fromName || '', fromEmail: c.fromEmail || '', html: c.html || '',
-      topicId: c.topicId || '', listKeys: new Set((c.lists || []).map((l: any) => l.key))
+      topicId: c.topicId || '', listKeys: new Set((c.lists || []).map((l: any) => l.key)), mailListIds: new Set<number>(c.mailListIds || [])
     };
     this.original = this.snapshot();
     if (fresh) this.step = this.editable ? 1 : 4;
+    if (fresh && c.status === 'submitting') this.watchUpload(c.id);
   }
 
   onContacts(list: any[] | null): void {
@@ -480,7 +523,7 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
 
   private snapshot(): string {
     const f = this.form;
-    return f ? JSON.stringify([f.name, f.subject, f.fromName, f.fromEmail, f.html, f.topicId, [...f.listKeys].sort()]) : '';
+    return f ? JSON.stringify([f.name, f.subject, f.fromName, f.fromEmail, f.html, f.topicId, [...f.listKeys].sort(), [...f.mailListIds].sort()]) : '';
   }
 
   /** True when the open campaign has edits that are not saved yet. */
@@ -511,7 +554,8 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
     const body = {
       name: this.form.name, subject: this.form.subject, fromName: this.form.fromName, fromEmail: this.form.fromEmail, html: this.form.html,
       topicId: this.form.topicId || '',
-      lists: [...this.form.listKeys].map((k: any) => ({ key: k, ...((known.get(k) || prior.get(k)) ? { name: String(known.get(k) || prior.get(k)).slice(0, 200) } : {}) }))
+      lists: [...this.form.listKeys].map((k: any) => ({ key: k, ...((known.get(k) || prior.get(k)) ? { name: String(known.get(k) || prior.get(k)).slice(0, 200) } : {}) })),
+      mailListIds: [...this.form.mailListIds]
     };
     this.busy = 'save';
     this.http.patch<any>(`${this.base}/${this.selected.id}`, body).subscribe({
@@ -542,7 +586,8 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
     // A ticked list already covers the contacts picked from it.
     const keys = new Set((this.selected.lists || []).map((l: any) => l.key));
     const contacts = this.allContacts ? this.allContacts.filter(c => c.eligible && !keys.has(c.sourceListKey)).length : this.selected.contactCount ?? 0;
-    return [lists && `Zoho lists ${lists}`, contacts && `${contacts} selected contact${contacts === 1 ? '' : 's'} (added to Zoho first)`].filter(Boolean).join(' and ');
+    const mine = (this.selected.mailLists || []).map((l: any) => `${l.name} (${Number(l.reachable || 0).toLocaleString('en-US')})`).join(', ');
+    return [mine && `Lists ${mine}, put into Zoho for this send`, lists && `Zoho lists ${lists}`, contacts && `${contacts} selected contact${contacts === 1 ? '' : 's'} (added to Zoho first)`].filter(Boolean).join(' and ');
   }
 
   /** Opens the confirmation popup; nothing is sent until "Send now". */
@@ -554,7 +599,11 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
     if (!this.sendConfirm || this.busy === 'send') return;
     this.busy = 'send';
     this.http.post<any>(`${this.base}/${this.selected.id}/send`, { confirm: true }).subscribe({
-      next: r => { this.busy = ''; this.sendConfirm = null; this.setSelected(r.campaign); this.load(); this.pollReport(r.campaign.id); this.toast.emit('Zoho accepted the campaign. Results are shown below and update on their own while Zoho sends.'); },
+      next: r => {
+        this.busy = ''; this.sendConfirm = null; this.setSelected(r.campaign); this.load();
+        if (r.campaign.status === 'submitting') { this.watchUpload(r.campaign.id); this.toast.emit('Putting your lists into Zoho. The campaign is sent as soon as that finishes.'); return; }
+        this.pollReport(r.campaign.id); this.toast.emit('Zoho accepted the campaign. Results are shown below and update on their own while Zoho sends.');
+      },
       error: e => { this.busy = ''; this.sendConfirm = null; this.toast.emit(this.err(e)); this.open(this.selected); this.load(); }
     });
   }

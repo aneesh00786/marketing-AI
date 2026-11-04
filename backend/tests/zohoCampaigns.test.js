@@ -999,7 +999,7 @@ test('a campaign with no lists and no contacts cannot be approved', async () => 
   const c = (await capi(ws, 'POST', '', { ...GOOD, lists: [] })).data.campaign;
   const a = await capi(ws, 'POST', `/${c.id}/approve`, {});
   assert.equal(a.status, 400);
-  assert.match(a.data.error, /Choose at least one Zoho mailing list or contact/);
+  assert.match(a.data.error, /Choose at least one contact list/);
 });
 
 test('duplicate: a sent campaign becomes a new draft with its content and recipients, and none of its history', async () => {
@@ -1190,38 +1190,176 @@ test('greetingName: leads without a contact person are greeted as the business, 
 
 // ------------------------------------------------------------------ Zoho Campaigns → Contact lists
 
-test('delete a list: remove from Marketech.ai only (hidden, restorable) or delete in Zoho (contacts kept, opt-outs saved first)', async () => {
-  const { ws, acct } = await freshConnected('Delete list', { connect: { scope: DELETE_SCOPES }, account: { lists: [
-    { listkey: 'L1', listname: 'Old fair', noofcontacts: '2' }, { listkey: 'L2', listname: 'Customers', noofcontacts: '9' }
-  ] } });
-  acct.contacts = { L1: [{ contact_email: 'left@fair.io', state: 'unsub' }] };
-  const r0 = await capi(ws, 'GET', '/zoho-lists');
-  assert.equal(r0.data.canDeleteInZoho, true);
-  // Remove from Marketech.ai only.
-  assert.equal((await capi(ws, 'POST', '/zoho-lists/L2/hide', {})).status, 200);
-  assert.equal((await capi(ws, 'GET', '/zoho-lists')).data.lists.find(l => l.key === 'L2').hidden, true);
-  assert.deepEqual((await capi(ws, 'GET', '/audiences')).data.lists.map(l => l.key), ['L1'], 'hidden lists are not offered for campaigns');
-  assert.equal((await capi(ws, 'POST', '/zoho-lists/L2/unhide', {})).status, 200);
-  assert.equal((await capi(ws, 'GET', '/zoho-lists')).data.lists.find(l => l.key === 'L2').hidden, false);
-  assert.ok(acct.lists.some(l => l.listkey === 'L2'), 'Zoho untouched');
-  // Delete in Zoho: Owners and Admins, with confirmation.
-  const mm = await h.addMember(ws.workspaceId, 'Marketing Manager');
-  assert.equal((await capi(mm, 'DELETE', '/zoho-lists/L1', { confirm: true })).status, 403);
-  assert.equal((await capi(ws, 'DELETE', '/zoho-lists/L1', {})).status, 400);
-  const del = await capi(ws, 'DELETE', '/zoho-lists/L1', { confirm: true });
-  assert.equal(del.status, 200, JSON.stringify(del.data));
-  assert.deepEqual(acct.deletedLists, ['L1']);
-  const sup = await db().get('SELECT reason FROM email_suppressions WHERE workspace_id = ? AND email = ?', [ws.workspaceId, 'left@fair.io']);
-  assert.equal(sup.reason, 'unsubscribed', 'the list\'s unsubscribes are kept');
-  assert.equal((await capi(ws, 'DELETE', '/zoho-lists/L1', { confirm: true })).status, 404);
-});
-
 test('delete a list in Zoho needs the delete permission: older connections are asked to reconnect', async () => {
-  const { ws } = await freshConnected('Delete list old', { connect: { scope: NAME_SCOPES } });
+  const { ws, acct } = await freshConnected('Delete list old', { connect: { scope: NAME_SCOPES } });
   assert.equal((await capi(ws, 'GET', '/zoho-lists')).data.canDeleteInZoho, false);
-  const r = await capi(ws, 'DELETE', '/zoho-lists/L1', { confirm: true });
+  acct.contacts = { L1: [{ contact_email: 'a@b.io' }] };
+  await require('../modules/mail/contacts/zohoImport').importFromZoho(ws.workspaceId);
+  const l = (await capi(ws, 'GET', '/contact-lists')).data.lists[0];
+  const r = await capi(ws, 'DELETE', `/contact-lists/${l.id}`, { where: 'zoho', confirm: true });
   assert.equal(r.status, 409);
   assert.equal(r.data.code, 'ZOHO_SCOPES_MISSING');
+});
+
+test('connect copies Zoho lists and contacts into Marketech.ai once: statuses kept, opt-outs stopped, safe to repeat', async () => {
+  const { ws, acct } = await freshConnected('Import contacts', { account: { lists: [
+    { listkey: 'L1', listname: 'Customers', noofcontacts: '3' },
+    { listkey: 'L2', listname: 'Trade show', noofcontacts: '2' },
+    { listkey: 'S1', listname: 'Marketech campaign 3 v1 abc123', noofcontacts: '1' }
+  ] } });
+  acct.contacts = {
+    L1: [{ contact_email: 'Kim@Shop.com.au', firstname: 'Kim', lastname: 'Lee', companyname: 'Shop', phone: '0400' },
+      { contact_email: 'gone@shop.com.au', state: 'unsub' }, { contact_email: 'bad@shop.com.au', state: 'bounce' }],
+    L2: [{ contact_email: 'kim@shop.com.au', companyname: 'Other' }, { contact_email: 'new@fair.io', firstname: 'Neo' }],
+    S1: [{ contact_email: 'temp@x.io' }]
+  };
+  const job = await db().get("SELECT status FROM background_jobs WHERE workspace_id = ? AND job_type = 'zoho_contact_sync'", [ws.workspaceId]);
+  assert.equal(job.status, 'queued', 'connecting queues the copy');
+  const imp = require('../modules/mail/contacts/zohoImport');
+  const r = await imp.importFromZoho(ws.workspaceId);
+  assert.deepEqual(r, { lists: 2, contacts: 4, memberships: 5, subscribed: 3, optOutsAdded: 2 });
+  const lists = await db().all('SELECT name, zoho_list_key FROM mail_lists WHERE workspace_id = ? ORDER BY name', [ws.workspaceId]);
+  assert.deepEqual(lists.map(l => [l.name, l.zoho_list_key]), [['Customers', 'L1'], ['Trade show', 'L2']], 'lists made for sending are not copied');
+  const kim = await db().get('SELECT * FROM mail_contacts WHERE workspace_id = ? AND email = ?', [ws.workspaceId, 'kim@shop.com.au']);
+  assert.equal(kim.company, 'Shop', 'details already here are kept');
+  assert.equal(kim.first_name, 'Kim');
+  const statuses = await db().all('SELECT c.email, m.status FROM mail_list_members m JOIN mail_contacts c ON c.id = m.contact_id JOIN mail_lists l ON l.id = m.list_id WHERE l.workspace_id = ? AND l.name = ? ORDER BY c.email', [ws.workspaceId, 'Customers']);
+  assert.deepEqual(statuses.map(x => [x.email, x.status]), [['bad@shop.com.au', 'bounced'], ['gone@shop.com.au', 'unsubscribed'], ['kim@shop.com.au', 'subscribed']]);
+  const sup = await db().all('SELECT email, reason FROM email_suppressions WHERE workspace_id = ? ORDER BY email', [ws.workspaceId]);
+  assert.deepEqual(sup.map(x => [x.email, x.reason]), [['bad@shop.com.au', 'bounced'], ['gone@shop.com.au', 'unsubscribed']]);
+  // Running again adds nothing new; an opt-out is never turned back into "subscribed".
+  acct.contacts.L1[1] = { contact_email: 'gone@shop.com.au' };
+  const again = await imp.importFromZoho(ws.workspaceId);
+  assert.equal(again.contacts, 4);
+  assert.equal((await db().get("SELECT m.status FROM mail_list_members m JOIN mail_contacts c ON c.id = m.contact_id WHERE c.workspace_id = ? AND c.email = 'gone@shop.com.au'", [ws.workspaceId])).status, 'unsubscribed');
+  const st = await capi(ws, 'GET', '/contact-sync');
+  assert.equal(st.status, 200);
+  assert.equal(st.data.status, 'queued');
+});
+
+test('contact lists in Marketech.ai: create, add leads / typed people, view with status, remove, delete here', async () => {
+  const { ws, acct } = await freshConnected('Local lists');
+  const lead = await namedLead(ws, 'Priya Nair');
+  await db().run("INSERT INTO email_suppressions (workspace_id, email, reason, source) VALUES (?, 'stop@x.io', 'unsubscribed', 'test')", [ws.workspaceId]);
+  const made = await capi(ws, 'POST', '/contact-lists', { name: 'Sydney buyers', leadIds: [lead.id], emails: ['Stop@X.io', 'not-an-email'],
+    contacts: [{ name: 'Kim Lee', company: 'Shop', email: 'KIM@shop.com.au', phone: '0400' }] });
+  assert.equal(made.status, 200, JSON.stringify(made.data));
+  assert.equal(made.data.added, 3);
+  assert.deepEqual(made.data.skipped.map(x => x.email), ['not-an-email']);
+  assert.equal((await capi(ws, 'POST', '/contact-lists', { name: 'Sydney buyers' })).status, 409, 'names are unique');
+  const id = made.data.list.id;
+  const again = await capi(ws, 'POST', `/contact-lists/${id}/contacts`, { emails: ['kim@shop.com.au', 'new@x.io'] });
+  assert.deepEqual([again.data.added, again.data.alreadyIn], [1, 1]);
+  const lists = (await capi(ws, 'GET', '/contact-lists')).data;
+  const l = lists.lists.find(x => x.id === id);
+  assert.deepEqual([l.total, l.reachable, l.inZoho], [4, 3, false], 'the stop-list wins');
+  const view = await capi(ws, 'GET', `/contact-lists/${id}/contacts?status=all`);
+  const kim = view.data.contacts.find(c => c.email === 'kim@shop.com.au');
+  assert.deepEqual([kim.name, kim.company, kim.phone, kim.status], ['Kim Lee', 'Shop', '0400', 'subscribed']);
+  assert.equal(view.data.contacts.find(c => c.email === 'stop@x.io').status, 'unsubscribed');
+  assert.equal(view.data.contacts.find(c => c.leadId === lead.id).name, 'Priya Nair');
+  assert.equal((await capi(ws, 'GET', `/contact-lists/${id}/contacts?status=subscribed&q=kim`)).data.contacts.length, 1);
+  assert.equal((await capi(ws, 'POST', `/contact-lists/${id}/remove`, { contactIds: [kim.id] })).data.removed, 1);
+  const other = await freshConnected('Local lists B');
+  assert.equal((await capi(other.ws, 'GET', `/contact-lists/${id}/contacts`)).status, 404, 'other workspace');
+  assert.equal((await capi(ws, 'DELETE', `/contact-lists/${id}`, { where: 'here' })).status, 400, 'needs confirmation');
+  assert.equal((await capi(ws, 'DELETE', `/contact-lists/${id}`, { where: 'zoho', confirm: true })).status, 409, 'not in Zoho');
+  assert.equal((await capi(ws, 'DELETE', `/contact-lists/${id}`, { where: 'here', confirm: true })).status, 200);
+  assert.equal((await capi(ws, 'GET', '/contact-lists')).data.lists.some(x => x.id === id), false);
+  assert.ok(await db().get('SELECT 1 AS x FROM mail_contacts WHERE workspace_id = ? AND email = ?', [ws.workspaceId, 'kim@shop.com.au']), 'people stay in contacts');
+  assert.equal(Object.keys(acct.added || {}).length, 0, 'nothing sent to Zoho');
+});
+
+test('a list copied from Zoho: delete in Zoho only keeps it here; delete both removes it', async () => {
+  const { ws, acct } = await freshConnected('Local lists Zoho', { connect: { scope: DELETE_SCOPES }, account: { lists: [
+    { listkey: 'L1', listname: 'Fair', noofcontacts: '1' }, { listkey: 'L2', listname: 'Old', noofcontacts: '1' }] } });
+  acct.contacts = { L1: [{ contact_email: 'a@fair.io' }], L2: [{ contact_email: 'b@old.io' }] };
+  await require('../modules/mail/contacts/zohoImport').importFromZoho(ws.workspaceId);
+  const byName = async n => (await capi(ws, 'GET', '/contact-lists')).data.lists.find(x => x.name === n);
+  const fair = await byName('Fair');
+  assert.equal(fair.inZoho, true);
+  const mm = await h.addMember(ws.workspaceId, 'Marketing Manager');
+  assert.equal((await capi(mm, 'DELETE', `/contact-lists/${fair.id}`, { where: 'zoho', confirm: true })).status, 403);
+  assert.equal((await capi(ws, 'DELETE', `/contact-lists/${fair.id}`, { where: 'zoho', confirm: true })).status, 200);
+  assert.deepEqual(acct.deletedLists, ['L1']);
+  const kept = await byName('Fair');
+  assert.deepEqual([kept.inZoho, kept.total], [false, 1], 'kept here, no longer in Zoho');
+  const old = await byName('Old');
+  assert.equal((await capi(ws, 'DELETE', `/contact-lists/${old.id}`, { where: 'both', confirm: true })).status, 200);
+  assert.deepEqual(acct.deletedLists, ['L1', 'L2']);
+  assert.equal(await byName('Old'), undefined);
+});
+
+test('send to a Marketech.ai list: uploaded to a Zoho list of the same name, sent, then the temporary list is deleted', async () => {
+  const { ws, acct } = await freshConnected('Upload send', { connect: { scope: DELETE_SCOPES }, account: { lists: [{ listkey: 'Z1', listname: 'Old customers', noofcontacts: '1' }] } });
+  acct.contacts = { Z1: [{ contact_email: 'known@x.io', firstname: 'Known' }] };
+  const imp = require('../modules/mail/contacts/zohoImport');
+  await imp.importFromZoho(ws.workspaceId);
+  await db().run("INSERT INTO email_suppressions (workspace_id, email, reason, source) VALUES (?, 'stop@x.io', 'unsubscribed', 'test')", [ws.workspaceId]);
+  const people = Array.from({ length: 23 }, (_, i) => ({ name: `Person ${i}`, company: 'Shop', email: `p${i}@shop.io` }));
+  const made = await capi(ws, 'POST', '/contact-lists', { name: 'Trade show', emails: ['known@x.io', 'stop@x.io'], contacts: people });
+  const listId = made.data.list.id;
+  const old = (await capi(ws, 'GET', '/contact-lists')).data.lists.find(l => l.name === 'Old customers');
+  const c = (await capi(ws, 'POST', '', { ...GOOD, lists: [], mailListIds: [listId, old.id] })).data.campaign;
+  assert.deepEqual(c.mailLists.map(l => [l.name, l.reachable, l.newToZoho]), [['Trade show', 24, 23], ['Old customers', 1, 0]]);
+  const v = (await capi(ws, 'POST', `/${c.id}/validate`, {})).data.validation;
+  assert.equal(v.ready, true, JSON.stringify(v));
+  assert.ok(v.warnings.some(w => /23 of them are not in Zoho yet/.test(w)), JSON.stringify(v.warnings));
+  assert.equal((await capi(ws, 'POST', `/${c.id}/approve`, {})).status, 200);
+  const sent = await capi(ws, 'POST', `/${c.id}/send`, { confirm: true });
+  assert.equal(sent.status, 200, JSON.stringify(sent.data));
+  assert.deepEqual([sent.data.campaign.status, sent.data.campaign.submitStage], ['submitting', 'upload'], 'the worker uploads first');
+  const job = await db().get("SELECT * FROM background_jobs WHERE workspace_id = ? AND job_type = 'zoho_campaign_upload' ORDER BY id DESC LIMIT 1", [ws.workspaceId]);
+  // Zoho is still sending at first: nothing may be deleted yet.
+  const routes = Z.routes[1].respond;
+  let zohoState = 'In Progress';
+  Z.routes[1].respond = (url, init) => (url.includes('getcampaigndetails') ? h.json(200, { status: 'success', code: '0', campaign_status: zohoState }) : routes(url, init));
+  const r = await require('../modules/mail/contacts/zohoUpload').runUploadJob(job);
+  assert.equal(r.delivered, true, JSON.stringify(r));
+  const after = await row(c.id);
+  assert.equal(after.status, 'submitted');
+  assert.deepEqual([after.upload_total, after.upload_done], [25, 25]);
+  const temp = JSON.parse(after.temp_lists_json);
+  assert.deepEqual(temp.map(t => t.name), ['Trade show', `Old customers - Marketech ${c.id}-1`], 'a Zoho list with the same name is never reused');
+  const uploaded = acct.added[temp[0].key];
+  assert.equal(uploaded.length, 24);
+  assert.ok(!uploaded.includes('stop@x.io'), 'the stop-list wins');
+  assert.equal(acct.names['p0@shop.io']['First Name'], 'Person', 'names sent for people new to Zoho');
+  assert.equal(acct.names['known@x.io'], undefined, 'not for people Zoho already has');
+  const create = apiCalls('createCampaign').at(-1);
+  assert.deepEqual(Object.keys(JSON.parse(create.params.list_details)).sort(), temp.map(t => t.key).sort());
+  assert.ok(acct.lists.some(l => l.listkey === 'Z1'), 'the original Zoho list is untouched');
+  assert.equal(acct.deletedLists, undefined, 'not while Zoho is still sending');
+  // Once Zoho reports it Sent, the temporary lists are removed (their unsubscribes kept first).
+  acct.contacts[temp[0].key] = [{ contact_email: 'p1@shop.io', state: 'unsub' }];
+  zohoState = 'Sent';
+  try { await capi(ws, 'POST', `/${c.id}/refresh`, {}); } finally { Z.routes[1].respond = routes; }
+  assert.deepEqual((acct.deletedLists || []).sort(), temp.map(t => t.key).sort());
+  assert.ok((await row(c.id)).temp_lists_deleted_at);
+  assert.ok(await db().get("SELECT 1 AS x FROM email_suppressions WHERE workspace_id = ? AND email = 'p1@shop.io'", [ws.workspaceId]));
+  assert.equal((await db().get("SELECT in_zoho FROM mail_contacts WHERE workspace_id = ? AND email = 'p0@shop.io'", [ws.workspaceId])).in_zoho, 1);
+});
+
+test('upload failure leaves the campaign not sent; sending again reuses what was uploaded', async () => {
+  const { ws, acct } = await freshConnected('Upload fail');
+  const made = await capi(ws, 'POST', '/contact-lists', { name: 'Fair', emails: Array.from({ length: 15 }, (_, i) => `f${i}@fair.io`) });
+  const c = (await capi(ws, 'POST', '', { ...GOOD, lists: [], mailListIds: [made.data.list.id] })).data.campaign;
+  await capi(ws, 'POST', `/${c.id}/approve`, {});
+  await capi(ws, 'POST', `/${c.id}/send`, { confirm: true });
+  let calls = 0;
+  Z.bulkResponder = () => (++calls === 1 ? h.json(200, { status: 'error', code: '500', message: 'Temporary problem' }) : null);
+  const upl = require('../modules/mail/contacts/zohoUpload');
+  const job = () => db().get("SELECT * FROM background_jobs WHERE workspace_id = ? AND job_type = 'zoho_campaign_upload' ORDER BY id DESC LIMIT 1", [ws.workspaceId]);
+  try {
+    assert.equal((await upl.runUploadJob(await job())).failed, true);
+    assert.equal((await row(c.id)).status, 'failed');
+    assert.equal(apiCalls('createCampaign').length, 0, 'nothing sent');
+    assert.equal((await capi(ws, 'POST', `/${c.id}/send`, { confirm: true })).status, 200);
+    assert.equal((await upl.runUploadJob(await job())).delivered, true);
+    const temp = JSON.parse((await row(c.id)).temp_lists_json);
+    assert.equal(temp.length, 1, 'the list from the first try is reused');
+    assert.equal(new Set(acct.added[temp[0].key]).size, 15);
+  } finally { Z.bulkResponder = null; }
 });
 
 test('plan limit: admins set the contact limit; lists show it with usage (campaign lists not counted)', async () => {
@@ -1240,71 +1378,12 @@ test('plan limit: admins set the contact limit; lists show it with usage (campai
   assert.equal((await capi(ws, 'PUT', '/zoho-plan', { contactLimit: null })).data.contactLimit, null);
 });
 
-test('contact lists: view lists, create one with leads and typed addresses (names sent, blocked addresses skipped)', async () => {
-  const { ws, acct } = await freshConnected('Lists create', { connect: { scope: NAME_SCOPES } });
-  const r0 = await capi(ws, 'GET', '/zoho-lists');
-  assert.equal(r0.status, 200, JSON.stringify(r0.data));
-  assert.equal(r0.data.canAdd, true);
-  assert.equal(r0.data.canRemove, true);
-  const person = await namedLead(ws, 'Priya Nair');
-  const withdrawn = await addLead(ws, { consent: 'withdrawn', evidence: false });
-  const suppressed = 'gone@client-co.io';
-  await db().run("INSERT INTO email_suppressions (workspace_id, email, reason, source) VALUES (?, ?, 'unsubscribed', 'test')", [ws.workspaceId, suppressed]);
-  const typed = Array.from({ length: 12 }, (_, i) => `buyer${i}@shop-${i}.com.au`);
-  const r = await capi(ws, 'POST', '/zoho-lists', { name: 'Sydney buyers', leadIds: [person.id, withdrawn.id], emails: [...typed, suppressed, 'not-an-email', ' Buyer0@Shop-0.com.au '] });
-  assert.equal(r.status, 200, JSON.stringify(r.data));
-  assert.equal(r.data.added, 13);
-  assert.deepEqual(r.data.skipped.map(x => x.email).sort(), [withdrawn.email, suppressed, 'not-an-email'].sort());
-  const made = apiCalls('addlistandcontacts').at(-1).params;
-  assert.equal(made.listname, 'Sydney buyers');
-  assert.equal(made.emailids.split(',').length, 10, 'Zoho creates the list with the first 10');
-  assert.equal(made.signupform, 'private');
-  assert.equal(uploaded(acct).length, 13);
-  assert.equal(acct.names[person.email]['First Name'], 'Priya');
-  const lists = (await capi(ws, 'GET', '/zoho-lists')).data.lists;
-  assert.ok(lists.some(l => l.key === r.data.list.key && l.name === 'Sydney buyers' && l.campaignList === false));
-  // Same name again: refused, nothing created.
-  const before = apiCalls('addlistandcontacts').length;
-  const dup = await capi(ws, 'POST', '/zoho-lists', { name: 'sydney BUYERS', emails: ['x@y.com.au'] });
-  assert.equal(dup.status, 409);
-  assert.equal(apiCalls('addlistandcontacts').length, before);
-  // No contacts: refused.
-  assert.equal((await capi(ws, 'POST', '/zoho-lists', { name: 'Empty', emails: [] })).status, 400);
-});
-
-test('contact lists: add contacts to a list and remove one (unsubscribed from that list only)', async () => {
-  const { ws, acct } = await freshConnected('Lists add', { connect: { scope: NAME_SCOPES } });
-  const list = (await capi(ws, 'POST', '/zoho-lists', { name: 'Melbourne', emails: ['a@m.com.au'] })).data.list;
-  const lead = await namedLead(ws, 'Big Red Packaging', 'Big Red Packaging');
-  const r = await capi(ws, 'POST', `/zoho-lists/${list.key}/contacts`, { leadIds: [lead.id], emails: ['b@m.com.au', 'a@m.com.au'] });
-  assert.equal(r.status, 200, JSON.stringify(r.data));
-  assert.equal(r.data.added, 3);
-  assert.deepEqual(acct.added[list.key].sort(), ['a@m.com.au', 'a@m.com.au', 'b@m.com.au', lead.email].sort());
-  assert.equal(acct.names[lead.email]['First Name'], 'Big Red Packaging team');
-  const rm = await capi(ws, 'POST', `/zoho-lists/${list.key}/remove`, { email: 'B@m.com.au' });
-  assert.equal(rm.status, 200, JSON.stringify(rm.data));
-  assert.deepEqual(acct.removed, [{ list: list.key, email: 'b@m.com.au' }]);
-  assert.equal((await capi(ws, 'POST', '/zoho-lists/NOPE/contacts', { emails: ['c@m.com.au'] })).status, 404, 'an unknown list is refused');
-  assert.equal((await capi(B, 'POST', `/zoho-lists/${list.key}/remove`, { email: 'a@m.com.au' })).status >= 400, true, 'another workspace cannot touch it');
-});
-
-test('contact lists: without the contact permissions, adding and removing ask to reconnect; read-only roles are refused', async () => {
-  const { ws } = await freshConnected('Lists scopes', { connect: { scope: DELIVERY_SCOPES } });
-  const r = await capi(ws, 'GET', '/zoho-lists');
-  assert.equal(r.status, 200, JSON.stringify(r.data));
-  assert.equal(r.data.canAdd, false);
-  assert.equal(r.data.canRemove, false);
-  assert.equal((await capi(ws, 'POST', '/zoho-lists', { name: 'X', emails: ['a@b.com.au'] })).data.code || 'x', 'ZOHO_SCOPES_MISSING');
-  const viewer = await h.addMember(ws.workspaceId, 'Member');
-  assert.equal((await capi(viewer, 'POST', '/zoho-lists', { name: 'X', emails: ['a@b.com.au'] })).status, 403);
-});
-
 // ------------------------------------------------------------------ Leads Excel import → Zoho list
 
 const importLeads = (ws, body) => h.api('POST', '/api/v1/leads/import-bulk', { token: ws.token, body });
 const CONSENT = { method: 'imported_with_proof', obtainedAt: '2026-10-01', evidence: 'Trade show sign-up sheet, Oct 2026', attest: true };
 
-test('import: rows become leads; with consent they get it recorded and go into a new Zoho list with their names', async () => {
+test('import: rows become leads; with consent they get it recorded and go into a new contact list here (not Zoho)', async () => {
   const { ws, acct } = await freshConnected('Import list', { connect: { scope: NAME_SCOPES } });
   const withdrawn = await addLead(ws, { consent: 'withdrawn', evidence: false });
   const rows = [
@@ -1313,44 +1392,40 @@ test('import: rows become leads; with consent they get it recorded and go into a
     { name: 'Old Contact', email: withdrawn.email },
     { name: 'No Email' }
   ];
-  const r = await importLeads(ws, { leads: rows, consent: CONSENT, zohoList: { name: 'Trade show Oct' } });
+  const r = await importLeads(ws, { leads: rows, consent: CONSENT, mailList: { name: 'Trade show Oct' } });
   assert.equal(r.status, 200, JSON.stringify(r.data));
   assert.equal(r.data.imported, 3);
   assert.equal(r.data.duplicates.length, 1);
   assert.equal(r.data.duplicates[0].leadId, withdrawn.id, 'a duplicate row reports the lead it matched');
   assert.equal(r.data.consentRecorded, 3, 'consent recorded on the new leads only, never over withdrawn consent');
-  const old = await db().get('SELECT marketing_consent FROM leads WHERE id = ?', [withdrawn.id]);
-  assert.equal(old.marketing_consent, 'withdrawn');
-  assert.equal(r.data.zoho.error, null, JSON.stringify(r.data.zoho));
-  assert.equal(r.data.zoho.list.name, 'Trade show Oct');
-  assert.equal(r.data.zoho.added, 2);
-  assert.equal(r.data.zoho.skipped, 2, 'the withdrawn lead and the lead without email are not added');
-  assert.deepEqual(acct.added[r.data.zoho.list.key].sort(), ['orders@bigred.com.au', 'priya@acme.com.au']);
-  assert.equal(acct.names['priya@acme.com.au']['First Name'], 'Priya');
-  assert.equal(acct.names['orders@bigred.com.au']['First Name'], 'Big Red Packaging team');
+  assert.equal((await db().get('SELECT marketing_consent FROM leads WHERE id = ?', [withdrawn.id])).marketing_consent, 'withdrawn');
+  assert.equal(r.data.list.error, null, JSON.stringify(r.data.list));
+  assert.equal(r.data.list.list.name, 'Trade show Oct');
+  assert.equal(r.data.list.added, 2, 'the withdrawn lead and the lead without email are not added');
+  const members = await db().all("SELECT c.email, c.company FROM mail_list_members m JOIN mail_contacts c ON c.id = m.contact_id JOIN mail_lists l ON l.id = m.list_id WHERE l.workspace_id = ? AND l.name = 'Trade show Oct' ORDER BY c.email", [ws.workspaceId]);
+  assert.deepEqual(members.map(x => [x.email, x.company]), [['orders@bigred.com.au', 'Big Red Packaging'], ['priya@acme.com.au', 'Acme']]);
+  assert.equal(Object.keys(acct.added || {}).length, 0, 'nothing goes to Zoho until a campaign is sent');
   const ev = await db().get("SELECT COUNT(*) AS n FROM lead_consent_events WHERE workspace_id = ? AND status = 'granted' AND method = 'imported_with_proof'", [ws.workspaceId]);
   assert.equal(Number(ev.n), 3, 'every consent change is kept with its evidence');
 });
 
-test('import: without consent the leads are imported and still go to the Zoho list (Zoho handles consent)', async () => {
-  const { ws, acct } = await freshConnected('Import noconsent', { connect: { scope: NAME_SCOPES } });
-  const list = (await capi(ws, 'POST', '/zoho-lists', { name: 'Existing', emails: ['a@m.com.au'] })).data.list;
-  const r = await importLeads(ws, { leads: [{ name: 'Kim Lee', email: 'kim@shop.com.au' }], zohoList: { key: list.key } });
+test('import: into an existing contact list here', async () => {
+  const { ws } = await freshConnected('Import existing');
+  const list = (await capi(ws, 'POST', '/contact-lists', { name: 'Existing', emails: ['a@m.com.au'] })).data.list;
+  const r = await importLeads(ws, { leads: [{ name: 'Kim Lee', email: 'kim@shop.com.au' }], mailList: { id: list.id } });
   assert.equal(r.status, 200, JSON.stringify(r.data));
-  assert.equal(r.data.imported, 1);
-  assert.equal(r.data.zoho.error, null, JSON.stringify(r.data.zoho));
-  assert.equal(r.data.zoho.added, 1);
-  assert.deepEqual(acct.added[list.key].sort(), ['a@m.com.au', 'kim@shop.com.au']);
+  assert.equal(r.data.list.added, 1);
+  assert.equal((await capi(ws, 'GET', '/contact-lists')).data.lists.find(l => l.id === list.id).total, 2);
 });
 
-test('import: bad consent details refuse the whole import; a Zoho list needs the send permission', async () => {
+test('import: bad consent details refuse the whole import; adding to a list needs the send permission', async () => {
   const { ws } = await freshConnected('Import rules', { connect: { scope: NAME_SCOPES } });
   const before = Number((await db().get('SELECT COUNT(*) AS n FROM leads WHERE workspace_id = ?', [ws.workspaceId])).n);
   const bad = await importLeads(ws, { leads: [{ name: 'A', email: 'a@b.com.au' }], consent: { ...CONSENT, attest: false } });
   assert.equal(bad.status, 400);
   assert.equal(Number((await db().get('SELECT COUNT(*) AS n FROM leads WHERE workspace_id = ?', [ws.workspaceId])).n), before, 'nothing imported');
   const member = await h.addMember(ws.workspaceId, 'Member');
-  const r = await importLeads(member, { leads: [{ name: 'A', email: 'a@b.com.au' }], zohoList: { name: 'X' } });
+  const r = await importLeads(member, { leads: [{ name: 'A', email: 'a@b.com.au' }], mailList: { name: 'X' } });
   assert.equal(r.status, 403);
   assert.equal(Number((await db().get('SELECT COUNT(*) AS n FROM leads WHERE workspace_id = ?', [ws.workspaceId])).n), before, 'refused before importing');
 });

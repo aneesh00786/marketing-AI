@@ -4,7 +4,6 @@ const { z } = require('zod');
 const { requireCapability } = require('../../middleware/auth');
 const leadService = require('./leadService');
 const productEmails = require('../mail/productEmails/service');
-const zohoLists = require('../mail/zoho/zohoLists');
 
 /**
  * Workspace-scoped Leads CRM API. Mounted at /api/v1/leads (plus legacy aliases
@@ -81,8 +80,8 @@ router.post('/', requireCapability('leads.manage'), body(z.object(leadFields)), 
  * - consent: the contacts agreed to marketing email; recorded with its evidence on the imported
  *   leads (and on matching existing leads whose consent is unknown; withdrawn consent is never
  *   overridden).
- * - zohoList: add them to a Zoho Campaigns list ({ key }) or a new one ({ name }). Leads who
- *   opted out (unsubscribed, bounced, withdrew consent) are not added; a Zoho failure never undoes the import.
+ * - mailList: also add them to a contact list in Marketech.ai ({ id }) or a new one ({ name }).
+ *   Zoho gets them when a campaign is sent to that list. A list problem never undoes the import.
  */
 const importConsent = z.object({
   method: z.enum(productEmails.CONSENT_METHODS),
@@ -90,14 +89,14 @@ const importConsent = z.object({
   evidence: z.string().trim().min(3, 'Give the evidence reference (form, document, URL...).').max(500),
   attest: z.literal(true, { errorMap: () => ({ message: 'Confirm that you hold this evidence for these contacts.' }) })
 }).strict();
-const importZohoList = z.union([
-  z.object({ key: z.string().regex(/^[A-Za-z0-9_-]{1,200}$/) }).strict(),
-  z.object({ name: z.string().trim().min(1).max(100) }).strict()
+const importMailList = z.union([
+  z.object({ id: z.number().int().positive() }).strict(),
+  z.object({ name: z.string().trim().min(1).max(150) }).strict()
 ]);
-router.post('/import-bulk', requireCapability('leads.manage'), body(z.object({ leads: z.array(z.record(z.any())).min(1), consent: importConsent.optional(), zohoList: importZohoList.optional() })), wrap(async (req, res) => {
-  const { consent, zohoList } = req.valid;
-  if (zohoList && !req.auth.capabilities.has('mail.send')) {
-    return res.status(403).json({ success: false, code: 'FORBIDDEN', error: 'Only people who can send campaigns can add contacts to Zoho lists. Import without a Zoho list.' });
+router.post('/import-bulk', requireCapability('leads.manage'), body(z.object({ leads: z.array(z.record(z.any())).min(1), consent: importConsent.optional(), mailList: importMailList.optional() })), wrap(async (req, res) => {
+  const { consent, mailList } = req.valid;
+  if (mailList && !req.auth.capabilities.has('mail.send')) {
+    return res.status(403).json({ success: false, code: 'FORBIDDEN', error: 'Only people who can send campaigns can add contacts to lists. Import without a list.' });
   }
   const r = await leadService.importLeads(req, req.valid.leads);
   const targets = [...new Set([...r.leadIds, ...r.duplicates.map(d => d.leadId).filter(Boolean)])];
@@ -113,33 +112,18 @@ router.post('/import-bulk', requireCapability('leads.manage'), body(z.object({ l
     }
   }
 
-  let zoho = null;
-  if (zohoList && targets.length) {
-    zoho = { list: null, added: 0, skipped: 0, reasons: [], error: null };
+  let list = null;
+  if (mailList && targets.length) {
+    list = { list: null, added: 0, error: null };
     try {
-      let key = zohoList.key || null;
-      let rest = targets;
-      if (!key) {
-        const made = await zohoLists.create(req, { name: zohoList.name, leadIds: targets.slice(0, zohoLists.MAX_ADD), emails: [] });
-        key = made.list.key; zoho.list = made.list; zoho.added += made.added; zoho.skipped += made.skipped.length; zoho.reasons.push(...made.skipped);
-        rest = targets.slice(zohoLists.MAX_ADD);
-      }
-      for (let i = 0; i < rest.length; i += zohoLists.MAX_ADD) {
-        try {
-          const a = await zohoLists.addContacts(req, key, { leadIds: rest.slice(i, i + zohoLists.MAX_ADD), emails: [] });
-          zoho.list = a.list; zoho.added += a.added; zoho.skipped += a.skipped.length; zoho.reasons.push(...a.skipped);
-        } catch (err) {
-          if (err.code !== 'NO_CONTACTS') throw err;
-          zoho.skipped += Math.min(zohoLists.MAX_ADD, rest.length - i);
-        }
-      }
+      const lists = require('../mail/contacts/listService');
+      const r2 = mailList.id
+        ? await lists.addContacts(req, mailList.id, { leadIds: targets })
+        : await lists.create(req, { name: mailList.name, leadIds: targets });
+      list.list = r2.list; list.added = r2.added + (r2.alreadyIn || 0);
     } catch (err) {
-      zoho.error = err.code === 'NO_CONTACTS'
-        ? 'None of these contacts can be added (unsubscribed, bounced or no valid email address), so nothing was added to Zoho.'
-        : err.message;
+      list.error = err.message;
     }
-    if (!zoho.error && !zoho.added) zoho.error = 'None of these contacts can be added (unsubscribed, bounced or no valid email address), so nothing was added to Zoho.';
-    zoho.reasons = zoho.reasons.slice(0, 20);
   }
 
   res.json({
@@ -147,13 +131,13 @@ router.post('/import-bulk', requireCapability('leads.manage'), body(z.object({ l
     ...r,
     count: r.imported,
     consentRecorded,
-    zoho,
+    list,
     message: `Imported ${r.imported} lead${r.imported === 1 ? '' : 's'}.` +
       (r.flagged.length ? ` ${r.flagged.length} need a product review.` : '') +
       (r.duplicates.length ? ` ${r.duplicates.length} already in Leads (not duplicated).` : '') +
       (r.skipped.length ? ` ${r.skipped.length} row${r.skipped.length === 1 ? '' : 's'} skipped.` : '') +
       (consentRecorded ? ` Consent recorded for ${consentRecorded}.` : '') +
-      (zoho ? (zoho.error ? ` Zoho: ${zoho.error}` : ` ${zoho.added} added to Zoho list “${zoho.list?.name || ''}”${zoho.skipped ? `, ${zoho.skipped} not added` : ''}.`) : '')
+      (list ? (list.error ? ` List: ${list.error}` : ` ${list.added} in list “${list.list?.name || ''}”.`) : '')
   });
 }));
 

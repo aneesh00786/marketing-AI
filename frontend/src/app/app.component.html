@@ -306,7 +306,7 @@
       </div>
       <div class="header-actions">
         <button class="btn btn-accent" (click)="openExcelImport()">📂 Import Excel / CSV</button>
-        <button *ngIf="canSendCampaigns" class="btn btn-secondary" type="button" (click)="showLeadsToZoho = true" title="Put leads into a Zoho Campaigns list to email them">📤 Add to Zoho list</button>
+        <button *ngIf="canSendCampaigns" class="btn btn-secondary" type="button" (click)="showLeadsToZoho = true" title="Put leads into a contact list to email them with a campaign">📤 Add to contact list</button>
         <div class="export-menu">
           <button class="btn btn-secondary" type="button" (click)="leadExportOpen = !leadExportOpen" [disabled]="leadExporting || !leadTotal" aria-haspopup="menu" [attr.aria-expanded]="leadExportOpen"
                   [title]="leadTotal ? 'Download the ' + leadTotal + ' lead(s) that match the current filters' : 'No leads to export'">
@@ -944,9 +944,9 @@
 
         <div *ngIf="leadImportResult" class="lead-import-result">
           <strong>Import finished:</strong> {{ leadImportResult.imported }} imported<span *ngIf="leadImportResult.flagged.length">, {{ leadImportResult.flagged.length }} need product review</span><span *ngIf="leadImportResult.duplicates.length">, {{ leadImportResult.duplicates.length }} already in Leads (not duplicated)</span><span *ngIf="leadImportResult.skipped.length">, {{ leadImportResult.skipped.length }} rows skipped</span><span *ngIf="leadImportResult.consentRecorded">, consent recorded for {{ leadImportResult.consentRecorded }}</span>.
-          <div *ngIf="leadImportResult.zoho" class="lead-import-zoho">
-            <ng-container *ngIf="!leadImportResult.zoho.error">✓ Zoho: {{ leadImportResult.zoho.added }} added to “{{ leadImportResult.zoho.list?.name }}”<span *ngIf="leadImportResult.zoho.skipped">, {{ leadImportResult.zoho.skipped }} not added (unsubscribed, bounced or no email)</span>.</ng-container>
-            <ng-container *ngIf="leadImportResult.zoho.error">⚠ Zoho: {{ leadImportResult.zoho.error }}</ng-container>
+          <div *ngIf="leadImportResult.list" class="lead-import-zoho">
+            <ng-container *ngIf="!leadImportResult.list.error">✓ {{ leadImportResult.list.added }} in contact list “{{ leadImportResult.list.list?.name }}”.</ng-container>
+            <ng-container *ngIf="leadImportResult.list.error">⚠ Contact list: {{ leadImportResult.list.error }}</ng-container>
           </div>
           <ul *ngIf="leadImportResult.flagged.length || leadImportResult.skipped.length">
             <li *ngFor="let f of leadImportResult.flagged.slice(0, 6)">Row {{ f.row }} ({{ f.name }}): {{ f.reason }}</li>

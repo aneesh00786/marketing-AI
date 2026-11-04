@@ -29,6 +29,8 @@ const HANDLERS = {
   generate_campaign: job => campaignService.runGeneration(job),
   sync_analytics: job => analyticsService.syncAccountAnalytics(job),
   sync_inbox: job => inboxService.syncAccountInbox(job),
+  zoho_contact_sync: job => require('../modules/mail/contacts/zohoImport').runImportJob(job),
+  zoho_campaign_upload: job => require('../modules/mail/contacts/zohoUpload').runUploadJob(job),
   check_account: async job => {
     const { accountId } = JSON.parse(job.payload_json || '{}');
     return accountService.checkAccountHealth({ auth: { workspaceId: job.workspace_id, actorType: 'worker' } }, accountId);
@@ -137,6 +139,23 @@ async function processAutomation() {
   }
 }
 
+/**
+ * Zoho campaigns sent from Marketech.ai lists: once Zoho reports one Sent, its figures are read and
+ * its temporary Zoho lists removed (refresh does both). Checked every minute, oldest first.
+ */
+async function processZohoCleanup() {
+  try {
+    const rows = await all(`SELECT id, workspace_id FROM mail_campaigns WHERE status = 'submitted' AND temp_lists_json IS NOT NULL
+      AND temp_lists_deleted_at IS NULL AND submitted_at < UTC_TIMESTAMP() - INTERVAL 1 MINUTE ORDER BY submitted_at LIMIT 5`);
+    const svc = require('../modules/mail/campaigns/campaignService');
+    for (const r of rows) {
+      await svc.refresh({ auth: { workspaceId: r.workspace_id, actorType: 'worker', capabilities: new Set(['mail.send']) } }, r.id).catch(err => log('zoho cleanup error:', err.message));
+    }
+  } catch (err) {
+    log('zoho cleanup error:', err.message);
+  }
+}
+
 /** Campaign budgets: sync provider spend (every 6 hours) and evaluate pacing alerts. */
 async function processBudgets() {
   try {
@@ -180,6 +199,7 @@ async function loop() {
       if (Date.now() - lastSchedule > SCHEDULER_MS) {
         await scheduleRecurring();
         await processBudgets();
+        await processZohoCleanup();
         lastSchedule = Date.now();
       }
       const worked = (await processPublishing()) + (await processProcessing()) + (await processBackground()) + (await processOutreach()) + (await processProductEmails()) + (await processAutomation());

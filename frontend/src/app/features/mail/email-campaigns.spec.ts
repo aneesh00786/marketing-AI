@@ -1,5 +1,5 @@
 import { Component, EventEmitter, Input, Output } from '@angular/core';
-import { ComponentFixture, TestBed, fakeAsync, flush, tick } from '@angular/core/testing';
+import { ComponentFixture, TestBed, discardPeriodicTasks, fakeAsync, flush, tick } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { EmailPreviewComponent } from './email-preview.component';
 import { provideHttpClient } from '@angular/common/http';
@@ -457,8 +457,47 @@ describe('EmailCampaignsComponent: Choose Template', () => {
   });
 
   // ---- Zoho list contacts ----
-  it('each Zoho list has View contacts for roles that can send; ticking a list is separate from viewing it', () => {
+  it('Recipients: contact lists here with their reachable counts; choosing one is saved with the campaign', () => {
+    comp.audiences = { lists: [], topics: [], mailLists: [{ id: 3, name: 'Trade show', reachable: 24, total: 25, inZoho: false }, { id: 4, name: 'All gone', reachable: 0, total: 2 }] };
+    comp.zoho = { canCompose: true, canSend: true, connection: { connected: true, missingScopes: [] } };
+    comp.step = 2;
+    fixture.detectChanges();
+    const rows = Array.from(el().querySelectorAll('.ec-list-row')) as HTMLElement[];
+    expect(rows[0].textContent).toContain('Trade show');
+    expect(rows[0].textContent).toContain('24 can be emailed of 25');
+    expect((rows[1].querySelector('input') as HTMLInputElement).disabled).withContext('nobody to email').toBeTrue();
+    (rows[0].querySelector('input') as HTMLInputElement).click();
+    fixture.detectChanges();
+    expect(comp.recipientSummary).toBe('1 list');
+    expect(el().textContent).toContain('(24 people)');
+    expect(comp.dirty).toBeTrue();
+    comp.save();
+    const req = http.expectOne(r => r.method === 'PATCH' && r.url.endsWith('/campaigns/5'));
+    expect(req.request.body.mailListIds).toEqual([3]);
+    req.flush({ campaign: { id: 5, name: 'Autumn', status: 'draft', version: 2, html: ORIGINAL, lists: [], mailListIds: [3], mailLists: [{ id: 3, name: 'Trade show', reachable: 24 }] } });
+    http.expectOne(r => /\/mail\/campaigns$/.test(r.url)).flush({ campaigns: [] });
+    expect(comp.sendRecipients()).toContain('Lists Trade show (24), put into Zoho for this send');
+  });
+
+  it('while the lists are put into Zoho, the campaign shows the progress and checks again until sent', fakeAsync(() => {
+    (comp as any).setSelected({ id: 9, name: 'Autumn', status: 'submitting', submitStage: 'upload', version: 3, html: ORIGINAL, lists: [], upload: { total: 7219, done: 1200 } });
+    fixture.detectChanges();
+    expect(el().querySelector('.ec-upload')!.textContent).toContain('Putting your lists into Zoho: 1,200 of 7,219 contacts');
+    tick(4000);
+    http.expectOne(r => r.method === 'POST' && r.url.endsWith('/campaigns/9/refresh')).flush({ campaign: { id: 9, name: 'Autumn', status: 'submitting', submitStage: 'upload', version: 3, html: ORIGINAL, lists: [], upload: { total: 7219, done: 7219 } } });
+    tick(4000);
+    http.expectOne(r => r.method === 'POST' && r.url.endsWith('/campaigns/9/refresh')).flush({ campaign: { id: 9, name: 'Autumn', status: 'submitted', version: 3, html: ORIGINAL, lists: [], report: { pending: true } } });
+    http.expectOne(r => /\/mail\/campaigns$/.test(r.url)).flush({ campaigns: [] });
+    expect(comp.selected.status).toBe('submitted');
+    discardPeriodicTasks();
+    (comp as any).ngOnDestroy();
+    flush();
+    http.match(() => true).forEach(r => r.flush({}));
+  }));
+
+  it('a Zoho list chosen earlier has View contacts for roles that can send; viewing does not change the choice', () => {
     comp.audiences = { lists: [{ key: 'L1', name: 'Customers', contacts: 2 }], topics: [] };
+    comp.form.listKeys.add('L1');
     comp.zoho = { canCompose: true, canSend: false, connection: { connected: true, missingScopes: [] } };
     fixture.detectChanges();
     expect(button('View contacts')).withContext('Members cannot see addresses').toBeUndefined();
@@ -466,7 +505,7 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     fixture.detectChanges();
     button('View contacts').click();
     fixture.detectChanges();
-    expect(comp.form.listKeys.has('L1')).withContext('viewing does not select the list').toBeFalse();
+    expect(comp.form.listKeys.has('L1')).withContext('viewing does not change the choice').toBeTrue();
     const req = http.expectOne(r => r.url.endsWith('/mail/campaigns/audiences/L1/contacts'));
     expect(req.request.params.get('status')).toBe('subscribed');
     req.flush({ contacts: [{ email: 'kim@client.io', name: 'Kim Lee', company: 'Acme', phone: null }], page: 1, hasMore: false });
@@ -682,14 +721,14 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     expect(comp.canPickFromZoho).withContext('already sent').toBeFalse();
   });
 
-  it('contacts picked from a Zoho list show on its row, part-ticked; ticking the whole list covers them', () => {
+  it('contacts picked from a Zoho list earlier show on its row, part-ticked; Zoho lists not in use are not shown', () => {
     comp.audiences = { lists: [{ key: 'L1', name: 'Customers', contacts: 5 }, { key: 'L2', name: 'Other', contacts: 3 }], topics: [] };
     comp.zoho = { canCompose: true, canSend: true, connection: { connected: true, missingScopes: [] } };
     comp.onContacts([{ id: 1, email: 'kim@client.io', name: 'Kim', source: 'zoho_list', sourceListKey: 'L1', eligible: true, reasons: [] }]);
     fixture.detectChanges();
     const boxes = () => Array.from(el().querySelectorAll('.ec-list-row input')) as HTMLInputElement[];
     expect([boxes()[0].indeterminate, boxes()[0].checked]).toEqual([true, false]);
-    expect(boxes()[1].indeterminate).toBeFalse();
+    expect(boxes().length).withContext('L2 is not used by this campaign').toBe(1);
     expect(el().textContent).toContain('· 1 selected');
     expect(el().querySelector('.ec-picks')!.textContent).toContain('1 contact picked from this list');
     boxes()[0].click();

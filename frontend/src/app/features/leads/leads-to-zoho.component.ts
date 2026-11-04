@@ -5,8 +5,8 @@ import { HttpClient } from '@angular/common/http';
 import { apiRoot } from '../../core/api-base';
 
 /**
- * Leads → "Add to Zoho list": pick leads (only those that may be emailed can be ticked; the others
- * show why) and a Zoho Campaigns list, existing or new. Names go to Zoho with them.
+ * Leads → "Add to contact list": pick leads (only those that may be emailed can be ticked; the others
+ * show why) and a contact list in Marketech.ai, existing or new. Zoho gets them when a campaign is sent.
  */
 @Component({
   selector: 'app-leads-to-zoho',
@@ -23,7 +23,7 @@ export class LeadsToZohoComponent implements OnInit {
   @Output() openCampaigns = new EventEmitter<void>();
 
   private base = `${apiRoot()}/api/v1/mail/campaigns`;
-  lists: { key: string; name: string | null; contacts: number | null }[] = [];
+  lists: { id: number; name: string; total: number }[] = [];
   listsError = '';
   target: 'existing' | 'new' = 'existing';
   listKey = '';
@@ -42,13 +42,9 @@ export class LeadsToZohoComponent implements OnInit {
 
   ngOnInit(): void {
     for (const id of this.preselect) this.picked.add(id);
-    this.http.get<any>(`${this.base}/zoho-lists`).subscribe({
-      next: r => {
-        this.lists = (r.lists || []).filter((l: any) => !l.campaignList);
-        if (!this.lists.length) this.target = 'new';
-        if (!r.canAdd) this.listsError = 'Reconnect Zoho (Mail Center › Zoho Campaigns) to add contacts to lists.';
-      },
-      error: e => this.listsError = e?.error?.error || 'Zoho Campaigns is not connected. Connect it in Mail Center › Zoho Campaigns.'
+    this.http.get<any>(`${this.base}/contact-lists`).subscribe({
+      next: r => { this.lists = r.lists || []; if (!this.lists.length) this.target = 'new'; },
+      error: e => this.listsError = e?.error?.error || 'Contact lists could not be loaded.'
     });
     this.search();
   }
@@ -69,10 +65,10 @@ export class LeadsToZohoComponent implements OnInit {
 
   get problem(): string {
     if (this.listsError) return this.listsError;
-    if (this.target === 'existing' && !this.listKey) return 'Choose a Zoho list.';
+    if (this.target === 'existing' && !this.listKey) return 'Choose a contact list.';
     if (this.target === 'new' && !this.listName.trim()) return 'Enter a name for the new list.';
     if (!this.picked.size) return 'Tick the leads to add.';
-    if (this.picked.size > 500) return 'Add up to 500 leads at a time.';
+    if (this.picked.size > 5000) return 'Add up to 5,000 leads at a time.';
     return '';
   }
 
@@ -81,15 +77,15 @@ export class LeadsToZohoComponent implements OnInit {
     this.saving = true;
     const leadIds = [...this.picked];
     const req = this.target === 'new'
-      ? this.http.post<any>(`${this.base}/zoho-lists`, { name: this.listName.trim(), leadIds, emails: [] })
-      : this.http.post<any>(`${this.base}/zoho-lists/${encodeURIComponent(this.listKey)}/contacts`, { leadIds, emails: [] });
+      ? this.http.post<any>(`${this.base}/contact-lists`, { name: this.listName.trim(), leadIds })
+      : this.http.post<any>(`${this.base}/contact-lists/${encodeURIComponent(this.listKey)}/contacts`, { leadIds });
     req.subscribe({
       next: r => {
         this.saving = false;
         this.result = { list: r.list, added: r.added, skipped: r.skipped || [] };
-        this.toast.emit(`${r.added} lead(s) added to Zoho list “${r.list?.name}”.`);
+        this.toast.emit(`${r.added} lead(s) added to “${r.list?.name}”.`);
       },
-      error: e => { this.saving = false; this.toast.emit(e?.error?.error || 'Could not add the leads to Zoho.'); }
+      error: e => { this.saving = false; this.toast.emit(e?.error?.error || 'Could not add the leads to the list.'); }
     });
   }
 

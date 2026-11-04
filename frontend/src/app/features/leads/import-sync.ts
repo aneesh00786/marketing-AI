@@ -1,6 +1,6 @@
 /**
  * What happens to imported contacts besides becoming leads: marketing consent recorded with its
- * evidence, and a Zoho Campaigns list to add them to. Sent with POST /leads/import-bulk.
+ * evidence, and a contact list in Marketech.ai to add them to (listKey: its id). Sent with POST /leads/import-bulk.
  */
 export interface ImportSync {
   consent: boolean;
@@ -34,15 +34,15 @@ export function importSyncProblem(o: ImportSync): string {
     if (o.evidence.trim().length < 3) return 'Describe the proof of consent (form, document, sign-up sheet…).';
     if (!o.attest) return 'Confirm that you hold this proof for these contacts.';
   }
-  if (o.list === 'existing' && !o.listKey) return 'Choose the Zoho list.';
-  if (o.list === 'new' && !o.listName.trim()) return 'Enter a name for the new Zoho list.';
+  if (o.list === 'existing' && !o.listKey) return 'Choose the contact list.';
+  if (o.list === 'new' && !o.listName.trim()) return 'Enter a name for the new contact list.';
   return '';
 }
 
-export function importSyncBody(o: ImportSync): { consent?: any; zohoList?: any } {
+export function importSyncBody(o: ImportSync): { consent?: any; mailList?: any } {
   const body: any = {};
   if (o.consent) body.consent = { method: o.method, obtainedAt: o.obtainedAt, evidence: o.evidence.trim(), attest: true };
-  if (o.list === 'existing' && o.listKey) body.zohoList = { key: o.listKey };
-  if (o.list === 'new' && o.listName.trim()) body.zohoList = { name: o.listName.trim() };
+  if (o.list === 'existing' && o.listKey) body.mailList = { id: Number(o.listKey) };
+  if (o.list === 'new' && o.listName.trim()) body.mailList = { name: o.listName.trim() };
   return body;
 }

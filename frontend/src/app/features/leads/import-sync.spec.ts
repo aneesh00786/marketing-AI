@@ -5,7 +5,7 @@ import { importSyncBody, importSyncProblem, newImportSync } from './import-sync'
 import { ImportSyncOptionsComponent } from './import-sync-options.component';
 import { LeadsToZohoComponent } from './leads-to-zoho.component';
 
-describe('Import sync (consent + Zoho list)', () => {
+describe('Import sync (consent + contact list)', () => {
   it('needs full consent details and a list choice before importing; builds the request body', () => {
     const o = newImportSync();
     expect(importSyncProblem(o)).toBe('');
@@ -19,13 +19,13 @@ describe('Import sync (consent + Zoho list)', () => {
     expect(importSyncProblem(o)).toContain('future');
     o.obtainedAt = '2026-10-01';
     o.list = 'new';
-    expect(importSyncProblem(o)).toContain('name for the new Zoho list');
+    expect(importSyncProblem(o)).toContain('name for the new contact list');
     o.listName = ' Trade show ';
     expect(importSyncProblem(o)).toBe('');
-    expect(importSyncBody(o)).toEqual({ consent: { method: 'web_form', obtainedAt: '2026-10-01', evidence: 'Trade show sheet', attest: true }, zohoList: { name: 'Trade show' } });
-    const e = newImportSync('L1');
+    expect(importSyncBody(o)).toEqual({ consent: { method: 'web_form', obtainedAt: '2026-10-01', evidence: 'Trade show sheet', attest: true }, mailList: { name: 'Trade show' } });
+    const e = newImportSync('12');
     expect(e.list).toBe('existing');
-    expect(importSyncBody(e)).toEqual({ zohoList: { key: 'L1' } });
+    expect(importSyncBody(e)).toEqual({ mailList: { id: 12 } });
   });
 });
 
@@ -45,31 +45,31 @@ describe('ImportSyncOptionsComponent', () => {
   it('marks consent optional (not needed for Zoho); consent shows how, when, proof and the confirmation', () => {
     const { fixture, el } = make(false);
     expect(el.textContent).toContain('Not needed for Zoho Campaigns');
-    expect(el.textContent).not.toContain('Zoho Campaigns list');
+    expect(el.textContent).not.toContain('Contact list');
     fixture.componentInstance.sync.consent = true;
     fixture.detectChanges();
     expect(el.textContent).toContain('How they agreed');
     expect(el.textContent).toContain('I confirm I hold this proof');
   });
 
-  it("loads Zoho lists (not the ones made for campaigns); not connected → no Zoho list", () => {
+  it('loads the contact lists here; if they cannot be loaded, leads only', () => {
     const a = make(true);
-    http.expectOne(r => r.url.endsWith('/zoho-lists')).flush({ lists: [{ key: 'L1', name: 'Sydney', contacts: 3 }, { key: 'L2', name: 'Marketech campaign 1 v1 x', campaignList: true }], canAdd: true });
+    http.expectOne(r => r.url.endsWith('/contact-lists')).flush({ lists: [{ id: 3, name: 'Sydney', total: 3 }] });
     a.fixture.componentInstance.sync.list = 'existing';
     a.fixture.detectChanges();
     expect(Array.from(a.el.querySelectorAll('select option')).map(o => o.textContent!.trim())).toContain('Sydney (3)');
-    expect(a.el.textContent).not.toContain('Marketech campaign');
+    expect(a.el.textContent).toContain('Kept in Marketech.ai');
     TestBed.resetTestingModule();
     const b = make(true);
     b.fixture.componentInstance.sync.list = 'new';
-    http.expectOne(r => r.url.endsWith('/zoho-lists')).flush({ error: 'Connect Zoho Campaigns first.' }, { status: 409, statusText: 'Conflict' });
+    http.expectOne(r => r.url.endsWith('/contact-lists')).flush({ error: 'No access.' }, { status: 403, statusText: 'Forbidden' });
     b.fixture.detectChanges();
     expect(b.fixture.componentInstance.sync.list).toBe('none');
-    expect(b.el.textContent).toContain('Connect Zoho Campaigns first.');
+    expect(b.el.textContent).toContain('No access.');
   });
 });
 
-describe('LeadsToZohoComponent (Leads → Add to Zoho list)', () => {
+describe('LeadsToZohoComponent (Leads → Add to contact list)', () => {
   let fixture: ComponentFixture<LeadsToZohoComponent>;
   let http: HttpTestingController;
   const el = () => fixture.nativeElement as HTMLElement;
@@ -79,7 +79,7 @@ describe('LeadsToZohoComponent (Leads → Add to Zoho list)', () => {
     http = TestBed.inject(HttpTestingController);
     fixture = TestBed.createComponent(LeadsToZohoComponent);
     fixture.detectChanges();
-    http.expectOne(r => r.url.endsWith('/zoho-lists')).flush({ lists: [{ key: 'L1', name: 'Sydney', contacts: 3 }], canAdd: true });
+    http.expectOne(r => r.url.endsWith('/contact-lists')).flush({ lists: [{ id: 3, name: 'Sydney', total: 3 }] });
   });
   afterEach(() => http.verify());
 
@@ -98,14 +98,14 @@ describe('LeadsToZohoComponent (Leads → Add to Zoho list)', () => {
   it('adds the ticked leads to the chosen list and offers to create a campaign', () => {
     http.expectOne(r => r.url.endsWith('/lead-options')).flush({ leads: [{ id: 7, name: 'Priya', email: 'p@a.com.au', eligible: true, reasons: [] }], total: 1, eligibleCount: 1 });
     fixture.detectChanges();
-    expect(btn('Add to Zoho list').disabled).toBeTrue();
-    fixture.componentInstance.listKey = 'L1';
+    expect(btn('Add to list').disabled).toBeTrue();
+    fixture.componentInstance.listKey = '3';
     btn('Select all shown').click();
     fixture.detectChanges();
-    btn('Add to Zoho list').click();
-    const req = http.expectOne(r => r.method === 'POST' && r.url.endsWith('/zoho-lists/L1/contacts'));
-    expect(req.request.body).toEqual({ leadIds: [7], emails: [] });
-    req.flush({ list: { key: 'L1', name: 'Sydney' }, added: 1, skipped: [] });
+    btn('Add to list').click();
+    const req = http.expectOne(r => r.method === 'POST' && r.url.endsWith('/contact-lists/3/contacts'));
+    expect(req.request.body).toEqual({ leadIds: [7] });
+    req.flush({ list: { id: 3, name: 'Sydney' }, added: 1, skipped: [] });
     fixture.detectChanges();
     expect(el().textContent).toContain('1 lead(s) added to “Sydney”');
     let open = 0;

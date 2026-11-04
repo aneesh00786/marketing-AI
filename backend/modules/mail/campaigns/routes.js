@@ -48,17 +48,20 @@ router.post('/', requireCapability('mail.compose'), wrap(async (req, res) => res
 // Zoho Campaigns → Contact lists (like Zoho's Manage Lists). Before /:id so "zoho-lists" is not an id.
 const lists = require('../zoho/zohoLists');
 const listsLimit = require('../../../lib/rateLimit').rateLimit({ windowMs: 60 * 1000, max: 20, keyFn: req => `zoho-lists:${req.auth.workspaceId}`, message: 'Too many list changes. Wait a minute and try again.' });
+// Zoho's lists (counts only): the plan usage on Contact lists.
 router.get('/zoho-lists', requireCapability('mail.send'), wrap(async (req, res) => res.json({ success: true, ...(await lists.lists(req)) })));
 // The Zoho plan's contact limit (Zoho's API does not report it): set by those who configure mail.
+// Contact lists kept in Marketech.ai (Zoho gets a list only when a campaign is sent to it).
+const mailLists = require('../contacts/listService');
+router.get('/contact-lists', requireCapability('mail.send'), wrap(async (req, res) => res.json({ success: true, ...(await mailLists.lists(req)) })));
+router.post('/contact-lists', requireCapability('mail.send', 'leads.view'), listsLimit, wrap(async (req, res) => res.json({ success: true, ...(await mailLists.create(req, req.body)) })));
+router.get('/contact-lists/:id/contacts', requireCapability('mail.send'), wrap(async (req, res) => res.json({ success: true, ...(await mailLists.listContacts(req, req.params.id, req.query)) })));
+router.post('/contact-lists/:id/contacts', requireCapability('mail.send', 'leads.view'), listsLimit, wrap(async (req, res) => res.json({ success: true, ...(await mailLists.addContacts(req, req.params.id, req.body)) })));
+router.post('/contact-lists/:id/remove', requireCapability('mail.send'), listsLimit, wrap(async (req, res) => res.json({ success: true, ...(await mailLists.removeContacts(req, req.params.id, req.body)) })));
+router.delete('/contact-lists/:id', requireCapability('mail.send'), listsLimit, wrap(async (req, res) => res.json({ success: true, ...(await mailLists.deleteList(req, req.params.id, req.body)) })));
+// The one-time copy of Zoho lists and contacts made when Zoho was connected.
+router.get('/contact-sync', requireCapability('mail.send'), wrap(async (req, res) => res.json({ success: true, ...(await require('../contacts/zohoImport').importStatus(req.auth.workspaceId)) })));
 router.put('/zoho-plan', requireCapability('mail.configure'), wrap(async (req, res) => res.json({ success: true, ...(await lists.setPlan(req, req.body)) })));
-router.post('/zoho-lists', requireCapability('mail.send', 'leads.view'), listsLimit, wrap(async (req, res) => res.json({ success: true, ...(await lists.create(req, req.body)) })));
-router.post('/zoho-lists/:listKey/contacts', requireCapability('mail.send', 'leads.view'), listsLimit, wrap(async (req, res) => res.json({ success: true, ...(await lists.addContacts(req, req.params.listKey, req.body)) })));
-router.post('/zoho-lists/:listKey/remove', requireCapability('mail.send'), listsLimit, wrap(async (req, res) => res.json({ success: true, ...(await lists.removeContact(req, req.params.listKey, req.body)) })));
-// Remove a list from Marketech.ai only (it stays in Zoho), or show it again.
-router.post('/zoho-lists/:listKey/hide', requireCapability('mail.send'), listsLimit, wrap(async (req, res) => res.json({ success: true, ...(await lists.hideList(req, req.params.listKey)) })));
-router.post('/zoho-lists/:listKey/unhide', requireCapability('mail.send'), listsLimit, wrap(async (req, res) => res.json({ success: true, ...(await lists.unhideList(req, req.params.listKey)) })));
-// Delete a list in Zoho (its contacts stay in the account): Owners and Admins.
-router.delete('/zoho-lists/:listKey', requireCapability('mail.configure'), listsLimit, wrap(async (req, res) => res.json({ success: true, ...(await lists.deleteList(req, req.params.listKey, req.body)) })));
 
 router.get('/:id', requireCapability('mail.view'), wrap(async (req, res) => res.json({ success: true, campaign: await svc.getOne(req, req.params.id) })));
 router.patch('/:id', requireCapability('mail.compose'), wrap(async (req, res) => res.json({ success: true, campaign: await svc.update(req, req.params.id, req.body) })));

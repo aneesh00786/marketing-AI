@@ -227,3 +227,14 @@
 .ec-picks .link-btn.danger { color: var(--danger-text, #b91c1c); }
 .ec-oldleads { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
 .ec-oldleads span { flex: 1 1 260px; }
+
+/* Sending from contact lists */
+.ec-upload { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; padding: 10px 14px; border-radius: 10px; background: rgba(42, 120, 214, 0.08); font-size: 0.86rem; }
+.ec-upload > span:first-child { display: flex; align-items: center; gap: 8px; }
+.ec-dot { width: 8px; height: 8px; border-radius: 50%; background: #2a78d6; animation: ec-pulse 1.2s ease-in-out infinite; flex: 0 0 auto; }
+@keyframes ec-pulse { 50% { opacity: 0.3; } }
+@media (prefers-reduced-motion: reduce) { .ec-dot { animation: none; } }
+.ec-upload-bar { display: block; height: 6px; border-radius: 999px; background: var(--surface-2, rgba(127,127,127,.15)); overflow: hidden; }
+.ec-upload-bar i { display: block; height: 100%; background: #2a78d6; }
+.ec-legacy { margin: 10px 0 2px; }
+.ec-temp-note { margin: 4px 0; }

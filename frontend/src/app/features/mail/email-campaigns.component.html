@@ -38,7 +38,7 @@
     <button type="button" [class.on]="view === 'campaigns'" [attr.aria-pressed]="view === 'campaigns'" (click)="view = 'campaigns'">Campaigns</button>
     <button type="button" [class.on]="view === 'lists'" [attr.aria-pressed]="view === 'lists'" (click)="view = 'lists'">Contact lists</button>
   </div>
-  <app-zoho-lists *ngIf="view === 'lists'" [zohoReady]="zohoReady" [canManage]="canSend" [canConfigure]="!!zoho?.canConfigure" (toast)="toast.emit($event)" (openZoho)="zohoOpen = true"></app-zoho-lists>
+  <app-contact-lists *ngIf="view === 'lists'" [zohoReady]="zohoReady" [canManage]="canSend" [canConfigure]="!!zoho?.canConfigure" (toast)="toast.emit($event)" (openZoho)="zohoOpen = true"></app-contact-lists>
 
   <div class="ec-grid" [class.has-sel]="!!selected" [hidden]="view !== 'campaigns'">
     <!-- ============ Campaign list ============ -->
@@ -109,7 +109,7 @@
         <h3>How a campaign works</h3>
         <ol>
           <li><b>Details</b> — name the campaign and write the subject line.</li>
-          <li><b>Recipients</b> — pick Zoho mailing lists and/or your leads.</li>
+          <li><b>Recipients</b> — pick your contact lists.</li>
           <li><b>Email content</b> — design the email, or start from a template.</li>
           <li><b>Review &amp; send</b> — check it, approve it, and send it through Zoho.</li>
         </ol>
@@ -149,6 +149,13 @@
         </div>
       </div>
       <div class="note error" *ngIf="selected.status === 'failed' && selected.providerMessage">{{ selected.providerMessage }}</div>
+
+      <!-- Sending from contact lists: the worker puts them into Zoho first -->
+      <div class="ec-upload" *ngIf="selected.status === 'submitting'" role="status">
+        <span><span class="ec-dot" aria-hidden="true"></span>{{ uploadText }}</span>
+        <span class="ec-upload-bar" *ngIf="selected.upload?.total" aria-hidden="true"><i [style.width.%]="uploadPct"></i></span>
+      </div>
+      <p class="muted small ec-temp-note" *ngIf="selected.status === 'submitted' && selected.tempListsPending">The temporary Zoho list(s) for this send are removed once Zoho reports it sent{{ zoho?.connection?.canDeleteLists === false ? ' (reconnect Zoho to allow this)' : '' }}.</p>
 
       <!-- Results exist only once Zoho has the campaign -->
       <app-campaign-metrics *ngIf="!['draft', 'approved'].includes(selected.status)" [campaignId]="selected.id" [report]="selected.report" [zohoStatus]="selected.zohoStatus" [lastCheckedAt]="selected.lastCheckedAt" [status]="selected.status" [canViewRecipients]="canSend" [refreshing]="busy === 'refresh'" (refresh)="refresh()"></app-campaign-metrics>
@@ -222,19 +229,26 @@
 
         <!-- Step 2: Recipients -->
         <section class="ec-pane" [hidden]="step !== 2" aria-label="Recipients">
-          <p class="ec-pane-help">Choose the Zoho mailing lists that receive this email, or pick some contacts inside a list. To email your leads, add them to a list first in <b>Contact lists</b>.
-            <b *ngIf="recipientSummary">Selected: {{ recipientSummary }}.</b></p>
+          <p class="ec-pane-help">Choose the contact lists that receive this email. They are put into Zoho when you send, and removed from Zoho once it is sent. To build lists, use <b>Contact lists</b>.
+            <b *ngIf="recipientSummary">Selected: {{ recipientSummary }}{{ chosenPeople ? ' (' + (chosenPeople | number) + ' people)' : '' }}.</b></p>
 
           <fieldset class="lists ec-rcard">
-            <legend><app-icon name="campaigns" [size]="15"></app-icon>Zoho mailing lists</legend>
+            <legend><app-icon name="leads" [size]="15"></app-icon>Contact lists</legend>
             <div class="ec-lists-empty" *ngIf="!zohoReady">
               <span class="ec-lists-icon" aria-hidden="true"><app-icon name="leads" [size]="18"></app-icon></span>
-              <span>Connect Zoho Campaigns to choose mailing lists.</span>
+              <span>Connect Zoho Campaigns to send.</span>
               <button type="button" class="btn btn-secondary btn-sm" (click)="zohoOpen = true"><app-icon name="link" [size]="14"></app-icon>{{ zoho?.canConfigure ? 'Set up Zoho' : 'Details' }}</button>
             </div>
-            <p class="muted small" *ngIf="zohoReady && audiences && !audiences.lists.length">No mailing lists in the connected Zoho account.</p>
+            <p class="muted small" *ngIf="audiences && !mailListOptions.length">No contact lists yet. Create one in Contact lists.</p>
+            <div class="ec-list-row" *ngFor="let l of mailListOptions">
+              <label class="check">
+                <input type="checkbox" [checked]="form.mailListIds.has(l.id)" (change)="toggleMailList(l.id)" [disabled]="!editable || (!l.reachable && !form.mailListIds.has(l.id))" />
+                {{ l.name }} <span class="muted small">({{ l.reachable | number }} can be emailed{{ l.total !== l.reachable ? ' of ' + (l.total | number) : '' }})</span>
+              </label>
+            </div>
+            <p class="muted small ec-legacy" *ngIf="form.listKeys.size || picksByList.size">Zoho lists chosen before contact lists (untick to stop using them):</p>
             <ng-container *ngFor="let l of audiences?.lists || []">
-              <div class="ec-list-row">
+              <div class="ec-list-row" *ngIf="form.listKeys.has(l.key) || picksByList.get(l.key)">
                 <label class="check">
                   <!-- Part-ticked: only some of this list's contacts are selected -->
                   <input type="checkbox" [checked]="form.listKeys.has(l.key)" [indeterminate]="!form.listKeys.has(l.key) && !!picksByList.get(l.key)" (change)="toggleList(l.key)" [disabled]="!editable" />
