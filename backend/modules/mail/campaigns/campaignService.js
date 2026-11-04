@@ -311,7 +311,20 @@ async function approve(ctx, id) {
 
 // ------------------------------------------------------------------ delivery (Zoho, internal)
 
-const marker = row => `(Marketech #${row.id} v${row.version})`;
+/**
+ * Zoho refuses campaign names with special characters ("CampaignName cannot contain special
+ * characters"), so the name and the marker that identifies this version use only letters,
+ * numbers, spaces, hyphens and underscores. The marker ends the name, so it is matched at the end.
+ */
+const marker = row => `Marketech ${row.id}-${row.version}`;
+const zohoCampaignName = row => {
+  const name = String(row.name || '').normalize('NFKC').replace(/[^\p{L}\p{N} _-]+/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
+  return `${name || 'Campaign'} - ${marker(row)}`;
+};
+const isOurCampaign = (name, row) => {
+  const n = String(name || '').trim();
+  return n.endsWith(` ${marker(row)}`) || n.includes(`(Marketech #${row.id} v${row.version})`);
+};
 
 async function setState(id, st, extra = {}) {
   const sets = ['status = ?', 'updated_at = UTC_TIMESTAMP()'];
@@ -365,7 +378,7 @@ async function send(ctx, id, { confirm } = {}) {
     });
     try {
       const res = await zoho.writeCall(ws(ctx), 'createCampaign', {
-        campaignname: `${String(row.name).slice(0, 100)} ${marker(row)}`,
+        campaignname: zohoCampaignName(row),
         from_email: row.from_email,
         ...(row.from_name ? { from_name: row.from_name } : {}),
         subject: toZohoMergeTags(row.subject),
@@ -425,7 +438,7 @@ async function findCreated(ctx, row) {
     throw err;
   });
   const listOf = Object.values(d || {}).find(v => Array.isArray(v) && v.some(x => x && 'campaign_key' in x)) || [];
-  const hit = listOf.find(c => String(c.campaign_name || '').includes(marker(row)));
+  const hit = listOf.find(c => isOurCampaign(c.campaign_name, row));
   return hit ? { key: String(hit.campaign_key), status: hit.campaign_status || null } : null;
 }
 

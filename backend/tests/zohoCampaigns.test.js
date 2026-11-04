@@ -309,6 +309,14 @@ test('validation: required fields, sender domain, placeholders, lists that exist
 
 // ------------------------------------------------------------------ delivery through Zoho
 
+test('send: symbols in the campaign name are dropped for Zoho, which refuses them', async () => {
+  const { ws } = await freshConnected('Odd name');
+  const c = await readyCampaign(ws, { name: 'Spring sale! (50% off) #1 – Café & Co.' });
+  const r = await capi(ws, 'POST', `/${c.id}/send`, { confirm: true });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(apiCalls('createCampaign').at(-1).params.campaignname, `Spring sale 50 off 1 Café Co - Marketech ${c.id}-1`);
+});
+
 test('send: Zoho delivery object is created internally, then sent; exactly once; content served safely', async () => {
   Z.account('acctA', { topics: [{ topicId: 'T1', topicName: 'News' }] });
   await connect(A, 'acctA');
@@ -322,7 +330,8 @@ test('send: Zoho delivery object is created internally, then sent; exactly once;
   const [create] = apiCalls('createCampaign');
   assert.equal(apiCalls('createCampaign').length, 1);
   assert.equal(create.method, 'POST');
-  assert.match(create.params.campaignname, new RegExp(`October newsletter \\(Marketech #${c.id} v1\\)`));
+  assert.equal(create.params.campaignname, `October newsletter - Marketech ${c.id}-1`);
+  assert.match(create.params.campaignname, /^[\p{L}\p{N} _-]+$/u, 'Zoho refuses special characters in campaign names');
   assert.equal(create.params.from_email, 'news@acme-co.io');
   assert.equal(create.params.from_name, 'Acme');
   assert.equal(create.params.subject, 'What is new in October');
@@ -439,7 +448,7 @@ test('clear Zoho rejections leave the campaign editable; "Campaign is sent" is r
   await capi(A, 'PATCH', `/${c.id}`, { subject: 'Fixed subject' });
   await capi(A, 'POST', `/${c.id}/approve`, {});
   assert.equal((await capi(A, 'POST', `/${c.id}/send`, { confirm: true })).status, 200);
-  assert.match(apiCalls('createCampaign').pop().params.campaignname, /v2\)/);
+  assert.match(apiCalls('createCampaign').pop().params.campaignname, /-2$/);
 
   const c2 = await readyCampaign(A, { name: 'Dashboard-sent' });
   Z.sendResponder = () => h.json(200, { status: 'error', code: '6600', message: 'Campaign is sent.' });
