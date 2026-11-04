@@ -632,6 +632,11 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     http.expectOne(r => r.method === 'POST' && r.url.endsWith('/campaigns/5/validate')).flush({ validation: { ready: false, problems: ['Add a subject.'], warnings: [] } });
     fixture.detectChanges();
     expect(el().querySelector('.ec-checks')!.textContent).toContain('Add a subject.');
+    expect(el().querySelector('.ec-fill-go')).withContext('nothing to fill in').toBeNull();
+    comp.validation = { ready: false, problems: ['Replace the placeholders: [Your name].'], warnings: [] };
+    fixture.detectChanges();
+    (el().querySelector('.ec-fill-go') as HTMLButtonElement).click();
+    expect(comp.step).toBe(3);
     (comp as any).setSelected({ id: 7, name: 'Sent one', status: 'submitted', version: 2, html: ORIGINAL, lists: [] });
     expect(comp.step).toBe(4);
   });

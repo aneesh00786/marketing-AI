@@ -200,6 +200,11 @@ export class EmailCampaignsComponent implements OnInit {
     if (this.selected?.approved) return 'Approved, ready to send';
     return 'Check and approve';
   }
+  /** The check found [placeholders] or the sample link: step 3 has a box for each. */
+  get hasFillProblems(): boolean {
+    return !!this.validation?.problems?.some((p: string) => p.startsWith('Replace the placeholders') || p.includes('sample link'));
+  }
+
   goStep(n: number): void {
     if (n < 1 || n > 4) return;
     this.step = n;

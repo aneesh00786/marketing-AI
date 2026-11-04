@@ -210,3 +210,5 @@
 /* Campaigns | Contact lists */
 .ec-views { align-self: flex-start; margin: 4px 0 12px; }
 .ec-grid[hidden] { display: none !important; }
+
+.ec-fill-go { margin-top: 8px; }

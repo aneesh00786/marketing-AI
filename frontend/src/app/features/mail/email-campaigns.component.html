@@ -273,7 +273,8 @@
             <p class="muted small" *ngIf="busy === 'validate'">Checking the campaign…</p>
             <ng-container *ngIf="validation">
               <p *ngIf="validation.ready" class="mx-callout ok"><app-icon name="check" [size]="15"></app-icon>Everything looks good. {{ selected.status === 'draft' ? 'Approve it, then send.' : '' }}</p>
-              <div *ngIf="validation.problems.length" class="mx-callout error ec-checks"><b>Fix before approving:</b><ul class="problems"><li *ngFor="let p of validation.problems">{{ p }}</li></ul></div>
+              <div *ngIf="validation.problems.length" class="mx-callout error ec-checks"><b>Fix before approving:</b><ul class="problems"><li *ngFor="let p of validation.problems">{{ p }}</li></ul>
+                <button *ngIf="editable && hasFillProblems" type="button" class="btn btn-secondary btn-sm ec-fill-go" (click)="goStep(3)">Fill in the template →</button></div>
               <div *ngIf="validation.warnings.length" class="mx-callout warn ec-checks"><b>Worth a look:</b><ul class="warnings"><li *ngFor="let w of validation.warnings">{{ w }}</li></ul></div>
             </ng-container>
             <button type="button" class="link-btn" (click)="validate()" [disabled]="busy === 'validate'" *ngIf="busy !== 'validate'">{{ validation ? 'Check again' : 'Check for problems' }}</button>
