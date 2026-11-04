@@ -146,4 +146,23 @@ async function cleanupTempLists(row) {
   return true;
 }
 
-module.exports = { runUploadJob, cleanupTempLists, uploadLists };
+/**
+ * Starts this campaign's waiting upload job in this process (send, and each status check while it
+ * waits), so sending never depends on the worker running. The job is claimed first, so it runs once;
+ * the worker remains a fallback. Returns true when it was started here.
+ */
+async function kickUpload(workspaceId, campaignId) {
+  if (process.env.ZOHO_UPLOAD_INLINE === '0') return false; // tests: run explicitly
+  const job = await get(`SELECT * FROM background_jobs WHERE workspace_id = ? AND job_type = 'zoho_campaign_upload' AND status = 'queued'
+    AND JSON_EXTRACT(payload_json, '$.campaignId') = ? ORDER BY id DESC LIMIT 1`, [workspaceId, Number(campaignId)]);
+  if (!job) return false;
+  const claim = await run("UPDATE background_jobs SET status = 'running', locked_by = 'api', locked_at = UTC_TIMESTAMP(), attempt_count = attempt_count + 1 WHERE id = ? AND status = 'queued'", [job.id]);
+  if (!claim.changes) return false;
+  const jobs = require('../../social/jobsService');
+  setImmediate(async () => {
+    try { await jobs.complete(job.id, await runUploadJob(job)); } catch (err) { await jobs.fail({ ...job, max_attempts: 0 }, err).catch(() => null); }
+  });
+  return true;
+}
+
+module.exports = { runUploadJob, cleanupTempLists, uploadLists, kickUpload };

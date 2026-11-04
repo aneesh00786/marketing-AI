@@ -16,6 +16,7 @@ process.env.ZOHO_CAMPAIGNS_CLIENT_SECRET = 'test-client-secret';
 process.env.APP_BASE_URL = 'https://app.marketech.test';
 // Connecting copies Zoho's lists right away; only the test about that copy lets it run.
 process.env.ZOHO_IMPORT_INLINE = '0';
+process.env.ZOHO_UPLOAD_INLINE = '0';
 const DELIVERY_SCOPES = 'ZohoCampaigns.campaign.CREATE,ZohoCampaigns.campaign.READ,ZohoCampaigns.campaign.UPDATE,ZohoCampaigns.contact.READ';
 const ALL_SCOPES = `${DELIVERY_SCOPES},ZohoCampaigns.contact.CREATE`;
 // What the app asks for: contact.UPDATE is optional (names for personalization).
@@ -1351,6 +1352,32 @@ test('send to a Marketech.ai list: uploaded to a Zoho list of the same name, sen
   assert.ok((await row(c.id)).temp_lists_deleted_at);
   assert.ok(await db().get("SELECT 1 AS x FROM email_suppressions WHERE workspace_id = ? AND email = 'p1@shop.io'", [ws.workspaceId]));
   assert.equal((await db().get("SELECT in_zoho FROM mail_contacts WHERE workspace_id = ? AND email = 'p0@shop.io'", [ws.workspaceId])).in_zoho, 1);
+});
+
+test('sending starts the upload right away without the worker; a waiting upload is started by a status check', async () => {
+  const { ws, acct } = await freshConnected('Upload inline');
+  const made = await capi(ws, 'POST', '/contact-lists', { name: 'Just me', emails: ['me@x.io'] });
+  const c = (await capi(ws, 'POST', '', { ...GOOD, lists: [], mailListIds: [made.data.list.id] })).data.campaign;
+  await capi(ws, 'POST', `/${c.id}/approve`, {});
+  const waitFor = async () => { for (let i = 0; i < 100; i++) { if ((await row(c.id)).status !== 'submitting') return; await new Promise(r => setTimeout(r, 20)); } };
+  process.env.ZOHO_UPLOAD_INLINE = '1';
+  try {
+    assert.equal((await capi(ws, 'POST', `/${c.id}/send`, { confirm: true })).status, 200);
+    await waitFor();
+  } finally { process.env.ZOHO_UPLOAD_INLINE = '0'; }
+  assert.equal((await row(c.id)).status, 'submitted', 'sent without the worker');
+  assert.deepEqual(Object.values(acct.added).flat(), ['me@x.io']);
+  // An upload left waiting (e.g. queued before this change) is started by the next status check.
+  const c2 = (await capi(ws, 'POST', '', { ...GOOD, lists: [], mailListIds: [made.data.list.id] })).data.campaign;
+  await capi(ws, 'POST', `/${c2.id}/approve`, {});
+  await capi(ws, 'POST', `/${c2.id}/send`, { confirm: true });
+  assert.equal((await row(c2.id)).submit_stage, 'upload');
+  process.env.ZOHO_UPLOAD_INLINE = '1';
+  try {
+    await capi(ws, 'POST', `/${c2.id}/refresh`, {});
+    for (let i = 0; i < 100 && (await row(c2.id)).status === 'submitting'; i++) await new Promise(r => setTimeout(r, 20));
+  } finally { process.env.ZOHO_UPLOAD_INLINE = '0'; }
+  assert.equal((await row(c2.id)).status, 'submitted');
 });
 
 test('upload failure leaves the campaign not sent; sending again reuses what was uploaded', async () => {

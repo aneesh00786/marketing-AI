@@ -459,6 +459,7 @@ async function send(ctx, id, { confirm } = {}) {
     await setState(row.id, 'submitting', { submit_stage: 'upload', upload_total: null, upload_done: 0 });
     await require('../../social/jobsService').enqueue(ws(ctx), 'zoho_campaign_upload', { campaignId: row.id, version: row.version },
       { idempotencyKey: `zoho_campaign_upload:${row.id}:${row.version}:${Date.now()}`, createdBy: ctx.auth.userId, maxAttempts: 1 });
+    await require('../contacts/zohoUpload').kickUpload(ws(ctx), row.id).catch(() => false);
     return getOne(ctx, row.id);
   }
   return deliver(ctx, row);
@@ -614,6 +615,8 @@ async function refresh(ctx, id) {
     }
     return getOne(ctx, row.id);
   }
+  // An upload still waiting for the worker is started here (the page checks every few seconds).
+  if (row.status === 'submitting' && row.submit_stage === 'upload') await require('../contacts/zohoUpload').kickUpload(ws(ctx), row.id).catch(() => false);
   if (row.status === 'submitting' && row.submit_stage === 'upload' && Date.now() - new Date(row.updated_at).getTime() > UPLOAD_STALL_MS) {
     // The worker stopped while uploading (nothing was emailed): it can be sent again.
     await run("UPDATE mail_campaigns SET status = 'failed', provider_message = 'Uploading the lists to Zoho stopped before sending. Nothing was emailed. Send again.' WHERE id = ? AND status = 'submitting' AND submit_stage = 'upload'", [row.id]);
