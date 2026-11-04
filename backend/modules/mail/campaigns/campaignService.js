@@ -446,7 +446,8 @@ async function send(ctx, id, { confirm } = {}) {
     }
     return fail(ctx, row, 'send', err);
   }
-  return getOne(ctx, row.id);
+  // Figures right away (Zoho may still be sending): the result never depends on this read.
+  try { return await refresh(ctx, row.id); } catch { return getOne(ctx, row.id); }
 }
 
 async function fail(ctx, row, stage, err) {

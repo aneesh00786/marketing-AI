@@ -22,7 +22,8 @@ import { CONTACT_FIELDS, ContactField, contactTag, fallbackExample, fallbackQues
 
 /** A sent campaign's figures are read from Zoho when it is opened, at most this often. */
 const REPORT_MAX_AGE_MS = 5 * 60 * 1000;
-const REPORT_POLL_MS = 60 * 1000;
+/** After sending: check soon, then less often (seconds), about 15 minutes in all. */
+const REPORT_POLL_S = [10, 20, 30, 60, 60, 120, 120, 300, 300];
 
 /**
  * Email campaigns: written, validated, approved and sent from Marketech.ai; delivered by Zoho.
@@ -392,16 +393,16 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
 
   /** After sending, checks Zoho's figures a few times while the campaign stays open. */
   private reportPoll: any = null;
-  private pollReport(id: number, tries = 6): void {
+  private pollReport(id: number, step = 0): void {
     clearTimeout(this.reportPoll);
-    if (tries <= 0) return;
+    if (step >= REPORT_POLL_S.length) return;
     this.reportPoll = setTimeout(() => {
       if (this.selected?.id !== id || this.selected.status !== 'submitted') return;
       this.http.post<any>(`${this.base}/${id}/refresh`, {}).subscribe({
-        next: r => { if (this.selected?.id === id) this.selected = r.campaign; this.pollReport(id, tries - 1); },
-        error: () => this.pollReport(id, tries - 1)
+        next: r => { if (this.selected?.id === id) this.selected = r.campaign; this.pollReport(id, step + 1); },
+        error: () => this.pollReport(id, step + 1)
       });
-    }, REPORT_POLL_MS);
+    }, REPORT_POLL_S[step] * 1000);
   }
 
   ngOnDestroy(): void { clearTimeout(this.reportPoll); }
@@ -519,7 +520,7 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
     if (!this.sendConfirm || this.busy === 'send') return;
     this.busy = 'send';
     this.http.post<any>(`${this.base}/${this.selected.id}/send`, { confirm: true }).subscribe({
-      next: r => { this.busy = ''; this.sendConfirm = null; this.setSelected(r.campaign); this.load(); this.pollReport(r.campaign.id); this.toast.emit('Zoho accepted the campaign for sending. Results appear here as Zoho sends; this page checks every minute.'); },
+      next: r => { this.busy = ''; this.sendConfirm = null; this.setSelected(r.campaign); this.load(); this.pollReport(r.campaign.id); this.toast.emit('Zoho accepted the campaign. Results are shown below and update on their own while Zoho sends.'); },
       error: e => { this.busy = ''; this.sendConfirm = null; this.toast.emit(this.err(e)); this.open(this.selected); this.load(); }
     });
   }

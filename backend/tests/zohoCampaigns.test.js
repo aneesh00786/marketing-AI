@@ -332,6 +332,19 @@ test('topics: the account\'s only topic is used automatically; with several one 
   assert.equal(apiCalls('createCampaign').at(-1).params.topicId, undefined);
 });
 
+test('send: if Zoho\'s figures cannot be read right after sending, the send still succeeds', async () => {
+  const { ws } = await freshConnected('Figures down');
+  const c = await readyCampaign(ws);
+  const routes = Z.routes[1].respond;
+  Z.routes[1].respond = (url, init) => (url.includes('getcampaigndetails') ? h.json(500, {}) : routes(url, init));
+  try {
+    const r = await capi(ws, 'POST', `/${c.id}/send`, { confirm: true });
+    assert.equal(r.status, 200, JSON.stringify(r.data));
+    assert.equal(r.data.campaign.status, 'submitted');
+    assert.equal(r.data.campaign.report, null);
+  } finally { Z.routes[1].respond = routes; }
+});
+
 test('send: symbols in the campaign name are dropped for Zoho, which refuses them', async () => {
   const { ws } = await freshConnected('Odd name');
   const c = await readyCampaign(ws, { name: 'Spring sale! (50% off) #1 – Café & Co.' });
@@ -348,7 +361,8 @@ test('send: Zoho delivery object is created internally, then sent; exactly once;
   const sent = await capi(A, 'POST', `/${c.id}/send`, { confirm: true });
   assert.equal(sent.status, 200, JSON.stringify(sent.data));
   assert.equal(sent.data.campaign.status, 'submitted');
-  assert.equal(sent.data.campaign.zohoStatus, 'inprogress');
+  assert.equal(sent.data.campaign.zohoStatus, 'Sent', 'the send reads Zoho\'s status and figures straight away');
+  assert.equal(sent.data.campaign.report.emails_sent_count, '120', 'results show without a manual refresh');
 
   const [create] = apiCalls('createCampaign');
   assert.equal(apiCalls('createCampaign').length, 1);
