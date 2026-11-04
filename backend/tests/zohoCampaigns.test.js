@@ -309,6 +309,29 @@ test('validation: required fields, sender domain, placeholders, lists that exist
 
 // ------------------------------------------------------------------ delivery through Zoho
 
+test('topics: the account\'s only topic is used automatically; with several one must be chosen; none sends no topic', async () => {
+  const one = await freshConnected('Topic one', { account: { topics: [{ topicId: 'T9', topicName: 'Marketing' }] } });
+  const c1 = await readyCampaign(one.ws);
+  assert.equal(c1.topicId, null);
+  assert.equal((await capi(one.ws, 'POST', `/${c1.id}/send`, { confirm: true })).status, 200);
+  assert.equal(apiCalls('createCampaign').at(-1).params.topicId, 'T9', 'Zoho requires a topic when topic management is on');
+
+  const many = await freshConnected('Topic many', { account: { topics: [{ topicId: 'T1', topicName: 'News' }, { topicId: 'T2', topicName: 'Offers' }] } });
+  const draft = (await capi(many.ws, 'POST', '', GOOD)).data.campaign;
+  const v = await capi(many.ws, 'POST', `/${draft.id}/validate`, {});
+  assert.ok(v.data.validation.problems.some(p => /choose the topic/.test(p)), JSON.stringify(v.data));
+  assert.equal((await capi(many.ws, 'POST', `/${draft.id}/approve`, {})).status, 400);
+  await capi(many.ws, 'PATCH', `/${draft.id}`, { topicId: 'T2' });
+  assert.equal((await capi(many.ws, 'POST', `/${draft.id}/approve`, {})).status, 200);
+  assert.equal((await capi(many.ws, 'POST', `/${draft.id}/send`, { confirm: true })).status, 200);
+  assert.equal(apiCalls('createCampaign').at(-1).params.topicId, 'T2');
+
+  const none = await freshConnected('Topic none');
+  const c3 = await readyCampaign(none.ws);
+  assert.equal((await capi(none.ws, 'POST', `/${c3.id}/send`, { confirm: true })).status, 200);
+  assert.equal(apiCalls('createCampaign').at(-1).params.topicId, undefined);
+});
+
 test('send: symbols in the campaign name are dropped for Zoho, which refuses them', async () => {
   const { ws } = await freshConnected('Odd name');
   const c = await readyCampaign(ws, { name: 'Spring sale! (50% off) #1 – Café & Co.' });

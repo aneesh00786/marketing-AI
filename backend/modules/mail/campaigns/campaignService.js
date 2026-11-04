@@ -221,18 +221,38 @@ const removeContacts = (ctx, id, input) => changeContacts(ctx, id, input, contac
 /** Leads to choose from, with why each one can or cannot be emailed. */
 const leadOptions = (ctx, query) => require('../productEmails/service').listRecipients(ctx, query, { maxSelect: contactsSvc.MAX_CONTACTS, maxPageSize: 2000, requireConsent: false });
 
+/**
+ * Topics of the Zoho account. Accounts with topic management must give every campaign a topic
+ * (Zoho otherwise answers "Mandatory Fields are not found"); others have none.
+ */
+async function fetchTopics(workspaceId) {
+  try {
+    const t = await zoho.readCall(workspaceId, 'topics', { details: JSON.stringify({ from_index: 0, range: 100 }) });
+    return (t.topicDetails || []).map(x => ({ id: String(x.topicId), name: x.topicName || null }));
+  } catch (err) {
+    if (err.code === 'ZOHO_REAUTH_REQUIRED' || err.code === 'ZOHO_UNAUTHORIZED') throw err;
+    return []; // no topic management
+  }
+}
+
+/** The topic this campaign goes out under: its own, or the account's only topic; null when there are none. */
+function campaignTopic(row, topics) {
+  if (row.topic_id) return row.topic_id;
+  return topics.length === 1 ? topics[0].id : null;
+}
+
+function topicProblem(row, topics) {
+  if (!topics.length) return null;
+  if (row.topic_id && !topics.some(t => t.id === String(row.topic_id))) return 'The chosen Zoho topic no longer exists. Choose another topic (Recipients).';
+  if (!campaignTopic(row, topics)) return 'Your Zoho account uses topics: choose the topic for this campaign (Recipients).';
+  return null;
+}
+
 /** Mailing lists and topics of the connected Zoho account, to choose recipients from. */
 async function zohoAudiences(ctx) {
   await zoho.assertReady(ws(ctx));
   const lists = (await contactsSvc.fetchLists(ws(ctx))).filter(l => !contactsSvc.isSyncList(l.name));
-  let topics = [];
-  try {
-    const t = await zoho.readCall(ws(ctx), 'topics', { details: JSON.stringify({ from_index: 0, range: 100 }) });
-    topics = (t.topicDetails || []).map(x => ({ id: String(x.topicId), name: x.topicName || null }));
-  } catch (err) {
-    if (err.code === 'ZOHO_REAUTH_REQUIRED' || err.code === 'ZOHO_UNAUTHORIZED') throw err;
-    topics = []; // topics are optional (only for accounts with topic management)
-  }
+  const topics = await fetchTopics(ws(ctx));
   return { lists, topics, note: 'Lists and consent are managed in Zoho Campaigns. Contacts you select are added to a new Zoho list when the campaign is sent.' };
 }
 
@@ -284,6 +304,8 @@ async function validateRow(ctx, row, { checkZoho = true } = {}) {
       const available = new Set((await contactsSvc.fetchLists(ws(ctx))).map(l => l.key));
       const missing = keys.filter(k => !available.has(k));
       if (missing.length) problems.push(`These lists no longer exist in Zoho: ${missing.join(', ')}.`);
+      const tp = topicProblem(row, await fetchTopics(ws(ctx)));
+      if (tp) problems.push(tp);
     } catch (err) {
       problems.push(err.message);
     }
@@ -364,6 +386,16 @@ async function send(ctx, id, { confirm } = {}) {
   if (!key) {
     const keys = parse(row.list_keys_json, []);
     await setState(row.id, 'submitting', { submit_stage: 'sync' });
+    // The topic first: an account with topic management refuses a campaign without one.
+    let topicId = null;
+    try {
+      const topics = await fetchTopics(ws(ctx));
+      const tp = topicProblem(row, topics);
+      if (tp) throw httpError(400, tp, 'TOPIC_REQUIRED');
+      topicId = campaignTopic(row, topics);
+    } catch (err) {
+      return fail(ctx, row, 'sync', err);
+    }
     try {
       const contactList = await contactsSvc.syncForSend(ctx, row, { listKeys: keys.slice() });
       if (contactList) keys.push(contactList);
@@ -384,7 +416,7 @@ async function send(ctx, id, { confirm } = {}) {
         subject: toZohoMergeTags(row.subject),
         content_url: `${publicBaseUrl()}/api/v1/mail/campaigns/content/${token}`,
         list_details: JSON.stringify(Object.fromEntries(keys.map(k => [k, []]))),
-        ...(row.topic_id ? { topicId: row.topic_id } : {})
+        ...(topicId ? { topicId } : {})
       });
       key = String(res.campaignKey || res.campaign_key || '');
       if (!KEY_RE.test(key)) throw Object.assign(new Error('Zoho did not return a campaign key.'), { outcomeUnknown: true, code: 'ZOHO_BAD_RESPONSE' });

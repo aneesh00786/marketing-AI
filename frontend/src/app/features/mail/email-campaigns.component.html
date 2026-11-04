@@ -237,11 +237,12 @@
               <app-campaign-contact-rows *ngIf="!form.listKeys.has(l.key) && picksByList.get(l.key) as picks" [contacts]="picks" [editable]="editable" (remove)="removeContact($event)"></app-campaign-contact-rows>
             </ng-container>
             <p class="muted small" *ngIf="!audiences && selected.lists.length">Selected: {{ selectedListNames }}</p>
-            <label *ngIf="audiences?.topics?.length" class="ec-topic">Topic (optional)
+            <label *ngIf="audiences?.topics?.length" class="ec-topic">Zoho topic <span class="req" aria-hidden="true" *ngIf="audiences!.topics.length > 1">*</span>
               <select class="hud-input" [(ngModel)]="form.topicId" [disabled]="!editable">
-                <option value="">None</option>
+                <option value="">{{ audiences!.topics.length === 1 ? (audiences!.topics[0].name || 'The only topic') + ' (used automatically)' : 'Choose a topic…' }}</option>
                 <option *ngFor="let t of audiences!.topics" [value]="t.id">{{ t.name || t.id }}</option>
               </select>
+              <small class="muted">Your Zoho account uses topics, so every campaign needs one.</small>
             </label>
           </fieldset>
 
