@@ -460,6 +460,39 @@ async function fail(ctx, row, stage, err) {
   throw err;
 }
 
+/**
+ * The parts of Zoho's campaign details a marketer uses: when it was sent, topic, devices, email
+ * clients and browsers, locations and the lists it went to (counts only, no addresses).
+ */
+function insightsOf(d) {
+  const counts = o => (o && typeof o === 'object'
+    ? Object.entries(o).map(([label, v]) => ({ label: String(label).slice(0, 60), value: Number(v) || 0 })).filter(x => x.value > 0).sort((a, b) => b.value - a.value).slice(0, 20)
+    : []);
+  const ua = d.useragentstats || {};
+  const det = first(d['campaign-details']) || {};
+  return {
+    sentAt: det.sent_date_string || null,
+    sentTimeZone: det.sent_time_zone_short || det.sent_time_zone || null,
+    topic: det.topic_name || null,
+    replyTo: det.reply_to || null,
+    devices: [
+      ...counts(ua.computer_percent).map(x => ({ ...x, label: `Computer · ${x.label}` })),
+      ...counts(ua.mobile_percent).map(x => ({ ...x, label: `Mobile · ${x.label}` })),
+      ...counts(ua.tablets_percent).map(x => ({ ...x, label: `Tablet · ${x.label}` }))
+    ],
+    emailClients: counts(ua.emailclients_percent),
+    browsers: counts(ua.browsers_percent),
+    locations: counts(d['campaign-by-location']),
+    lists: (Array.isArray(d.associated_mailing_lists) ? d.associated_mailing_lists : []).slice(0, 20).map(l => ({
+      name: String(l.listname || '').slice(0, 100) || null,
+      contacts: Number(l.contactscount) || 0,
+      bounces: Number(l.no_of_bounce) || 0,
+      unsubscribes: Number(l.no_of_unsubcontacts) || 0,
+      generated: contactsSvc.isSyncList(l.listname)
+    }))
+  };
+}
+
 const REPORT_FIELDS = ['emails_sent_count', 'delivered_count', 'delivered_percent', 'opens_count', 'open_percent', 'unopened', 'unopened_percent',
   'unique_clicks_count', 'unique_clicked_percent', 'bounces_count', 'bounce_percent', 'hardbounce_count', 'softbounce_count', 'unsub_count', 'unsubscribe_percent',
   'spams_count', 'spam_percent', 'complaints_count', 'forwards_count', 'forward_percent', 'autoreply_count', 'unsent_count'];
@@ -496,6 +529,7 @@ async function refresh(ctx, id) {
   const d = await zoho.readCall(ws(ctx), 'getcampaigndetails', { campaignkey: row.zoho_campaign_key, campaigntype: 'normal' });
   const report = first(d['campaign-reports']);
   const picked = report ? Object.fromEntries(REPORT_FIELDS.filter(f => report[f] !== undefined).map(f => [f, report[f]])) : null;
+  if (picked) picked.insights = insightsOf(d);
   await run('UPDATE mail_campaigns SET zoho_status = ?, report_json = ?, last_checked_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP() WHERE id = ?',
     [d.campaign_status || null, picked ? JSON.stringify(picked) : null, row.id]);
   if (row.status === 'needs_review' && SENT_LIKE.has(norm(d.campaign_status))) {
@@ -558,10 +592,33 @@ function contactsIn(data) {
     // Documented JSON field: contactemailaddress (others kept for older/XML-converted shapes).
     const email = c?.contactemailaddress || c?.contact_email || c?.contactemail || c?.email || c?.['Contact Email'] || null;
     if (!email || typeof email !== 'string') return null;
-    const first = c.firstname || c.contact_fn || c['First Name'] || '';
-    const last = c.lastname || c.contact_ln || c['Last Name'] || '';
-    return { email: email.slice(0, 255), name: `${first} ${last}`.trim().slice(0, 200) || null };
+    const first = c.firstname || c.contactfn || c.contact_fn || c['First Name'] || '';
+    const last = c.lastname || c.contactln || c.contact_ln || c['Last Name'] || '';
+    const txt = v => (typeof v === 'string' && v.trim() ? v.trim().slice(0, 200) : null);
+    const count = v => (v === undefined || v === null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
+    return {
+      email: email.slice(0, 255),
+      name: `${first} ${last}`.trim().slice(0, 200) || null,
+      company: txt(c.companyname),
+      phone: txt(c.phone) || txt(c.mobile),
+      location: [txt(c.city), txt(c.state), txt(c.country)].filter(Boolean).join(', ') || txt(c.location),
+      sentAt: txt(c.sentdate),
+      opens: count(c.numoftimeopened),
+      clicks: count(c.numoftimeclicked ?? c.numofclicks ?? c.clickcount),
+      lastOpenedAt: lastReportTime(c.openreports),
+      lastClickedAt: lastReportTime(c.clickreports)
+    };
   }).filter(Boolean);
+}
+
+/** Zoho's "{id=Nov 04, 2026 11:33 AM, id2=…}" activity list: the latest time as shown, or null. */
+function lastReportTime(v) {
+  if (typeof v !== 'string' || !v.includes('=')) return null;
+  const times = v.replace(/^\{|\}$/g, '').split(/,\s*(?=[^=,]+=)/).map(p => p.split('=').slice(1).join('=').trim()).filter(Boolean);
+  if (!times.length) return null;
+  const parsed = times.map(t => ({ t, ms: Date.parse(t) }));
+  const best = parsed.filter(x => Number.isFinite(x.ms)).sort((a, b) => b.ms - a.ms)[0];
+  return (best ? best.t : times[times.length - 1]).slice(0, 40);
 }
 
 async function recipientActivity(ctx, id, { activity, page = 1 } = {}) {
@@ -581,7 +638,8 @@ async function recipientActivity(ctx, id, { activity, page = 1 } = {}) {
     if (err.providerCode === '6002') return { available: false, reason: 'not_sent', recipients: [], page: p, pageSize: PAGE_SIZE };
     throw err;
   }
-  const recipients = contactsIn(data);
+  // Matched to Leads by email: business, contact person, phone, product and lead status.
+  const recipients = (await withLeadDetails(ws(ctx), contactsIn(data))).map(r => ({ ...r, name: r.name || r.contactName || null }));
   await audit(ctx, 'mail.campaign_recipients_viewed', { resourceType: 'mail_campaign', resourceId: row.id, metadata: { activity, page: p, count: recipients.length } });
   return { available: true, recipients, page: p, pageSize: PAGE_SIZE, hasMore: recipients.length === PAGE_SIZE };
 }

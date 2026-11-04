@@ -212,3 +212,11 @@
 .ec-grid[hidden] { display: none !important; }
 
 .ec-fill-go { margin-top: 8px; }
+
+/* Sent campaign: what went out */
+.ec-sentinfo { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 28px; padding: 10px 14px; border: 1px solid var(--border); border-radius: 12px; margin: 10px 0; }
+.ec-sentinfo span { display: flex; flex-direction: column; min-width: 0; }
+.ec-sentinfo small { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-muted); font-weight: 600; }
+.ec-sentinfo b { font-size: 0.9rem; font-weight: 500; overflow-wrap: anywhere; }
+.ec-sentinfo .btn { margin-left: auto; }
+.ec-view-card { width: min(760px, 100%); }

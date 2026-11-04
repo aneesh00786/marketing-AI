@@ -722,6 +722,12 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     http.expectOne(r => r.method === 'POST' && r.url.endsWith('/campaigns/7/refresh')).flush({ campaign: { ...SENT, report: { emails_sent_count: '10' } } });
     http.expectOne(r => /\/mail\/campaigns$/.test(r.url)).flush({ campaigns: [] });
     expect(comp.selected.report.emails_sent_count).toBe('10');
+    fixture.detectChanges();
+    expect((el().querySelector('.ec-wizard') as HTMLElement).hidden).withContext('steps are not shown once sent').toBeTrue();
+    expect(el().querySelector('.ec-sentinfo')).toBeTruthy();
+    (Array.from(el().querySelectorAll('.ec-sentinfo button')).find(b => b.textContent!.includes('View email')) as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect(el().querySelector('.ec-view-card app-email-preview')).toBeTruthy();
   });
 
   it('figures read in the last few minutes are not read again (unless Zoho had none yet), and drafts never are', () => {

@@ -499,7 +499,8 @@ test('Zoho per-recipient activity: mail.send roles only, read on demand, nothing
     for (const who of [A, approver, mm]) {
       const r = await h.api('GET', `/api/v1/mail/campaigns/${sent.lastID}/recipients?activity=opened`, { token: who.token });
       assert.equal(r.status, 200, JSON.stringify(r.data));
-      assert.deepEqual(r.data.recipients, [{ email: 'ann@acme.io', name: 'Ann Lee' }, { email: 'bo@acme.io', name: null }]);
+      assert.deepEqual(r.data.recipients.map(x => [x.email, x.name, x.leadId]), [['ann@acme.io', 'Ann Lee', null], ['bo@acme.io', null, null]]);
+      assert.equal(r.data.recipients[0].secret_field, undefined, 'only known fields are passed on');
     }
     assert.deepEqual(seen[0], { wsId: A.workspaceId, endpoint: 'getcampaignrecipientsdata', params: { campaignkey: 'zk-1', action: 'openedcontacts', fromindex: '1', range: '50' } });
     const clicked = await h.api('GET', `/api/v1/mail/campaigns/${sent.lastID}/recipients?activity=clicked&page=2`, { token: A.token });
@@ -512,6 +513,30 @@ test('Zoho per-recipient activity: mail.send roles only, read on demand, nothing
     assert.equal((await h.api('GET', `/api/v1/mail/campaigns/${sent.lastID}/recipients?activity=opened`, { token: B.token })).status, 404, 'other workspace');
     assert.ok(await db().get("SELECT 1 AS x FROM audit_logs WHERE action = 'mail.campaign_recipients_viewed' AND resource_id = ?", [String(sent.lastID)]));
     assert.doesNotMatch(JSON.stringify(await db().all("SELECT metadata_json FROM audit_logs WHERE action = 'mail.campaign_recipients_viewed'")), /ann@acme\.io/, 'addresses not stored');
+  } finally { zsvc.readCall = original; }
+});
+
+test('Zoho per-recipient activity: full details as Zoho returns them, matched to the lead', async () => {
+  const zsvc = require('../modules/mail/zoho/zohoService');
+  const original = zsvc.readCall;
+  zsvc.readCall = async () => ({ list_of_details: [{ contactemailaddress: 'Kim@Shop.com.au', contactfn: 'Kim', contactln: 'Lee', companyname: 'Shop', phone: '', mobile: '0400 111 222',
+    city: 'Sydney', state: 'NSW', country: 'Australia', sentdate: '04 Nov 2026, 11:33 AM', numoftimeopened: '3',
+    openreports: '{1=Nov 04, 2026 11:33 AM, 2=Nov 05, 2026 09:10 AM}' }] });
+  try {
+    const lead = await db().run("INSERT INTO leads (workspace_id, name, email, company_name, phone, status, created_at) VALUES (?, 'Kim Lee', 'kim@shop.com.au', 'Shop Pty Ltd', '0400 000 000', 'Contacted', UTC_TIMESTAMP())", [A.workspaceId]);
+    const sent = await db().run("INSERT INTO mail_campaigns (workspace_id, name, status, zoho_campaign_key, created_at, updated_at) VALUES (?, 'Full', 'submitted', 'zk-2', UTC_TIMESTAMP(), UTC_TIMESTAMP())", [A.workspaceId]);
+    const r = await h.api('GET', `/api/v1/mail/campaigns/${sent.lastID}/recipients?activity=opened`, { token: A.token });
+    assert.equal(r.status, 200, JSON.stringify(r.data));
+    const [k] = r.data.recipients;
+    assert.equal(k.name, 'Kim Lee');
+    assert.equal(k.company, 'Shop Pty Ltd', 'the lead\'s business');
+    assert.equal(k.phone, '0400 000 000');
+    assert.equal(k.location, 'Sydney, NSW, Australia');
+    assert.equal(k.sentAt, '04 Nov 2026, 11:33 AM');
+    assert.equal(k.opens, 3);
+    assert.equal(k.lastOpenedAt, 'Nov 05, 2026 09:10 AM');
+    assert.equal(k.leadId, lead.lastID);
+    assert.equal(k.leadStatus, 'Contacted');
   } finally { zsvc.readCall = original; }
 });
 
@@ -536,7 +561,7 @@ test('REVIEW: Zoho recipient lists parse the documented response shape (list_of_
   try {
     const c = await db().run("INSERT INTO mail_campaigns (workspace_id, name, status, zoho_campaign_key, created_at, updated_at) VALUES (?, 'Docs', 'submitted', 'zk-docs', UTC_TIMESTAMP(), UTC_TIMESTAMP())", [A.workspaceId]);
     const r = await h.api('GET', `/api/v1/mail/campaigns/${c.lastID}/recipients?activity=sent`, { token: A.token });
-    assert.deepEqual(r.data.recipients, [{ email: 'john.doe@xyz.com', name: 'John Doe' }]);
+    assert.deepEqual(r.data.recipients.map(x => [x.email, x.name, x.phone]), [['john.doe@xyz.com', 'John Doe', '123']]);
   } finally { zsvc.readCall = original; }
 });
 

@@ -153,7 +153,16 @@
       <!-- Results exist only once Zoho has the campaign -->
       <app-campaign-metrics *ngIf="!['draft', 'approved'].includes(selected.status)" [campaignId]="selected.id" [report]="selected.report" [zohoStatus]="selected.zohoStatus" [lastCheckedAt]="selected.lastCheckedAt" [status]="selected.status" [canViewRecipients]="canSend" [refreshing]="busy === 'refresh'" (refresh)="refresh()"></app-campaign-metrics>
 
-      <!-- Steps: every step stays on the page (hidden when not current) so nothing typed is lost -->
+      <!-- Once sent: what went out, in one line; the results above are the page -->
+      <div class="ec-sentinfo" *ngIf="isSent">
+        <span><small>Subject</small><b>{{ form.subject || '—' }}</b></span>
+        <span><small>From</small><b>{{ fromText }}</b></span>
+        <span><small>Recipients</small><b>{{ recipientSummary || '—' }}</b></span>
+        <button type="button" class="btn btn-secondary btn-sm" (click)="viewEmail = true">👁 View email</button>
+      </div>
+
+      <!-- Steps (until sent): every step stays on the page (hidden when not current) so nothing typed is lost -->
+      <div class="ec-wizard" [hidden]="isSent">
       <nav class="ec-steps" aria-label="Campaign steps">
         <button type="button" *ngFor="let s of steps" class="ec-step" [class.on]="step === s.n" [class.done]="stepDone(s.n)" (click)="goStep(s.n)" [attr.aria-current]="step === s.n ? 'step' : null">
           <span class="ec-step-num" aria-hidden="true"><app-icon *ngIf="stepDone(s.n) && step !== s.n" name="check" [size]="13"></app-icon><ng-container *ngIf="!stepDone(s.n) || step === s.n">{{ s.n }}</ng-container></span>
@@ -300,6 +309,7 @@
                   [title]="!zohoReady ? 'Connect Zoho Campaigns first' : dirty ? 'Save your changes first' : ''"><app-icon name="send" [size]="15"></app-icon>Send through Zoho…</button>
         </ng-container>
       </footer>
+      </div>
     </div>
   </div>
 
@@ -311,6 +321,17 @@
         <button type="button" class="zc-close" (click)="zohoOpen = false" aria-label="Close"><app-icon name="x" [size]="18"></app-icon></button>
       </header>
       <app-zoho-campaigns [oauthResult]="oauthResult" (toast)="toast.emit($event)" (statusChange)="onZohoStatus($event)" (openSettings)="zohoOpen = false; openSettings.emit()"></app-zoho-campaigns>
+    </div>
+  </div>
+
+  <!-- Popup: the email as sent -->
+  <div class="zc-backdrop ec-pop" *ngIf="viewEmail && selected" (click)="viewEmail = false">
+    <div class="zc-card ec-pop-card ec-view-card" role="dialog" aria-modal="true" aria-labelledby="ec-view-title" (click)="$event.stopPropagation()">
+      <header class="zc-head">
+        <div><h3 id="ec-view-title">{{ form?.subject || 'Email' }}</h3><p class="mx-desc">From {{ fromText }}. Zoho filled in each recipient's name.</p></div>
+        <button type="button" class="zc-close" (click)="viewEmail = false" aria-label="Close"><app-icon name="x" [size]="18"></app-icon></button>
+      </header>
+      <app-email-preview [html]="form?.html || ''" [contentKey]="'sent-' + selected.id" [title]="'Email of ' + (form?.name || 'campaign')" emptyText="No content."></app-email-preview>
     </div>
   </div>
 

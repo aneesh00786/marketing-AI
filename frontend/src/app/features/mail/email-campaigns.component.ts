@@ -201,6 +201,10 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
     if (this.selected?.approved) return 'Approved, ready to send';
     return 'Check and approve';
   }
+  /** Sent (or being settled with Zoho): the page shows results, not the steps. */
+  get isSent(): boolean { return this.selected?.status === 'submitted' || this.selected?.status === 'needs_review'; }
+  viewEmail = false;
+
   /** The check found [placeholders] or the sample link: step 3 has a box for each. */
   get hasFillProblems(): boolean {
     return !!this.validation?.problems?.some((p: string) => p.startsWith('Replace the placeholders') || p.includes('sample link'));
@@ -404,7 +408,7 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
 
   private setSelected(c: any): void {
     const fresh = this.selected?.id !== c.id;
-    if (fresh) { this.onContacts(null); this.subjectCaret = -1; this.subjectAsk = null; this.senderAdding = false; this.senderError = ''; }
+    if (fresh) { this.viewEmail = false; this.onContacts(null); this.subjectCaret = -1; this.subjectAsk = null; this.senderAdding = false; this.senderError = ''; }
     this.selected = c;
     this.validation = null;
     this.form = {

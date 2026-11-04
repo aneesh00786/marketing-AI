@@ -35,7 +35,7 @@
       </ng-container>
     </figure>
   </div>
-  <p class="cm-muted" *ngIf="report && canOpenLists">Click a bar or figure to see the people behind it.</p>
+  <p class="cm-muted" *ngIf="report && canOpenLists">Click any figure or bar to see the people behind it.</p>
 
   <ng-template #barRow let-b let-tone="tone">
     <button type="button" class="cm-bar" *ngIf="canOpen(b.activity); else staticBar" [class.on]="isOpen(b.activity)" [ngClass]="tone" (click)="openActivity(b.activity)"
@@ -71,32 +71,88 @@
   <p class="cm-note" *ngIf="report">Totals as reported by Zoho Campaigns when last refreshed. Opens are an estimate: image blocking, caching and privacy features distort them.</p>
 
   <ng-container *ngIf="sent">
-    <div class="cm-recips" #recips *ngIf="canViewRecipients">
-      <button type="button" class="btn btn-secondary btn-sm" *ngIf="!showRecipients" (click)="openRecipients()">Show recipient activity</button>
-      <ng-container *ngIf="showRecipients">
-        <div class="cm-recips-bar">
-          <label>Activity
-            <select class="hud-input" [(ngModel)]="activity" (ngModelChange)="loadRecipients(1)" aria-label="Recipient activity">
-              <option *ngFor="let a of activities" [value]="a.key">{{ a.label }}</option>
-            </select>
-          </label>
-          <button type="button" class="link-btn" (click)="showRecipients = false">Hide</button>
-        </div>
-        <p class="cm-muted" *ngIf="loading">Loading from Zoho…</p>
-        <div class="note error" *ngIf="error" role="alert">{{ error }} <button type="button" class="link-btn" (click)="loadRecipients(page)">Try again</button></div>
-        <p class="cm-muted" *ngIf="!loading && !error && notSent">Zoho has no recipient data for this campaign yet.</p>
-        <p class="cm-muted" *ngIf="!loading && !error && !notSent && !recipients.length">No recipients in this group{{ page > 1 ? ' on this page' : '' }}.</p>
-        <ul class="cm-list" *ngIf="recipients.length">
-          <li *ngFor="let r of recipients"><span>{{ r.email }}</span><small *ngIf="r.name">{{ r.name }}</small></li>
-        </ul>
-        <div class="cm-pager" *ngIf="page > 1 || hasMore">
-          <button type="button" class="btn btn-secondary btn-sm" (click)="loadRecipients(page - 1)" [disabled]="page <= 1 || loading">Previous</button>
-          <span class="cm-muted">Page {{ page }}</span>
-          <button type="button" class="btn btn-secondary btn-sm" (click)="loadRecipients(page + 1)" [disabled]="!hasMore || loading">Next</button>
-        </div>
-        <p class="cm-note">Read from Zoho when you open this list; not stored in Marketech.ai. Zoho does not report when each recipient opened or clicked.</p>
-      </ng-container>
+    <div class="cm-recips-open" *ngIf="canViewRecipients">
+      <button type="button" class="btn btn-secondary btn-sm" (click)="openActivity('sent')">👥 View recipients and their activity</button>
     </div>
     <p class="cm-note" *ngIf="!canViewRecipients">Recipient-level activity is visible to owners, admins, marketing managers and approvers.</p>
   </ng-container>
+
+  <!-- Insights: what Zoho reports about where and how the email was read -->
+  <div class="cm-insights" *ngIf="insights as ins">
+    <div class="cm-facts">
+      <span *ngIf="ins.sentAt"><small>Sent</small><b>{{ ins.sentAt }}{{ ins.sentTimeZone ? ' ' + ins.sentTimeZone : '' }}</b></span>
+      <span *ngIf="ins.topic"><small>Topic</small><b>{{ ins.topic }}</b></span>
+      <span *ngIf="ins.replyTo"><small>Replies go to</small><b>{{ ins.replyTo }}</b></span>
+    </div>
+    <div class="cm-charts">
+      <figure class="cm-card" *ngFor="let g of insightGroups; trackBy: trackLabel">
+        <figcaption>{{ g.label }} <small class="cm-scale" *ngIf="g.hint">{{ g.hint }}</small></figcaption>
+        <p class="cm-muted" *ngIf="!g.rows.length">{{ g.empty }}</p>
+        <div class="cm-bar static reach" *ngFor="let b of g.rows; trackBy: trackLabel" [title]="b.label + ': ' + b.value">
+          <span class="cm-bar-label">{{ b.label }}</span>
+          <span class="cm-track" aria-hidden="true"><i [style.width.%]="b.pct" [class.some]="b.value > 0"></i></span>
+          <b class="cm-bar-value">{{ b.value | number }}</b>
+        </div>
+      </figure>
+      <figure class="cm-card" *ngIf="ins.lists?.length">
+        <figcaption>Lists it went to</figcaption>
+        <div class="cm-listrow" *ngFor="let l of ins.lists">
+          <span class="cm-bar-label">{{ l.generated ? 'Selected contacts' : (l.name || 'List') }}</span>
+          <small>{{ l.contacts | number }} contact(s){{ l.bounces ? ' · ' + l.bounces + ' bounced' : '' }}{{ l.unsubscribes ? ' · ' + l.unsubscribes + ' unsubscribed' : '' }}</small>
+        </div>
+      </figure>
+    </div>
+  </div>
 </section>
+
+<!-- Popup: the people behind a figure -->
+<div class="cm-backdrop" *ngIf="showRecipients" (click)="closeRecipients()">
+  <div class="cm-pop" role="dialog" aria-modal="true" aria-labelledby="cm-pop-title" (click)="$event.stopPropagation()">
+    <header class="cm-pop-head">
+      <div>
+        <h3 id="cm-pop-title">{{ activityLabel(activity) }} <span class="cm-pop-count" *ngIf="activityCount(activity) !== null">{{ activityCount(activity) | number }}</span></h3>
+        <p class="cm-muted">{{ activityHelp(activity) }}</p>
+      </div>
+      <button type="button" class="cm-x" aria-label="Close" (click)="closeRecipients()">✕</button>
+    </header>
+    <div class="cm-tabs" role="tablist" aria-label="Recipient activity">
+      <button type="button" role="tab" *ngFor="let a of popupActivities" [class.on]="activity === a.key" [attr.aria-selected]="activity === a.key" (click)="selectActivity(a.key)">
+        {{ a.label }}<span *ngIf="activityCount(a.key) !== null"> {{ activityCount(a.key) | number }}</span>
+      </button>
+    </div>
+    <p class="cm-muted" *ngIf="loading">Loading from Zoho…</p>
+    <div class="note error" *ngIf="error" role="alert">{{ error }} <button type="button" class="link-btn" (click)="loadRecipients(page)">Try again</button></div>
+    <p class="cm-muted" *ngIf="!loading && !error && noList(activity)">{{ noList(activity) }}</p>
+    <p class="cm-muted" *ngIf="!loading && !error && !noList(activity) && notSent">Zoho has no recipient data for this campaign yet.</p>
+    <p class="cm-muted" *ngIf="!loading && !error && !noList(activity) && !notSent && !recipients.length">No one in this group{{ page > 1 ? ' on this page' : '' }}.</p>
+    <div class="cm-table" *ngIf="!loading && recipients.length">
+      <table aria-label="Recipients">
+        <thead><tr><th>#</th><th>Contact</th><th>Business</th><th>Email</th><th>Phone</th><th>Location</th><th>Opens</th><th>Last opened</th><th>Clicks</th><th>Lead status</th></tr></thead>
+        <tbody>
+          <tr *ngFor="let r of recipients; let i = index">
+            <td class="cm-n">{{ (page - 1) * pageSize + i + 1 }}</td>
+            <td>{{ r.name || r.contactName || '—' }}</td>
+            <td>{{ r.company || '—' }}</td>
+            <td class="cm-email">{{ r.email }}</td>
+            <td class="cm-nw">{{ r.phone || '—' }}</td>
+            <td>{{ r.location || '—' }}</td>
+            <td class="cm-n">{{ r.opens ?? '—' }}</td>
+            <td class="cm-nw">{{ r.lastOpenedAt || '—' }}</td>
+            <td class="cm-n">{{ r.clicks ?? '—' }}</td>
+            <td><span class="cm-status" *ngIf="r.leadStatus; else noLead">{{ r.leadStatus }}</span><ng-template #noLead><small class="cm-muted">Not in Leads</small></ng-template></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <footer class="cm-pop-foot">
+      <button type="button" class="btn btn-secondary btn-sm" *ngIf="recipients.length" (click)="downloadCsv()">⬇ Download CSV</button>
+      <span class="cm-spacer"></span>
+      <ng-container *ngIf="page > 1 || hasMore">
+        <button type="button" class="btn btn-secondary btn-sm" (click)="loadRecipients(page - 1)" [disabled]="page <= 1 || loading">← Previous</button>
+        <span class="cm-muted">Page {{ page }}</span>
+        <button type="button" class="btn btn-secondary btn-sm" (click)="loadRecipients(page + 1)" [disabled]="!hasMore || loading">Next →</button>
+      </ng-container>
+    </footer>
+    <p class="cm-note">Read from Zoho when you open this list; not stored in Marketech.ai. Business, phone and lead status come from your Leads when the email matches.</p>
+  </div>
+</div>
