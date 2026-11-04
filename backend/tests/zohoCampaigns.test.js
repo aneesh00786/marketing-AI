@@ -805,6 +805,25 @@ test('unsubscribes from an earlier generated list carry over: the next campaign 
   assert.deepEqual(sup.map(s => [s.email, s.reason, s.source]), [[bounce.email, 'bounced', 'zoho_campaigns'], [leave.email, 'unsubscribed', 'zoho_campaigns']]);
 });
 
+test('a list with no unsubscribes or bounces (Zoho code 2502) does not stop the send', async () => {
+  const { ws, acct } = await freshConnected('Sync optout empty');
+  const first = await contactCampaign(ws, [await addLead(ws)]);
+  assert.equal((await capi(ws, 'POST', `/${first.id}/send`, { confirm: true })).status, 200);
+  const next = await contactCampaign(ws, [await addLead(ws)]);
+  const routes = Z.routes[1].respond;
+  let emptyReads = 0;
+  Z.routes[1].respond = (url, init) => (url.includes('getlistsubscribers')
+    ? (emptyReads++, h.json(200, { status: 'error', code: '2502', message: 'Yet,There are no contacts in this list.' }))
+    : routes(url, init));
+  try {
+    const r = await capi(ws, 'POST', `/${next.id}/send`, { confirm: true });
+    assert.equal(r.status, 200, JSON.stringify(r.data));
+    assert.equal((await row(next.id)).status, 'submitted');
+    assert.ok(emptyReads > 0, 'the earlier list was checked for opt-outs');
+    assert.equal(acct.added[(await row(next.id)).contact_list_key].length, 1);
+  } finally { Z.routes[1].respond = routes; }
+});
+
 test('if opt-outs cannot be read from Zoho, no contact is uploaded', async () => {
   const { ws, acct } = await freshConnected('Sync optout down');
   const a = await addLead(ws);

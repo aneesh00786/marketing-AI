@@ -30,7 +30,9 @@ const MAX_LIST_PAGES = 50;
 const OPT_OUT_LISTS = 50; // most recent generated lists read for opt-outs before each upload
 const OPT_OUT_STATUS = { unsub: 'unsubscribed', bounce: 'bounced' };
 const SYNC_LIST_RE = /^Marketech campaign \d+ v\d+ [a-f0-9]{6}$/;
-const EMPTY_CODES = ['2203', '995']; // Zoho reports an empty result as an error code
+// Zoho reports an empty result as an error code: 2502 is "Yet, There are no contacts in this list"
+// (e.g. a list with no unsubscribes or bounces), read before every send.
+const EMPTY_CODES = ['2203', '995', '2502'];
 // Names sent per campaign send: one Zoho call each, kept well inside Zoho's 500 calls/minute.
 const NAME_SYNC_MAX = 300;
 const NAME_SYNC_CONCURRENCY = 4;
