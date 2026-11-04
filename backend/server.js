@@ -131,6 +131,8 @@ app.use('/api', apiGate({
     /^\/api\/v1\/mail\/assets\/[A-Za-z0-9_-]{43}$/,
     // Unsubscribe links in product emails carry a random per-recipient token.
     /^\/api\/v1\/mail\/unsubscribe\/[a-f0-9]{40}$/,
+    // Campaign unsubscribe links (signed per campaign; the address is checked against the campaign).
+    /^\/api\/v1\/mail\/unsubscribe\/c\/\d{1,10}-[a-f0-9]{32}$/,
     // Email tracking: open pixel and tracked links (opaque per-email/per-link tokens) and the
     // ZeptoMail webhook (signature-verified; off unless ZEPTOMAIL_WEBHOOKS_ENABLED=1).
     /^\/api\/v1\/mail\/t\/o\/[a-f0-9]{32}\.gif$/,

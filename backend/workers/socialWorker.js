@@ -145,7 +145,7 @@ async function processAutomation() {
  */
 async function processZohoCleanup() {
   try {
-    const rows = await all(`SELECT id, workspace_id FROM mail_campaigns WHERE status = 'submitted' AND temp_lists_json IS NOT NULL
+    const rows = await all(`SELECT id, workspace_id FROM mail_campaigns WHERE status = 'submitted' AND (temp_lists_json IS NOT NULL OR contact_list_key IS NOT NULL)
       AND temp_lists_deleted_at IS NULL AND submitted_at < UTC_TIMESTAMP() - INTERVAL 1 MINUTE ORDER BY submitted_at LIMIT 5`);
     const svc = require('../modules/mail/campaigns/campaignService');
     for (const r of rows) {

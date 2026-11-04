@@ -125,12 +125,14 @@ async function runUploadJob(job) {
 }
 
 /**
- * After Zoho reports the campaign Sent: keeps the temporary lists' unsubscribes and bounces in the
+ * After Zoho reports the campaign Sent: keeps the temporary lists' (and the picked-contacts list's) unsubscribes and bounces in the
  * stop-list, then deletes those lists in Zoho (contacts stay). Needs the list-delete permission;
  * without it the lists stay and the campaign says so. Returns true when done.
  */
 async function cleanupTempLists(row) {
   const temp = parse(row.temp_lists_json, []);
+  // The private list made for contacts picked one by one (earlier way of sending) goes too.
+  if (row.contact_list_key && !temp.some(t => t.key === row.contact_list_key)) temp.push({ key: row.contact_list_key, name: row.contact_list_name || null });
   if (!temp.length || row.temp_lists_deleted_at) return true;
   const workspaceId = row.workspace_id;
   await campaignContacts.importOptOutsFrom(workspaceId, temp.map(t => t.key));

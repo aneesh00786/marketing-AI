@@ -26,6 +26,21 @@ const wrap = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch
 const page = (title, text, form = '') => `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title></head>
 <body style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;max-width:480px;margin:60px auto;padding:0 16px;color:#1e293b"><h1 style="font-size:20px">${title}</h1><p>${text}</p>${form}</body></html>`;
 
+// Campaigns sent through Zoho: Marketech.ai keeps the unsubscribe (the Zoho list is temporary).
+const CONFIRM_FORM = '<form method="post" action=""><button type="submit" style="font:inherit;padding:10px 18px;border-radius:8px;border:0;background:#1e293b;color:#fff;cursor:pointer">Unsubscribe</button></form>';
+const campaigns = () => require('../campaigns/campaignService');
+unsubscribe.get('/c/:token', wrap(async (req, res) => {
+  const r = await campaigns().unsubscribeFromCampaign(req.params.token, req.query.e, { apply: false });
+  if (!r) return res.status(404).type('html').send(page('Link not valid', 'This unsubscribe link is not valid. Reply "unsubscribe" to the email instead.'));
+  if (r.unsubscribed) return res.type('html').send(page('You are unsubscribed', 'You will not receive further marketing emails from this sender.'));
+  res.type('html').send(page('Unsubscribe?', 'Confirm to stop receiving marketing emails from this sender.', CONFIRM_FORM));
+}));
+unsubscribe.post('/c/:token', wrap(async (req, res) => {
+  const r = await campaigns().unsubscribeFromCampaign(req.params.token, req.query.e, { apply: true });
+  if (!r) return res.status(404).type('html').send(page('Link not valid', 'This unsubscribe link is not valid. Reply "unsubscribe" to the email instead.'));
+  res.type('html').send(page('You are unsubscribed', 'You will not receive further marketing emails from this sender.'));
+}));
+
 unsubscribe.get('/:token', wrap(async (req, res) => {
   const r = await svc.unsubscribeByToken(req.params.token, { apply: false });
   if (!r) return res.status(404).type('html').send(page('Link not valid', 'This unsubscribe link is not valid. Reply "unsubscribe" to the email instead.'));

@@ -1094,7 +1094,34 @@ test('personalization: Zoho merge tags from the Merge Tags menu (custom default 
   const created = apiCalls('createCampaign')[0].params;
   assert.equal(created.subject, 'Hey $[FNAME|Jin]$, your weekly update');
   const token = created.content_url.split('/content/')[1];
-  assert.equal(await require('../modules/mail/campaigns/campaignService').contentByToken(token), html);
+  const svc = require('../modules/mail/campaigns/campaignService');
+  const unsub = svc.campaignUnsubscribeUrl({ id: c.id, workspace_id: ws.workspaceId });
+  assert.equal(await svc.contentByToken(token), html.replace('href="$[LI:UNSUBSCRIBE]$"', `href="${unsub}"`), 'only the unsubscribe link changes: it goes to Marketech.ai');
+});
+
+test('unsubscribes are kept in Marketech.ai: the campaign link confirms, then stops the address in every list', async () => {
+  const { ws } = await freshConnected('Own unsubscribe');
+  const a = await capi(ws, 'POST', '/contact-lists', { name: 'A', emails: ['kim@shop.io', 'other@x.io'] });
+  await capi(ws, 'POST', '/contact-lists', { name: 'B', emails: ['kim@shop.io'] });
+  const c = (await capi(ws, 'POST', '', { ...GOOD, lists: [], mailListIds: [a.data.list.id] })).data.campaign;
+  const url = require('../modules/mail/campaigns/campaignService').campaignUnsubscribeUrl({ id: c.id, workspace_id: ws.workspaceId });
+  assert.match(url, /\/api\/v1\/mail\/unsubscribe\/c\/\d+-[a-f0-9]{32}\?e=\$\[UD:CONTACT_EMAIL\]\$$/);
+  const path = new URL(url.replace('$[UD:CONTACT_EMAIL]$', 'Kim%40Shop.io')).pathname + '?e=Kim%40Shop.io';
+  const page = await h.api('GET', path);
+  assert.equal(page.status, 200);
+  assert.match(page.text || JSON.stringify(page.data), /Unsubscribe\?/, 'a link scanner opening it unsubscribes no one');
+  assert.ok(!(await db().get("SELECT 1 AS x FROM email_suppressions WHERE workspace_id = ? AND email = 'kim@shop.io'", [ws.workspaceId])), 'not before confirming');
+  const done = await h.api('POST', path);
+  assert.equal(done.status, 200);
+  assert.ok(await db().get("SELECT 1 AS x FROM email_suppressions WHERE workspace_id = ? AND email = 'kim@shop.io'", [ws.workspaceId]));
+  const statuses = await db().all("SELECT mm.status FROM mail_list_members mm JOIN mail_contacts ct ON ct.id = mm.contact_id WHERE ct.workspace_id = ? AND ct.email = 'kim@shop.io'", [ws.workspaceId]);
+  assert.deepEqual(statuses.map(x => x.status), ['unsubscribed', 'unsubscribed'], 'in every list');
+  const lists = (await capi(ws, 'GET', '/contact-lists')).data.lists;
+  assert.equal(lists.find(l => l.name === 'A').reachable, 1);
+  // A forged token, or an address that was never a contact, is refused.
+  const bad = path.replace(/-[a-f0-9]{32}/, '-' + '0'.repeat(32));
+  assert.equal((await h.api('POST', bad)).status, 404);
+  assert.equal((await h.api('POST', path.replace('Kim%40Shop.io', 'stranger%40x.io'))).status, 404);
 });
 
 test('sample email: [bracketed] parts and the example.com link block approval until replaced', async () => {

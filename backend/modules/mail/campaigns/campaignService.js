@@ -80,7 +80,7 @@ function present(row, { full = false } = {}) {
     mailListIds: parse(row.mail_list_ids_json, []),
     upload: row.upload_total != null ? { total: row.upload_total, done: row.upload_done || 0 } : null,
     tempListsRemoved: !!row.temp_lists_deleted_at,
-    tempListsPending: !!row.temp_lists_json && !row.temp_lists_deleted_at,
+    tempListsPending: !!(row.temp_lists_json || row.contact_list_key) && !row.temp_lists_deleted_at,
     topicId: row.topic_id,
     status: row.status,
     version: row.version,
@@ -363,7 +363,7 @@ async function validateRow(ctx, row, { checkZoho = true } = {}) {
     }
   }
   if (contacts.length > eligible) warnings.push(`${contacts.length - eligible} selected contact(s) cannot be emailed and will be skipped.`);
-  if (html && !UNSUB_TAG_RE.test(html)) warnings.push('No unsubscribe link: add $[LI:UNSUBSCRIBE]$ (or $[LI:ORG_OPTOUT]$). Without it Zoho adds its default footer or holds the campaign.');
+  if (html && !UNSUB_TAG_RE.test(html)) warnings.push('No unsubscribe link: tick "Add unsubscribe link" (Email content). Without it Zoho adds its default footer or holds the campaign, and unsubscribes are not kept in Marketech.ai.');
   if (/href=["']https?:\/\/(www\.)?example\.(com|org|net)\b/i.test(html)) problems.push('Replace the sample link (example.com) with your own web page.');
   if (/<img[^>]+src=["'](?!https:\/\/|data:)/i.test(html)) warnings.push('Some images do not use https:// URLs; they may not show in Zoho.');
   if (!publicBaseUrl()) problems.push('The server needs a public https APP_BASE_URL: Zoho imports the content from a Marketech.ai link.');
@@ -636,7 +636,7 @@ async function refresh(ctx, id) {
   await run('UPDATE mail_campaigns SET zoho_status = ?, report_json = ?, last_checked_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP() WHERE id = ?',
     [d.campaign_status || null, picked ? JSON.stringify(picked) : null, row.id]);
   // Sent: the temporary Zoho lists made from Marketech.ai lists are removed (contacts stay in Zoho).
-  if (norm(d.campaign_status) === 'sent' && row.temp_lists_json && !row.temp_lists_deleted_at) {
+  if (norm(d.campaign_status) === 'sent' && (row.temp_lists_json || row.contact_list_key) && !row.temp_lists_deleted_at) {
     await require('../contacts/zohoUpload').cleanupTempLists(row).catch(() => false);
   }
   if (row.status === 'needs_review' && SENT_LIKE.has(norm(d.campaign_status))) {
@@ -673,10 +673,60 @@ async function contentByToken(token) {
   if (!/^[A-Za-z0-9_-]{43}$/.test(String(token || ''))) return null;
   const hash = crypto.createHash('sha256').update(token).digest('hex');
   const row = await get(
-    "SELECT html_content FROM mail_campaigns WHERE content_token_hash = ? AND content_token_expires_at > UTC_TIMESTAMP() AND approved_version = version AND status IN ('submitting', 'submitted', 'needs_review', 'failed')",
+    "SELECT id, workspace_id, html_content FROM mail_campaigns WHERE content_token_hash = ? AND content_token_expires_at > UTC_TIMESTAMP() AND approved_version = version AND status IN ('submitting', 'submitted', 'needs_review', 'failed')",
     [hash]
   );
-  return row ? toZohoMergeTags(row.html_content) : null;
+  return row ? withOwnUnsubscribe(toZohoMergeTags(row.html_content), row) : null;
+}
+
+// ------------------------------------------------------------------ unsubscribes kept in Marketech.ai
+
+/**
+ * Unsubscribes are kept by Marketech.ai, not by the Zoho list (which is deleted once the campaign
+ * is sent). The email's unsubscribe link ($[LI:UNSUBSCRIBE]$) is pointed at Marketech.ai's own page
+ * for this campaign, with the recipient's address filled in by Zoho ($[UD:CONTACT_EMAIL]$). The
+ * page asks to confirm (link scanners do not unsubscribe anyone), then adds the address to the
+ * stop-list and marks it unsubscribed in every contact list here.
+ */
+const UNSUB_TAG = /href\s*=\s*(["'])\$\[LI:(?:UNSUBSCRIBE|ORG_OPTOUT)\]\$\1/gi;
+const unsubSecret = () => process.env.SOCIAL_TOKEN_ENCRYPTION_KEY || process.env.ZOHO_CAMPAIGNS_CLIENT_SECRET || 'marketech-unsubscribe';
+const unsubSig = (workspaceId, id) => crypto.createHmac('sha256', unsubSecret()).update(`campaign-unsubscribe:${workspaceId}:${id}`).digest('hex').slice(0, 32);
+const unsubToken = row => `${row.id}-${unsubSig(row.workspace_id, row.id)}`;
+const campaignUnsubscribeUrl = row => `${publicBaseUrl()}/api/v1/mail/unsubscribe/c/${unsubToken(row)}?e=$[UD:CONTACT_EMAIL]$`;
+
+function withOwnUnsubscribe(html, row) {
+  if (!publicBaseUrl()) return html;
+  return String(html || '').replace(UNSUB_TAG, (_m, q) => `href=${q}${campaignUnsubscribeUrl(row)}${q}`);
+}
+
+/** The campaign of an unsubscribe token, and whether the address was one it went to. */
+async function unsubscribeTarget(token, email) {
+  const m = /^(\d{1,10})-([a-f0-9]{32})$/.exec(String(token || ''));
+  const addr = String(email || '').trim().toLowerCase();
+  if (!m || !addr || addr.length > 255 || !addr.includes('@')) return null;
+  const row = await get('SELECT id, workspace_id, mail_list_ids_json FROM mail_campaigns WHERE id = ?', [Number(m[1])]);
+  if (!row || !crypto.timingSafeEqual(Buffer.from(unsubSig(row.workspace_id, row.id)), Buffer.from(m[2]))) return null;
+  const listIds = parse(row.mail_list_ids_json, []);
+  const inLists = listIds.length && await get(
+    `SELECT 1 AS x FROM mail_list_members mm JOIN mail_contacts c ON c.id = mm.contact_id
+     WHERE c.workspace_id = ? AND c.email = ? AND mm.list_id IN (${listIds.map(() => '?').join(',')}) LIMIT 1`, [row.workspace_id, addr, ...listIds]);
+  const picked = await get('SELECT 1 AS x FROM mail_campaign_contacts WHERE campaign_id = ? AND email = ? LIMIT 1', [row.id, addr]);
+  const known = await get('SELECT 1 AS x FROM mail_contacts WHERE workspace_id = ? AND email = ? LIMIT 1', [row.workspace_id, addr]);
+  if (!inLists && !picked && !known) return null;
+  return { workspaceId: row.workspace_id, campaignId: row.id, email: addr };
+}
+
+/** The public page's work: confirm (apply=false) or unsubscribe (apply=true). Null: link not valid. */
+async function unsubscribeFromCampaign(token, email, { apply }) {
+  const t = await unsubscribeTarget(token, email);
+  if (!t) return null;
+  if (apply) {
+    await require('../productEmails/service').applyUnsubscribe(t.workspaceId, { email: t.email, leadId: null, source: 'campaign_link', reference: `campaign:${t.campaignId}` });
+    await run(`UPDATE mail_list_members mm JOIN mail_contacts c ON c.id = mm.contact_id SET mm.status = 'unsubscribed'
+      WHERE c.workspace_id = ? AND c.email = ?`, [t.workspaceId, t.email]);
+  }
+  const s = await get('SELECT 1 AS x FROM email_suppressions WHERE workspace_id = ? AND email = ?', [t.workspaceId, t.email]);
+  return { unsubscribed: !!s, email: t.email };
 }
 
 /**
@@ -799,4 +849,4 @@ async function listContacts(ctx, listKey, { status = 'subscribed', page = 1 } = 
   return { contacts, page: p, pageSize: contactsSvc.PAGE_SIZE, hasMore };
 }
 
-module.exports = { deliver, failSubmission: (...a) => fail(...a), list, getOne, create, update, duplicate, remove, getContacts, setContactLeads, addContactsFromZoho, removeContacts, leadOptions, zohoAudiences, listContacts, validate, approve, send, refresh, resolve, contentByToken, recipientActivity, RECIPIENT_ACTIONS, contactsIn, toZohoMergeTags };
+module.exports = { unsubscribeFromCampaign, campaignUnsubscribeUrl, deliver, failSubmission: (...a) => fail(...a), list, getOne, create, update, duplicate, remove, getContacts, setContactLeads, addContactsFromZoho, removeContacts, leadOptions, zohoAudiences, listContacts, validate, approve, send, refresh, resolve, contentByToken, recipientActivity, RECIPIENT_ACTIONS, contactsIn, toZohoMergeTags };
