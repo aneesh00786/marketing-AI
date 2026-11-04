@@ -26,6 +26,28 @@
     </div>
     <div class="note error" *ngIf="error" role="alert">{{ error }} <button type="button" class="link-btn" (click)="load()">Try again</button></div>
 
+    <!-- Zoho plan: contacts used against the limit (subscriber-based plans) -->
+    <div class="zl-plan" *ngIf="plan && !loading">
+      <ng-container *ngIf="limitEdit === null">
+        <div class="zl-plan-text" *ngIf="plan.contactLimit">
+          <b>Contacts in Zoho: up to {{ plan.usage.upTo | number }} of {{ plan.contactLimit | number }}</b>
+          <small class="muted">Your plan's limit. Zoho counts a contact in several lists once, so the real number may be lower (at least {{ plan.usage.atLeast | number }}). Zoho's billing page has the exact figure.</small>
+          <span class="zl-plan-bar" [class.full]="usagePct >= 100" [class.near]="usagePct >= 85 && usagePct < 100" aria-hidden="true"><i [style.width.%]="usagePct"></i></span>
+        </div>
+        <div class="zl-plan-text" *ngIf="!plan.contactLimit">
+          <b>Contacts in Zoho: up to {{ plan.usage.upTo | number }}</b>
+          <small class="muted">{{ canConfigure ? 'Enter your Zoho plan\'s contact limit to get a warning before adding or importing too many.' : 'An admin can enter your Zoho plan\'s contact limit to get warnings.' }}</small>
+        </div>
+        <button type="button" class="btn btn-secondary btn-sm" *ngIf="canConfigure" (click)="editLimit()">{{ plan.contactLimit ? 'Change limit' : 'Set plan limit' }}</button>
+      </ng-container>
+      <form class="zl-plan-edit" *ngIf="limitEdit !== null" (ngSubmit)="saveLimit()">
+        <label><span>Contacts your Zoho plan allows</span>
+          <input class="hud-input" name="limit" [(ngModel)]="limitEdit" inputmode="numeric" placeholder="e.g. 1000 (empty: no limit set)" /></label>
+        <button type="submit" class="btn btn-primary btn-sm" [disabled]="limitSaving">{{ limitSaving ? 'Saving…' : 'Save' }}</button>
+        <button type="button" class="btn btn-secondary btn-sm" (click)="limitEdit = null">Cancel</button>
+      </form>
+    </div>
+
     <div class="zl-tools">
       <label class="zl-search"><app-icon name="search" [size]="15"></app-icon>
         <input class="hud-input" type="search" [(ngModel)]="query" placeholder="Search lists…" aria-label="Search lists" /></label>
@@ -143,6 +165,7 @@
     <label class="zl-field"><span>Or paste email addresses <span class="muted small" *ngIf="typedEmails.length">({{ typedEmails.length }})</span></span>
       <textarea class="hud-input" rows="3" [(ngModel)]="form.emails" placeholder="One per line, or separated by commas"></textarea></label>
 
+    <p class="mx-callout warn zl-limit-warn" *ngIf="limitWarning(formCount) as w" role="status">{{ w }}</p>
     <div class="zl-form-foot">
       <span class="muted small" [class.zl-problem]="formProblem && formCount">{{ formProblem || formCount + ' contact(s) will be added' + (form.mode === 'create' ? ' to the new list' : '') + '.' }}</span>
       <button type="button" class="btn btn-secondary btn-sm" (click)="form = null">{{ form.skipped.length ? 'Done' : 'Cancel' }}</button>
@@ -220,6 +243,7 @@
       </div>
       <p class="muted small" *ngIf="importing.rows.length > 5">Showing 5 of {{ importing.rows.length }}.</p>
       <app-import-sync-options *ngIf="importing.rows.length" [sync]="importing.sync" [canZoho]="true"></app-import-sync-options>
+      <p class="mx-callout warn zl-limit-warn" *ngIf="importing.sync.list !== 'none' && limitWarning(importing.rows.length) as w" role="status">{{ w }}</p>
       <div class="zl-form-foot">
         <span class="muted small" [class.zl-problem]="importProblem && importing.rows.length">{{ importProblem || importing.rows.length + ' contact(s) will be imported.' }}</span>
         <button type="button" class="btn btn-secondary btn-sm" (click)="importing = null">Cancel</button>

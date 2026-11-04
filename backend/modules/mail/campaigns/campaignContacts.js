@@ -254,7 +254,12 @@ async function importOptOuts(workspaceId, contacts) {
     `SELECT contact_list_key AS k FROM mail_campaigns WHERE workspace_id = ? AND contact_list_key IS NOT NULL AND status IN ('submitted', 'needs_review') ORDER BY id DESC LIMIT ${OPT_OUT_LISTS}`,
     [workspaceId]
   );
-  const wanted = new Set([...sent.map(r => r.k), ...contacts.map(c => c.sourceListKey).filter(Boolean)]);
+  return importOptOutsFrom(workspaceId, [...sent.map(r => r.k), ...contacts.map(c => c.sourceListKey).filter(Boolean)]);
+}
+
+/** Saves the unsubscribes and bounces of these Zoho lists in the stop-list; returns how many were new. */
+async function importOptOutsFrom(workspaceId, listKeys) {
+  const wanted = new Set(listKeys.filter(Boolean));
   if (!wanted.size) return 0;
   const existing = new Set((await fetchLists(workspaceId)).map(l => l.key));
   let imported = 0;
@@ -416,4 +421,4 @@ async function syncForSend(ctx, row, { listKeys }) {
   return listKey;
 }
 
-module.exports = { MAX_CONTACTS, personName, businessName, greetingName, syncNames, assess, notOnLists, selection, setLeads, addFromZoho, copySelection, removeContacts, syncForSend, fetchLists, readListPage, isSyncList, PAGE_SIZE };
+module.exports = { importOptOutsFrom, MAX_CONTACTS, personName, businessName, greetingName, syncNames, assess, notOnLists, selection, setLeads, addFromZoho, copySelection, removeContacts, syncForSend, fetchLists, readListPage, isSyncList, PAGE_SIZE };

@@ -9,8 +9,6 @@ import { TemplatePickerComponent } from './template-picker.component';
 import { EmailPreviewComponent } from './email-preview.component';
 import { EmailContentEditorComponent } from './email-content-editor.component';
 import { ZohoListContactsComponent } from './zoho-list-contacts.component';
-import { CampaignContactsComponent } from './campaign-contacts.component';
-import { CampaignContactRowsComponent } from './campaign-contact-rows.component';
 import { EmailPreviewComponent as ThumbPreview } from './email-preview.component';
 import { CampaignMetricsComponent } from './campaign-metrics.component';
 import { ZohoListsComponent } from './zoho-lists.component';
@@ -34,7 +32,7 @@ const REPORT_POLL_S = [10, 20, 30, 60, 60, 120, 120, 300, 300];
 @Component({
   selector: 'app-email-campaigns',
   standalone: true,
-  imports: [CommonModule, IconComponent, FormsModule, ZohoCampaignsComponent, TemplatePickerComponent, EmailContentEditorComponent, ThumbPreview, ZohoListContactsComponent, CampaignContactsComponent, CampaignContactRowsComponent, CampaignMetricsComponent, ZohoListsComponent],
+  imports: [CommonModule, IconComponent, FormsModule, ZohoCampaignsComponent, TemplatePickerComponent, EmailContentEditorComponent, ThumbPreview, ZohoListContactsComponent, CampaignMetricsComponent, ZohoListsComponent],
   templateUrl: './email-campaigns.component.html',
   styleUrls: ['../command/command-center.component.css', './mail-ui.css', './email-campaigns.component.css']
 })
@@ -84,7 +82,6 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
   /** The saved values of the open campaign, to tell when the form has unsaved changes. */
   private original = '';
   @ViewChild(ZohoCampaignsComponent) private zohoPanel?: ZohoCampaignsComponent;
-  @ViewChild(CampaignContactsComponent) private contactsPanel?: CampaignContactsComponent;
 
   constructor(private http: HttpClient) {}
 
@@ -161,7 +158,11 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
     return '';
   }
 
-  canDelete(c: any): boolean { return this.canCompose && ['draft', 'approved', 'failed'].includes(c.status); }
+  /** Drafts and unsent ones: those who compose. Sent ones: those who send (it removes the history here). */
+  canDelete(c: any): boolean {
+    if (['draft', 'approved', 'failed'].includes(c.status)) return this.canCompose;
+    return c.status === 'submitted' && this.canSend;
+  }
 
   toggleMenu(id: number, ev: Event): void { ev.stopPropagation(); this.menuFor = this.menuFor === id ? null : id; }
 
@@ -196,7 +197,7 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
   }
   stepHint(n: number): string {
     if (n === 1) return this.stepDone(1) ? 'Name and subject set' : 'Name and subject';
-    if (n === 2) return this.recipientSummary || 'Lists or leads';
+    if (n === 2) return this.recipientSummary || 'Zoho lists';
     if (n === 3) return this.hasContent ? 'Content added' : 'Design the email';
     if (this.selected?.status === 'submitted') return 'Sent';
     if (this.selected?.approved) return 'Approved, ready to send';
@@ -411,7 +412,7 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
 
   private setSelected(c: any): void {
     const fresh = this.selected?.id !== c.id;
-    if (fresh) { this.viewEmail = false; this.onContacts(null); this.subjectCaret = -1; this.subjectAsk = null; this.senderAdding = false; this.senderError = ''; }
+    if (fresh) { this.viewEmail = false; this.onContacts(null); this.loadContacts(c.id); this.subjectCaret = -1; this.subjectAsk = null; this.senderAdding = false; this.senderError = ''; }
     this.selected = c;
     this.validation = null;
     this.form = {
@@ -430,7 +431,38 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
     }
   }
 
-  removeContact(c: any): void { this.contactsPanel?.remove(c); }
+  /** The campaign's picked contacts (from Zoho lists, or leads chosen earlier). */
+  private loadContacts(id: number): void {
+    this.http.get<any>(`${this.base}/${id}/contacts`).subscribe({
+      next: r => { if (this.selected?.id === id) this.onContacts(r.contacts || []); },
+      error: () => {}
+    });
+  }
+
+  /** Leads chosen directly (before Zoho lists became the way to reach leads). */
+  get leadContacts(): any[] { return (this.allContacts || []).filter(c => !c.sourceListKey); }
+
+  ineligibleIn(picks: any[]): number { return picks.filter(c => c.eligible === false).length; }
+
+  private removeContacts(ids: number[], message: string): void {
+    if (!ids.length || !this.selected) return;
+    const id = this.selected.id;
+    this.http.post<any>(`${this.base}/${id}/contacts/remove`, { ids }).subscribe({
+      next: r => { if (this.selected?.id === id) { this.onContacts(r.contacts || []); this.onCampaignChanged(r.campaign); } this.toast.emit(message); },
+      error: e => this.toast.emit(this.err(e))
+    });
+  }
+
+  clearPicks(list: any, picks: any[]): void {
+    if (!confirm(`Remove the ${picks.length} contact(s) picked from "${list.name || list.key}" from this campaign?`)) return;
+    this.removeContacts(picks.map(c => c.id), 'Contacts removed. Approve the campaign before sending.');
+  }
+
+  clearLeadContacts(): void {
+    const rows = this.leadContacts;
+    if (!confirm(`Remove the ${rows.length} lead(s) chosen directly from this campaign?`)) return;
+    this.removeContacts(rows.map(c => c.id), 'Leads removed. Approve the campaign before sending.');
+  }
 
   /** Selected contacts are saved at once: the campaign changed, but form edits are kept. */
   onCampaignChanged(c: any): void {
@@ -440,7 +472,7 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
   }
 
   onZohoContactsAdded(r: any): void {
-    this.contactsPanel?.apply(r);
+    this.onContacts(r.contacts || this.allContacts);
     this.onCampaignChanged(r.campaign);
     const refused = r.refused ? ` ${r.refused} could not be added (unsubscribed or blocked).` : '';
     this.toast.emit(`${r.added} contact${r.added === 1 ? '' : 's'} added.${refused} Approve the campaign before sending.`);
@@ -562,7 +594,10 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
   remove(): void { if (this.selected) this.removeCampaign(this.selected); }
 
   removeCampaign(c: any): void {
-    if (!confirm(`Delete "${c.name}"?`)) return;
+    const msg = c.status === 'submitted'
+      ? `Delete "${c.name}" from Marketech.ai?\n\nIts results and recipient activity will no longer show here. The campaign and its report stay in Zoho Campaigns. People who unsubscribed or bounced are kept in the stop-list.`
+      : `Delete "${c.name}"?`;
+    if (!confirm(msg)) return;
     this.http.delete<any>(`${this.base}/${c.id}`).subscribe({
       next: () => { if (this.selected?.id === c.id) { this.selected = null; this.form = null; this.original = ''; } this.load(); this.toast.emit('Campaign deleted.'); },
       error: e => this.toast.emit(this.err(e))

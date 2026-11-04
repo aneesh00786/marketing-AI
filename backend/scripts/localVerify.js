@@ -116,7 +116,7 @@ async function main() {
   record('fresh install: migrations 000 to 023 build the database from nothing', to023.status === 0, (to023.stderr || to023.stdout || '').slice(-300));
   const { migrate, backupProblem } = require('../db/migrate');
   const status023 = await migrate({ databaseName: target, statusOnly: true, log: () => {} });
-  record('status at 023: 024 to 031 pending', status023.pending.join(',') === '024_mail_tracking,025_compose_purpose_and_grants,026_mail_provider_apps,027_mail_campaign_contacts,028_global_crm,029_crm_call_logs,030_lead_discovery_contacts,031_session_revocation', `pending: ${status023.pending.join(', ')}`);
+  record('status at 023: 024 to 032 pending', status023.pending.join(',') === '024_mail_tracking,025_compose_purpose_and_grants,026_mail_provider_apps,027_mail_campaign_contacts,028_global_crm,029_crm_call_logs,030_lead_discovery_contacts,031_session_revocation,032_mail_provider_settings', `pending: ${status023.pending.join(', ')}`);
 
   // ------------------------------------------------------------ verified pre-migration backup
   const pre = path.join(tmp, `${target}-pre.sql`);
@@ -133,7 +133,7 @@ async function main() {
   const refused = await migrate({ databaseName: target, env: { NODE_ENV: 'production' }, log: () => {} }).then(() => null, e => e);
   record('production mode refuses to migrate without a backup', refused && refused.code === 'BACKUP_REQUIRED');
   const applied = await migrate({ databaseName: target, env: { NODE_ENV: 'production' }, backupPath: pre, log: () => {} }).then(r => r, e => ({ error: e }));
-  record('024 to 031 applied with the verified backup', !applied.error && applied.applied.join(',') === '024_mail_tracking,025_compose_purpose_and_grants,026_mail_provider_apps,027_mail_campaign_contacts,028_global_crm,029_crm_call_logs,030_lead_discovery_contacts,031_session_revocation', applied.error ? applied.error.message : applied.applied.join(', '));
+  record('024 to 032 applied with the verified backup', !applied.error && applied.applied.join(',') === '024_mail_tracking,025_compose_purpose_and_grants,026_mail_provider_apps,027_mail_campaign_contacts,028_global_crm,029_crm_call_logs,030_lead_discovery_contacts,031_session_revocation,032_mail_provider_settings', applied.error ? applied.error.message : applied.applied.join(', '));
 
   const db = (sql, p = []) => q(sql.replace(/\bTARGET\b/g, target), p);
   const tables = (await db("SELECT TABLE_NAME AS t FROM information_schema.TABLES WHERE TABLE_SCHEMA = 'TARGET'")).map(r => r.t);
@@ -155,7 +155,7 @@ async function main() {
   // ------------------------------------------------------------ idempotent re-run
   const again = await migrate({ databaseName: target, log: () => {} });
   record('re-running migrate applies nothing', again.applied.length === 0);
-  await db("DELETE FROM TARGET.schema_migrations WHERE id IN ('024_mail_tracking','025_compose_purpose_and_grants','026_mail_provider_apps','027_mail_campaign_contacts','028_global_crm','029_crm_call_logs','030_lead_discovery_contacts,031_session_revocation')");
+  await db("DELETE FROM TARGET.schema_migrations WHERE id IN ('024_mail_tracking','025_compose_purpose_and_grants','026_mail_provider_apps','027_mail_campaign_contacts','028_global_crm','029_crm_call_logs','030_lead_discovery_contacts,031_session_revocation,032_mail_provider_settings')");
   const rerun = await migrate({ databaseName: target, log: () => {} }).then(r => r, e => ({ error: e }));
   record('024-031 are safe to apply twice (ensure* helpers)', !rerun.error && rerun.applied.length === 8, rerun.error ? rerun.error.message : '');
 
@@ -224,7 +224,7 @@ async function main() {
   const pk = run('node', ['backend/scripts/packageRelease.js', '--out', zip], { cwd: REPO });
   // git archive puts everything under one top-level folder (e.g. marketing-AI/); compare without it.
   const list = pk.status === 0 ? run('unzip', ['-Z1', zip]).stdout.split('\n').filter(Boolean).map(n => n.replace(/^[^/]+\//, '')).filter(Boolean) : [];
-  const want = ['frontend/dist/frontend/browser/index.html', 'backend/migrations/024_mail_tracking.js', 'backend/migrations/025_compose_purpose_and_grants.js', 'backend/migrations/026_mail_provider_apps.js', 'backend/migrations/027_mail_campaign_contacts.js', 'backend/migrations/028_global_crm.js', 'backend/migrations/029_crm_call_logs.js', 'backend/migrations/030_lead_discovery_contacts.js', 'backend/migrations/031_session_revocation.js', 'backend/.env.example'];
+  const want = ['frontend/dist/frontend/browser/index.html', 'backend/migrations/024_mail_tracking.js', 'backend/migrations/025_compose_purpose_and_grants.js', 'backend/migrations/026_mail_provider_apps.js', 'backend/migrations/027_mail_campaign_contacts.js', 'backend/migrations/028_global_crm.js', 'backend/migrations/029_crm_call_logs.js', 'backend/migrations/030_lead_discovery_contacts.js', 'backend/migrations/031_session_revocation.js', 'backend/migrations/032_mail_provider_settings.js', 'backend/.env.example'];
   const bad = list.filter(n => /(^|\/)\.env$|\.env\.(?!example$)|\.(sql|dump|log|bak|pem|key)$|(^|\/)(node_modules|storage|logs?|scratch)\//i.test(n));
   record('release package (git HEAD): passes its checks and has the migrations and built frontend', pk.status === 0 && want.every(w => list.includes(w)) && !bad.length, pk.status === 0 ? `${list.length} entries${bad.length ? `; forbidden: ${bad.join(', ')}` : ''}` : (pk.stderr || pk.stdout).slice(-200));
   const uncommitted = run('git', ['status', '--porcelain'], { cwd: REPO }).stdout.trim();

@@ -33,6 +33,8 @@ export class ZohoListsComponent implements OnInit {
   @Input() zohoReady = false;
   /** The user may change recipients (mail.send). */
   @Input() canManage = false;
+  /** May set the Zoho plan's contact limit (mail.configure). */
+  @Input() canConfigure = false;
   @Output() toast = new EventEmitter<string>();
   /** Opens the Zoho connection popup (connect or reconnect). */
   @Output() openZoho = new EventEmitter<void>();
@@ -63,8 +65,46 @@ export class ZohoListsComponent implements OnInit {
   load(): void {
     this.loading = true; this.error = '';
     this.http.get<any>(`${this.base}/zoho-lists`).subscribe({
-      next: r => { this.loading = false; this.lists = r.lists || []; this.canAdd = !!r.canAdd; this.canRemove = !!r.canRemove; },
+      next: r => { this.loading = false; this.lists = r.lists || []; this.canAdd = !!r.canAdd; this.canRemove = !!r.canRemove; this.plan = r.plan || null; },
       error: e => { this.loading = false; this.error = this.err(e); }
+    });
+  }
+
+  // ---------- Zoho plan: contact limit and usage ----------
+  plan: { contactLimit: number | null; usage: { upTo: number; atLeast: number } } | null = null;
+  limitEdit: string | null = null;
+  limitSaving = false;
+
+  /** Share of the limit the lists may already use (upper bound), for the bar. */
+  get usagePct(): number {
+    const p = this.plan;
+    return p?.contactLimit ? Math.min(100, Math.round((p.usage.upTo / p.contactLimit) * 100)) : 0;
+  }
+
+  /** A warning when adding `adding` new addresses could go over the plan ('' when it cannot). */
+  limitWarning(adding: number): string {
+    const p = this.plan;
+    if (!p?.contactLimit || !adding) return '';
+    const after = p.usage.upTo + adding;
+    if (after <= p.contactLimit) return '';
+    const room = Math.max(0, p.contactLimit - p.usage.atLeast);
+    return `Your Zoho plan allows ${p.contactLimit.toLocaleString('en-US')} contacts and your lists already hold up to ${p.usage.upTo.toLocaleString('en-US')}. `
+      + `Adding ${adding.toLocaleString('en-US')} may go over it (contacts already in Zoho do not count again). Zoho refuses contacts beyond the limit`
+      + (room < adding ? `; there may be room for only about ${room.toLocaleString('en-US')} more.` : '.');
+  }
+
+  editLimit(): void { this.limitEdit = this.plan?.contactLimit ? String(this.plan.contactLimit) : ''; }
+
+  saveLimit(): void {
+    if (this.limitEdit === null || this.limitSaving) return;
+    const t = this.limitEdit.replace(/[,\s]/g, '');
+    if (t && !/^\d{1,8}$/.test(t)) { this.toast.emit('Enter the number of contacts your plan allows, e.g. 1000.'); return; }
+    const value = t ? Number(t) : null;
+    if (value === 0) { this.toast.emit('Enter a number above 0, or leave it empty.'); return; }
+    this.limitSaving = true;
+    this.http.put<any>(`${this.base}/zoho-plan`, { contactLimit: value }).subscribe({
+      next: r => { this.limitSaving = false; this.limitEdit = null; if (this.plan) this.plan.contactLimit = r.contactLimit; this.toast.emit(r.contactLimit ? 'Contact limit saved.' : 'Contact limit removed.'); },
+      error: e => { this.limitSaving = false; this.toast.emit(this.err(e)); }
     });
   }
 

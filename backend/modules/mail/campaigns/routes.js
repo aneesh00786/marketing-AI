@@ -49,6 +49,8 @@ router.post('/', requireCapability('mail.compose'), wrap(async (req, res) => res
 const lists = require('../zoho/zohoLists');
 const listsLimit = require('../../../lib/rateLimit').rateLimit({ windowMs: 60 * 1000, max: 20, keyFn: req => `zoho-lists:${req.auth.workspaceId}`, message: 'Too many list changes. Wait a minute and try again.' });
 router.get('/zoho-lists', requireCapability('mail.send'), wrap(async (req, res) => res.json({ success: true, ...(await lists.lists(req)) })));
+// The Zoho plan's contact limit (Zoho's API does not report it): set by those who configure mail.
+router.put('/zoho-plan', requireCapability('mail.configure'), wrap(async (req, res) => res.json({ success: true, ...(await lists.setPlan(req, req.body)) })));
 router.post('/zoho-lists', requireCapability('mail.send', 'leads.view'), listsLimit, wrap(async (req, res) => res.json({ success: true, ...(await lists.create(req, req.body)) })));
 router.post('/zoho-lists/:listKey/contacts', requireCapability('mail.send', 'leads.view'), listsLimit, wrap(async (req, res) => res.json({ success: true, ...(await lists.addContacts(req, req.params.listKey, req.body)) })));
 router.post('/zoho-lists/:listKey/remove', requireCapability('mail.send'), listsLimit, wrap(async (req, res) => res.json({ success: true, ...(await lists.removeContact(req, req.params.listKey, req.body)) })));

@@ -38,7 +38,7 @@
     <button type="button" [class.on]="view === 'campaigns'" [attr.aria-pressed]="view === 'campaigns'" (click)="view = 'campaigns'">Campaigns</button>
     <button type="button" [class.on]="view === 'lists'" [attr.aria-pressed]="view === 'lists'" (click)="view = 'lists'">Contact lists</button>
   </div>
-  <app-zoho-lists *ngIf="view === 'lists'" [zohoReady]="zohoReady" [canManage]="canSend" (toast)="toast.emit($event)" (openZoho)="zohoOpen = true"></app-zoho-lists>
+  <app-zoho-lists *ngIf="view === 'lists'" [zohoReady]="zohoReady" [canManage]="canSend" [canConfigure]="!!zoho?.canConfigure" (toast)="toast.emit($event)" (openZoho)="zohoOpen = true"></app-zoho-lists>
 
   <div class="ec-grid" [class.has-sel]="!!selected" [hidden]="view !== 'campaigns'">
     <!-- ============ Campaign list ============ -->
@@ -134,7 +134,7 @@
               <button type="button" role="menuitem" (click)="moreOpen = false; goStep(4)">Check for problems</button>
               <button type="button" role="menuitem" *ngIf="selected.status === 'submitted' || selected.status === 'needs_review' || selected.zohoPrepared" (click)="moreOpen = false; refresh()" [disabled]="busy === 'refresh'">Refresh status from Zoho</button>
               <button type="button" role="menuitem" *ngIf="canCompose" (click)="moreOpen = false; duplicate(selected)" [disabled]="busy === 'duplicate'">Duplicate</button>
-              <button type="button" role="menuitem" class="danger" *ngIf="editable" (click)="moreOpen = false; remove()">Delete</button>
+              <button type="button" role="menuitem" class="danger" *ngIf="canDelete(selected)" (click)="moreOpen = false; remove()">Delete</button>
             </div>
           </div>
           <button class="btn btn-secondary btn-sm" (click)="close()" [attr.aria-label]="dirty ? 'Cancel' : 'Close'"><app-icon name="x" [size]="15"></app-icon>{{ dirty ? 'Cancel' : 'Close' }}</button>
@@ -222,7 +222,7 @@
 
         <!-- Step 2: Recipients -->
         <section class="ec-pane" [hidden]="step !== 2" aria-label="Recipients">
-          <p class="ec-pane-help">Choose who receives this email. You can use Zoho mailing lists, your leads, or both.
+          <p class="ec-pane-help">Choose the Zoho mailing lists that receive this email, or pick some contacts inside a list. To email your leads, add them to a list first in <b>Contact lists</b>.
             <b *ngIf="recipientSummary">Selected: {{ recipientSummary }}.</b></p>
 
           <fieldset class="lists ec-rcard">
@@ -243,7 +243,12 @@
                 </label>
                 <button *ngIf="canSend" type="button" class="link-btn ec-view-contacts" (click)="contactsList = l">View contacts</button>
               </div>
-              <app-campaign-contact-rows *ngIf="!form.listKeys.has(l.key) && picksByList.get(l.key) as picks" [contacts]="picks" [editable]="editable" (remove)="removeContact($event)"></app-campaign-contact-rows>
+              <!-- Picked contacts: a count, never the whole list (there may be thousands) -->
+              <div class="ec-picks" *ngIf="!form.listKeys.has(l.key) && picksByList.get(l.key) as picks">
+                <span>{{ picks.length | number }} contact{{ picks.length === 1 ? '' : 's' }} picked from this list<span class="muted" *ngIf="ineligibleIn(picks) as bad"> · {{ bad }} can no longer be emailed</span></span>
+                <button *ngIf="canSend" type="button" class="link-btn" (click)="contactsList = l">{{ editable ? 'Review or add' : 'View' }}</button>
+                <button *ngIf="editable" type="button" class="link-btn danger" (click)="clearPicks(l, picks)">Clear</button>
+              </div>
             </ng-container>
             <p class="muted small" *ngIf="!audiences && selected.lists.length">Selected: {{ selectedListNames }}</p>
             <label *ngIf="audiences?.topics?.length" class="ec-topic">Zoho topic <span class="req" aria-hidden="true" *ngIf="audiences!.topics.length > 1">*</span>
@@ -255,12 +260,11 @@
             </label>
           </fieldset>
 
-          <fieldset class="lists ec-rcard">
-            <legend><app-icon name="leads" [size]="15"></app-icon>Your leads</legend>
-            <p class="muted small ec-rcard-help">Pick leads from Marketech.ai. Leads who unsubscribed, bounced or have no valid email are left out.</p>
-            <app-campaign-contacts [campaignId]="selected.id" [editable]="editable" [canSync]="canSyncContacts" [canReconnect]="!!zoho?.canConfigure" [zohoLists]="audiences?.lists ?? null"
-              (contactsChange)="onContacts($event)" (changed)="onCampaignChanged($event)" (reconnect)="connectZoho()" (toast)="toast.emit($event)"></app-campaign-contacts>
-          </fieldset>
+          <!-- Leads chosen before lists became the only way: shown so they can be removed -->
+          <div class="mx-callout warn ec-oldleads" *ngIf="leadContacts.length">
+            <span>{{ leadContacts.length | number }} lead(s) were chosen for this campaign directly. Leads now go through a Zoho list (Contact lists).</span>
+            <button *ngIf="editable" type="button" class="btn btn-secondary btn-sm" (click)="clearLeadContacts()">Remove them</button>
+          </div>
         </section>
 
         <!-- Step 3: Email content -->

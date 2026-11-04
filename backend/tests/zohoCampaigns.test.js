@@ -364,6 +364,25 @@ test('refresh while Zoho is still sending: a pending report with how many it goe
   assert.equal(after.data.campaign.report.emails_sent_count, '120');
 });
 
+test('delete a sent campaign: senders only; its list\'s unsubscribes are kept first; Zoho is not touched', async () => {
+  const { ws, acct } = await freshConnected('Delete sent');
+  const lead = await addLead(ws);
+  const c = await contactCampaign(ws, [lead]);
+  assert.equal((await capi(ws, 'POST', `/${c.id}/send`, { confirm: true })).status, 200);
+  const listKey = (await row(c.id)).contact_list_key;
+  acct.contacts = { ...(acct.contacts || {}), [listKey]: [{ contact_email: lead.email, state: 'unsub' }] };
+  const member = await h.addMember(ws.workspaceId, 'Member');
+  assert.equal((await capi(member, 'DELETE', `/${c.id}`)).status, 403);
+  const before = apiCalls('createCampaign').length + apiCalls('sendcampaign').length;
+  const r = await capi(ws, 'DELETE', `/${c.id}`);
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(await row(c.id), null);
+  const sup = await db().get('SELECT reason FROM email_suppressions WHERE workspace_id = ? AND email = ?', [ws.workspaceId, lead.email]);
+  assert.equal(sup.reason, 'unsubscribed', 'the unsubscribe survives the campaign');
+  assert.equal(apiCalls('createCampaign').length + apiCalls('sendcampaign').length, before, 'nothing done in Zoho');
+  assert.equal(Z.calls.filter(x => /delete/i.test(x.endpoint || '')).length, 0);
+});
+
 test('send: symbols in the campaign name are dropped for Zoho, which refuses them', async () => {
   const { ws } = await freshConnected('Odd name');
   const c = await readyCampaign(ws, { name: 'Spring sale! (50% off) #1 – Café & Co.' });
@@ -1162,6 +1181,22 @@ test('greetingName: leads without a contact person are greeted as the business, 
 });
 
 // ------------------------------------------------------------------ Zoho Campaigns → Contact lists
+
+test('plan limit: admins set the contact limit; lists show it with usage (campaign lists not counted)', async () => {
+  const { ws } = await freshConnected('Plan limit', { account: { lists: [
+    { listkey: 'L1', listname: 'Customers', noofcontacts: '600' },
+    { listkey: 'L2', listname: 'Trade show', noofcontacts: '250' },
+    { listkey: 'S1', listname: 'Marketech campaign 3 v1 abc123', noofcontacts: '40' }
+  ] } });
+  const before = await capi(ws, 'GET', '/zoho-lists');
+  assert.deepEqual(before.data.plan, { contactLimit: null, usage: { upTo: 850, atLeast: 600 } });
+  assert.equal((await capi(ws, 'PUT', '/zoho-plan', { contactLimit: 0 })).status, 400);
+  const member = await h.addMember(ws.workspaceId, 'Marketing Manager');
+  assert.equal((await capi(member, 'PUT', '/zoho-plan', { contactLimit: 1000 })).status, 403, 'only those who configure mail');
+  assert.equal((await capi(ws, 'PUT', '/zoho-plan', { contactLimit: 1000 })).status, 200);
+  assert.equal((await capi(ws, 'GET', '/zoho-lists')).data.plan.contactLimit, 1000);
+  assert.equal((await capi(ws, 'PUT', '/zoho-plan', { contactLimit: null })).data.contactLimit, null);
+});
 
 test('contact lists: view lists, create one with leads and typed addresses (names sent, blocked addresses skipped)', async () => {
   const { ws, acct } = await freshConnected('Lists create', { connect: { scope: NAME_SCOPES } });

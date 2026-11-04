@@ -8,17 +8,10 @@ import { EmailCampaignsComponent } from './email-campaigns.component';
 import { VisualHtmlEditorComponent } from './visual-html-editor.component';
 import { EmailContentEditorComponent } from './email-content-editor.component';
 import { ZohoCampaignsComponent } from './zoho-campaigns.component';
-import { CampaignContactsComponent } from './campaign-contacts.component';
 
 @Component({ selector: 'app-zoho-campaigns', standalone: true, template: '' })
 class ZohoStub { @Input() oauthResult: any; @Output() toast = new EventEmitter<string>(); @Output() statusChange = new EventEmitter<any>(); }
 
-@Component({ selector: 'app-campaign-contacts', standalone: true, template: '' })
-class ContactsStub {
-  @Input() campaignId: any; @Input() editable: any; @Input() canSync: any; @Input() canReconnect: any; @Input() zohoLists: any;
-  @Output() contactsChange = new EventEmitter<any[]>();
-  @Output() changed = new EventEmitter<any>(); @Output() reconnect = new EventEmitter<void>(); @Output() toast = new EventEmitter<string>();
-}
 
 const ORIGINAL = '<p>Original campaign content</p>';
 
@@ -31,7 +24,7 @@ describe('EmailCampaignsComponent: Choose Template', () => {
 
   beforeEach(() => {
     TestBed.configureTestingModule({ imports: [EmailCampaignsComponent], providers: [provideHttpClient(), provideHttpClientTesting()] });
-    TestBed.overrideComponent(EmailCampaignsComponent, { remove: { imports: [ZohoCampaignsComponent, CampaignContactsComponent] }, add: { imports: [ZohoStub, ContactsStub] } });
+    TestBed.overrideComponent(EmailCampaignsComponent, { remove: { imports: [ZohoCampaignsComponent] }, add: { imports: [ZohoStub] } });
     http = TestBed.inject(HttpTestingController);
     fixture = TestBed.createComponent(EmailCampaignsComponent);
     comp = fixture.componentInstance;
@@ -41,7 +34,10 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     (comp as any).setSelected({ id: 5, name: 'Autumn', status: 'draft', version: 1, html: ORIGINAL, lists: [] });
     fixture.detectChanges();
   });
+  /** Each opened campaign loads its picked contacts. */
+  const flushContacts = (contacts: any[] = []) => http.match(r => r.method === 'GET' && /\/mail\/campaigns\/\d+\/contacts$/.test(r.url)).forEach(r => r.flush({ contacts }));
   afterEach(() => {
+    flushContacts();
     // Choosing a template never saves, sends or contacts Zoho by itself.
     http.expectNone(r => r.method !== 'GET' && !/\/(duplicate|refresh)$/.test(r.url));
     http.verify();
@@ -245,7 +241,7 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     (el().querySelector('[aria-label="Preview width"] button:last-child') as HTMLButtonElement).click();
     fixture.detectChanges();
     expect(ed().previewWidth).toBe('mobile');
-    http.expectNone(() => true);
+    flushContacts(); http.expectNone(() => true);
   });
 
   it('the switch toggles Edit and Preview, like the labels', () => {
@@ -296,7 +292,7 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     tickUnsub(false);
     expect(comp.form.html.trim()).toBe('<p>Hello</p>');
     expect(unsubBox()!.checked).toBeFalse();
-    http.expectNone(() => true);
+    flushContacts(); http.expectNone(() => true);
   });
 
   it('the unsubscribe link goes before </body> in full documents; a link written by hand is recognised and can be removed', () => {
@@ -394,7 +390,7 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     (window.prompt as jasmine.Spy).and.returnValue('https://example.com');
     (el().querySelector('[aria-label=Link]') as HTMLButtonElement).click();
     expect(exec).toHaveBeenCalledWith('createLink', 'https://example.com');
-    http.expectNone(() => true);
+    flushContacts(); http.expectNone(() => true);
   });
 
   it('a newly opened campaign starts in Visual editing', () => {
@@ -482,19 +478,52 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     expect(el().querySelector('[role=dialog]')).toBeNull();
   });
 
-  // ---- Selected contacts ----
-  const contactsStub = () => fixture.debugElement.query(By.directive(ContactsStub)).componentInstance as ContactsStub;
-
-  it('changing the selected contacts keeps unsaved edits and shows the campaign is back to draft', () => {
+  // ---- Contacts picked inside a list ----
+  it('picked contacts show as one line with a count (never listed); Clear removes them and keeps unsaved edits', () => {
+    comp.zoho = { canCompose: true, canSend: true, connection: { connected: true, missingScopes: [], canSyncContacts: true } };
     (comp as any).setSelected({ id: 5, name: 'Autumn', status: 'approved', approved: true, version: 3, html: ORIGINAL, lists: [] });
+    comp.audiences = { lists: [{ key: 'L1', name: 'Customers', contacts: 2000 }], topics: [] };
+    const picks = Array.from({ length: 1000 }, (_, i) => ({ id: i + 1, email: `p${i}@a.io`, sourceListKey: 'L1', eligible: true }));
+    flushContacts(picks);
     comp.form.subject = 'Unsaved subject';
+    comp.step = 2;
     fixture.detectChanges();
-    contactsStub().changed.emit({ id: 5, name: 'Autumn', status: 'draft', approved: false, version: 4, html: ORIGINAL, lists: [], contactCount: 2 });
+    expect(el().querySelector('.ec-picks')!.textContent).toContain('1,000 contacts picked from this list');
+    expect(el().textContent).not.toContain('p999@a.io');
+    expect(el().textContent).not.toContain('Your leads');
+    spyOn(window, 'confirm').and.returnValue(true);
+    (Array.from(el().querySelectorAll('.ec-picks button')).find(b => b.textContent!.trim() === 'Clear') as HTMLButtonElement).click();
+    const req = http.expectOne(r => r.method === 'POST' && r.url.endsWith('/campaigns/5/contacts/remove'));
+    expect(req.request.body.ids.length).toBe(1000);
+    req.flush({ contacts: [], campaign: { id: 5, name: 'Autumn', status: 'draft', approved: false, version: 4, html: ORIGINAL, lists: [] } });
     http.expectOne(r => /\/mail\/campaigns$/.test(r.url)).flush({ campaigns: [] });
     fixture.detectChanges();
+    expect(el().querySelector('.ec-picks')).toBeNull();
     expect(comp.selected.status).toBe('draft');
     expect(comp.form.subject).withContext('the form is not reloaded').toBe('Unsaved subject');
-    expect(comp.dirty).toBeTrue();
+  });
+
+  it('sent campaigns can be deleted by those who send, after a confirmation that Zoho keeps its copy', () => {
+    const sent = { id: 7, name: 'Spring', status: 'submitted' };
+    comp.zoho = { canCompose: true, canSend: false, connection: { connected: true } };
+    expect(comp.canDelete(sent)).toBeFalse();
+    expect(comp.canDelete({ id: 8, status: 'needs_review' })).toBeFalse();
+    comp.zoho = { canCompose: true, canSend: true, connection: { connected: true } };
+    expect(comp.canDelete(sent)).toBeTrue();
+    let asked = '';
+    spyOn(window, 'confirm').and.callFake((m?: string) => { asked = m || ''; return true; });
+    comp.removeCampaign(sent);
+    expect(asked).toContain('stay in Zoho Campaigns');
+    http.expectOne(r => r.method === 'DELETE' && r.url.endsWith('/campaigns/7')).flush({ deleted: true });
+    http.expectOne(r => /\/mail\/campaigns$/.test(r.url)).flush({ campaigns: [] });
+  });
+
+  it('leads chosen directly before can be removed', () => {
+    (comp as any).setSelected({ id: 5, name: 'Autumn', status: 'draft', version: 3, html: ORIGINAL, lists: [] });
+    flushContacts([{ id: 9, email: 'lead@a.io', sourceListKey: null, eligible: true }]);
+    comp.step = 2;
+    fixture.detectChanges();
+    expect(el().querySelector('.ec-oldleads')!.textContent).toContain('1 lead(s) were chosen');
   });
 
   it('the send confirmation popup names the lists and the selected contacts; Cancel sends nothing', () => {
@@ -662,11 +691,11 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     expect([boxes()[0].indeterminate, boxes()[0].checked]).toEqual([true, false]);
     expect(boxes()[1].indeterminate).toBeFalse();
     expect(el().textContent).toContain('· 1 selected');
-    expect(el().querySelector('app-campaign-contact-rows')!.textContent).toContain('kim@client.io');
+    expect(el().querySelector('.ec-picks')!.textContent).toContain('1 contact picked from this list');
     boxes()[0].click();
     fixture.detectChanges();
     expect([boxes()[0].indeterminate, boxes()[0].checked]).toEqual([false, true]);
-    expect(el().querySelector('app-campaign-contact-rows')).toBeNull();
+    expect(el().querySelector('.ec-picks')).toBeNull();
     expect(el().textContent).not.toContain('· 1 selected');
   });
 

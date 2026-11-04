@@ -220,3 +220,10 @@
 .ec-sentinfo b { font-size: 0.9rem; font-weight: 500; overflow-wrap: anywhere; }
 .ec-sentinfo .btn { margin-left: auto; }
 .ec-view-card { width: min(760px, 100%); }
+
+/* Contacts picked inside a list: one line with a count */
+.ec-picks { display: flex; align-items: center; gap: 6px 14px; flex-wrap: wrap; margin: -2px 0 8px 28px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 0.84rem; }
+.ec-picks > span { flex: 1 1 200px; }
+.ec-picks .link-btn.danger { color: var(--danger-text, #b91c1c); }
+.ec-oldleads { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+.ec-oldleads span { flex: 1 1 260px; }

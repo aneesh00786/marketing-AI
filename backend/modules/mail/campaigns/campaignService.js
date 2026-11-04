@@ -195,11 +195,27 @@ async function duplicate(ctx, id) {
   return { campaign: await getOne(ctx, ins.lastID), contactsDropped: contacts.dropped };
 }
 
+/**
+ * Deletes a campaign from Marketech.ai. Drafts, approved and failed ones: anyone who composes.
+ * Sent ones: only those who send (it removes the history here). Zoho keeps its copy and report:
+ * this connection cannot delete in Zoho. Before a sent campaign goes, the unsubscribes and bounces
+ * of the list it made are saved in the stop-list, so later campaigns still skip those people.
+ * A submission still in progress or with an unclear outcome cannot be deleted.
+ */
 async function remove(ctx, id) {
   const row = await requireRow(ctx, id);
-  if (!EDITABLE.includes(row.status)) throw httpError(409, 'A campaign that was submitted to Zoho, or whose submission is unclear, cannot be deleted.', 'NOT_EDITABLE');
-  await run("DELETE FROM mail_campaigns WHERE id = ? AND workspace_id = ? AND status IN ('draft', 'approved', 'failed')", [row.id, ws(ctx)]);
-  await audit(ctx, 'mail.campaign_deleted', { resourceType: 'mail_campaign', resourceId: row.id });
+  const sent = row.status === 'submitted';
+  if (!EDITABLE.includes(row.status) && !sent) throw httpError(409, 'A campaign being submitted to Zoho, or whose submission is unclear, cannot be deleted. Check its status first.', 'NOT_DELETABLE');
+  if (sent && !ctx.auth.capabilities.has('mail.send')) throw httpError(403, 'Only people who can send campaigns can delete a sent campaign.', 'FORBIDDEN');
+  if (sent && row.contact_list_key) {
+    try {
+      await contactsSvc.importOptOutsFrom(ws(ctx), [row.contact_list_key]);
+    } catch (err) {
+      throw httpError(502, `The campaign was not deleted: its unsubscribes could not be read from Zoho first (${err.message}). Try again later.`, 'OPT_OUTS_UNREADABLE');
+    }
+  }
+  await run("DELETE FROM mail_campaigns WHERE id = ? AND workspace_id = ? AND status IN ('draft', 'approved', 'failed', 'submitted')", [row.id, ws(ctx)]);
+  await audit(ctx, sent ? 'mail.campaign_deleted_after_send' : 'mail.campaign_deleted', { resourceType: 'mail_campaign', resourceId: row.id, metadata: sent ? { zohoCampaignKey: row.zoho_campaign_key || null } : undefined });
   return { deleted: true };
 }
 

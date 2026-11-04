@@ -123,6 +123,33 @@ describe('ZohoListsComponent (Zoho Campaigns → Contact lists)', () => {
     expect(comp.form).toBeNull();
   });
 
+  it('plan limit: shows contacts against the limit; admins set it; adding past it warns', () => {
+    TestBed.configureTestingModule({ imports: [ZohoListsComponent], providers: [provideHttpClient(), provideHttpClientTesting()] });
+    http = TestBed.inject(HttpTestingController);
+    fixture = TestBed.createComponent(ZohoListsComponent);
+    comp = fixture.componentInstance;
+    Object.assign(comp, { zohoReady: true, canManage: true, canConfigure: true });
+    fixture.detectChanges();
+    http.expectOne(r => r.url.endsWith('/zoho-lists')).flush({ lists: structuredClone(LISTS), canAdd: true, canRemove: true, plan: { contactLimit: null, usage: { upTo: 950, atLeast: 600 } } });
+    fixture.detectChanges();
+    expect(el().querySelector('.zl-plan')!.textContent).toContain('Contacts in Zoho: up to 950');
+    button('Set plan limit').click(); fixture.detectChanges();
+    comp.limitEdit = '1,000';
+    (el().querySelector('.zl-plan-edit') as HTMLFormElement).dispatchEvent(new Event('submit'));
+    const put = http.expectOne(r => r.method === 'PUT' && r.url.endsWith('/zoho-plan'));
+    expect(put.request.body).toEqual({ contactLimit: 1000 });
+    put.flush({ contactLimit: 1000 });
+    fixture.detectChanges();
+    expect(el().querySelector('.zl-plan')!.textContent).toContain('up to 950 of 1,000');
+    expect(comp.limitWarning(50)).toBe('');
+    expect(comp.limitWarning(100)).toContain('may go over it');
+    button('New list').click(); fixture.detectChanges();
+    http.expectOne(r => r.url.endsWith('/lead-options')).flush({ leads: [] });
+    comp.form!.emails = Array.from({ length: 60 }, (_, i) => `p${i}@a.io`).join('\n');
+    fixture.detectChanges();
+    expect(el().querySelector('.zl-limit-warn')!.textContent).toContain('Adding 60 may go over it');
+  });
+
   it('Add contacts goes to that list; View contacts can remove one after confirming', () => {
     start();
     button('Add contacts').click(); fixture.detectChanges();
