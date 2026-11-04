@@ -109,7 +109,23 @@ const safeAgent = new Agent({ connect: { lookup: safeLookup } });
 /**
  * @returns {Promise<{ status:number, ok:boolean, url:string, headers:Headers, text:string }>}
  */
-async function safeFetchText(rawUrl, { timeoutMs = 8000, maxBytes = 2 * 1024 * 1024, maxRedirects = 5, headers = {} } = {}) {
+async function safeFetchText(rawUrl, opts = {}) {
+  const r = await safeFetchRaw(rawUrl, opts);
+  return { status: r.status, ok: r.ok, url: r.url, headers: r.headers, text: r.buffer.toString('utf8') };
+}
+
+/**
+ * Binary download (e.g. an image for an email) with the same protections. Refused, not cut short,
+ * when it is larger than maxBytes.
+ * @returns {Promise<{ status:number, ok:boolean, url:string, headers:Headers, buffer:Buffer }>}
+ */
+async function safeFetchBuffer(rawUrl, opts = {}) {
+  const r = await safeFetchRaw(rawUrl, opts);
+  if (r.truncated) throw new UnsafeUrlError(`The file is larger than ${Math.round((opts.maxBytes || 2 * 1024 * 1024) / 1024)} KB.`);
+  return { status: r.status, ok: r.ok, url: r.url, headers: r.headers, buffer: r.buffer };
+}
+
+async function safeFetchRaw(rawUrl, { timeoutMs = 8000, maxBytes = 2 * 1024 * 1024, maxRedirects = 5, headers = {} } = {}) {
   let current = assertSafeUrl(rawUrl).toString();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -130,20 +146,22 @@ async function safeFetchText(rawUrl, { timeoutMs = 8000, maxBytes = 2 * 1024 * 1
       const reader = res.body ? res.body.getReader() : null;
       const chunks = [];
       let received = 0;
+      let truncated = false;
       if (reader) {
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
           received += value.byteLength;
           if (received > maxBytes) {
+            truncated = true;
             controller.abort();
             break;
           }
           chunks.push(value);
         }
       }
-      const text = Buffer.concat(chunks.map(c => Buffer.from(c))).toString('utf8');
-      return { status: res.status, ok: res.ok, url: current, headers: res.headers, text };
+      const buffer = Buffer.concat(chunks.map(c => Buffer.from(c)));
+      return { status: res.status, ok: res.ok, url: current, headers: res.headers, buffer, truncated };
     }
     throw new UnsafeUrlError('Too many redirects.');
   } catch (err) {
@@ -160,6 +178,7 @@ async function safeFetchText(rawUrl, { timeoutMs = 8000, maxBytes = 2 * 1024 * 1
 module.exports = {
   assertSafeUrl,
   safeFetchText,
+  safeFetchBuffer,
   isBlockedAddress,
   UnsafeUrlError
 };

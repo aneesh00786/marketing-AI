@@ -15,14 +15,114 @@
           <app-icon name="plus" [size]="15"></app-icon>{{ busy === 'upload' ? 'Importing…' : 'Create Template' }}<app-icon name="chevron-down" [size]="14"></app-icon>
         </button>
         <div class="menu" *ngIf="showCreateMenu" role="menu" (click)="$event.stopPropagation()">
+          <button class="menu-item" role="menuitem" (click)="openAi()"><b>✨ Create with AI</b><small>From a description or a website link</small></button>
           <button class="menu-item" role="menuitem" (click)="newBlank()"><b>Blank template</b><small>Start from a simple email layout</small></button>
           <button type="button" class="menu-item" role="menuitem" (click)="showCreateMenu = false; htmlPicker.click()"><b>Upload HTML file</b><small>.html or .htm, up to {{ limits.htmlKb }} KB</small></button>
           <button type="button" class="menu-item" role="menuitem" (click)="showCreateMenu = false; zipPicker.click()"><b>Upload ZIP package</b><small>.zip with an HTML file, CSS and images, up to {{ limits.zipMb }} MB</small></button>
         </div>
       </div>
-      <button type="button" class="btn btn-secondary btn-sm" (click)="zipPicker.click()" [disabled]="busy === 'upload'"><app-icon name="upload" [size]="15"></app-icon>Import from ZIP</button>
     </div>
   </header>
+
+  <!-- Create with AI: content, design, sections and branding become a template preview -->
+  <div class="zc-backdrop tpl-ai-backdrop" *ngIf="ai" (click)="closeAi()">
+    <div class="zc-card tpl-ai" role="dialog" aria-modal="true" aria-labelledby="tpl-ai-title" (click)="$event.stopPropagation()">
+      <header class="zc-head">
+        <div><h3 id="tpl-ai-title">✨ Create a template with AI</h3>
+          <p class="mx-desc">Describe the email or give a website link, then choose the design. The AI writes the words; Marketech.ai builds the layout so it works in every inbox. Anything it does not know is left as [placeholders] for you to fill in.</p></div>
+        <button type="button" class="zc-close" aria-label="Close" (click)="closeAi()"><app-icon name="x" [size]="18"></app-icon></button>
+      </header>
+      <div class="tpl-ai-body">
+        <form class="tpl-ai-form" (ngSubmit)="generateAi()">
+          <div class="tpl-ai-tabs" role="tablist" aria-label="Options">
+            <button type="button" role="tab" *ngFor="let tb of aiTabs" [class.on]="ai.tab === tb.key" [attr.aria-selected]="ai.tab === tb.key" (click)="ai.tab = tb.key">{{ tb.label }}</button>
+          </div>
+
+          <!-- Content -->
+          <div class="tpl-ai-pane" *ngIf="ai.tab === 'content'">
+            <label><span>What should the email say?</span>
+              <textarea class="hud-input" name="prompt" rows="4" maxlength="1500" [(ngModel)]="ai.prompt" placeholder="e.g. Promote our compostable takeaway boxes to cafés: 15% off the first order this month."></textarea></label>
+            <label><span>Website link <small class="muted">(the AI reads it for facts, logo, colours and pictures)</small></span>
+              <input class="hud-input" name="url" maxlength="500" [(ngModel)]="ai.url" placeholder="e.g. thrivewoo.com/product" /></label>
+            <div class="tpl-ai-row">
+              <label><span>Type</span><select class="hud-input" name="type" [(ngModel)]="ai.type"><option *ngFor="let x of aiTypes" [value]="x">{{ x }}</option></select></label>
+              <label><span>Tone</span><select class="hud-input" name="tone" [(ngModel)]="ai.tone"><option *ngFor="let x of aiTones" [value]="x">{{ x }}</option></select></label>
+              <label><span>Length</span><select class="hud-input" name="length" [(ngModel)]="ai.length"><option value="short">Short</option><option value="medium">Medium</option><option value="long">Long</option></select></label>
+            </div>
+            <div class="tpl-ai-row">
+              <label><span>Audience <small class="muted">(optional)</small></span><input class="hud-input" name="audience" maxlength="150" [(ngModel)]="ai.audience" placeholder="e.g. café owners in Sydney" /></label>
+              <label><span>Language</span><select class="hud-input" name="language" [(ngModel)]="ai.language"><option *ngFor="let x of aiLanguages" [value]="x">{{ x }}</option></select></label>
+            </div>
+            <label><span>Button link <small class="muted">(optional; else the website link)</small></span>
+              <input class="hud-input" name="ctaUrl" maxlength="500" [(ngModel)]="ai.ctaUrl" placeholder="https://yourcompany.com/register" /></label>
+          </div>
+
+          <!-- Design -->
+          <div class="tpl-ai-pane" *ngIf="ai.tab === 'design'">
+            <span class="tpl-ai-label">Style</span>
+            <div class="tpl-ai-styles" role="radiogroup" aria-label="Style">
+              <button type="button" role="radio" *ngFor="let st of aiStyles" [class.on]="ai.style === st.key" [attr.aria-checked]="ai.style === st.key" (click)="ai.style = st.key">
+                <b>{{ st.label }}</b><small>{{ st.help }}</small></button>
+            </div>
+            <div class="tpl-ai-row">
+              <label><span>Theme</span><select class="hud-input" name="theme" [(ngModel)]="ai.theme"><option value="light">Light</option><option value="dark">Dark</option></select></label>
+              <label><span>Font</span><select class="hud-input" name="font" [(ngModel)]="ai.font"><option value="sans">Clean (sans-serif)</option><option value="serif">Classic (serif)</option><option value="rounded">Friendly (rounded)</option></select></label>
+              <label><span>Buttons</span><select class="hud-input" name="buttonShape" [(ngModel)]="ai.buttonShape"><option value="rounded">Rounded</option><option value="pill">Pill</option><option value="square">Square</option></select></label>
+            </div>
+            <label><span>Brand colour <small class="muted">(optional; else from the website)</small></span>
+              <span class="tpl-ai-color"><input type="color" name="colorPick" [ngModel]="ai.color || '#4f46e5'" (ngModelChange)="ai.color = $event" aria-label="Pick a colour" />
+                <input class="hud-input" name="color" maxlength="7" [(ngModel)]="ai.color" placeholder="From the website" /></span></label>
+            <label class="tpl-ai-check"><input type="checkbox" name="pictures" [(ngModel)]="ai.pictures" /> Add pictures <small class="muted">(from the website, or matching stock photos)</small></label>
+          </div>
+
+          <!-- Sections -->
+          <div class="tpl-ai-pane" *ngIf="ai.tab === 'sections'">
+            <p class="muted small tpl-ai-note">Tick what the email should include. Numbers, quotes and dates the AI does not know are left as [placeholders].</p>
+            <label class="tpl-ai-sec" *ngFor="let sc of aiSections">
+              <input type="checkbox" [checked]="ai.sections.has(sc.key)" (change)="toggleAiSection(sc.key)" />
+              <span><b>{{ sc.label }}</b><small>{{ sc.help }}</small></span></label>
+          </div>
+
+          <!-- Branding -->
+          <div class="tpl-ai-pane" *ngIf="ai.tab === 'branding'">
+            <span class="tpl-ai-label">Logo <small class="muted">(PNG, JPEG or GIF, up to 1 MB; else from the website)</small></span>
+            <div class="tpl-ai-logo">
+              <img *ngIf="ai.logo" [src]="ai.logo.url" alt="Logo preview" />
+              <label class="btn btn-secondary btn-sm">{{ ai.uploading ? 'Uploading…' : ai.logo ? 'Change logo' : 'Upload logo' }}
+                <input type="file" accept="image/png,image/jpeg,image/gif" class="file-input" (change)="uploadAiLogo($event)" [disabled]="ai.uploading" /></label>
+              <button *ngIf="ai.logo" type="button" class="btn btn-secondary btn-sm" (click)="ai.logo = null">Remove</button>
+            </div>
+            <span class="tpl-ai-label">Social links <small class="muted">(https:// links; shown in the footer)</small></span>
+            <div class="tpl-ai-socials">
+              <label *ngFor="let so of aiSocials"><span>{{ so.label }}</span><input class="hud-input" [name]="'so-' + so.key" maxlength="500" [(ngModel)]="ai.socials[so.key]" [placeholder]="so.placeholder" /></label>
+            </div>
+            <label><span>Footer address <small class="muted">(optional; else your Zoho organization address)</small></span>
+              <textarea class="hud-input" name="address" rows="2" maxlength="300" [(ngModel)]="ai.address" placeholder="Company name, street, city"></textarea></label>
+          </div>
+
+          <p class="note error" *ngIf="ai.error" role="alert">{{ ai.error }}</p>
+          <div class="tpl-ai-actions">
+            <span class="muted small">{{ aiProblem || (ai.busy ? 'Writing and designing your email… this can take up to 40 seconds.' : aiSummary) }}</span>
+            <button type="submit" class="btn btn-primary btn-sm" [disabled]="!!aiProblem || ai.busy || ai.uploading">{{ ai.busy ? 'Creating…' : ai.result ? 'Regenerate' : '✨ Create template' }}</button>
+          </div>
+        </form>
+        <div class="tpl-ai-preview" *ngIf="ai.result as r">
+          <div class="tpl-ai-meta">
+            <span><small>Subject</small><b>{{ r.subject }}</b></span>
+            <span *ngIf="r.website"><small>From the website</small><b>{{ r.website.title || r.website.url }}</b></span>
+            <span *ngIf="aiPlaceholders(r.html) as n"><small>To fill in</small><b>{{ n }} placeholder(s)</b></span>
+            <span *ngIf="ai.pictures"><small>Pictures</small><b>{{ aiPicturesText(r) }}</b></span>
+          </div>
+          <app-email-preview [html]="r.html" [contentKey]="'ai-' + ai.runs" title="AI template preview" emptyText=""></app-email-preview>
+          <div class="tpl-ai-actions">
+            <span class="muted small">Written by {{ r.provider }}. Check the facts before sending.</span>
+            <button type="button" class="btn btn-primary btn-sm" (click)="useAi()">Use this template</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <p class="muted small" *ngIf="permissionsLoaded && !canCompose">You can view and use templates. Creating, importing and editing templates needs the Member role or higher.</p>
 
   <!-- What a ZIP package may contain (collapsible) -->
@@ -52,7 +152,6 @@
     <aside class="tpl-listpanel" aria-labelledby="tpl-list-title">
       <div class="tpl-list-head">
         <h3 id="tpl-list-title">Templates</h3>
-        <button *ngIf="canCompose" class="btn btn-primary btn-sm" (click)="newBlank()"><app-icon name="plus" [size]="15"></app-icon>New template</button>
       </div>
       <label class="tpl-search">
         <app-icon name="search" [size]="15"></app-icon>

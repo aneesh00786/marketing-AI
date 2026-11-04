@@ -17,7 +17,7 @@ const store = require('./assetStore');
 const ws = ctx => ctx.auth.workspaceId;
 
 const CATEGORIES = ['Newsletter', 'Promotion', 'Announcement', 'Welcome', 'Transactional', 'Custom'];
-const SOURCES = ['blank', 'html', 'zip', 'duplicate', 'email', 'campaign'];
+const SOURCES = ['blank', 'html', 'zip', 'duplicate', 'email', 'campaign', 'ai'];
 const MAX_HTML = 1024 * 1024;
 
 function httpError(status, message, code) {
@@ -34,7 +34,7 @@ const createSchema = z.object({
   description: z.string().trim().max(500).nullable().optional(),
   category: category.optional(),
   html: z.string().max(MAX_HTML, 'The template is larger than 1 MB.').optional(),
-  source: z.enum(['blank', 'html', 'zip', 'email', 'campaign']).optional(),
+  source: z.enum(['blank', 'html', 'zip', 'email', 'campaign', 'ai']).optional(),
   sourceFilename: z.string().trim().max(255).nullable().optional(),
   importId: z.string().regex(/^[a-f0-9]{32}$/).nullable().optional()
 }).strict();

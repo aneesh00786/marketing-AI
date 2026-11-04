@@ -117,6 +117,141 @@ export class EmailTemplatesComponent implements OnInit {
 
   // ---------------------------------------------------------------- create / import
 
+  // ---------- Create with AI ----------
+  readonly aiTypes = ['Promotion', 'Newsletter', 'Announcement', 'Welcome', 'Follow-up'];
+  readonly aiTones = ['Friendly', 'Professional', 'Persuasive', 'Formal', 'Playful'];
+  readonly aiLanguages = ['English', 'Hindi', 'Malayalam', 'Tamil', 'Arabic', 'Spanish', 'French', 'German', 'Portuguese', 'Italian', 'Chinese', 'Japanese'];
+  readonly aiTabs = [{ key: 'content', label: 'Content' }, { key: 'design', label: 'Design' }, { key: 'sections', label: 'Sections' }, { key: 'branding', label: 'Branding' }];
+  readonly aiStyles = [
+    { key: 'modern', label: 'Modern', help: 'Colour banner, cards' },
+    { key: 'minimal', label: 'Minimal', help: 'Clean and text-led' },
+    { key: 'corporate', label: 'Corporate', help: 'Formal, structured' },
+    { key: 'newsletter', label: 'Newsletter', help: 'Articles with pictures' },
+    { key: 'bold', label: 'Bold promo', help: 'Big headline and offer' }
+  ];
+  readonly aiSections = [
+    { key: 'features', label: 'Feature cards', help: 'Key benefits with icons' },
+    { key: 'products', label: 'Product grid', help: 'Products or services, with pictures' },
+    { key: 'stats', label: 'Numbers row', help: 'Key figures, e.g. customers, years' },
+    { key: 'testimonial', label: 'Testimonial', help: 'A customer quote' },
+    { key: 'steps', label: 'How it works', help: 'Numbered steps' },
+    { key: 'faq', label: 'FAQ', help: 'Common questions and answers' },
+    { key: 'event', label: 'Event details', help: 'Date, time and place' },
+    { key: 'comparison', label: 'Comparison', help: 'Without us vs with us' },
+    { key: 'secondCta', label: 'Second call to action', help: 'E.g. book a demo' }
+  ];
+  readonly aiSocials = [
+    { key: 'website', label: 'Website', placeholder: 'https://yourcompany.com' },
+    { key: 'linkedin', label: 'LinkedIn', placeholder: 'https://linkedin.com/company/…' },
+    { key: 'facebook', label: 'Facebook', placeholder: 'https://facebook.com/…' },
+    { key: 'instagram', label: 'Instagram', placeholder: 'https://instagram.com/…' },
+    { key: 'x', label: 'X', placeholder: 'https://x.com/…' },
+    { key: 'youtube', label: 'YouTube', placeholder: 'https://youtube.com/…' },
+    { key: 'tiktok', label: 'TikTok', placeholder: 'https://tiktok.com/@…' }
+  ];
+  ai: {
+    tab: string; prompt: string; url: string; type: string; tone: string; color: string; pictures: boolean;
+    style: string; theme: string; font: string; buttonShape: string; sections: Set<string>;
+    length: string; audience: string; language: string; ctaUrl: string;
+    logo: { id: string; url: string } | null; uploading: boolean; socials: Record<string, string>; address: string; importId: string;
+    busy: boolean; error: string; result: any; runs: number;
+  } | null = null;
+
+  openAi(): void {
+    this.showCreateMenu = false;
+    const rnd = new Uint8Array(16);
+    crypto.getRandomValues(rnd);
+    this.ai = {
+      tab: 'content', prompt: '', url: '', type: 'Promotion', tone: 'Friendly', color: '', pictures: true,
+      style: 'modern', theme: 'light', font: 'sans', buttonShape: 'rounded', sections: new Set(['features']),
+      length: 'medium', audience: '', language: 'English', ctaUrl: '',
+      logo: null, uploading: false, socials: {}, address: '', importId: Array.from(rnd, b => b.toString(16).padStart(2, '0')).join(''),
+      busy: false, error: '', result: null, runs: 0
+    };
+  }
+
+  closeAi(): void { if (!this.ai?.busy) this.ai = null; }
+
+  toggleAiSection(key: string): void { const s = this.ai?.sections; if (s) s.has(key) ? s.delete(key) : s.add(key); }
+
+  private static https(v: string): boolean { return !v.trim() || /^https:\/\/[^\s"'<>]+\.[^\s"'<>]+$/i.test(v.trim()); }
+
+  get aiProblem(): string {
+    const a = this.ai;
+    if (!a) return '';
+    if (!a.prompt.trim() && !a.url.trim()) return 'Describe the email, or give a website link (Content).';
+    if (a.color && !/^#[0-9a-fA-F]{6}$/.test(a.color.trim())) return 'Use a colour like #4f46e5, or leave it empty (Design).';
+    if (!EmailTemplatesComponent.https(a.ctaUrl)) return 'The button link must start with https:// (Content).';
+    const bad = this.aiSocials.find(so => !EmailTemplatesComponent.https(a.socials[so.key] || ''));
+    if (bad) return `The ${bad.label} link must start with https:// (Branding).`;
+    return '';
+  }
+
+  /** "Modern · Light · 3 sections" under the form. */
+  get aiSummary(): string {
+    const a = this.ai;
+    if (!a) return '';
+    const st = this.aiStyles.find(x => x.key === a.style)?.label;
+    return `${st} · ${a.theme === 'dark' ? 'Dark' : 'Light'} · ${a.sections.size} extra section${a.sections.size === 1 ? '' : 's'}${a.logo ? ' · your logo' : ''}`;
+  }
+
+  uploadAiLogo(ev: Event): void {
+    const a = this.ai;
+    const input = ev.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!a || !file) return;
+    if (file.size > 1024 * 1024) { a.error = 'The logo must be 1 MB or smaller.'; return; }
+    a.uploading = true; a.error = '';
+    this.http.post<any>(`${this.base}/ai-logo`, file, { params: { importId: a.importId }, headers: { 'Content-Type': file.type || 'application/octet-stream' } }).subscribe({
+      next: r => { a.uploading = false; a.logo = { id: r.id, url: r.url }; },
+      error: err => { a.uploading = false; a.error = this.err(err); }
+    });
+  }
+
+  /** "1 from your website, 1 stock photo", or why there are none. */
+  aiPicturesText(r: any): string {
+    const i = r?.images;
+    if (!i) return '';
+    const parts = [i.website && `${i.website} from your website`, i.stock && `${i.stock} stock photo${i.stock > 1 ? 's' : ''}`].filter(Boolean);
+    if (parts.length) return parts.join(', ');
+    return i.stockAvailable ? 'None suitable found: a colour banner is used' : 'None found: a colour banner is used (add PIXABAY_API_KEY for stock photos)';
+  }
+
+  /** How many [bracketed] parts the person still has to fill in. */
+  aiPlaceholders(html: string): number {
+    const visible = String(html || '').replace(/<(style|head)[\s\S]*?<\/\1>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/\$\[[^\]]+\]\$/g, ' ');
+    return new Set(visible.match(/\[[^\[\]{}<>\n]{1,160}\]/g) || []).size;
+  }
+
+  generateAi(): void {
+    const a = this.ai;
+    if (!a || a.busy || a.uploading || this.aiProblem) return;
+    a.busy = true; a.error = '';
+    const socials = Object.fromEntries(Object.entries(a.socials).map(([k, v]) => [k, String(v || '').trim()]).filter(([, v]) => v));
+    const body = {
+      prompt: a.prompt.trim(), url: a.url.trim(), type: a.type, tone: a.tone, brandColor: a.color.trim(), images: a.pictures,
+      style: a.style, theme: a.theme, font: a.font, buttonShape: a.buttonShape, sections: [...a.sections],
+      length: a.length, audience: a.audience.trim(), language: a.language, ctaUrl: a.ctaUrl.trim(),
+      logoAssetId: a.logo?.id || '', importId: a.importId, socials, address: a.address.trim()
+    };
+    this.http.post<any>(`${this.base}/generate`, body).subscribe({
+      next: r => { a.busy = false; a.result = r; a.runs++; },
+      error: err => { a.busy = false; a.error = this.err(err); }
+    });
+  }
+
+  /** Opens the generated template in the editor (not saved until Save). */
+  useAi(): void {
+    const r = this.ai?.result;
+    if (!r || !this.confirmDiscard()) return;
+    this.ai = null;
+    // importId: the pictures and logo stored for this preview become the template's when it is saved.
+    this.startEditing({ id: null, name: r.name || 'AI template', description: `Subject: ${r.subject}`, category: r.category || 'Custom', source: 'ai', version: null,
+      html: r.html, importId: r.importId || null, warnings: [], placeholders: [] });
+    this.toast.emit('Template created. Fill in the [placeholders], then Save.');
+  }
+
   newBlank(): void {
     this.showCreateMenu = false;
     if (!this.confirmDiscard()) return;
@@ -229,7 +364,7 @@ export class EmailTemplatesComponent implements OnInit {
   toggleZipInfo(): void { this.zipInfoOpen = !this.zipInfoOpen; }
 
   @HostListener('document:click') closeMenus(): void { this.menuFor = null; this.showCreateMenu = false; }
-  @HostListener('document:keydown.escape') escMenus(): void { this.menuFor = null; this.showCreateMenu = false; }
+  @HostListener('document:keydown.escape') escMenus(): void { this.menuFor = null; this.showCreateMenu = false; this.closeAi(); }
 
   /** Tag tone by category: transactional/welcome, marketing kinds, everything else. */
   tone(category: string): string {
@@ -240,6 +375,7 @@ export class EmailTemplatesComponent implements OnInit {
   }
 
   sourceLabel(t: any): string {
+    if (t.source === 'ai') return 'Created with AI';
     return t.source === 'zip' ? `Imported ZIP${t.sourceFilename ? ' · ' + t.sourceFilename : ''}` : t.source === 'html' ? `Uploaded HTML${t.sourceFilename ? ' · ' + t.sourceFilename : ''}` : 'Created here';
   }
 

@@ -90,3 +90,56 @@
   .tpl-content-card { padding: 10px; }
   .zip-icon { width: 40px; height: 40px; }
 }
+
+/* Create with AI */
+.tpl-ai-backdrop { position: fixed; inset: 0; z-index: 1000; background: rgba(15, 18, 30, 0.5); display: grid; place-items: center; padding: 16px; }
+.tpl-ai { width: min(1100px, 100%); max-height: calc(100vh - 32px); overflow: auto; display: flex; flex-direction: column; gap: 12px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 14px; padding: 18px; box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25); box-sizing: border-box; }
+.tpl-ai-body { display: grid; grid-template-columns: minmax(0, 360px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.tpl-ai-body:has(.tpl-ai-preview) { grid-template-columns: minmax(0, 340px) minmax(0, 1fr); }
+.tpl-ai-body:not(:has(.tpl-ai-preview)) { grid-template-columns: 1fr; }
+.tpl-ai-form { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.tpl-ai-form label { display: flex; flex-direction: column; gap: 4px; font-size: 0.84rem; font-weight: 600; min-width: 0; }
+.tpl-ai-form label small { font-weight: normal; }
+.tpl-ai-form .hud-input { width: 100%; box-sizing: border-box; font-weight: normal; }
+.tpl-ai-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+.tpl-ai-color { display: flex; gap: 6px; align-items: center; }
+.tpl-ai-color input[type=color] { width: 38px; height: 34px; padding: 0; border: 1px solid var(--border); border-radius: 6px; background: none; flex: 0 0 auto; }
+.tpl-ai-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
+.tpl-ai-actions > span { flex: 1 1 200px; }
+.tpl-ai-preview { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.tpl-ai-preview app-email-preview { display: block; height: 520px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.tpl-ai-meta { display: flex; flex-wrap: wrap; gap: 8px 22px; }
+.tpl-ai-meta span { display: flex; flex-direction: column; min-width: 0; }
+.tpl-ai-meta small { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-muted); font-weight: 600; }
+.tpl-ai-meta b { font-size: 0.88rem; font-weight: 500; overflow-wrap: anywhere; }
+@media (max-width: 860px) { .tpl-ai-body, .tpl-ai-body:has(.tpl-ai-preview) { grid-template-columns: 1fr; } }
+/* Create with AI popup header: title on the left, close button on the right */
+.tpl-ai .zc-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.tpl-ai .zc-head h3 { margin: 0 0 4px; font-size: 1.15rem; }
+.tpl-ai .zc-head .mx-desc { margin: 0; max-width: 70ch; }
+.tpl-ai .zc-close { flex: 0 0 auto; border: none; background: none; color: var(--text-muted); cursor: pointer; padding: 6px; border-radius: 6px; display: inline-flex; }
+.tpl-ai .zc-close:hover { background: var(--surface-2); color: var(--text); }
+
+.tpl-ai-form label.tpl-ai-check { flex-direction: row; align-items: center; gap: 8px; font-weight: normal; }
+
+/* Create with AI: option tabs and pickers */
+.tpl-ai-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 4px; overflow-x: auto; }
+.tpl-ai-tabs button { border: 0; background: none; color: var(--text-muted); font: inherit; font-size: 0.86rem; font-weight: 600; padding: 8px 12px; border-bottom: 2px solid transparent; cursor: pointer; white-space: nowrap; }
+.tpl-ai-tabs button.on { color: var(--text); border-bottom-color: var(--accent); }
+.tpl-ai-pane { display: flex; flex-direction: column; gap: 10px; }
+.tpl-ai-label { font-size: 0.84rem; font-weight: 600; }
+.tpl-ai-label small { font-weight: normal; }
+.tpl-ai-note { margin: 0; }
+.tpl-ai-styles { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+.tpl-ai-styles button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.tpl-ai-styles button small { color: var(--text-muted); font-size: 0.76rem; }
+.tpl-ai-styles button.on { border-color: var(--accent); background: rgba(79, 70, 229, 0.08); box-shadow: inset 0 0 0 1px var(--accent); }
+.tpl-ai-form label.tpl-ai-sec { flex-direction: row; align-items: flex-start; gap: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; font-weight: normal; cursor: pointer; }
+.tpl-ai-sec input { margin-top: 3px; }
+.tpl-ai-sec span { display: flex; flex-direction: column; }
+.tpl-ai-sec small { color: var(--text-muted); font-size: 0.78rem; }
+.tpl-ai-logo { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.tpl-ai-logo img { max-height: 40px; max-width: 180px; border: 1px solid var(--border); border-radius: 6px; padding: 4px; background: #fff; }
+.tpl-ai-logo .file-input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.tpl-ai-socials { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px 10px; }
+.tpl-ai-socials label span { font-size: 0.78rem; }

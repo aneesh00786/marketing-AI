@@ -58,6 +58,99 @@ describe('EmailTemplatesComponent', () => {
     http.expectNone(r => r.method === 'POST');
   });
 
+  it('Create with AI: needs a description or link; previews the result in a sandbox; Use opens it unsaved in the editor', () => {
+    init();
+    const el: HTMLElement = fixture.nativeElement;
+    const buttonsNamed = (t: string) => Array.from(el.querySelectorAll('button')).filter(b => b.textContent!.includes(t));
+    expect(buttonsNamed('Create with AI').length).withContext('only inside the Create Template menu').toBe(0);
+    expect(buttonsNamed('Import from ZIP').length).withContext('duplicate of Upload ZIP package').toBe(0);
+    expect(buttonsNamed('New template').length).withContext('duplicate of Blank template').toBe(0);
+    buttonsNamed('Create Template')[0].click();
+    fixture.detectChanges();
+    buttonsNamed('Create with AI')[0].click();
+    fixture.detectChanges();
+    const dlg = () => el.querySelector('.tpl-ai') as HTMLElement;
+    expect(dlg().textContent).toContain('Describe the email, or give a website link (Content).');
+    const go = () => dlg().querySelector('button[type=submit]') as HTMLButtonElement;
+    expect(go().disabled).toBeTrue();
+    comp.ai!.url = 'thrivewoo.com';
+    comp.ai!.color = 'red';
+    fixture.detectChanges();
+    expect(comp.aiProblem).toContain('#4f46e5');
+    comp.ai!.color = '#0f766e';
+    comp.ai!.prompt = 'Promote boxes';
+    fixture.detectChanges();
+    go().click();
+    const req = http.expectOne(r => r.method === 'POST' && r.url === `${BASE}/generate`);
+    expect(req.request.body).toEqual(jasmine.objectContaining({ prompt: 'Promote boxes', url: 'thrivewoo.com', type: 'Promotion', tone: 'Friendly', brandColor: '#0f766e', images: true,
+      style: 'modern', theme: 'light', font: 'sans', buttonShape: 'rounded', sections: ['features'], length: 'medium', language: 'English', logoAssetId: '', socials: {} }));
+    expect(req.request.body.importId).toMatch(/^[a-f0-9]{32}$/);
+    req.flush({ name: 'Boxes promo', subject: 'Packaging they can compost', category: 'Promotion', provider: 'OpenAI',
+      html: '<p>Hi {{first_name}}, save [Discount] by [Offer end date]. $[LI:UNSUBSCRIBE]$ [Discount]</p><script>window.__pwned = 1</script>',
+      importId: 'a'.repeat(32), images: { website: 1, stock: 1, stockAvailable: true },
+      website: { url: 'https://thrivewoo.com/', title: 'ThriveWoo', logo: true, color: '#0f766e' } });
+    fixture.detectChanges();
+    expect(dlg().textContent).toContain('Packaging they can compost');
+    expect(dlg().textContent).toContain('2 placeholder(s)');
+    expect(dlg().textContent).toContain('1 from your website, 1 stock photo');
+    expect(go().textContent).toContain('Regenerate');
+    const frame = dlg().querySelector('app-email-preview iframe') as HTMLIFrameElement;
+    expect(frame.getAttribute('sandbox')).toBe('');
+    expect((window as any).__pwned).toBeUndefined();
+    (Array.from(dlg().querySelectorAll('button')).find(b => b.textContent!.includes('Use this template')) as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect(comp.ai).toBeNull();
+    expect(comp.editing.id).withContext('not saved until Save').toBeNull();
+    expect([comp.editing.name, comp.editing.category, comp.editing.source, comp.editing.description]).toEqual(['Boxes promo', 'Promotion', 'ai', 'Subject: Packaging they can compost']);
+    expect(comp.editing.importId).withContext('the pictures are saved with the template').toBe('a'.repeat(32));
+    http.expectNone(r => r.method === 'POST' && r.url === BASE);
+  });
+
+  it('Create with AI options: tabs for design, sections and branding; links must be https; the logo is uploaded with the preview', () => {
+    init();
+    comp.openAi();
+    fixture.detectChanges();
+    const el: HTMLElement = fixture.nativeElement;
+    const tab = (label: string) => { (Array.from(el.querySelectorAll('.tpl-ai-tabs button')).find(b => b.textContent!.trim() === label) as HTMLButtonElement).click(); fixture.detectChanges(); };
+    comp.ai!.prompt = 'Spring sale';
+    tab('Design');
+    (Array.from(el.querySelectorAll('.tpl-ai-styles button')).find(b => b.textContent!.includes('Bold promo')) as HTMLButtonElement).click();
+    comp.ai!.theme = 'dark';
+    tab('Sections');
+    expect(el.querySelectorAll('.tpl-ai-sec').length).toBe(9);
+    (Array.from(el.querySelectorAll('.tpl-ai-sec')).find(l => l.textContent!.includes('Testimonial'))!.querySelector('input') as HTMLInputElement).click();
+    (Array.from(el.querySelectorAll('.tpl-ai-sec')).find(l => l.textContent!.includes('Feature cards'))!.querySelector('input') as HTMLInputElement).click();
+    tab('Branding');
+    comp.ai!.socials['linkedin'] = 'http://linkedin.com/x';
+    fixture.detectChanges();
+    expect(comp.aiProblem).toContain('LinkedIn link must start with https://');
+    comp.ai!.socials['linkedin'] = 'https://linkedin.com/company/x';
+    comp.ai!.address = 'Level 2, Sydney';
+    const file = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'logo.png', { type: 'image/png' });
+    comp.uploadAiLogo({ target: { files: [file], value: 'x' } } as any);
+    const up = http.expectOne(r => r.method === 'POST' && r.url === `${BASE}/ai-logo`);
+    expect(up.request.params.get('importId')).toBe(comp.ai!.importId);
+    up.flush({ id: 'L'.repeat(43), url: 'https://app/api/v1/mail/assets/' + 'L'.repeat(43) });
+    fixture.detectChanges();
+    expect((el.querySelector('.tpl-ai-logo img') as HTMLImageElement).src).toContain('L'.repeat(43));
+    expect(comp.aiSummary).toBe('Bold promo · Dark · 1 extra section · your logo');
+    comp.generateAi();
+    const req = http.expectOne(`${BASE}/generate`);
+    expect(req.request.body).toEqual(jasmine.objectContaining({ style: 'bold', theme: 'dark', sections: ['testimonial'], logoAssetId: 'L'.repeat(43), importId: comp.ai!.importId,
+      socials: { linkedin: 'https://linkedin.com/company/x' }, address: 'Level 2, Sydney' }));
+    req.flush({ error: 'x' }, { status: 503, statusText: 'x' });
+  });
+
+  it('Create with AI shows the server\'s message when no AI model is set up', () => {
+    init();
+    comp.openAi();
+    comp.ai!.prompt = 'Spring sale';
+    comp.generateAi();
+    http.expectOne(`${BASE}/generate`).flush({ error: 'No AI language model is configured or reachable.' }, { status: 503, statusText: 'x' });
+    fixture.detectChanges();
+    expect((fixture.nativeElement as HTMLElement).querySelector('.tpl-ai .note.error')!.textContent).toContain('No AI language model');
+  });
+
   it('previews template HTML only inside a sandboxed iframe; nothing runs in the app', () => {
     init();
     comp.open({ id: 7 });

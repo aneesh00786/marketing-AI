@@ -55,6 +55,12 @@ templates.post('/import', requireCapability('mail.compose'), rawUpload, wrap(asy
   if (!Buffer.isBuffer(req.body)) return res.status(400).json({ success: false, code: 'VALIDATION_ERROR', error: 'Send the file as the request body.' });
   res.json({ success: true, ...(await svc.importUpload(req, { buffer: req.body, filename: req.query.filename, entry: req.query.entry })) });
 }));
+// "Create with AI": a prompt and/or website link become a template preview (nothing is saved).
+const aiLimit = require('../../../lib/rateLimit').rateLimit({ windowMs: 60 * 1000, max: Math.max(1, parseInt(process.env.TEMPLATE_AI_PER_MINUTE || '6', 10) || 6), keyFn: req => `template-ai:${req.auth.workspaceId}`, message: 'Too many AI templates at once. Wait a minute and try again.' });
+templates.post('/generate', requireCapability('mail.compose'), aiLimit, wrap(async (req, res) => res.json({ success: true, ...(await require('./aiTemplate').generate(req, req.body)) })));
+// Logo for "Create with AI" (Branding): PNG, JPEG or GIF up to 1 MB, kept with the preview's importId.
+const logoUpload = (req, res, next) => express.raw({ type: () => true, limit: 1024 * 1024 })(req, res, next);
+templates.post('/ai-logo', requireCapability('mail.compose'), aiLimit, logoUpload, wrap(async (req, res) => res.json({ success: true, ...(await require('./aiTemplate').uploadLogo(req, req.body, req.query.importId)) })));
 templates.post('/analyze', requireCapability('mail.view'), wrap(async (req, res) => res.json({ success: true, ...(await svc.analyze(req, req.body)) })));
 templates.post('/assets/cleanup', requireCapability('mail.configure'), wrap(async (req, res) => res.json({ success: true, ...(await svc.cleanupAssets(req, req.body || {})) })));
 templates.post('/', requireCapability('mail.compose'), wrap(async (req, res) => res.json({ success: true, template: await svc.create(req, req.body) })));
