@@ -364,7 +364,8 @@ export class EmailTemplatesComponent implements OnInit {
   toggleZipInfo(): void { this.zipInfoOpen = !this.zipInfoOpen; }
 
   @HostListener('document:click') closeMenus(): void { this.menuFor = null; this.showCreateMenu = false; }
-  @HostListener('document:keydown.escape') escMenus(): void { this.menuFor = null; this.showCreateMenu = false; this.closeAi(); }
+  // The Create with AI popup closes only with its close button (no outside click or Escape), so nothing typed is lost.
+  @HostListener('document:keydown.escape') escMenus(): void { this.menuFor = null; this.showCreateMenu = false; }
 
   /** Tag tone by category: transactional/welcome, marketing kinds, everything else. */
   tone(category: string): string {

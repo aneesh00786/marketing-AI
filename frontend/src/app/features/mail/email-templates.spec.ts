@@ -141,6 +141,23 @@ describe('EmailTemplatesComponent', () => {
     req.flush({ error: 'x' }, { status: 503, statusText: 'x' });
   });
 
+  it('Create with AI popup stays open on outside clicks and Escape; only the close button closes it; the description box shows a count', () => {
+    init();
+    comp.openAi();
+    comp.ai!.prompt = 'Spring sale';
+    fixture.detectChanges();
+    const el: HTMLElement = fixture.nativeElement;
+    (el.querySelector('.tpl-ai-backdrop') as HTMLElement).click();
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    fixture.detectChanges();
+    expect(comp.ai).withContext('still open, nothing typed is lost').not.toBeNull();
+    expect(el.querySelector('.tpl-ai-count')!.textContent).toContain('11 / 1,500');
+    expect((el.querySelector('.tpl-ai-prompt') as HTMLTextAreaElement).rows).toBe(9);
+    (el.querySelector('.tpl-ai .zc-close') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect(comp.ai).toBeNull();
+  });
+
   it('Create with AI shows the server\'s message when no AI model is set up', () => {
     init();
     comp.openAi();

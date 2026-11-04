@@ -143,3 +143,7 @@
 .tpl-ai-logo .file-input { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .tpl-ai-socials { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px 10px; }
 .tpl-ai-socials label span { font-size: 0.78rem; }
+
+.tpl-ai-form .tpl-ai-prompt { min-height: 190px; resize: vertical; line-height: 1.5; }
+.tpl-ai-count { align-self: flex-end; font-weight: normal; font-size: 0.75rem; }
+.tpl-ai-count.near { color: var(--warning-text, #b45309); }
