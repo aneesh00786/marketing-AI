@@ -12,8 +12,9 @@ const { withEligibility, LEAD_COLUMNS } = require('../productEmails/service');
  * Zoho only sends to mailing lists, so the selection becomes a new private list, one per campaign
  * version. Those lists are generated: they are hidden from the recipient lists and never reused.
  *
- * Nobody is uploaded on the browser's word. Leads must pass the same consent and suppression rules
- * as every other marketing email, when added and again at send time. A contact picked from a Zoho
+ * Nobody is uploaded on the browser's word. Leads must not have opted out (unsubscribed, bounced,
+ * spam complaint, consent withdrawn) and need a valid address, when added and again at send time;
+ * Zoho handles consent itself, so missing consent does not block a lead. A contact picked from a Zoho
  * list is accepted only if Zoho itself shows it as subscribed on that list. Before each upload,
  * unsubscribes and bounces are imported from the earlier generated lists: an unsubscribe applies to
  * one Zoho list, so without this the next campaign's new list would add the person back.
@@ -63,6 +64,14 @@ async function fetchLists(workspaceId) {
   return lists;
 }
 
+/** Zoho's added_time (epoch milliseconds, as a number or string) as an ISO date, or null. */
+function zohoTime(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  const d = new Date(n);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
 /** One page of a Zoho list's contacts in one state (active, unsub, bounce). */
 async function readListPage(workspaceId, listKey, status, page) {
   let data;
@@ -80,7 +89,8 @@ async function readListPage(workspaceId, listKey, status, page) {
       email: email.slice(0, 255),
       name: `${c.firstname || ''} ${c.lastname || ''}`.trim().slice(0, 200) || null,
       company: clean(c.companyname),
-      phone: clean(c.phone)
+      phone: clean(c.phone),
+      addedAt: zohoTime(c.added_time)
     };
   }).filter(Boolean);
   return { contacts, hasMore: contacts.length === PAGE_SIZE };
@@ -102,7 +112,7 @@ async function assess(workspaceId, campaignId) {
   if (!rows.length) return [];
   const leadIds = rows.filter(r => r.lead_id).map(r => r.lead_id);
   const leads = leadIds.length ? await all(`SELECT ${LEAD_COLUMNS} FROM leads WHERE workspace_id = ? AND id IN (${placeholders(leadIds.length)})`, [workspaceId, ...leadIds]) : [];
-  const byLead = new Map((await withEligibility(workspaceId, leads)).map(l => [l.id, l]));
+  const byLead = new Map((await withEligibility(workspaceId, leads, { requireConsent: false })).map(l => [l.id, l]));
   const blocked = rows.some(r => !r.lead_id) ? await blockedAddresses(workspaceId) : new Set();
   return rows.map(r => {
     const lead = r.lead_id ? byLead.get(r.lead_id) : null;
@@ -165,7 +175,7 @@ async function setLeads(ctx, row, input, touch) {
   const { leadIds } = leadsSchema.parse(input || {});
   const ids = [...new Set(leadIds)];
   const leads = ids.length ? await all(`SELECT ${LEAD_COLUMNS} FROM leads WHERE workspace_id = ? AND id IN (${placeholders(ids.length)})`, [ws(ctx), ...ids]) : [];
-  const assessed = await withEligibility(ws(ctx), leads);
+  const assessed = await withEligibility(ws(ctx), leads, { requireConsent: false });
   const seen = new Set();
   const rows = [];
   for (const l of assessed) {

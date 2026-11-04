@@ -65,7 +65,7 @@ async function resolveAdditions(ctx, { leadIds, emails }) {
   const skipped = [];
   if (leadIds.length) {
     const rows = await all(`SELECT ${LEAD_COLUMNS} FROM leads WHERE workspace_id = ? AND id IN (${leadIds.map(() => '?').join(',')})`, [ws(ctx), ...leadIds]);
-    for (const l of await withEligibility(ws(ctx), rows)) {
+    for (const l of await withEligibility(ws(ctx), rows, { requireConsent: false })) {
       const email = normalize(l.email);
       if (!l.eligible || !email) { skipped.push({ email: email || l.name || `Lead ${l.id}`, reason: (l.reasons || []).join('; ') || 'No email address' }); continue; }
       if (!add.has(email)) add.set(email, { email, leadId: l.id, name: l.name, company: l.company });

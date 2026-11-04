@@ -945,7 +945,7 @@
         <div *ngIf="leadImportResult" class="lead-import-result">
           <strong>Import finished:</strong> {{ leadImportResult.imported }} imported<span *ngIf="leadImportResult.flagged.length">, {{ leadImportResult.flagged.length }} need product review</span><span *ngIf="leadImportResult.duplicates.length">, {{ leadImportResult.duplicates.length }} already in Leads (not duplicated)</span><span *ngIf="leadImportResult.skipped.length">, {{ leadImportResult.skipped.length }} rows skipped</span><span *ngIf="leadImportResult.consentRecorded">, consent recorded for {{ leadImportResult.consentRecorded }}</span>.
           <div *ngIf="leadImportResult.zoho" class="lead-import-zoho">
-            <ng-container *ngIf="!leadImportResult.zoho.error">✓ Zoho: {{ leadImportResult.zoho.added }} added to “{{ leadImportResult.zoho.list?.name }}”<span *ngIf="leadImportResult.zoho.skipped">, {{ leadImportResult.zoho.skipped }} not added (no consent, unsubscribed or no email)</span>.</ng-container>
+            <ng-container *ngIf="!leadImportResult.zoho.error">✓ Zoho: {{ leadImportResult.zoho.added }} added to “{{ leadImportResult.zoho.list?.name }}”<span *ngIf="leadImportResult.zoho.skipped">, {{ leadImportResult.zoho.skipped }} not added (unsubscribed, bounced or no email)</span>.</ng-container>
             <ng-container *ngIf="leadImportResult.zoho.error">⚠ Zoho: {{ leadImportResult.zoho.error }}</ng-container>
           </div>
           <ul *ngIf="leadImportResult.flagged.length || leadImportResult.skipped.length">

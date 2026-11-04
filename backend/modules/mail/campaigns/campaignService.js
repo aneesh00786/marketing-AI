@@ -219,7 +219,7 @@ const addContactsFromZoho = (ctx, id, input) => changeContacts(ctx, id, input, c
 const removeContacts = (ctx, id, input) => changeContacts(ctx, id, input, contactsSvc.removeContacts);
 
 /** Leads to choose from, with why each one can or cannot be emailed. */
-const leadOptions = (ctx, query) => require('../productEmails/service').listRecipients(ctx, query, { maxSelect: contactsSvc.MAX_CONTACTS });
+const leadOptions = (ctx, query) => require('../productEmails/service').listRecipients(ctx, query, { maxSelect: contactsSvc.MAX_CONTACTS, maxPageSize: 2000, requireConsent: false });
 
 /** Mailing lists and topics of the connected Zoho account, to choose recipients from. */
 async function zohoAudiences(ctx) {
@@ -545,13 +545,44 @@ const LIST_CONTACT_STATUS = { subscribed: 'active', unsubscribed: 'unsub', bounc
  * Contacts of a Zoho mailing list, read on demand (one page at a time). Nothing is stored unless
  * a contact is selected for a campaign. Each view is audited, without any address.
  */
+/**
+ * Adds the matching lead's details (by email) to Zoho contacts: business, contact person, phone,
+ * product and status, as on the Leads page. Zoho's own values are used where there is no lead.
+ */
+async function withLeadDetails(workspaceId, contacts) {
+  const emails = [...new Set(contacts.map(c => String(c.email || '').trim().toLowerCase()).filter(Boolean))];
+  const byEmail = new Map();
+  if (emails.length) {
+    const rows = await all(
+      `SELECT l.id, l.name, l.company_name, l.phone, l.status, l.product_interest, LOWER(TRIM(l.email)) AS email, p.name AS product_name
+       FROM leads l LEFT JOIN digital_products p ON p.workspace_id = l.workspace_id AND p.id = l.product_id
+       WHERE l.workspace_id = ? AND LOWER(TRIM(l.email)) IN (${emails.map(() => '?').join(',')}) ORDER BY l.id DESC`,
+      [workspaceId, ...emails]);
+    for (const r of rows) if (!byEmail.has(r.email)) byEmail.set(r.email, r);
+  }
+  return contacts.map(c => {
+    const l = byEmail.get(String(c.email || '').trim().toLowerCase());
+    return {
+      ...c,
+      leadId: l ? l.id : null,
+      company: (l && l.company_name) || c.company || null,
+      contactName: (l && l.name) || c.name || null,
+      phone: (l && l.phone) || c.phone || null,
+      product: l ? (l.product_name || l.product_interest || null) : null,
+      leadStatus: l ? l.status || null : null
+    };
+  });
+}
+
 async function listContacts(ctx, listKey, { status = 'subscribed', page = 1 } = {}) {
   const zohoStatus = LIST_CONTACT_STATUS[status];
   if (!zohoStatus) throw httpError(400, `Unknown status. Use one of: ${Object.keys(LIST_CONTACT_STATUS).join(', ')}.`, 'VALIDATION_ERROR');
   if (!/^[A-Za-z0-9_-]{1,200}$/.test(String(listKey || ''))) throw httpError(400, 'Invalid list.', 'VALIDATION_ERROR');
   await zoho.assertReady(ws(ctx));
   const p = Math.max(1, Math.min(1000, parseInt(page, 10) || 1));
-  const { contacts, hasMore } = await contactsSvc.readListPage(ws(ctx), listKey, zohoStatus, p);
+  const read = await contactsSvc.readListPage(ws(ctx), listKey, zohoStatus, p);
+  const contacts = await withLeadDetails(ws(ctx), read.contacts);
+  const { hasMore } = read;
   await audit(ctx, 'mail.zoho_list_contacts_viewed', { resourceType: 'mail_provider', resourceId: 'zoho_campaigns', metadata: { status, page: p, count: contacts.length } });
   return { contacts, page: p, pageSize: contactsSvc.PAGE_SIZE, hasMore };
 }

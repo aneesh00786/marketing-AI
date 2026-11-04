@@ -53,6 +53,38 @@
   </ng-container>
 </section>
 
+<!-- Lead picker (opened from the New list / Add contacts popup) -->
+<div class="zc-backdrop zl-picker-backdrop" *ngIf="form && picker" (click)="picker = null">
+  <div class="zc-card zl-card zl-picker" role="dialog" aria-modal="true" aria-labelledby="zl-pick-title" (click)="$event.stopPropagation()">
+    <div class="zc-head">
+      <div>
+        <h3 id="zl-pick-title">Choose leads</h3>
+        <p class="mx-desc">Tick the leads to add. Greyed-out leads cannot be added; the reason is shown.</p>
+      </div>
+      <button type="button" class="zc-close" aria-label="Close" (click)="picker = null"><app-icon name="x" [size]="18"></app-icon></button>
+    </div>
+    <label class="zl-search zl-pick-filter"><app-icon name="search" [size]="15"></app-icon>
+      <input class="hud-input" type="search" [(ngModel)]="picker.query" placeholder="Filter by name, email or company" aria-label="Filter leads" /></label>
+    <div class="zl-pick-list">
+      <label class="zl-pick-row zl-pick-all" *ngIf="pickerShownAddable.length">
+        <input type="checkbox" [checked]="pickerAllShownChecked" (change)="toggleAllShown()" />
+        <span><b>Select all{{ picker.query.trim() ? ' shown' : '' }} ({{ pickerShownAddable.length }})</b></span>
+      </label>
+      <label class="zl-pick-row" *ngFor="let l of pickerLeads" [class.zl-pick-off]="l.eligible === false">
+        <input type="checkbox" [checked]="picker.sel.has(l.id)" [disabled]="l.eligible === false" (change)="togglePick(l)" />
+        <span><b>{{ l.name }}</b><small>{{ l.email || 'No email' }}{{ l.company && l.company !== l.name ? ' · ' + l.company : '' }}</small>
+          <small class="zl-pick-why" *ngIf="l.eligible === false">{{ (l.reasons || []).join('; ') || 'Cannot be added' }}</small></span>
+      </label>
+      <p class="muted small zl-pick-none" *ngIf="!pickerLeads.length">No leads match “{{ picker.query }}”.</p>
+    </div>
+    <div class="zl-form-foot">
+      <span class="muted small">{{ picker.sel.size }} selected</span>
+      <button type="button" class="btn btn-secondary btn-sm" (click)="picker = null">Cancel</button>
+      <button type="button" class="btn btn-primary btn-sm" (click)="applyPicker()">Done</button>
+    </div>
+  </div>
+</div>
+
 <!-- New list / add contacts -->
 <div class="zc-backdrop" *ngIf="form" (click)="form = null">
   <div class="zc-card zl-card" role="dialog" aria-modal="true" aria-labelledby="zl-form-title" (click)="$event.stopPropagation()">
@@ -76,20 +108,17 @@
       <input class="hud-input" [(ngModel)]="form.name" maxlength="100" placeholder="e.g. Sydney packaging buyers" /></label>
 
     <fieldset class="zl-field">
-      <legend>From your leads <span class="muted small" *ngIf="form.picked.size">({{ form.picked.size }} selected)</span></legend>
-      <div class="zl-lead-search">
-        <input class="hud-input" type="search" [(ngModel)]="form.leadQuery" (keydown.enter)="$event.preventDefault(); searchLeads()" placeholder="Search leads by name, email or company" aria-label="Search leads" />
-        <button type="button" class="btn btn-secondary btn-sm" (click)="searchLeads()">Search</button>
-        <button type="button" class="btn btn-secondary btn-sm" *ngIf="leadOptions.length" (click)="selectAllShown()">Select all shown</button>
-      </div>
+      <legend>From your leads</legend>
       <p class="muted small" *ngIf="leadsLoading">Loading leads…</p>
-      <p class="muted small" *ngIf="!leadsLoading && !leadOptions.length">No leads that can be emailed match.</p>
-      <div class="zl-leads" *ngIf="!leadsLoading && leadOptions.length">
-        <label class="zl-lead" *ngFor="let l of leadOptions">
-          <input type="checkbox" [checked]="form.picked.has(l.id)" (change)="toggleLead(l)" />
-          <span><b>{{ l.name }}</b><small>{{ l.email }}{{ l.company && l.company !== l.name ? ' · ' + l.company : '' }}</small></span>
-        </label>
-      </div>
+      <ng-container *ngIf="!leadsLoading">
+        <div class="zl-lead-pick" *ngIf="leadOptions.length">
+          <span class="zl-picked-count" *ngIf="form.picked.size">✓ {{ form.picked.size }} lead(s) selected</span>
+          <button type="button" class="btn btn-secondary btn-sm" (click)="openPicker()">{{ form.picked.size ? 'Change selected leads' : 'Choose leads' }} ({{ addableLeads.length }} available)</button>
+          <button type="button" class="btn btn-secondary btn-sm" *ngIf="form.picked.size" (click)="form.picked.clear()">Clear</button>
+        </div>
+        <p class="muted small" *ngIf="!leadOptions.length">You have no leads yet. Type email addresses below, or use Import from Excel.</p>
+        <p class="muted small" *ngIf="blockedLeads.length && !addableLeads.length">None of your {{ blockedLeads.length }} lead(s) can be added: they have no valid email address, or unsubscribed or bounced. Open the list to see the reason for each.</p>
+      </ng-container>
     </fieldset>
 
     <label class="zl-field"><span>Or type email addresses <span class="muted small" *ngIf="typedEmails.length">({{ typedEmails.length }})</span></span>
@@ -105,7 +134,7 @@
 
 <!-- Contacts in a list -->
 <div class="zc-backdrop" *ngIf="viewing" (click)="viewing = null">
-  <div class="zc-card zl-card" role="dialog" aria-modal="true" aria-labelledby="zl-view-title" (click)="$event.stopPropagation()">
+  <div class="zc-card zl-card zl-view-card" role="dialog" aria-modal="true" aria-labelledby="zl-view-title" (click)="$event.stopPropagation()">
     <div class="zc-head">
       <div><h3 id="zl-view-title">{{ viewing.list.name }}</h3><p class="mx-desc">{{ viewing.list.contacts ?? 0 }} contact(s) in Zoho</p></div>
       <button type="button" class="zc-close" aria-label="Close" (click)="viewing = null"><app-icon name="x" [size]="18"></app-icon></button>
@@ -115,15 +144,31 @@
     </div>
     <p class="muted" *ngIf="viewing.loading">Loading contacts…</p>
     <p class="muted" *ngIf="!viewing.loading && !viewing.contacts.length">No {{ viewing.status }} contacts{{ viewing.page > 1 ? ' on this page' : '' }}.</p>
-    <div class="zl-table" *ngIf="!viewing.loading && viewing.contacts.length" role="table" aria-label="Contacts">
-      <div class="zl-row zl-crow zl-th" role="row"><span role="columnheader">Email</span><span role="columnheader">Name</span><span role="columnheader"><span class="sr-only">Actions</span></span></div>
-      <div class="zl-row zl-crow" role="row" *ngFor="let c of viewing.contacts">
-        <span role="cell" class="zl-email">{{ c.email }}</span>
-        <span role="cell">{{ c.name || '—' }}<small class="muted" *ngIf="c.company"> · {{ c.company }}</small></span>
-        <span role="cell" class="zl-actions">
-          <button *ngIf="canManage && canRemove && viewing.status === 'subscribed'" type="button" class="btn btn-secondary btn-sm" [disabled]="removing === c.email" (click)="remove(c)">{{ removing === c.email ? 'Removing…' : 'Remove' }}</button>
-        </span>
-      </div>
+    <p class="muted small zl-range" *ngIf="!viewing.loading && viewing.contacts.length">{{ viewRange }} {{ viewing.status }} contact(s)</p>
+    <div class="zl-ctable" *ngIf="!viewing.loading && viewing.contacts.length">
+      <table aria-label="Contacts">
+        <thead>
+          <tr>
+            <th class="zl-sno">#</th><th>Contact</th><th>Business</th><th>Email</th><th>Phone</th><th>Product</th><th>Lead status</th><th>Added</th>
+            <th *ngIf="canManage && canRemove && viewing.status === 'subscribed'"><span class="sr-only">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let c of viewing.contacts; let i = index">
+            <td class="zl-sno">{{ (viewing.page - 1) * viewing.pageSize + i + 1 }}</td>
+            <td>{{ c.contactName || c.name || '—' }}</td>
+            <td>{{ c.company || '—' }}</td>
+            <td class="zl-email">{{ c.email }}</td>
+            <td class="zl-nowrap">{{ c.phone || '—' }}</td>
+            <td>{{ c.product || '—' }}</td>
+            <td><span class="zl-status" *ngIf="c.leadStatus; else notLead">{{ c.leadStatus }}</span><ng-template #notLead><span class="muted small" title="This address is not in your Leads">Not in Leads</span></ng-template></td>
+            <td class="zl-nowrap">{{ c.addedAt ? (c.addedAt | date: 'd MMM y') : '—' }}</td>
+            <td *ngIf="canManage && canRemove && viewing.status === 'subscribed'" class="zl-nowrap">
+              <button type="button" class="btn btn-secondary btn-sm" [disabled]="removing === c.email" (click)="remove(c)">{{ removing === c.email ? 'Removing…' : 'Remove' }}</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
     </div>
     <div class="zl-pager" *ngIf="viewing.page > 1 || viewing.hasMore">
       <button type="button" class="btn btn-secondary btn-sm" [disabled]="viewing.page <= 1" (click)="view(viewing.list, viewing.status, viewing.page - 1)">← Previous</button>
@@ -166,7 +211,7 @@
     <ng-container *ngIf="importing.result as r">
       <div class="mx-callout" role="status"><span>✓ {{ r.imported }} new lead(s){{ r.duplicates?.length ? ', ' + r.duplicates.length + ' already in Leads' : '' }}{{ r.consentRecorded ? ', consent recorded for ' + r.consentRecorded : '' }}.</span></div>
       <div class="mx-callout" [class.warn]="r.zoho?.error" *ngIf="r.zoho" role="status">
-        <span *ngIf="!r.zoho.error">✓ Zoho: {{ r.zoho.added }} added to “{{ r.zoho.list?.name }}”{{ r.zoho.skipped ? ', ' + r.zoho.skipped + ' not added (no consent, unsubscribed or no email)' : '' }}.</span>
+        <span *ngIf="!r.zoho.error">✓ Zoho: {{ r.zoho.added }} added to “{{ r.zoho.list?.name }}”{{ r.zoho.skipped ? ', ' + r.zoho.skipped + ' not added (unsubscribed, bounced or no email)' : '' }}.</span>
         <span *ngIf="r.zoho.error">⚠ Zoho: {{ r.zoho.error }}</span>
       </div>
       <div class="zl-form-foot"><button type="button" class="btn btn-primary btn-sm" (click)="importing = null">Done</button></div>

@@ -39,8 +39,7 @@
         <p class="ltz-muted" *ngIf="loading">Loading leads…</p>
         <div class="ltz-empty" *ngIf="!loading && !leads.length">
           <ng-container *ngIf="show === 'eligible'">
-            No leads can be emailed yet. A lead can be added to Zoho once its <b>marketing consent is recorded with proof</b>
-            (import with consent, or Mail Center › Product Emails › Record consent).
+            No leads can be added: a lead needs a valid email address and must not have unsubscribed, bounced or withdrawn consent.
             <button type="button" class="link" (click)="show = 'all'; search()">Show all leads</button>
           </ng-container>
           <ng-container *ngIf="show === 'all'">No leads match.</ng-container>

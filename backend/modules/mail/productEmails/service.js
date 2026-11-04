@@ -52,8 +52,12 @@ async function hasTable(name) {
   return !!(await get('SELECT 1 AS x FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?', [name]));
 }
 
-/** Marks each lead eligible or not, with the reasons (only from information actually stored). */
-async function withEligibility(workspaceId, leads) {
+/**
+ * Marks each lead eligible or not, with the reasons (only from information actually stored).
+ * requireConsent=false (Zoho Campaigns, which handles consent and unsubscribes itself): only
+ * opt-outs block a lead (unsubscribed, bounced, spam complaint, consent withdrawn), not missing consent.
+ */
+async function withEligibility(workspaceId, leads, { requireConsent = true } = {}) {
   const suppressed = new Map((await all('SELECT email, reason FROM email_suppressions WHERE workspace_id = ?', [workspaceId])).map(r => [String(r.email).toLowerCase(), r.reason]));
   const ids = leads.map(l => l.id);
   const discovered = new Set(ids.length && (await hasTable('lead_place_refs'))
@@ -67,6 +71,7 @@ async function withEligibility(workspaceId, leads) {
     else if (suppressed.has(email.toLowerCase())) reasons.push({ bounced: 'Email bounced earlier', complaint: 'Marked an earlier email as spam' }[suppressed.get(email.toLowerCase())] || 'Unsubscribed');
     const consent = l.marketing_consent || 'unknown';
     if (consent === 'withdrawn') reasons.push('Marketing consent withdrawn');
+    else if (!requireConsent) { /* missing consent does not block */ }
     else if (consent === 'granted' && !(l.marketing_consent_method && l.marketing_consent_evidence)) {
       // Recorded before evidence was required (a note only): not trusted as consent.
       reasons.push('Consent recorded without evidence; record how and when it was given');
@@ -100,7 +105,7 @@ const LEAD_COLUMNS = 'id, name, email, company_name, status, product_id, product
  * Leads of the workspace for the recipient picker: searchable and filterable, each with its
  * eligibility. Nothing is selected server-side; eligibleIds supports "Select all eligible".
  */
-async function listRecipients(ctx, query = {}, { maxSelect = maxBatch() } = {}) {
+async function listRecipients(ctx, query = {}, { maxSelect = maxBatch(), maxPageSize = 100, requireConsent = true } = {}) {
   const where = ['workspace_id = ?'];
   const params = [ws(ctx)];
   const q = String(query.q || '').trim().slice(0, 100);
@@ -117,11 +122,11 @@ async function listRecipients(ctx, query = {}, { maxSelect = maxBatch() } = {}) 
   }
   const rows = await all(`SELECT ${LEAD_COLUMNS} FROM leads WHERE ${where.join(' AND ')} ORDER BY id DESC LIMIT ${MAX_LIST + 1}`, params);
   const truncated = rows.length > MAX_LIST;
-  let leads = await withEligibility(ws(ctx), rows.slice(0, MAX_LIST));
+  let leads = await withEligibility(ws(ctx), rows.slice(0, MAX_LIST), { requireConsent });
   if (query.eligibility === 'eligible') leads = leads.filter(l => l.eligible);
   if (query.eligibility === 'ineligible') leads = leads.filter(l => !l.eligible);
   const page = Math.max(1, parseInt(query.page, 10) || 1);
-  const pageSize = Math.min(100, Math.max(1, parseInt(query.pageSize, 10) || 25));
+  const pageSize = Math.min(maxPageSize, Math.max(1, parseInt(query.pageSize, 10) || 25));
   return {
     product: product ? presentProduct(product) : null,
     leads: leads.slice((page - 1) * pageSize, page * pageSize),

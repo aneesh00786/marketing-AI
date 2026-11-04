@@ -7,7 +7,7 @@ import { CONSENT_METHOD_LABELS, ImportSync } from './import-sync';
 
 /**
  * The two optional steps of an Excel / CSV import, shown under the file preview:
- * 1. Marketing consent: only contacts with consent recorded (with proof) can be emailed or sent to Zoho.
+ * 1. Marketing consent (optional): needed only for Product Emails; Zoho handles consent itself.
  * 2. Zoho list: add the imported contacts to an existing Zoho Campaigns list or a new one.
  * It edits the ImportSync object it is given; the import itself is sent by the parent.
  */
@@ -20,9 +20,9 @@ import { CONSENT_METHOD_LABELS, ImportSync } from './import-sync';
   template: `
   <div class="iso">
     <fieldset class="iso-box">
-      <legend>Marketing consent</legend>
+      <legend>Marketing consent <span class="iso-opt">(optional)</span></legend>
       <label class="iso-check"><input type="checkbox" [(ngModel)]="sync.consent" /> These contacts agreed to receive marketing emails, and I have proof</label>
-      <p class="iso-help" *ngIf="!sync.consent">Without consent they are imported as leads only: they cannot be emailed or added to Zoho until consent is recorded.</p>
+      <p class="iso-help" *ngIf="!sync.consent">Not needed for Zoho Campaigns. Record it only if you will send these contacts Product Emails.</p>
       <div class="iso-grid" *ngIf="sync.consent">
         <label>How they agreed
           <select class="hud-input" [(ngModel)]="sync.method"><option *ngFor="let m of methods" [value]="m.value">{{ m.label }}</option></select></label>
@@ -46,7 +46,7 @@ import { CONSENT_METHOD_LABELS, ImportSync } from './import-sync';
       </select>
       <input *ngIf="sync.list === 'new'" class="hud-input" [(ngModel)]="sync.listName" maxlength="100" placeholder="e.g. Trade show Oct 2026" aria-label="New list name" />
       <p class="iso-help" *ngIf="listsError">{{ listsError }}</p>
-      <p class="iso-help" *ngIf="sync.list !== 'none' && !sync.consent">Only contacts that already have consent recorded will be added to Zoho.</p>
+      <p class="iso-help" *ngIf="sync.list !== 'none'">Contacts who unsubscribed, bounced or have no valid email are not added.</p>
     </fieldset>
   </div>`,
   styles: [`
@@ -54,6 +54,7 @@ import { CONSENT_METHOD_LABELS, ImportSync } from './import-sync';
     .iso { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
     .iso-box { margin: 0; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
     .iso-box legend { padding: 0 6px; font-weight: 600; font-size: 0.9rem; }
+    .iso-opt { font-weight: normal; color: var(--text-muted); font-size: 0.8rem; }
     .iso-check { display: flex; gap: 8px; align-items: flex-start; font-size: 0.86rem; }
     .iso-check input { margin-top: 3px; }
     .iso-help { margin: 0; font-size: 0.8rem; color: var(--text-muted); }

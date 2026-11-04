@@ -12,6 +12,7 @@
 .zl-row:first-child { border-top: 0; }
 .zl-th { background: var(--surface-2, rgba(127,127,127,.06)); font-size: 0.76rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: .03em; }
 .zl-crow { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) 100px; }
+.zl-sno { color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .zl-name { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; overflow-wrap: anywhere; }
 .zl-badge { font-size: 0.7rem; padding: 1px 8px; border-radius: 999px; background: var(--surface-2, rgba(127,127,127,.12)); color: var(--text-muted); }
 .zl-count { font-variant-numeric: tabular-nums; }
@@ -30,13 +31,8 @@
 .zl-field { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; border: 0; min-width: 0; font-size: 13px; font-weight: 600; }
 .zl-field legend { padding: 0; margin-bottom: 6px; }
 .zl-field textarea { resize: vertical; font-weight: normal; }
-.zl-lead-search { display: flex; gap: 6px; flex-wrap: wrap; }
-.zl-lead-search input { flex: 1 1 220px; min-width: 0; }
-.zl-leads { max-height: 240px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
-.zl-lead { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-top: 1px solid var(--border); font-weight: normal; cursor: pointer; }
-.zl-lead:first-child { border-top: 0; }
-.zl-lead span { display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; }
-.zl-lead small { color: var(--text-muted); font-size: 0.76rem; }
+.zl-lead-pick { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.zl-picked-count { font-weight: 600; font-size: 0.86rem; margin-right: 4px; }
 .zl-skipped ul { margin: 4px 0 0; padding-left: 18px; font-size: 0.8rem; }
 .zl-form-foot { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 .zl-form-foot > span { flex: 1 1 200px; }
@@ -53,3 +49,31 @@
 .zl-file { display: inline-flex; align-self: flex-start; align-items: center; gap: 8px; padding: 10px 14px; border: 1px dashed var(--border-strong, var(--border)); border-radius: 10px; cursor: pointer; font-weight: 600; font-size: 0.88rem; }
 .zl-file input { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .zl-file:focus-within { outline: 2px solid var(--primary, #4f46e5); outline-offset: 2px; }
+
+/* Lead picker popup: sits above the New list / Add contacts popup. */
+.zl-picker-backdrop { z-index: 1010; }
+.zl-picker { width: min(640px, 100%); }
+.zl-pick-filter { max-width: none; flex: 0 0 auto; }
+.zl-pick-list { min-height: 120px; max-height: 55vh; overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
+.zl-pick-row { display: flex; align-items: flex-start; gap: 10px; padding: 8px 12px; border-top: 1px solid var(--border); font-weight: normal; cursor: pointer; }
+.zl-pick-row:first-child { border-top: 0; }
+.zl-pick-row input { margin-top: 3px; }
+.zl-pick-row span { display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; }
+.zl-pick-row small { color: var(--text-muted); font-size: 0.76rem; }
+.zl-pick-all { position: sticky; top: 0; z-index: 1; background: var(--surface); }
+.zl-pick-off { cursor: default; opacity: 0.6; }
+.zl-pick-why { font-style: italic; }
+.zl-pick-none { padding: 12px; margin: 0; }
+
+/* View contacts: a full-details table; only the table scrolls (both ways), header kept in view. */
+.zl-view-card { width: min(1200px, 100%); }
+.zl-ctable { overflow: auto; max-height: 60vh; border: 1px solid var(--border); border-radius: 10px; }
+.zl-ctable table { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
+.zl-ctable th, .zl-ctable td { padding: 9px 12px; text-align: left; vertical-align: middle; border-top: 1px solid var(--border); }
+.zl-ctable th { position: sticky; top: 0; z-index: 1; border-top: 0; background: var(--surface); box-shadow: inset 0 -1px 0 var(--border); font-size: 0.74rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: .03em; white-space: nowrap; }
+.zl-ctable td { min-width: 110px; overflow-wrap: anywhere; }
+.zl-ctable td.zl-sno, .zl-ctable th.zl-sno { min-width: 0; width: 1%; }
+.zl-nowrap { white-space: nowrap; }
+.zl-ctable td.zl-email { min-width: 200px; }
+.zl-status { display: inline-block; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); font-size: 0.76rem; white-space: nowrap; }
+.zl-range { margin: 0; }

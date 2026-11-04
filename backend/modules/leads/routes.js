@@ -81,8 +81,8 @@ router.post('/', requireCapability('leads.manage'), body(z.object(leadFields)), 
  * - consent: the contacts agreed to marketing email; recorded with its evidence on the imported
  *   leads (and on matching existing leads whose consent is unknown; withdrawn consent is never
  *   overridden).
- * - zohoList: add them to a Zoho Campaigns list ({ key }) or a new one ({ name }). Only leads that
- *   may be emailed go to Zoho; a Zoho failure never undoes the import.
+ * - zohoList: add them to a Zoho Campaigns list ({ key }) or a new one ({ name }). Leads who
+ *   opted out (unsubscribed, bounced, withdrew consent) are not added; a Zoho failure never undoes the import.
  */
 const importConsent = z.object({
   method: z.enum(productEmails.CONSENT_METHODS),
@@ -135,10 +135,10 @@ router.post('/import-bulk', requireCapability('leads.manage'), body(z.object({ l
       }
     } catch (err) {
       zoho.error = err.code === 'NO_CONTACTS'
-        ? 'None of these contacts can be emailed yet (no marketing consent recorded, or unsubscribed or invalid), so nothing was added to Zoho.'
+        ? 'None of these contacts can be added (unsubscribed, bounced or no valid email address), so nothing was added to Zoho.'
         : err.message;
     }
-    if (!zoho.error && !zoho.added) zoho.error = 'None of these contacts can be emailed yet (no marketing consent recorded, or unsubscribed or invalid), so nothing was added to Zoho.';
+    if (!zoho.error && !zoho.added) zoho.error = 'None of these contacts can be added (unsubscribed, bounced or no valid email address), so nothing was added to Zoho.';
     zoho.reasons = zoho.reasons.slice(0, 20);
   }
 

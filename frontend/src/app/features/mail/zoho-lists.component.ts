@@ -9,7 +9,7 @@ import { ImportSync, importSyncBody, importSyncProblem, newImportSync } from '..
 import { ImportSyncOptionsComponent } from '../leads/import-sync-options.component';
 
 interface ZList { key: string; name: string | null; contacts: number | null; campaignList: boolean; }
-interface LeadOpt { id: number; name: string; email: string; company?: string | null; }
+interface LeadOpt { id: number; name: string; email: string; company?: string | null; eligible?: boolean; reasons?: string[]; }
 
 /**
  * Zoho Campaigns → Contact lists, like Zoho's "Manage Lists": every mailing list with its contact
@@ -43,13 +43,13 @@ export class ZohoListsComponent implements OnInit {
   showCampaignLists = false;
 
   /** The add / new-list popup. */
-  form: { mode: 'create' | 'add'; list: ZList | null; name: string; emails: string; leadQuery: string; picked: Map<number, LeadOpt>; skipped: { email: string; reason: string }[] } | null = null;
+  form: { mode: 'create' | 'add'; list: ZList | null; name: string; emails: string; picked: Map<number, LeadOpt>; skipped: { email: string; reason: string }[] } | null = null;
   leadOptions: LeadOpt[] = [];
   leadsLoading = false;
   saving = false;
 
   /** The contacts popup. */
-  viewing: { list: ZList; status: 'subscribed' | 'unsubscribed' | 'bounced'; page: number; contacts: any[]; hasMore: boolean; loading: boolean } | null = null;
+  viewing: { list: ZList; status: 'subscribed' | 'unsubscribed' | 'bounced'; page: number; pageSize: number; contacts: any[]; hasMore: boolean; loading: boolean } | null = null;
   removing = '';
 
   constructor(private http: HttpClient) {}
@@ -73,25 +73,61 @@ export class ZohoListsComponent implements OnInit {
 
   // ---------- New list / add contacts ----------
   openForm(mode: 'create' | 'add', list: ZList | null = null): void {
-    this.form = { mode, list, name: '', emails: '', leadQuery: '', picked: new Map(), skipped: [] };
-    this.searchLeads();
+    this.form = { mode, list, name: '', emails: '', picked: new Map(), skipped: [] };
+    this.picker = null;
+    this.loadLeads();
   }
 
-  searchLeads(): void {
+  /** All leads for the dropdown: ones that can be added, and the rest (disabled) with the reason. */
+  loadLeads(): void {
     if (!this.form) return;
     this.leadsLoading = true;
-    this.http.get<any>(`${this.base}/lead-options`, { params: { q: this.form.leadQuery.trim(), eligibility: 'eligible', pageSize: '50' } }).subscribe({
+    this.http.get<any>(`${this.base}/lead-options`, { params: { pageSize: '2000' } }).subscribe({
       next: r => { this.leadsLoading = false; this.leadOptions = r.leads || []; },
       error: e => { this.leadsLoading = false; this.leadOptions = []; this.toast.emit(this.err(e)); }
     });
   }
 
-  toggleLead(l: LeadOpt): void {
-    if (!this.form) return;
-    if (this.form.picked.has(l.id)) this.form.picked.delete(l.id); else this.form.picked.set(l.id, l);
+  get addableLeads(): LeadOpt[] { return this.leadOptions.filter(l => l.eligible !== false); }
+  get blockedLeads(): LeadOpt[] { return this.leadOptions.filter(l => l.eligible === false); }
+
+  // ---------- Lead picker popup (checkboxes; applied on "Done") ----------
+  picker: { query: string; sel: Set<number> } | null = null;
+
+  openPicker(): void { this.picker = { query: '', sel: new Set(this.form?.picked.keys() || []) }; }
+
+  /** Leads matching the filter: ones that can be added first, then the rest (disabled). */
+  get pickerLeads(): LeadOpt[] {
+    const q = (this.picker?.query || '').trim().toLowerCase();
+    const hit = (l: LeadOpt) => !q || [l.name, l.email, l.company].some(v => String(v || '').toLowerCase().includes(q));
+    return [...this.addableLeads.filter(hit), ...this.blockedLeads.filter(hit)];
   }
 
-  selectAllShown(): void { if (this.form) for (const l of this.leadOptions) this.form.picked.set(l.id, l); }
+  get pickerShownAddable(): LeadOpt[] { return this.pickerLeads.filter(l => l.eligible !== false); }
+
+  get pickerAllShownChecked(): boolean {
+    const shown = this.pickerShownAddable;
+    return !!shown.length && shown.every(l => this.picker!.sel.has(l.id));
+  }
+
+  togglePick(l: LeadOpt): void {
+    if (!this.picker || l.eligible === false) return;
+    if (this.picker.sel.has(l.id)) this.picker.sel.delete(l.id); else this.picker.sel.add(l.id);
+  }
+
+  toggleAllShown(): void {
+    if (!this.picker) return;
+    const on = !this.pickerAllShownChecked;
+    for (const l of this.pickerShownAddable) on ? this.picker.sel.add(l.id) : this.picker.sel.delete(l.id);
+  }
+
+  applyPicker(): void {
+    if (!this.form || !this.picker) return;
+    const picked = new Map<number, LeadOpt>();
+    for (const l of this.addableLeads) if (this.picker.sel.has(l.id)) picked.set(l.id, l);
+    this.form.picked = picked;
+    this.picker = null;
+  }
 
   /** Typed addresses: one per line, or separated by commas, semicolons or spaces. */
   get typedEmails(): string[] {
@@ -130,11 +166,25 @@ export class ZohoListsComponent implements OnInit {
   }
 
   // ---------- Contacts in a list ----------
+  /** "Showing 1–34" for the loaded page. */
+  get viewRange(): string {
+    const v = this.viewing;
+    if (!v || !v.contacts.length) return '';
+    const from = (v.page - 1) * v.pageSize + 1;
+    return `Showing ${from}–${from + v.contacts.length - 1}${v.hasMore ? '' : ' of ' + (from + v.contacts.length - 1)}`;
+  }
+
   view(list: ZList, status: 'subscribed' | 'unsubscribed' | 'bounced' = 'subscribed', page = 1): void {
-    this.viewing = { list, status, page, contacts: [], hasMore: false, loading: true };
+    this.viewing = { list, status, page, pageSize: 50, contacts: [], hasMore: false, loading: true };
     const v = this.viewing;
     this.http.get<any>(`${this.base}/audiences/${encodeURIComponent(list.key)}/contacts`, { params: { status, page: String(page) } }).subscribe({
-      next: r => { if (this.viewing !== v) return; v.loading = false; v.contacts = r.contacts || []; v.hasMore = !!r.hasMore; },
+      next: r => {
+        if (this.viewing !== v) return;
+        v.loading = false; v.contacts = r.contacts || []; v.hasMore = !!r.hasMore; v.pageSize = r.pageSize || v.pageSize;
+        // Zoho's list count can run ahead while it is still processing added contacts; on the
+        // last page of subscribers the real number is known, so the list shows it.
+        if (status === 'subscribed' && !v.hasMore && (v.contacts.length || page === 1)) list.contacts = (page - 1) * v.pageSize + v.contacts.length;
+      },
       error: e => { if (this.viewing !== v) return; v.loading = false; this.toast.emit(this.err(e)); }
     });
   }

@@ -42,9 +42,9 @@ describe('ImportSyncOptionsComponent', () => {
     return { fixture, el: fixture.nativeElement };
   }
 
-  it('explains that without consent contacts are leads only; consent shows how, when, proof and the confirmation', () => {
+  it('marks consent optional (not needed for Zoho); consent shows how, when, proof and the confirmation', () => {
     const { fixture, el } = make(false);
-    expect(el.textContent).toContain('imported as leads only');
+    expect(el.textContent).toContain('Not needed for Zoho Campaigns');
     expect(el.textContent).not.toContain('Zoho Campaigns list');
     fixture.componentInstance.sync.consent = true;
     fixture.detectChanges();
@@ -83,15 +83,15 @@ describe('LeadsToZohoComponent (Leads → Add to Zoho list)', () => {
   });
   afterEach(() => http.verify());
 
-  it('with no eligible leads, explains consent; "All leads" shows why each cannot be added', () => {
+  it('with no eligible leads, explains why; "All leads" shows why each cannot be added', () => {
     http.expectOne(r => r.url.endsWith('/lead-options') && r.params.get('eligibility') === 'eligible').flush({ leads: [], total: 0, eligibleCount: 0 });
     fixture.detectChanges();
-    expect(el().textContent).toContain('marketing consent is recorded with proof');
+    expect(el().textContent).toContain('must not have unsubscribed');
     btn('Show all leads').click();
     http.expectOne(r => r.url.endsWith('/lead-options') && !r.params.has('eligibility')).flush({
-      leads: [{ id: 3, name: 'Big Red Packaging', email: 'o@b.com.au', eligible: false, reasons: ['Found with AI Lead Discovery (public business listing); no marketing consent recorded'] }], total: 1, eligibleCount: 0 });
+      leads: [{ id: 3, name: 'Big Red Packaging', email: 'o@b.com.au', eligible: false, reasons: ['Unsubscribed'] }], total: 1, eligibleCount: 0 });
     fixture.detectChanges();
-    expect(el().textContent).toContain('no marketing consent recorded');
+    expect(el().textContent).toContain('Unsubscribed');
     expect((el().querySelector('.ltz-lead input') as HTMLInputElement).disabled).toBeTrue();
   });
 

@@ -247,7 +247,7 @@
 
           <fieldset class="lists ec-rcard">
             <legend><app-icon name="leads" [size]="15"></app-icon>Your leads</legend>
-            <p class="muted small ec-rcard-help">Pick leads from Marketech.ai. Only leads with marketing consent can be emailed.</p>
+            <p class="muted small ec-rcard-help">Pick leads from Marketech.ai. Leads who unsubscribed, bounced or have no valid email are left out.</p>
             <app-campaign-contacts [campaignId]="selected.id" [editable]="editable" [canSync]="canSyncContacts" [canReconnect]="!!zoho?.canConfigure" [zohoLists]="audiences?.lists ?? null"
               (contactsChange)="onContacts($event)" (changed)="onCampaignChanged($event)" (reconnect)="connectZoho()" (toast)="toast.emit($event)"></app-campaign-contacts>
           </fieldset>

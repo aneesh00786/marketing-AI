@@ -22,7 +22,7 @@ describe('ZohoListsComponent (Zoho Campaigns → Contact lists)', () => {
     comp.zohoReady = opts.ready ?? true;
     comp.canManage = opts.manage ?? true;
     fixture.detectChanges();
-    if (comp.zohoReady) http.expectOne(r => r.url.endsWith('/mail/campaigns/zoho-lists')).flush({ lists: LISTS, canAdd: opts.canAdd ?? true, canRemove: opts.canRemove ?? true });
+    if (comp.zohoReady) http.expectOne(r => r.url.endsWith('/mail/campaigns/zoho-lists')).flush({ lists: structuredClone(LISTS), canAdd: opts.canAdd ?? true, canRemove: opts.canRemove ?? true });
     fixture.detectChanges();
   }
   afterEach(() => http.verify());
@@ -40,15 +40,41 @@ describe('ZohoListsComponent (Zoho Campaigns → Contact lists)', () => {
   it('New list: needs a name and a contact, then creates it with the chosen leads and typed addresses', () => {
     start();
     button('New list').click(); fixture.detectChanges();
-    http.expectOne(r => r.url.endsWith('/lead-options') && r.params.get('eligibility') === 'eligible')
-      .flush({ leads: [{ id: 7, name: 'Priya Nair', email: 'priya@acme.com.au', company: 'Acme' }] });
+    http.expectOne(r => r.url.endsWith('/lead-options') && !r.params.has('eligibility') && r.params.get('pageSize') === '2000')
+      .flush({ leads: [
+        { id: 7, name: 'Priya Nair', email: 'priya@acme.com.au', company: 'Acme', eligible: true, reasons: [] },
+        { id: 8, name: 'Big Red', email: 'o@bigred.com.au', eligible: false, reasons: ['Unsubscribed'] }
+      ] });
     fixture.detectChanges();
     expect(button('Create list').disabled).toBeTrue();
     expect(el().textContent).toContain('Enter a list name.');
     comp.form!.name = 'Melbourne';
     fixture.detectChanges();
     expect(el().textContent).toContain('Zoho creates a list together with its first contacts');
-    (el().querySelector('.zl-lead input') as HTMLInputElement).click();
+    button('Choose leads (1 available)').click(); fixture.detectChanges();
+    const picker = () => el().querySelector('.zl-picker') as HTMLElement;
+    const rows = () => Array.from(picker().querySelectorAll('.zl-pick-row:not(.zl-pick-all)')) as HTMLElement[];
+    expect(rows().map(r => r.querySelector('b')!.textContent)).toEqual(['Priya Nair', 'Big Red']);
+    expect((rows()[1].querySelector('input') as HTMLInputElement).disabled).toBeTrue();
+    expect(rows()[1].textContent).toContain('Unsubscribed');
+    // The filter narrows the list as you type.
+    comp.picker!.query = 'acme'; fixture.detectChanges();
+    expect(rows().length).toBe(1);
+    comp.picker!.query = 'zzz'; fixture.detectChanges();
+    expect(picker().textContent).toContain('No leads match');
+    comp.picker!.query = ''; fixture.detectChanges();
+    // Cancel keeps nothing; ticking and Done adds the lead.
+    (picker().querySelector('.zl-pick-all input') as HTMLInputElement).click(); fixture.detectChanges();
+    expect(picker().textContent).toContain('1 selected');
+    button('Cancel').click(); fixture.detectChanges();
+    expect(comp.picker).toBeNull();
+    expect(comp.form!.picked.size).toBe(0);
+    button('Choose leads').click(); fixture.detectChanges();
+    (rows()[0].querySelector('input') as HTMLInputElement).click(); fixture.detectChanges();
+    button('Done').click(); fixture.detectChanges();
+    expect(el().querySelector('.zl-picked-count')!.textContent).toContain('1 lead(s) selected');
+    expect(el().querySelector('.zl-chip')).toBeNull();
+    expect(button('Change selected leads')).toBeTruthy();
     comp.form!.emails = 'a@b.com.au, A@b.com.au\nc@d.com.au';
     fixture.detectChanges();
     expect(el().textContent).toContain('3 contact(s) will be added to the new list.');
@@ -58,7 +84,7 @@ describe('ZohoListsComponent (Zoho Campaigns → Contact lists)', () => {
     let msg = '';
     comp.toast.subscribe((m: string) => msg = m);
     req.flush({ list: { key: 'L9', name: 'Melbourne' }, added: 2, skipped: [{ email: 'c@d.com.au', reason: 'Unsubscribed, bounced or withdrew consent' }] });
-    http.expectOne(r => r.url.endsWith('/zoho-lists')).flush({ lists: LISTS, canAdd: true, canRemove: true });
+    http.expectOne(r => r.url.endsWith('/zoho-lists')).flush({ lists: structuredClone(LISTS), canAdd: true, canRemove: true });
     fixture.detectChanges();
     expect(msg).toBe('List “Melbourne” created in Zoho with 2 contact(s). 1 skipped.');
     expect(el().textContent).toContain('c@d.com.au: Unsubscribed, bounced or withdrew consent');
@@ -67,18 +93,27 @@ describe('ZohoListsComponent (Zoho Campaigns → Contact lists)', () => {
   it('Add contacts goes to that list; View contacts can remove one after confirming', () => {
     start();
     button('Add contacts').click(); fixture.detectChanges();
-    http.expectOne(r => r.url.endsWith('/lead-options')).flush({ leads: [] });
+    http.expectOne(r => r.url.endsWith('/lead-options')).flush({ leads: [{ id: 8, name: 'Big Red', email: 'o@bigred.com.au', eligible: false, reasons: ['Unsubscribed'] }] });
+    fixture.detectChanges();
+    expect(el().textContent).toContain('None of your 1 lead(s) can be added:');
+    expect(button('Choose leads (0 available)')).toBeTruthy();
     comp.form!.emails = 'new@shop.com.au'; fixture.detectChanges();
     Array.from(el().querySelectorAll('.zc-card button')).find(b => b.textContent!.trim() === 'Add contacts')!.dispatchEvent(new Event('click'));
     const add = http.expectOne(r => r.method === 'POST' && r.url.endsWith('/zoho-lists/L1/contacts'));
     expect(add.request.body).toEqual({ leadIds: [], emails: ['new@shop.com.au'] });
     add.flush({ list: { key: 'L1', name: 'Sydney buyers' }, added: 1, skipped: [] });
-    http.expectOne(r => r.url.endsWith('/zoho-lists')).flush({ lists: LISTS, canAdd: true, canRemove: true });
+    http.expectOne(r => r.url.endsWith('/zoho-lists')).flush({ lists: structuredClone(LISTS), canAdd: true, canRemove: true });
     fixture.detectChanges();
     expect(comp.form).toBeNull();
 
     button('View contacts').click(); fixture.detectChanges();
     http.expectOne(r => r.url.endsWith('/audiences/L1/contacts') && r.params.get('status') === 'subscribed').flush({ contacts: [{ email: 'x@y.com.au', name: 'Xi' }], hasMore: false });
+    fixture.detectChanges();
+    expect(el().querySelector('.zl-range')!.textContent).toContain('Showing 1–1 of 1 subscribed');
+    const cells = Array.from(el().querySelectorAll('.zl-ctable tbody tr:first-child td')).map(td => td.textContent!.trim());
+    expect(cells.slice(0, 8)).toEqual(['1', 'Xi', '—', 'x@y.com.au', '—', '—', 'Not in Leads', '—']);
+    expect(Array.from(el().querySelectorAll('.zl-ctable th')).map(th => th.textContent!.trim()).slice(0, 8)).toEqual(['#', 'Contact', 'Business', 'Email', 'Phone', 'Product', 'Lead status', 'Added']);
+    expect(comp.viewing!.list.contacts).toBe(1, "Zoho's stale count (12) is corrected to what the list really holds");
     fixture.detectChanges();
     spyOn(window, 'confirm').and.returnValue(true);
     button('Remove').click();
@@ -86,7 +121,7 @@ describe('ZohoListsComponent (Zoho Campaigns → Contact lists)', () => {
     const rm = http.expectOne(r => r.method === 'POST' && r.url.endsWith('/zoho-lists/L1/remove'));
     expect(rm.request.body).toEqual({ email: 'x@y.com.au' });
     rm.flush({ removed: 'x@y.com.au' });
-    http.expectOne(r => r.url.endsWith('/zoho-lists')).flush({ lists: LISTS, canAdd: true, canRemove: true });
+    http.expectOne(r => r.url.endsWith('/zoho-lists')).flush({ lists: structuredClone(LISTS), canAdd: true, canRemove: true });
     fixture.detectChanges();
     expect(el().querySelector('.zl-email')).toBeNull();
   });
@@ -97,7 +132,7 @@ describe('ZohoListsComponent (Zoho Campaigns → Contact lists)', () => {
     expect(el().textContent).toContain('Choose an Excel or CSV file');
     comp.importing!.rows = [{ name: 'Priya Nair', companyName: 'Acme', email: 'p@acme.com.au', phone: '', product: '', productId: '', estimatedBudget: '', notes: '' }];
     fixture.detectChanges();
-    http.expectOne(r => r.url.endsWith('/zoho-lists')).flush({ lists: LISTS, canAdd: true, canRemove: true });
+    http.expectOne(r => r.url.endsWith('/zoho-lists')).flush({ lists: structuredClone(LISTS), canAdd: true, canRemove: true });
     fixture.detectChanges();
     expect(comp.importProblem).toBe('Enter a name for the new Zoho list.');
     Object.assign(comp.importing!.sync, { listName: 'Trade show', consent: true, evidence: 'Sign-up sheet', attest: true, obtainedAt: '2026-10-01' });
@@ -108,7 +143,7 @@ describe('ZohoListsComponent (Zoho Campaigns → Contact lists)', () => {
     expect(req.request.body.zohoList).toEqual({ name: 'Trade show' });
     expect(req.request.body.consent).toEqual({ method: 'web_form', obtainedAt: '2026-10-01', evidence: 'Sign-up sheet', attest: true });
     req.flush({ message: 'Imported 1 lead.', imported: 1, duplicates: [], consentRecorded: 1, zoho: { list: { name: 'Trade show' }, added: 1, skipped: 0, error: null } });
-    http.expectOne(r => r.url.endsWith('/zoho-lists')).flush({ lists: LISTS, canAdd: true, canRemove: true });
+    http.expectOne(r => r.url.endsWith('/zoho-lists')).flush({ lists: structuredClone(LISTS), canAdd: true, canRemove: true });
     fixture.detectChanges();
     expect(el().textContent).toContain('Zoho: 1 added to “Trade show”');
   });

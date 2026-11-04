@@ -522,17 +522,21 @@ test('list contacts: read-only, one page at a time, by status; audited without a
   const C = await h.createWorkspace({ name: 'List contacts' });
   Z.account('acctC');
   Z.accounts.acctC.contacts = { L1: [
-    { contact_email: 'kim@client.io', firstname: 'Kim', lastname: 'Lee', companyname: 'Acme', phone: '+1 555 0100' },
+    { contact_email: 'kim@client.io', firstname: 'Kim', lastname: 'Lee', companyname: 'Acme', phone: '+1 555 0100', added_time: '1793766534000' },
     { contact_email: 'no.name@client.io' },
+    { contact_email: 'Lead@Shop.com.au', firstname: 'Shop team' },
     { contact_email: 'gone@client.io', firstname: 'Gone', state: 'unsub' },
   ] };
   await connect(C, 'acctC');
+  // A matching lead (by email, any case) fills in business, contact, phone, product and status.
+  const lead = await db().run("INSERT INTO leads (workspace_id, name, email, company_name, phone, status, product_interest, created_at) VALUES (?, 'Sam Shop', 'lead@shop.com.au', 'Shop Pty Ltd', '0400 000 000', 'Contacted', 'Boxes', UTC_TIMESTAMP())", [C.workspaceId]);
   const get = (who, qs = '') => h.api('GET', `/api/v1/mail/campaigns/audiences/L1/contacts${qs}`, { token: who.token });
   const r = await get(C);
   assert.equal(r.status, 200, JSON.stringify(r.data));
   assert.deepEqual(r.data.contacts, [
-    { email: 'kim@client.io', name: 'Kim Lee', company: 'Acme', phone: '+1 555 0100' },
-    { email: 'no.name@client.io', name: null, company: null, phone: null }
+    { email: 'kim@client.io', name: 'Kim Lee', company: 'Acme', phone: '+1 555 0100', addedAt: '2026-11-04T04:28:54.000Z', leadId: null, contactName: 'Kim Lee', product: null, leadStatus: null },
+    { email: 'no.name@client.io', name: null, company: null, phone: null, addedAt: null, leadId: null, contactName: null, product: null, leadStatus: null },
+    { email: 'Lead@Shop.com.au', name: 'Shop team', company: 'Shop Pty Ltd', phone: '0400 000 000', addedAt: null, leadId: lead.lastID, contactName: 'Sam Shop', product: 'Boxes', leadStatus: 'Contacted' }
   ]);
   assert.equal(r.data.hasMore, false);
   assert.deepEqual((await get(C, '?status=unsubscribed')).data.contacts.map(c => c.email), ['gone@client.io']);
@@ -594,7 +598,7 @@ async function freshConnected(name, opts = {}) {
 
 const uploaded = acct => Object.values(acct.added || {}).flat();
 
-test('selection: leads without valid consent, or from another workspace, are refused and never stored', async () => {
+test('selection: leads without recorded consent are accepted (Zoho handles consent); opted-out leads or another workspace are refused and never stored', async () => {
   const { ws } = await freshConnected('Pick');
   const good = await addLead(ws);
   const noConsent = await addLead(ws, { consent: 'unknown', evidence: false });
@@ -606,16 +610,16 @@ test('selection: leads without valid consent, or from another workspace, are ref
   const c = (await capi(ws, 'POST', '', GOOD)).data.campaign;
   const r = await capi(ws, 'PUT', `/${c.id}/contacts/leads`, { leadIds: [good, noConsent, noEvidence, withdrawn, suppressed, other].map(l => l.id) });
   assert.equal(r.status, 200, JSON.stringify(r.data));
-  assert.deepEqual([r.data.added, r.data.refused], [1, 5]);
-  assert.deepEqual(r.data.contacts.map(x => x.email), [good.email]);
-  assert.equal(r.data.campaign.contactCount, 1);
+  assert.deepEqual([r.data.added, r.data.refused], [3, 3]);
+  assert.deepEqual(r.data.contacts.map(x => x.email).sort(), [good.email, noConsent.email, noEvidence.email].sort());
+  assert.equal(r.data.campaign.contactCount, 3);
   assert.equal((await capi(B, 'GET', `/${c.id}/contacts`)).status, 404);
 });
 
 test('selection: Select all ids are not limited to the product-email batch size', async () => {
   const { ws } = await freshConnected('Pick all');
   for (let i = 0; i < 3; i++) await addLead(ws);
-  await addLead(ws, { consent: 'unknown', evidence: false });
+  await addLead(ws, { consent: 'withdrawn', evidence: false });
   const prev = process.env.MAIL_BATCH_MAX_RECIPIENTS;
   process.env.MAIL_BATCH_MAX_RECIPIENTS = '2';
   try {
@@ -1167,14 +1171,15 @@ test('import: rows become leads; with consent they get it recorded and go into a
   assert.equal(Number(ev.n), 3, 'every consent change is kept with its evidence');
 });
 
-test('import: without consent the leads are imported but nothing reaches Zoho, and the result says why', async () => {
+test('import: without consent the leads are imported and still go to the Zoho list (Zoho handles consent)', async () => {
   const { ws, acct } = await freshConnected('Import noconsent', { connect: { scope: NAME_SCOPES } });
   const list = (await capi(ws, 'POST', '/zoho-lists', { name: 'Existing', emails: ['a@m.com.au'] })).data.list;
   const r = await importLeads(ws, { leads: [{ name: 'Kim Lee', email: 'kim@shop.com.au' }], zohoList: { key: list.key } });
   assert.equal(r.status, 200, JSON.stringify(r.data));
   assert.equal(r.data.imported, 1);
-  assert.match(r.data.zoho.error, /no marketing consent recorded/);
-  assert.deepEqual(acct.added[list.key], ['a@m.com.au']);
+  assert.equal(r.data.zoho.error, null, JSON.stringify(r.data.zoho));
+  assert.equal(r.data.zoho.added, 1);
+  assert.deepEqual(acct.added[list.key].sort(), ['a@m.com.au', 'kim@shop.com.au']);
 });
 
 test('import: bad consent details refuse the whole import; a Zoho list needs the send permission', async () => {
