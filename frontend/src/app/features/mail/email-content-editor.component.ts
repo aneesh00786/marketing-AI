@@ -6,6 +6,7 @@ import { VisualHtmlEditorComponent } from './visual-html-editor.component';
 import { HtmlCodeEditorComponent } from './html-code-editor.component';
 import { FormsModule } from '@angular/forms';
 import { CONTACT_FIELDS, ContactField, INFO_TAGS, LINK_TAGS, contactTag, fallbackExample, fallbackQuestion } from './merge-tags';
+import { describePlaceholder, fillPlaceholders, findPlaceholders, findSampleLinks, isWebLink } from './fill-placeholders';
 
 const UNSUB_LINK = '<p style="text-align:center;font-size:12px;"><a href="$[LI:UNSUBSCRIBE]$">Unsubscribe</a></p>';
 const UNSUB_TAG = /\$\[LI:(?:UNSUBSCRIBE|ORG_OPTOUT)\]\$/i;
@@ -53,8 +54,47 @@ export class EmailContentEditorComponent implements OnChanges {
     // A different email (or an email that became read-only) starts on its default view.
     if (ch['contentKey'] || (ch['editable'] && !ch['editable'].firstChange)) {
       this.contentMode = this.editable ? 'edit' : 'preview';
-      if (ch['contentKey']) { this.editMode = 'visual'; this.previewWidth = 'desktop'; }
+      if (ch['contentKey']) { this.editMode = 'visual'; this.previewWidth = 'desktop'; this.fills = {}; this.linkFills = {}; this.fillOpen = true; }
     }
+  }
+
+  // ---------- Fill in the template: one box per [placeholder] and per sample link ----------
+  fills: Record<string, string> = {};
+  linkFills: Record<string, string> = {};
+  fillOpen = true;
+  private scanned: { html: string; placeholders: { key: string; label: string; hint: string }[]; links: string[] } | null = null;
+
+  private scan() {
+    const html = this.html || '';
+    if (!this.scanned || this.scanned.html !== html) {
+      this.scanned = { html, placeholders: findPlaceholders(html).map(key => ({ key, ...describePlaceholder(key) })), links: findSampleLinks(html) };
+    }
+    return this.scanned;
+  }
+
+  get placeholders() { return this.scan().placeholders; }
+  get sampleLinks(): string[] { return this.scan().links; }
+  get fillCount(): number { return this.placeholders.length + this.sampleLinks.length; }
+
+  /** Typed values ready to go in (links must be https://, mailto: or tel:). */
+  get filledCount(): number {
+    return this.placeholders.filter(p => (this.fills[p.key] || '').trim()).length
+      + this.sampleLinks.filter(l => isWebLink(this.linkFills[l] || '')).length;
+  }
+
+  linkProblem(l: string): string {
+    const v = (this.linkFills[l] || '').trim();
+    return v && !isWebLink(v) ? 'Use a full https:// address, e.g. https://yourcompany.com/book' : '';
+  }
+
+  applyFills(): void {
+    if (!this.editable || !this.filledCount) return;
+    const before = this.fillCount;
+    this.setHtml(fillPlaceholders(this.html, this.fills, this.linkFills));
+    const left = this.fillCount;
+    this.fills = {};
+    this.linkFills = {};
+    this.toast.emit(left ? `Filled in ${before - left}. ${left} still to fill.` : 'Template filled in. Check the preview, then save.');
   }
 
   setHtml(v: string): void {

@@ -18,6 +18,32 @@
     <button *ngIf="editable && canChooseTemplate" type="button" class="btn btn-secondary btn-sm" (click)="chooseTemplate.emit()"><app-icon name="template" [size]="14"></app-icon>Choose template</button>
   </div>
 
+  <!-- Fill in the template: the [bracketed] parts and sample links, as input boxes -->
+  <section class="ec-fill" *ngIf="editable && purpose === 'campaign' && fillCount" aria-labelledby="ec-fill-title">
+    <button type="button" class="ec-fill-head" [attr.aria-expanded]="fillOpen" (click)="fillOpen = !fillOpen">
+      <span id="ec-fill-title"><b>Fill in the template</b> <span class="ec-fill-badge">{{ fillCount }} to fill</span></span>
+      <span class="muted small">{{ fillOpen ? 'Hide' : 'Show' }}</span>
+    </button>
+    <form *ngIf="fillOpen" class="ec-fill-body" (ngSubmit)="applyFills()">
+      <p class="muted small ec-fill-help">Type your own text for each part. It is the same for every recipient; the contact's name is filled in by Zoho on its own.</p>
+      <div class="ec-fill-grid">
+        <label *ngFor="let p of placeholders" class="ec-fill-field">
+          <span>{{ p.label }}</span>
+          <input class="hud-input" [name]="'f-' + p.key" [(ngModel)]="fills[p.key]" maxlength="300" [placeholder]="p.hint || p.label" />
+        </label>
+        <label *ngFor="let l of sampleLinks" class="ec-fill-field">
+          <span>Button / link address <small class="muted">(now {{ l }})</small></span>
+          <input class="hud-input" type="url" [name]="'l-' + l" [(ngModel)]="linkFills[l]" maxlength="500" placeholder="https://yourcompany.com/book" />
+          <small class="ec-fill-err" *ngIf="linkProblem(l)">{{ linkProblem(l) }}</small>
+        </label>
+      </div>
+      <div class="ec-fill-foot">
+        <span class="muted small">{{ filledCount }} of {{ fillCount }} typed. Empty boxes are left as they are.</span>
+        <button type="submit" class="btn btn-primary btn-sm" [disabled]="!filledCount">Fill in</button>
+      </div>
+    </form>
+  </section>
+
   <div id="ec-content-body" class="ec-content-body" [attr.aria-label]="contentMode === 'edit' ? 'Email HTML editor' : 'Email preview'">
     <ng-container *ngIf="contentMode === 'edit'">
       <!-- Formatting toolbar: formats the email in Visual mode, inserts tags at the cursor in HTML mode -->

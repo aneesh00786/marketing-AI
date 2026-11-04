@@ -58,3 +58,17 @@ textarea.code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; fon
 .ec-pp-head { margin: 4px 10px 6px; font-size: 0.76rem; color: var(--text-muted); }
 .ec-pp-sep { height: 1px; margin: 4px 6px; background: var(--border); }
 @media (max-width: 600px) { .ec-personalize-panel { right: auto; left: 0; } }
+
+/* Fill in the template */
+.ec-fill { border: 1px solid var(--border); border-radius: 10px; margin-bottom: 12px; background: var(--surface); }
+.ec-fill-head { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; background: none; border: 0; color: inherit; font: inherit; cursor: pointer; text-align: left; }
+.ec-fill-badge { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 999px; font-size: 0.74rem; font-weight: 600; background: rgba(217, 119, 6, 0.12); color: #b45309; }
+.ec-fill-body { display: flex; flex-direction: column; gap: 10px; padding: 0 14px 14px; }
+.ec-fill-help { margin: 0; }
+.ec-fill-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px 14px; }
+.ec-fill-field { display: flex; flex-direction: column; gap: 4px; font-size: 0.82rem; font-weight: 600; min-width: 0; }
+.ec-fill-field small { font-weight: normal; overflow-wrap: anywhere; }
+.ec-fill-field .hud-input { width: 100%; box-sizing: border-box; font-weight: normal; }
+.ec-fill-err { color: var(--danger, #b91c1c); }
+.ec-fill-foot { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
+.ec-fill-foot > span { flex: 1 1 200px; }
