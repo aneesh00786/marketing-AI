@@ -6,6 +6,8 @@
   </div>
   <p class="cm-muted" *ngIf="!report">{{ sent ? 'No figures from Zoho yet. They appear a few minutes after Zoho starts sending; this page checks again on its own, or click Refresh.' : 'Results appear after the campaign is sent.' }}</p>
 
+  <p class="cm-sending" *ngIf="pending" role="status"><span class="cm-dot" aria-hidden="true"></span>Zoho is sending this campaign{{ report.recipients_count ? ' to ' + (report.recipients_count | number) + ' contact(s)' : '' }}. Figures fill in on their own as it goes.</p>
+
   <!-- Summary row, as in Zoho's report -->
   <div class="cm-summary" *ngIf="report">
     <ng-container *ngFor="let s of summary; trackBy: trackLabel">
@@ -21,7 +23,7 @@
     <span>{{ s.label }}</span>
     <small *ngIf="s.sub">{{ s.sub }}</small>
   </ng-template>
-  <div class="cm-charts" *ngIf="report && (reach.length || problems.length)">
+  <div class="cm-charts" *ngIf="report && !pending && (reach.length || problems.length)">
     <figure class="cm-card" *ngIf="reach.length">
       <figcaption>Campaign reach</figcaption>
       <ng-container *ngFor="let b of reach; trackBy: trackLabel">
@@ -52,7 +54,7 @@
     <b class="cm-bar-value">{{ b.value | number }}</b>
   </ng-template>
 
-  <div class="cm-grid" *ngIf="report">
+  <div class="cm-grid" *ngIf="report && !pending">
     <ng-container *ngFor="let m of metrics; trackBy: trackLabel">
       <button type="button" class="cm-tile cm-link" *ngIf="canOpen(m.activity) && !m.unavailable; else plainTile" [class.on]="isOpen(m.activity)" [title]="m.hint || ''"
         (click)="openActivity(m.activity!)" [attr.aria-pressed]="isOpen(m.activity)" [attr.aria-label]="'Show who: ' + m.label + ', ' + m.value">
@@ -68,7 +70,7 @@
     <b>{{ m.value }}</b>
     <small *ngIf="m.hint">{{ m.hint }}</small>
   </ng-template>
-  <p class="cm-note" *ngIf="report">Totals as reported by Zoho Campaigns when last refreshed. Opens are an estimate: image blocking, caching and privacy features distort them.</p>
+  <p class="cm-note" *ngIf="report && !pending">Totals as reported by Zoho Campaigns when last refreshed. Opens are an estimate: image blocking, caching and privacy features distort them.</p>
 
   <ng-container *ngIf="sent">
     <div class="cm-recips-open" *ngIf="canViewRecipients">

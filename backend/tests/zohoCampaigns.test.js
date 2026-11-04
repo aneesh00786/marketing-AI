@@ -345,6 +345,25 @@ test('send: if Zoho\'s figures cannot be read right after sending, the send stil
   } finally { Z.routes[1].respond = routes; }
 });
 
+test('refresh while Zoho is still sending: a pending report with how many it goes to', async () => {
+  const { ws } = await freshConnected('Pending figures');
+  const c = await readyCampaign(ws);
+  const routes = Z.routes[1].respond;
+  Z.routes[1].respond = (url, init) => (url.includes('getcampaigndetails')
+    ? h.json(200, { status: 'success', code: '0', campaign_status: 'In Progress', total_subscribers_count: 2, 'campaign-details': [{ sent_date_string: '04 Nov 2026, 12:24 PM' }] })
+    : routes(url, init));
+  try {
+    const r = await capi(ws, 'POST', `/${c.id}/send`, { confirm: true });
+    assert.equal(r.status, 200, JSON.stringify(r.data));
+    assert.equal(r.data.campaign.report.pending, true);
+    assert.equal(r.data.campaign.report.recipients_count, 2);
+    assert.equal(r.data.campaign.report.insights.sentAt, '04 Nov 2026, 12:24 PM');
+  } finally { Z.routes[1].respond = routes; }
+  const after = await capi(ws, 'POST', `/${c.id}/refresh`, {});
+  assert.equal(after.data.campaign.report.pending, undefined, 'real figures replace it');
+  assert.equal(after.data.campaign.report.emails_sent_count, '120');
+});
+
 test('send: symbols in the campaign name are dropped for Zoho, which refuses them', async () => {
   const { ws } = await freshConnected('Odd name');
   const c = await readyCampaign(ws, { name: 'Spring sale! (50% off) #1 – Café & Co.' });

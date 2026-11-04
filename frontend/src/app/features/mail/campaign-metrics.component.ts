@@ -86,7 +86,19 @@ export class CampaignMetricsComponent implements OnChanges {
   get sent(): boolean { return this.status === 'submitted' || this.status === 'needs_review'; }
 
   /** The headline row, as in Zoho's report summary: count, and its share of sent or delivered. */
+  /** Zoho is still sending and has no figures yet: the row shows how many it goes to, and 0 so far. */
+  get pending(): boolean { return !!this.report?.pending; }
+
   get summary(): SummaryItem[] {
+    if (this.pending) {
+      const to = num(this.report.recipients_count);
+      const zero = (label: string, activity?: string): SummaryItem => ({ label, value: '0', sub: 'so far', activity, unavailable: false });
+      return [
+        { label: 'Sending to', value: to === null ? '…' : to.toLocaleString('en-US'), sub: 'in progress', activity: 'sent', unavailable: false },
+        zero('Delivered', 'delivered'), zero('Opened', 'opened'), zero('Unopened', 'unopened'), zero('Clicked', 'clicked'),
+        zero('Bounced', 'hard_bounced'), zero('Unsubscribes', 'unsubscribed'), zero('Marked spam', 'spam'), zero('Forwards', 'forwards')
+      ];
+    }
     const r = this.report || {};
     const sent = num(r.emails_sent_count);
     const delivered = num(r.delivered_count);

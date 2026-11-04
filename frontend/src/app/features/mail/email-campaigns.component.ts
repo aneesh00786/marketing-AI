@@ -386,7 +386,7 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
     // Recent figures are reused, unless Zoho had none yet (they appear minutes after sending).
     if (c.report && c.lastCheckedAt && Date.now() - new Date(c.lastCheckedAt).getTime() < REPORT_MAX_AGE_MS) return;
     this.http.post<any>(`${this.base}/${c.id}/refresh`, {}).subscribe({
-      next: r => { if (this.selected?.id === c.id) this.selected = r.campaign; this.load(); },
+      next: r => { if (this.selected?.id === c.id) { this.selected = r.campaign; if (!r.campaign.report || r.campaign.report.pending) this.pollReport(c.id, 2); } this.load(); },
       error: () => {}
     });
   }
@@ -395,14 +395,16 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
   private reportPoll: any = null;
   private pollReport(id: number, step = 0): void {
     clearTimeout(this.reportPoll);
-    if (step >= REPORT_POLL_S.length) return;
+    // After the schedule, keep checking each minute (up to an hour) while Zoho is still sending.
+    const stillSending = !!this.selected?.report?.pending || !this.selected?.report;
+    if (step >= REPORT_POLL_S.length + 45 || (step >= REPORT_POLL_S.length && !stillSending)) return;
     this.reportPoll = setTimeout(() => {
       if (this.selected?.id !== id || this.selected.status !== 'submitted') return;
       this.http.post<any>(`${this.base}/${id}/refresh`, {}).subscribe({
         next: r => { if (this.selected?.id === id) this.selected = r.campaign; this.pollReport(id, step + 1); },
         error: () => this.pollReport(id, step + 1)
       });
-    }, REPORT_POLL_S[step] * 1000);
+    }, (REPORT_POLL_S[step] ?? 60) * 1000);
   }
 
   ngOnDestroy(): void { clearTimeout(this.reportPoll); }

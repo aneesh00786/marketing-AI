@@ -78,3 +78,9 @@ button.cm-bar:focus-visible, .cm-link:focus-visible { outline: 2px solid var(--a
 .cm-status { display: inline-block; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); font-size: 0.74rem; white-space: nowrap; }
 .cm-pop-foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .cm-spacer { flex: 1; }
+
+/* Zoho still sending */
+.cm-sending { display: flex; align-items: center; gap: 8px; margin: 0; padding: 8px 12px; border-radius: 8px; background: rgba(42, 120, 214, 0.08); font-size: 0.84rem; }
+.cm-dot { width: 8px; height: 8px; border-radius: 50%; background: #2a78d6; animation: cm-pulse 1.2s ease-in-out infinite; flex: 0 0 auto; }
+@keyframes cm-pulse { 50% { opacity: 0.3; } }
+@media (prefers-reduced-motion: reduce) { .cm-dot { animation: none; } }

@@ -192,6 +192,16 @@ describe('CampaignMetricsComponent', () => {
     expect(asked).toBe(1);
   });
 
+  it('while Zoho is still sending: the row shows how many it goes to and 0 so far; no charts yet', () => {
+    init({ report: { pending: true, recipients_count: 2, insights: { lists: [] } }, canViewRecipients: true });
+    expect(el().querySelector('.cm-sending')!.textContent).toContain('Zoho is sending this campaign to 2 contact(s)');
+    expect(comp.summary.map(x => [x.label, x.value])).toEqual([['Sending to', '2'], ['Delivered', '0'], ['Opened', '0'], ['Unopened', '0'], ['Clicked', '0'],
+      ['Bounced', '0'], ['Unsubscribes', '0'], ['Marked spam', '0'], ['Forwards', '0']]);
+    expect(el().textContent).not.toContain('Campaign reach');
+    expect(el().querySelector('.cm-grid')).toBeNull();
+    expect(el().textContent).not.toContain('No figures from Zoho yet');
+  });
+
   it('num() and rate() never invent values', () => {
     expect(num(undefined)).toBeNull();
     expect(num('')).toBeNull();

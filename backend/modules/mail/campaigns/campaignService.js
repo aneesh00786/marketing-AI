@@ -529,7 +529,13 @@ async function refresh(ctx, id) {
   if (!row.zoho_campaign_key) return getOne(ctx, row.id);
   const d = await zoho.readCall(ws(ctx), 'getcampaigndetails', { campaignkey: row.zoho_campaign_key, campaigntype: 'normal' });
   const report = first(d['campaign-reports']);
-  const picked = report ? Object.fromEntries(REPORT_FIELDS.filter(f => report[f] !== undefined).map(f => [f, report[f]])) : null;
+  let picked = report ? Object.fromEntries(REPORT_FIELDS.filter(f => report[f] !== undefined).map(f => [f, report[f]])) : null;
+  // While Zoho is still sending it has no report yet: keep what is known (how many it is going to).
+  if (!picked && SENT_LIKE.has(norm(d.campaign_status))) {
+    const lists = Array.isArray(d.associated_mailing_lists) ? d.associated_mailing_lists : [];
+    const total = Number(d.total_subscribers_count) || lists.reduce((n, l) => n + (Number(l.contactscount) || 0), 0);
+    picked = { pending: true, ...(total ? { recipients_count: total } : {}) };
+  }
   if (picked) picked.insights = insightsOf(d);
   await run('UPDATE mail_campaigns SET zoho_status = ?, report_json = ?, last_checked_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP() WHERE id = ?',
     [d.campaign_status || null, picked ? JSON.stringify(picked) : null, row.id]);
