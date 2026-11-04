@@ -90,6 +90,39 @@ describe('ZohoListsComponent (Zoho Campaigns → Contact lists)', () => {
     expect(el().textContent).toContain('c@d.com.au: Unsubscribed, bounced or withdrew consent');
   });
 
+  it('Add a contact: typed details are saved as a lead, then added to the list with the chosen leads', () => {
+    start();
+    button('Add contacts').click(); fixture.detectChanges();
+    http.expectOne(r => r.url.endsWith('/lead-options')).flush({ leads: [] });
+    fixture.detectChanges();
+    const add = () => button('+ Add');
+    expect(add().disabled).toBeTrue();
+    Object.assign(comp.form!.draft, { name: 'Kim Lee', company: 'Shop Pty Ltd', email: 'bad', phone: '0400 000 000' });
+    fixture.detectChanges();
+    expect(el().textContent).toContain('Enter a valid email address.');
+    comp.form!.draft.email = ' Kim@Shop.com.au ';
+    fixture.detectChanges();
+    add().click(); fixture.detectChanges();
+    expect(el().querySelector('.zl-manual-list')!.textContent).toContain('kim@shop.com.au');
+    expect(comp.form!.draft.email).toBe('');
+    Object.assign(comp.form!.draft, { email: 'kim@shop.com.au', name: 'Again' });
+    fixture.detectChanges();
+    expect(add().disabled).toBeTrue();
+    comp.form!.draft = { name: '', company: '', email: '', phone: '' };
+    fixture.detectChanges();
+    expect(el().textContent).toContain('1 contact(s) will be added.');
+    Array.from(el().querySelectorAll('.zc-card button')).find(b => b.textContent!.trim() === 'Add contacts')!.dispatchEvent(new Event('click'));
+    const imp = http.expectOne(r => r.method === 'POST' && r.url.endsWith('/api/v1/leads/import-bulk'));
+    expect(imp.request.body).toEqual({ leads: [{ name: 'Kim Lee', companyName: 'Shop Pty Ltd', email: 'kim@shop.com.au', phone: '0400 000 000' }] });
+    imp.flush({ imported: 1, leadIds: [21], duplicates: [] });
+    http.expectOne(r => r.url.endsWith('/lead-options')).flush({ leads: [] });
+    const req = http.expectOne(r => r.method === 'POST' && r.url.endsWith('/zoho-lists/L1/contacts'));
+    expect(req.request.body).toEqual({ leadIds: [21], emails: [] });
+    req.flush({ list: { key: 'L1', name: 'Sydney buyers' }, added: 1, skipped: [] });
+    http.expectOne(r => r.url.endsWith('/zoho-lists')).flush({ lists: structuredClone(LISTS), canAdd: true, canRemove: true });
+    expect(comp.form).toBeNull();
+  });
+
   it('Add contacts goes to that list; View contacts can remove one after confirming', () => {
     start();
     button('Add contacts').click(); fixture.detectChanges();

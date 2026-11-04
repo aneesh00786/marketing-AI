@@ -77,3 +77,13 @@
 .zl-ctable td.zl-email { min-width: 200px; }
 .zl-status { display: inline-block; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); font-size: 0.76rem; white-space: nowrap; }
 .zl-range { margin: 0; }
+
+/* Add a contact manually */
+.zl-manual { display: grid; grid-template-columns: 1fr 1fr 1.3fr 1fr auto; gap: 6px; }
+.zl-manual input { min-width: 0; }
+.zl-manual-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: 8px; max-height: 180px; overflow: auto; }
+.zl-manual-list li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 10px; border-top: 1px solid var(--border); }
+.zl-manual-list li:first-child { border-top: 0; }
+.zl-manual-list span { display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; }
+.zl-manual-list small { color: var(--text-muted); font-size: 0.76rem; }
+@media (max-width: 700px) { .zl-manual { grid-template-columns: 1fr 1fr; } .zl-manual button { grid-column: 1 / -1; } }

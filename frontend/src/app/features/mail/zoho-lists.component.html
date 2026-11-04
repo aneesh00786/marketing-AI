@@ -121,7 +121,26 @@
       </ng-container>
     </fieldset>
 
-    <label class="zl-field"><span>Or type email addresses <span class="muted small" *ngIf="typedEmails.length">({{ typedEmails.length }})</span></span>
+    <fieldset class="zl-field">
+      <legend>Add a contact</legend>
+      <div class="zl-manual">
+        <input class="hud-input" [(ngModel)]="form.draft.name" maxlength="255" placeholder="Name" aria-label="Contact name" (keydown.enter)="addManual()" />
+        <input class="hud-input" [(ngModel)]="form.draft.company" maxlength="255" placeholder="Business" aria-label="Business name" (keydown.enter)="addManual()" />
+        <input class="hud-input" type="email" [(ngModel)]="form.draft.email" maxlength="255" placeholder="Email *" aria-label="Email" (keydown.enter)="addManual()" />
+        <input class="hud-input" type="tel" [(ngModel)]="form.draft.phone" maxlength="50" placeholder="Phone" aria-label="Phone" (keydown.enter)="addManual()" />
+        <button type="button" class="btn btn-secondary btn-sm" [disabled]="!!draftProblem" [title]="draftProblem" (click)="addManual()">+ Add</button>
+      </div>
+      <p class="muted small" *ngIf="(form.draft.email || form.draft.name || form.draft.company) && draftProblem">{{ draftProblem }}</p>
+      <ul class="zl-manual-list" *ngIf="form.manual.length">
+        <li *ngFor="let m of form.manual; let i = index">
+          <span><b>{{ m.name || m.company }}</b><small>{{ m.email }}{{ m.company && m.name ? ' · ' + m.company : '' }}{{ m.phone ? ' · ' + m.phone : '' }}</small></span>
+          <button type="button" class="btn btn-secondary btn-sm" (click)="removeManual(i)" [attr.aria-label]="'Remove ' + m.email">Remove</button>
+        </li>
+      </ul>
+      <p class="muted small">Saved in Leads too (an existing lead with the same email is used), so the details show in the list.</p>
+    </fieldset>
+
+    <label class="zl-field"><span>Or paste email addresses <span class="muted small" *ngIf="typedEmails.length">({{ typedEmails.length }})</span></span>
       <textarea class="hud-input" rows="3" [(ngModel)]="form.emails" placeholder="One per line, or separated by commas"></textarea></label>
 
     <div class="zl-form-foot">

@@ -9,6 +9,10 @@ import { ImportSync, importSyncBody, importSyncProblem, newImportSync } from '..
 import { ImportSyncOptionsComponent } from '../leads/import-sync-options.component';
 
 interface ZList { key: string; name: string | null; contacts: number | null; campaignList: boolean; }
+interface ManualContact { name: string; company: string; email: string; phone: string; }
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const emptyContact = (): ManualContact => ({ name: '', company: '', email: '', phone: '' });
+
 interface LeadOpt { id: number; name: string; email: string; company?: string | null; eligible?: boolean; reasons?: string[]; }
 
 /**
@@ -43,7 +47,7 @@ export class ZohoListsComponent implements OnInit {
   showCampaignLists = false;
 
   /** The add / new-list popup. */
-  form: { mode: 'create' | 'add'; list: ZList | null; name: string; emails: string; picked: Map<number, LeadOpt>; skipped: { email: string; reason: string }[] } | null = null;
+  form: { mode: 'create' | 'add'; list: ZList | null; name: string; emails: string; manual: ManualContact[]; draft: ManualContact; picked: Map<number, LeadOpt>; skipped: { email: string; reason: string }[] } | null = null;
   leadOptions: LeadOpt[] = [];
   leadsLoading = false;
   saving = false;
@@ -73,7 +77,7 @@ export class ZohoListsComponent implements OnInit {
 
   // ---------- New list / add contacts ----------
   openForm(mode: 'create' | 'add', list: ZList | null = null): void {
-    this.form = { mode, list, name: '', emails: '', picked: new Map(), skipped: [] };
+    this.form = { mode, list, name: '', emails: '', manual: [], draft: emptyContact(), picked: new Map(), skipped: [] };
     this.picker = null;
     this.loadLeads();
   }
@@ -134,13 +138,34 @@ export class ZohoListsComponent implements OnInit {
     return [...new Set(String(this.form?.emails || '').split(/[\s,;]+/).map(e => e.trim().toLowerCase()).filter(Boolean))];
   }
 
-  get formCount(): number { return (this.form?.picked.size || 0) + this.typedEmails.length; }
+  get formCount(): number { return (this.form?.picked.size || 0) + this.typedEmails.length + (this.form?.manual.length || 0); }
+
+  // ---------- Add a contact manually (saved in Leads, then added to the list) ----------
+  /** Why the typed contact cannot be added yet ('' when it can). */
+  get draftProblem(): string {
+    const d = this.form?.draft;
+    if (!d) return '';
+    if (!d.name.trim() && !d.company.trim()) return 'Enter a name or business.';
+    if (!EMAIL_RE.test(d.email.trim())) return 'Enter a valid email address.';
+    if (this.form!.manual.some(m => m.email === d.email.trim().toLowerCase())) return 'This email is already added below.';
+    return '';
+  }
+
+  addManual(): void {
+    const f = this.form;
+    if (!f || this.draftProblem) return;
+    const d = f.draft;
+    f.manual.push({ name: d.name.trim(), company: d.company.trim(), email: d.email.trim().toLowerCase(), phone: d.phone.trim() });
+    f.draft = emptyContact();
+  }
+
+  removeManual(i: number): void { this.form?.manual.splice(i, 1); }
 
   get formProblem(): string {
     const f = this.form;
     if (!f) return '';
     if (f.mode === 'create' && !f.name.trim()) return 'Enter a list name.';
-    if (!this.formCount) return f.mode === 'create' ? 'Add at least one contact: Zoho creates a list together with its first contacts.' : 'Choose leads or enter email addresses.';
+    if (!this.formCount) return f.mode === 'create' ? 'Add at least one contact: Zoho creates a list together with its first contacts.' : 'Choose leads, add a contact or enter email addresses.';
     if (this.formCount > 500) return 'Add up to 500 contacts at a time.';
     return '';
   }
@@ -149,6 +174,24 @@ export class ZohoListsComponent implements OnInit {
     const f = this.form;
     if (!f || this.saving || this.formProblem) return;
     this.saving = true;
+    if (!f.manual.length) { this.sendForm(f); return; }
+    // Manual contacts become leads first (an existing lead with the same email is reused), so
+    // their name, business and phone are kept and shown in the list.
+    const rows = f.manual.map(m => ({ name: m.name || m.company, companyName: m.company, email: m.email, phone: m.phone }));
+    this.http.post<any>(`${apiRoot()}/api/v1/leads/import-bulk`, { leads: rows }).subscribe({
+      next: r => {
+        // They are now leads: keep them as picked, so a failed Zoho step can simply be retried.
+        const ids: number[] = [...(r.leadIds || []), ...(r.duplicates || []).map((d: any) => d.leadId).filter(Boolean)];
+        ids.forEach(id => f.picked.set(id, { id, name: '', email: '' }));
+        f.manual = [];
+        this.loadLeads();
+        this.sendForm(f);
+      },
+      error: e => { this.saving = false; this.toast.emit(this.err(e)); }
+    });
+  }
+
+  private sendForm(f: NonNullable<ZohoListsComponent['form']>): void {
     const body: any = { leadIds: [...f.picked.keys()], emails: this.typedEmails };
     if (f.mode === 'create') body.name = f.name.trim();
     const url = f.mode === 'create' ? `${this.base}/zoho-lists` : `${this.base}/zoho-lists/${encodeURIComponent(f.list!.key)}/contacts`;
