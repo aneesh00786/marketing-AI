@@ -1078,8 +1078,9 @@ test('personalization: {{first_name}} / {{last_name}} become Zoho merge tags in 
   const created = apiCalls('createCampaign')[0].params;
   assert.equal(created.subject, 'News for you, $[FNAME|there]$');
   const token = created.content_url.split('/content/')[1];
-  const html = await require('../modules/mail/campaigns/campaignService').contentByToken(token);
-  assert.equal(html, '<p>Hi $[FNAME|there]$ $[LNAME||]$,</p><p><a href="$[LI:UNSUBSCRIBE]$">Unsubscribe</a></p>');
+  const svc = require('../modules/mail/campaigns/campaignService');
+  const html = await svc.contentByToken(token);
+  assert.equal(html, `<p>Hi $[FNAME|there]$ $[LNAME||]$,</p><p><a href="${svc.campaignUnsubscribeUrl({ id: c.id, workspace_id: ws.workspaceId })}">Unsubscribe</a></p>`);
   assert.match((await row(c.id)).html_content, /\{\{ first_name \}\}/, 'the stored campaign keeps the readable tokens');
 });
 
