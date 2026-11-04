@@ -14,6 +14,8 @@ process.env.ZOHO_CAMPAIGNS_CLIENT_ID = 'test-client-id';
 process.env.ZOHO_CAMPAIGNS_CLIENT_SECRET = 'test-client-secret';
 // Zoho imports content from a public https URL (validated); this host is never contacted.
 process.env.APP_BASE_URL = 'https://app.marketech.test';
+// Connecting copies Zoho's lists right away; only the test about that copy lets it run.
+process.env.ZOHO_IMPORT_INLINE = '0';
 const DELIVERY_SCOPES = 'ZohoCampaigns.campaign.CREATE,ZohoCampaigns.campaign.READ,ZohoCampaigns.campaign.UPDATE,ZohoCampaigns.contact.READ';
 const ALL_SCOPES = `${DELIVERY_SCOPES},ZohoCampaigns.contact.CREATE`;
 // What the app asks for: contact.UPDATE is optional (names for personalization).
@@ -1202,22 +1204,33 @@ test('delete a list in Zoho needs the delete permission: older connections are a
 });
 
 test('connect copies Zoho lists and contacts into Marketech.ai once: statuses kept, opt-outs stopped, safe to repeat', async () => {
-  const { ws, acct } = await freshConnected('Import contacts', { account: { lists: [
+  Z.account('acctImport', { lists: [
     { listkey: 'L1', listname: 'Customers', noofcontacts: '3' },
     { listkey: 'L2', listname: 'Trade show', noofcontacts: '2' },
     { listkey: 'S1', listname: 'Marketech campaign 3 v1 abc123', noofcontacts: '1' }
-  ] } });
+  ] });
+  const acct = Z.accounts.acctImport;
   acct.contacts = {
     L1: [{ contact_email: 'Kim@Shop.com.au', firstname: 'Kim', lastname: 'Lee', companyname: 'Shop', phone: '0400' },
       { contact_email: 'gone@shop.com.au', state: 'unsub' }, { contact_email: 'bad@shop.com.au', state: 'bounce' }],
     L2: [{ contact_email: 'kim@shop.com.au', companyname: 'Other' }, { contact_email: 'new@fair.io', firstname: 'Neo' }],
     S1: [{ contact_email: 'temp@x.io' }]
   };
-  const job = await db().get("SELECT status FROM background_jobs WHERE workspace_id = ? AND job_type = 'zoho_contact_sync'", [ws.workspaceId]);
-  assert.equal(job.status, 'queued', 'connecting queues the copy');
+  const ws = await h.createWorkspace({ name: 'Import contacts' });
+  process.env.ZOHO_IMPORT_INLINE = '1';
+  try { await connect(ws, 'acctImport'); } finally { process.env.ZOHO_IMPORT_INLINE = '0'; }
+  // Connecting starts the copy right away (no worker needed).
+  let job;
+  for (let i = 0; i < 50; i++) {
+    job = await db().get("SELECT status, result_json FROM background_jobs WHERE workspace_id = ? AND job_type = 'zoho_contact_sync'", [ws.workspaceId]);
+    if (job && job.status === 'succeeded') break;
+    await new Promise(res => setTimeout(res, 20));
+  }
+  assert.equal(job.status, 'succeeded', 'the copy ran when Zoho was connected');
   const imp = require('../modules/mail/contacts/zohoImport');
+  assert.deepEqual(JSON.parse(job.result_json), { lists: 2, contacts: 4, memberships: 5, subscribed: 3, optOutsAdded: 2 });
   const r = await imp.importFromZoho(ws.workspaceId);
-  assert.deepEqual(r, { lists: 2, contacts: 4, memberships: 5, subscribed: 3, optOutsAdded: 2 });
+  assert.deepEqual(r, { lists: 2, contacts: 4, memberships: 5, subscribed: 3, optOutsAdded: 0 }, 'running again adds nothing new');
   const lists = await db().all('SELECT name, zoho_list_key FROM mail_lists WHERE workspace_id = ? ORDER BY name', [ws.workspaceId]);
   assert.deepEqual(lists.map(l => [l.name, l.zoho_list_key]), [['Customers', 'L1'], ['Trade show', 'L2']], 'lists made for sending are not copied');
   const kim = await db().get('SELECT * FROM mail_contacts WHERE workspace_id = ? AND email = ?', [ws.workspaceId, 'kim@shop.com.au']);
@@ -1234,7 +1247,7 @@ test('connect copies Zoho lists and contacts into Marketech.ai once: statuses ke
   assert.equal((await db().get("SELECT m.status FROM mail_list_members m JOIN mail_contacts c ON c.id = m.contact_id WHERE c.workspace_id = ? AND c.email = 'gone@shop.com.au'", [ws.workspaceId])).status, 'unsubscribed');
   const st = await capi(ws, 'GET', '/contact-sync');
   assert.equal(st.status, 200);
-  assert.equal(st.data.status, 'queued');
+  assert.equal(st.data.status, 'succeeded');
 });
 
 test('contact lists in Marketech.ai: create, add leads / typed people, view with status, remove, delete here', async () => {

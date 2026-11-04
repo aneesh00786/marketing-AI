@@ -1,4 +1,4 @@
-import { Component, EventEmitter, HostListener, Input, OnInit, Output } from '@angular/core';
+import { Component, EventEmitter, HostListener, Input, OnDestroy, OnInit, Output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
@@ -10,6 +10,7 @@ export interface MList { id: number; name: string; source: string; inZoho: boole
 interface ManualContact { name: string; company: string; email: string; phone: string; }
 interface LeadOpt { id: number; name: string; email: string; company?: string | null; eligible?: boolean; reasons?: string[]; }
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const SYNC_POLL_MS = 3000;
 const emptyContact = (): ManualContact => ({ name: '', company: '', email: '', phone: '' });
 type Status = 'all' | 'subscribed' | 'unsubscribed' | 'bounced';
 
@@ -26,7 +27,7 @@ type Status = 'all' | 'subscribed' | 'unsubscribed' | 'bounced';
   templateUrl: './contact-lists.component.html',
   styleUrls: ['../command/command-center.component.css', './mail-ui.css', './contact-lists-shared.css', './contact-lists.component.css']
 })
-export class ContactListsComponent implements OnInit {
+export class ContactListsComponent implements OnInit, OnDestroy {
   @Input() zohoReady = false;
   /** May change lists (mail.send). */
   @Input() canManage = false;
@@ -45,7 +46,9 @@ export class ContactListsComponent implements OnInit {
 
   constructor(private http: HttpClient) {}
 
+  private syncPoll: any = null;
   ngOnInit(): void { this.load(); this.loadPlan(); }
+  ngOnDestroy(): void { clearTimeout(this.syncPoll); }
 
   // ---------- Zoho plan: contacts in Zoho against the plan's limit ----------
   plan: { contactLimit: number | null; usage: { upTo: number; atLeast: number } } | null = null;
@@ -81,7 +84,12 @@ export class ContactListsComponent implements OnInit {
   load(): void {
     this.loading = true; this.error = '';
     this.http.get<any>(`${this.base}/contact-lists`).subscribe({
-      next: r => { this.loading = false; this.lists = r.lists || []; this.totalContacts = r.contacts || 0; this.sync = r.sync || null; },
+      next: r => {
+        this.loading = false; this.lists = r.lists || []; this.totalContacts = r.contacts || 0; this.sync = r.sync || null;
+        // While the copy from Zoho runs (after connecting), check again until it is done.
+        clearTimeout(this.syncPoll);
+        if (this.sync && ['queued', 'running'].includes(this.sync.status)) this.syncPoll = setTimeout(() => this.load(), SYNC_POLL_MS);
+      },
       error: e => { this.loading = false; this.error = this.err(e); }
     });
   }
@@ -95,7 +103,7 @@ export class ContactListsComponent implements OnInit {
   get syncText(): string {
     const s = this.sync;
     if (!s || s.status === 'never') return this.zohoReady ? 'Zoho lists were not copied yet. Reconnect Zoho (Settings) to copy them.' : 'Connect Zoho to copy your Zoho lists and contacts here once.';
-    if (s.status === 'queued' || s.status === 'running') return 'Copying your Zoho lists and contacts… This takes about a minute. Reload to see them.';
+    if (s.status === 'queued' || s.status === 'running') return 'Copying your Zoho lists and contacts… This takes about a minute; they appear here when it is done.';
     if (s.status === 'failed') return `Copying from Zoho failed: ${s.error || 'unknown error'}. Reconnect Zoho to try again.`;
     const r = s.result || {};
     return `Copied ${Number(r.contacts || 0).toLocaleString('en-US')} contacts from ${r.lists || 0} Zoho list(s) when Zoho was connected. Lists are managed here from then on.`;

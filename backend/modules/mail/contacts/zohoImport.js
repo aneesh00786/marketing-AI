@@ -121,10 +121,26 @@ async function runImportJob(job) {
   return result;
 }
 
-/** Queues the one-time import (on connect). */
+/**
+ * Starts the one-time import on connect. It runs right away in this process (it does not wait for
+ * the worker): the job is claimed first, so the worker never runs it twice. If this process stops
+ * part-way, the worker picks the job up again once it is stale (safe to repeat).
+ */
 async function queueImport(workspaceId, userId) {
   const jobs = require('../../social/jobsService');
-  return jobs.enqueue(workspaceId, 'zoho_contact_sync', {}, { idempotencyKey: `zoho_contact_sync:${Date.now()}`, createdBy: userId || null, maxAttempts: 3 });
+  const { job } = await jobs.enqueue(workspaceId, 'zoho_contact_sync', {}, { idempotencyKey: `zoho_contact_sync:${Date.now()}`, createdBy: userId || null, maxAttempts: 3 });
+  if (process.env.ZOHO_IMPORT_INLINE === '0') return job; // tests: left to the worker
+  const claim = await run("UPDATE background_jobs SET status = 'running', locked_by = 'api', locked_at = UTC_TIMESTAMP(), attempt_count = attempt_count + 1 WHERE id = ? AND status = 'queued'", [job.id]);
+  if (!claim.changes) return job;
+  setImmediate(async () => {
+    const claimed = await get('SELECT * FROM background_jobs WHERE id = ?', [job.id]);
+    try {
+      await jobs.complete(job.id, await runImportJob(claimed));
+    } catch (err) {
+      await jobs.fail(claimed, err).catch(() => null);
+    }
+  });
+  return job;
 }
 
 /** The latest import, for the status line on Contact lists. */

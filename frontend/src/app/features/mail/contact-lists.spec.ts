@@ -1,4 +1,4 @@
-import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { ContactListsComponent } from './contact-lists.component';
@@ -39,6 +39,24 @@ describe('ContactListsComponent (lists kept in Marketech.ai)', () => {
     expect(rows[1].textContent).not.toContain('Also in Zoho');
     expect(el().querySelector('.zl-plan')!.textContent).toContain('Contacts in Zoho: up to 7,227 of 10,000');
   });
+
+  it('while the copy from Zoho runs, the lists are checked again until it is done', fakeAsync(() => {
+    TestBed.configureTestingModule({ imports: [ContactListsComponent], providers: [provideHttpClient(), provideHttpClientTesting()] });
+    http = TestBed.inject(HttpTestingController);
+    fixture = TestBed.createComponent(ContactListsComponent);
+    comp = fixture.componentInstance;
+    Object.assign(comp, { zohoReady: false, canManage: true });
+    fixture.detectChanges();
+    http.expectOne(r => r.url.endsWith('/contact-lists')).flush({ lists: [], contacts: 0, sync: { status: 'running' } });
+    fixture.detectChanges();
+    expect(el().querySelector('.cl-sync')!.textContent).toContain('Copying your Zoho lists');
+    tick(3000);
+    http.expectOne(r => r.url.endsWith('/contact-lists')).flush({ lists: structuredClone(LISTS), contacts: 7390, sync: SYNC });
+    fixture.detectChanges();
+    expect(el().querySelectorAll('.cl-row:not(.zl-th)').length).toBe(2);
+    tick(10000);
+    http.expectNone(r => r.url.endsWith('/contact-lists'));
+  }));
 
   it('New list: created here with chosen leads, typed contacts and pasted addresses (an empty list is fine)', () => {
     start();

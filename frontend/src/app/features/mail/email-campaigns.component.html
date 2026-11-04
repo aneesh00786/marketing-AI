@@ -35,7 +35,7 @@
 
   <!-- Campaigns | Contact lists (Zoho's lists, managed here) -->
   <div class="mx-seg ec-views" role="group" aria-label="Show">
-    <button type="button" [class.on]="view === 'campaigns'" [attr.aria-pressed]="view === 'campaigns'" (click)="view = 'campaigns'">Campaigns</button>
+    <button type="button" [class.on]="view === 'campaigns'" [attr.aria-pressed]="view === 'campaigns'" (click)="showCampaigns()">Campaigns</button>
     <button type="button" [class.on]="view === 'lists'" [attr.aria-pressed]="view === 'lists'" (click)="view = 'lists'">Contact lists</button>
   </div>
   <app-contact-lists *ngIf="view === 'lists'" [zohoReady]="zohoReady" [canManage]="canSend" [canConfigure]="!!zoho?.canConfigure" (toast)="toast.emit($event)" (openZoho)="zohoOpen = true"></app-contact-lists>

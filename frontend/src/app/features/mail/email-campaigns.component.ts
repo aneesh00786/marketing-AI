@@ -110,9 +110,15 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
     });
   }
 
+  /** Back from Contact lists: lists may have been created or changed there. */
+  showCampaigns(): void {
+    this.view = 'campaigns';
+    if (this.zohoReady && this.canCompose) this.loadAudiences();
+  }
+
   loadAudiences(): void {
     this.http.get<any>(`${this.base}/audiences`).subscribe({
-      next: r => { this.audiences = { lists: r.lists, topics: r.topics }; },
+      next: r => { this.audiences = { lists: r.lists || [], topics: r.topics || [], mailLists: r.mailLists || [] }; },
       error: e => { this.audiences = null; this.error = this.err(e); }
     });
   }
@@ -230,6 +236,7 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
     this.step = n;
     // Arriving at Review runs the checks, so problems show without an extra click.
     if (n === 4 && this.selected && !this.validation && this.busy !== 'validate') this.validate();
+    if (n === 2 && this.zohoReady && this.canCompose) this.loadAudiences();
   }
   /** Campaigns, or Zoho Campaigns → Contact lists. */
   view: 'campaigns' | 'lists' = 'campaigns';

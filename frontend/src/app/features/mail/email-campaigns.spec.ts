@@ -457,6 +457,19 @@ describe('EmailCampaignsComponent: Choose Template', () => {
   });
 
   // ---- Zoho list contacts ----
+  it('Recipients load the contact lists from the server, and again after visiting Contact lists or opening Recipients', () => {
+    comp.zoho = { canCompose: true, canSend: true, connection: { connected: true, missingScopes: [] } };
+    comp.loadAudiences();
+    http.expectOne(r => r.url.endsWith('/audiences')).flush({ lists: [], topics: [], mailLists: [{ id: 3, name: 'Trade show', reachable: 2, total: 2 }] });
+    expect(comp.mailListOptions.map(l => l.name)).toEqual(['Trade show']);
+    comp.view = 'lists';
+    comp.showCampaigns();
+    http.expectOne(r => r.url.endsWith('/audiences')).flush({ lists: [], topics: [], mailLists: [{ id: 3, name: 'Trade show' }, { id: 4, name: 'New list' }] });
+    expect(comp.mailListOptions.map(l => l.name)).toEqual(['Trade show', 'New list']);
+    comp.goStep(2);
+    http.expectOne(r => r.url.endsWith('/audiences')).flush({ lists: [], topics: [], mailLists: [] });
+  });
+
   it('Recipients: contact lists here with their reachable counts; choosing one is saved with the campaign', () => {
     comp.audiences = { lists: [], topics: [], mailLists: [{ id: 3, name: 'Trade show', reachable: 24, total: 25, inZoho: false }, { id: 4, name: 'All gone', reachable: 0, total: 2 }] };
     comp.zoho = { canCompose: true, canSend: true, connection: { connected: true, missingScopes: [] } };
