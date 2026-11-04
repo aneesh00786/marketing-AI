@@ -151,7 +151,7 @@
       <div class="note error" *ngIf="selected.status === 'failed' && selected.providerMessage">{{ selected.providerMessage }}</div>
 
       <!-- Results exist only once Zoho has the campaign -->
-      <app-campaign-metrics *ngIf="!['draft', 'approved'].includes(selected.status)" [campaignId]="selected.id" [report]="selected.report" [zohoStatus]="selected.zohoStatus" [lastCheckedAt]="selected.lastCheckedAt" [status]="selected.status" [canViewRecipients]="canSend"></app-campaign-metrics>
+      <app-campaign-metrics *ngIf="!['draft', 'approved'].includes(selected.status)" [campaignId]="selected.id" [report]="selected.report" [zohoStatus]="selected.zohoStatus" [lastCheckedAt]="selected.lastCheckedAt" [status]="selected.status" [canViewRecipients]="canSend" [refreshing]="busy === 'refresh'" (refresh)="refresh()"></app-campaign-metrics>
 
       <!-- Steps: every step stays on the page (hidden when not current) so nothing typed is lost -->
       <nav class="ec-steps" aria-label="Campaign steps">

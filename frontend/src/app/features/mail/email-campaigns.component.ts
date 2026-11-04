@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, OnInit, Output, HostListener, ViewChild, ElementRef } from '@angular/core';
+import { Component, EventEmitter, Input, OnDestroy, OnInit, Output, HostListener, ViewChild, ElementRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { IconComponent } from '../../shared/icon.component';
 import { FormsModule } from '@angular/forms';
@@ -22,6 +22,7 @@ import { CONTACT_FIELDS, ContactField, contactTag, fallbackExample, fallbackQues
 
 /** A sent campaign's figures are read from Zoho when it is opened, at most this often. */
 const REPORT_MAX_AGE_MS = 5 * 60 * 1000;
+const REPORT_POLL_MS = 60 * 1000;
 
 /**
  * Email campaigns: written, validated, approved and sent from Marketech.ai; delivered by Zoho.
@@ -36,7 +37,7 @@ const REPORT_MAX_AGE_MS = 5 * 60 * 1000;
   templateUrl: './email-campaigns.component.html',
   styleUrls: ['../command/command-center.component.css', './mail-ui.css', './email-campaigns.component.css']
 })
-export class EmailCampaignsComponent implements OnInit {
+export class EmailCampaignsComponent implements OnInit, OnDestroy {
   @Input() oauthResult: { zoho?: string; reason?: string } | null = null;
   /** Set by Email Templates → "New campaign": creates a campaign from that template. */
   @Input() set startTemplate(t: { id: number; name: string } | null) {
@@ -377,12 +378,29 @@ export class EmailCampaignsComponent implements OnInit {
   /** Quietly updates the figures: if Zoho cannot be reached, the last ones stay on screen. */
   private refreshReport(c: any): void {
     if (c.status !== 'submitted') return;
-    if (c.lastCheckedAt && Date.now() - new Date(c.lastCheckedAt).getTime() < REPORT_MAX_AGE_MS) return;
+    // Recent figures are reused, unless Zoho had none yet (they appear minutes after sending).
+    if (c.report && c.lastCheckedAt && Date.now() - new Date(c.lastCheckedAt).getTime() < REPORT_MAX_AGE_MS) return;
     this.http.post<any>(`${this.base}/${c.id}/refresh`, {}).subscribe({
       next: r => { if (this.selected?.id === c.id) this.selected = r.campaign; this.load(); },
       error: () => {}
     });
   }
+
+  /** After sending, checks Zoho's figures a few times while the campaign stays open. */
+  private reportPoll: any = null;
+  private pollReport(id: number, tries = 6): void {
+    clearTimeout(this.reportPoll);
+    if (tries <= 0) return;
+    this.reportPoll = setTimeout(() => {
+      if (this.selected?.id !== id || this.selected.status !== 'submitted') return;
+      this.http.post<any>(`${this.base}/${id}/refresh`, {}).subscribe({
+        next: r => { if (this.selected?.id === id) this.selected = r.campaign; this.pollReport(id, tries - 1); },
+        error: () => this.pollReport(id, tries - 1)
+      });
+    }, REPORT_POLL_MS);
+  }
+
+  ngOnDestroy(): void { clearTimeout(this.reportPoll); }
 
   private setSelected(c: any): void {
     const fresh = this.selected?.id !== c.id;
@@ -497,7 +515,7 @@ export class EmailCampaignsComponent implements OnInit {
     if (!this.sendConfirm || this.busy === 'send') return;
     this.busy = 'send';
     this.http.post<any>(`${this.base}/${this.selected.id}/send`, { confirm: true }).subscribe({
-      next: r => { this.busy = ''; this.sendConfirm = null; this.setSelected(r.campaign); this.load(); this.toast.emit('Zoho accepted the campaign for sending. Delivery figures appear as Zoho sends.'); },
+      next: r => { this.busy = ''; this.sendConfirm = null; this.setSelected(r.campaign); this.load(); this.pollReport(r.campaign.id); this.toast.emit('Zoho accepted the campaign for sending. Results appear here as Zoho sends; this page checks every minute.'); },
       error: e => { this.busy = ''; this.sendConfirm = null; this.toast.emit(this.err(e)); this.open(this.selected); this.load(); }
     });
   }

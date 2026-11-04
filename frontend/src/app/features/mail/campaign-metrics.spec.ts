@@ -9,6 +9,7 @@ describe('CampaignMetricsComponent', () => {
   let http: HttpTestingController;
   const el = () => fixture.nativeElement as HTMLElement;
   const tile = (label: string) => Array.from(el().querySelectorAll('.cm-tile')).find(t => t.querySelector('span')!.textContent === label)!;
+  const sum = (label: string) => Array.from(el().querySelectorAll('.cm-sum')).find(t => t.querySelector('span')!.textContent === label) as HTMLElement;
 
   function init(o: Partial<CampaignMetricsComponent>): void {
     fixture = TestBed.createComponent(CampaignMetricsComponent);
@@ -25,13 +26,16 @@ describe('CampaignMetricsComponent', () => {
 
   it('missing Zoho figures are "Unavailable", never 0; rates are computed only from reported figures', () => {
     init({ report: { emails_sent_count: '200', delivered_count: '190', opens_count: '57', bounces_count: '10', hardbounce_count: '6', softbounce_count: '4' } });
-    expect(tile('Sent').querySelector('b')!.textContent).toBe('200');
+    expect(sum('Sent').querySelector('b')!.textContent).toBe('200');
+    expect(sum('Delivered').textContent).toContain('95.0%');
+    expect(sum('Unopened').querySelector('b')!.textContent).withContext('delivered − opened when Zoho gives no figure').toBe('133');
     expect(tile('Delivery rate').querySelector('b')!.textContent).toBe('95.0%');
     expect(tile('Open rate').querySelector('b')!.textContent).toBe('30.0%');
-    expect(tile('Unique clickers').querySelector('b')!.textContent).toBe('Unavailable');
+    expect(sum('Clicked').querySelector('b')!.textContent).toBe('—');
     expect(tile('Click rate').querySelector('b')!.textContent).toBe('Unavailable');
-    expect(tile('Unsubscribes').querySelector('b')!.textContent).toBe('Unavailable');
-    expect(tile('Spam complaints').querySelector('b')!.textContent).toBe('Unavailable');
+    expect(sum('Unsubscribes').querySelector('b')!.textContent).toBe('—');
+    expect(sum('Marked spam').querySelector('b')!.textContent).toBe('—');
+    expect(sum('Forwards').querySelector('b')!.textContent).toBe('—');
     expect(tile('Bounced').textContent).toContain('Hard 6 · Soft 4');
     expect(el().textContent).toContain('estimate');
   });
@@ -45,7 +49,7 @@ describe('CampaignMetricsComponent', () => {
   it('without a report it says what to do instead of showing zeros', () => {
     init({ report: null });
     expect(el().querySelectorAll('.cm-tile').length).toBe(0);
-    expect(el().textContent).toContain('Refresh status');
+    expect(el().textContent).toContain('click Refresh');
     fixture.destroy();
     init({ report: null, status: 'draft' });
     expect(el().textContent).toContain('Results appear after the campaign is sent');
@@ -97,7 +101,7 @@ describe('CampaignMetricsComponent', () => {
 
     it('large figures read the same in the tiles and the charts', () => {
       init({ report: { emails_sent_count: '7229' } });
-      expect(tile('Sent').querySelector('b')!.textContent).toBe('7,229');
+      expect(sum('Sent').querySelector('b')!.textContent).toBe('7,229');
       expect(row('Sent').querySelector('.cm-bar-value')!.textContent).toBe('7,229');
     });
 
@@ -129,8 +133,9 @@ describe('CampaignMetricsComponent', () => {
     it('figures open their list too; those with no list, or nothing reported, stay plain', () => {
       init({ report: { ...REPORT, unsub_count: undefined }, canViewRecipients: true });
       expect(tile('Open rate').tagName).toBe('DIV');
-      expect(tile('Unsubscribes').tagName).withContext('Unavailable').toBe('DIV');
-      expect(tile('Delivered').tagName).toBe('DIV');
+      expect(sum('Unsubscribes').tagName).withContext('Unavailable').toBe('DIV');
+      expect(sum('Delivered').tagName).toBe('DIV');
+      expect(sum('Opened').tagName).toBe('BUTTON');
       expect(row('Delivered').tagName).toBe('DIV');
       (tile('Bounced') as HTMLElement).click();
       const req = recipients();
@@ -141,12 +146,25 @@ describe('CampaignMetricsComponent', () => {
     it('roles that cannot see addresses, and unsent campaigns, get the charts without links', () => {
       init({ report: REPORT, canViewRecipients: false });
       expect(el().querySelector('.cm-charts')).toBeTruthy();
-      expect(el().querySelector('button.cm-bar, button.cm-tile')).toBeNull();
+      expect(el().querySelector('button.cm-bar, button.cm-tile, button.cm-sum')).toBeNull();
       expect(el().textContent).not.toContain('Click a bar');
       fixture.destroy();
       init({ report: REPORT, canViewRecipients: true, status: 'failed' });
       expect(el().querySelector('button.cm-bar')).toBeNull();
     });
+  });
+
+  it('summary row matches Zoho\'s report: all eight figures with Zoho\'s percentages; Refresh asks the page', () => {
+    init({ report: { emails_sent_count: '2', delivered_count: '2', delivered_percent: '100.0', opens_count: '1', open_percent: '50.0', unopened: '1', unopened_percent: '50.0',
+      unique_clicks_count: '0', unique_clicked_percent: '0.0', unsub_count: '0', unsubscribe_percent: '0.0', spams_count: '0', spam_percent: '0.0', forwards_count: '0', forward_percent: '0.0' } });
+    expect(comp.summary.map(x => [x.label, x.value, x.sub])).toEqual([
+      ['Sent', '2', null], ['Delivered', '2', '100%'], ['Opened', '1', '50%'], ['Unopened', '1', '50%'],
+      ['Clicked', '0', '0%'], ['Unsubscribes', '0', '0%'], ['Marked spam', '0', '0%'], ['Forwards', '0', '0%']
+    ]);
+    let asked = 0;
+    comp.refresh.subscribe(() => asked++);
+    (Array.from(el().querySelectorAll('button')).find(b => b.textContent!.includes('Refresh')) as HTMLButtonElement).click();
+    expect(asked).toBe(1);
   });
 
   it('num() and rate() never invent values', () => {

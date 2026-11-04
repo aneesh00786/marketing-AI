@@ -724,8 +724,11 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     expect(comp.selected.report.emails_sent_count).toBe('10');
   });
 
-  it('figures read in the last few minutes are not read again, and drafts never are', () => {
-    openSent({ ...SENT, lastCheckedAt: new Date(Date.now() - 60000).toISOString() });
+  it('figures read in the last few minutes are not read again (unless Zoho had none yet), and drafts never are', () => {
+    openSent({ ...SENT, lastCheckedAt: new Date(Date.now() - 60000).toISOString(), report: null });
+    http.expectOne(r => r.url.endsWith('/refresh')).flush({ campaign: { ...SENT, report: { emails_sent_count: '2' } } });
+    http.expectOne(r => /\/mail\/campaigns$/.test(r.url)).flush({ campaigns: [] });
+    openSent({ ...SENT, lastCheckedAt: new Date(Date.now() - 60000).toISOString(), report: { emails_sent_count: '2' } });
     http.expectNone(r => r.url.endsWith('/refresh'));
     comp.open(comp.campaigns[0] || { id: 5 });
     http.expectOne(r => r.url.endsWith('/campaigns/5')).flush({ campaign: { id: 5, name: 'Autumn', status: 'draft', version: 1, html: ORIGINAL, lists: [] } });

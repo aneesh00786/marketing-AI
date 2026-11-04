@@ -40,3 +40,17 @@ button.cm-bar:focus-visible, .cm-link:focus-visible { outline: 2px solid var(--a
 .link-btn { background: none; border: none; padding: 0; color: var(--info-text, var(--accent)); text-decoration: underline; cursor: pointer; font: inherit; font-size: 0.82rem; }
 .btn-sm { padding: 6px 11px; font-size: 0.8rem; border-radius: 8px; }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* Summary row, as in Zoho's report */
+.cm-refresh { margin-left: auto; }
+.cm-summary { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.cm-sum { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 14px 6px; min-width: 0; background: none; border: 0; border-left: 1px solid var(--border); color: inherit; font: inherit; text-align: center; }
+.cm-sum:first-child { border-left: 0; }
+.cm-sum b { font-size: 1.5rem; line-height: 1.1; color: var(--accent, #4f46e5); font-variant-numeric: tabular-nums; }
+.cm-sum span { font-size: 0.82rem; }
+.cm-sum small { font-size: 0.72rem; color: var(--text-muted); }
+.cm-sum.na b { color: var(--text-muted); }
+.cm-sum.cm-link { cursor: pointer; }
+.cm-sum.cm-link:hover, .cm-sum.on { background: rgba(79, 70, 229, 0.08); }
+@media (max-width: 900px) { .cm-summary { grid-template-columns: repeat(4, minmax(0, 1fr)); } .cm-sum:nth-child(5) { border-left: 0; } .cm-sum:nth-child(n+5) { border-top: 1px solid var(--border); } }
+@media (max-width: 480px) { .cm-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } .cm-sum:nth-child(odd) { border-left: 0; } .cm-sum:nth-child(n+3) { border-top: 1px solid var(--border); } }

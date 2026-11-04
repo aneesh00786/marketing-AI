@@ -2,8 +2,25 @@
   <div class="cm-head">
     <strong>Results from Zoho</strong>
     <span class="cm-muted" *ngIf="zohoStatus">Zoho status: {{ zohoStatus }}<ng-container *ngIf="lastCheckedAt"> · Updated {{ lastCheckedAt | date:'MMM d, h:mm a' }}</ng-container></span>
+    <button type="button" class="btn btn-secondary btn-sm cm-refresh" *ngIf="sent" [disabled]="refreshing" (click)="refresh.emit()">{{ refreshing ? 'Updating…' : '↻ Refresh' }}</button>
   </div>
-  <p class="cm-muted" *ngIf="!report">{{ sent ? 'No figures from Zoho yet. They appear shortly after Zoho starts sending; use "Refresh status" to check.' : 'Results appear after the campaign is sent.' }}</p>
+  <p class="cm-muted" *ngIf="!report">{{ sent ? 'No figures from Zoho yet. They appear a few minutes after Zoho starts sending; this page checks again on its own, or click Refresh.' : 'Results appear after the campaign is sent.' }}</p>
+
+  <!-- Summary row, as in Zoho's report -->
+  <div class="cm-summary" *ngIf="report">
+    <ng-container *ngFor="let s of summary; trackBy: trackLabel">
+      <button type="button" class="cm-sum cm-link" *ngIf="canOpen(s.activity) && !s.unavailable; else plainSum" [class.on]="isOpen(s.activity)"
+        (click)="openActivity(s.activity!)" [attr.aria-pressed]="isOpen(s.activity)" [attr.aria-label]="'Show who: ' + s.label + ', ' + s.value">
+        <ng-container *ngTemplateOutlet="sumBody; context: { $implicit: s }"></ng-container>
+      </button>
+      <ng-template #plainSum><div class="cm-sum" [class.na]="s.unavailable"><ng-container *ngTemplateOutlet="sumBody; context: { $implicit: s }"></ng-container></div></ng-template>
+    </ng-container>
+  </div>
+  <ng-template #sumBody let-s>
+    <b>{{ s.value }}</b>
+    <span>{{ s.label }}</span>
+    <small *ngIf="s.sub">{{ s.sub }}</small>
+  </ng-template>
   <div class="cm-charts" *ngIf="report && (reach.length || problems.length)">
     <figure class="cm-card" *ngIf="reach.length">
       <figcaption>Campaign reach</figcaption>

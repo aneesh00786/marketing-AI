@@ -1,9 +1,10 @@
-import { Component, ElementRef, Input, OnChanges, SimpleChanges, ViewChild } from '@angular/core';
+import { Component, ElementRef, EventEmitter, Input, OnChanges, Output, SimpleChanges, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../services/api.service';
 
 export interface Metric { label: string; value: string; hint?: string; unavailable?: boolean; activity?: string }
+export interface SummaryItem { label: string; value: string; sub: string | null; activity?: string; unavailable: boolean }
 export interface BarRow { label: string; value: number; pct: number; activity?: string }
 
 const ACTIVITIES = [
@@ -57,6 +58,9 @@ export class CampaignMetricsComponent implements OnChanges {
   @Input() lastCheckedAt: string | null = null;
   /** Owner, Admin, Marketing Manager and Approver (mail.send); the server enforces it too. */
   @Input() canViewRecipients = false;
+  /** Fetching the latest figures from Zoho right now (the parent does the request). */
+  @Input() refreshing = false;
+  @Output() refresh = new EventEmitter<void>();
 
   readonly activities = ACTIVITIES;
   activity = 'opened';
@@ -78,6 +82,28 @@ export class CampaignMetricsComponent implements OnChanges {
 
   get sent(): boolean { return this.status === 'submitted' || this.status === 'needs_review'; }
 
+  /** The headline row, as in Zoho's report summary: count, and its share of sent or delivered. */
+  get summary(): SummaryItem[] {
+    const r = this.report || {};
+    const sent = num(r.emails_sent_count);
+    const delivered = num(r.delivered_count);
+    const opened = num(r.opens_count);
+    const unopened = num(r.unopened) ?? (delivered !== null && opened !== null ? Math.max(0, delivered - opened) : null);
+    const share = (zohoPct: any, part: number | null, whole: number | null) => (num(zohoPct) !== null ? `${num(zohoPct)}%` : rate(part, whole));
+    const item = (label: string, v: number | null, sub: string | null, activity?: string): SummaryItem =>
+      ({ label, value: v === null ? '—' : v.toLocaleString('en-US'), sub: v === null ? null : sub, activity, unavailable: v === null });
+    return [
+      item('Sent', sent, null, 'sent'),
+      item('Delivered', delivered, share(r.delivered_percent, delivered, sent)),
+      item('Opened', opened, share(r.open_percent, opened, delivered), 'opened'),
+      item('Unopened', unopened, share(r.unopened_percent, unopened, delivered), 'unopened'),
+      item('Clicked', num(r.unique_clicks_count), share(r.unique_clicked_percent, num(r.unique_clicks_count), delivered), 'clicked'),
+      item('Unsubscribes', num(r.unsub_count), share(r.unsubscribe_percent, num(r.unsub_count), delivered), 'unsubscribed'),
+      item('Marked spam', num(r.spams_count) ?? num(r.complaints_count), share(r.spam_percent, num(r.spams_count), delivered), 'spam'),
+      item('Forwards', num(r.forwards_count), share(r.forward_percent, num(r.forwards_count), delivered))
+    ];
+  }
+
   get metrics(): Metric[] {
     const r = this.report || {};
     const sent = num(r.emails_sent_count);
@@ -90,17 +116,12 @@ export class CampaignMetricsComponent implements OnChanges {
     const hard = num(r.hardbounce_count);
     const soft = num(r.softbounce_count);
     return [
-      { label: 'Sent', value: show(sent), activity: 'sent' },
-      { label: 'Delivered', value: show(delivered), unavailable: delivered === null },
       { label: 'Delivery rate', value: pct(r.delivered_percent, rate(delivered, sent)) },
       { label: 'Bounced', value: show(bounced), hint: hard !== null || soft !== null ? `Hard ${show(hard)} · Soft ${show(soft)}` : undefined, activity: 'hard_bounced' },
       { label: 'Not sent', value: show(num(r.unsent_count)), hint: 'Zoho could not send to these addresses' },
-      { label: 'Opens', value: show(opens), hint: 'As Zoho counts them (unique opens). An estimate, not proof of reading.', activity: 'opened' },
-      { label: 'Open rate', value: pct(r.open_percent, rate(opens, delivered)) },
-      { label: 'Unique clickers', value: show(clicks), activity: 'clicked' },
+      { label: 'Open rate', value: pct(r.open_percent, rate(opens, delivered)), hint: 'Unique opens ÷ delivered. An estimate, not proof of reading.' },
       { label: 'Click rate', value: rate(clicks, delivered) ?? 'Unavailable', hint: 'Unique clickers ÷ delivered' },
-      { label: 'Unsubscribes', value: show(num(r.unsub_count)), activity: 'unsubscribed' },
-      { label: 'Spam complaints', value: show(num(r.spams_count) ?? num(r.complaints_count)), activity: 'spam' }
+      { label: 'Auto-replies', value: show(num(r.autoreply_count)) }
     ].map(m => ({ ...m, unavailable: m.value === 'Unavailable' }));
   }
 

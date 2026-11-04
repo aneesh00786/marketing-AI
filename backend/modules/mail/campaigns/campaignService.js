@@ -460,7 +460,9 @@ async function fail(ctx, row, stage, err) {
   throw err;
 }
 
-const REPORT_FIELDS = ['emails_sent_count', 'delivered_count', 'delivered_percent', 'opens_count', 'open_percent', 'unique_clicks_count', 'bounces_count', 'hardbounce_count', 'softbounce_count', 'unsub_count', 'spams_count', 'complaints_count', 'unsent_count'];
+const REPORT_FIELDS = ['emails_sent_count', 'delivered_count', 'delivered_percent', 'opens_count', 'open_percent', 'unopened', 'unopened_percent',
+  'unique_clicks_count', 'unique_clicked_percent', 'bounces_count', 'bounce_percent', 'hardbounce_count', 'softbounce_count', 'unsub_count', 'unsubscribe_percent',
+  'spams_count', 'spam_percent', 'complaints_count', 'forwards_count', 'forward_percent', 'autoreply_count', 'unsent_count'];
 const first = v => (Array.isArray(v) ? v[0] || null : v || null);
 
 /** Finds the Zoho object created for this version by its unique name marker. */
