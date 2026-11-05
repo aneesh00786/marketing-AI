@@ -133,9 +133,13 @@ function present(row) {
     aiSuggestedAt: row.ai_suggested_at || null,
     // Found through AI Lead Discovery: business details are shown live from Google, not stored.
     googlePlace: !!row.google_place,
-    // Marketing email consent (never assumed; recorded in Mail Center > Product emails).
+    // Marketing email consent (never assumed; recorded on the Leads screen or in Product Emails).
     marketingConsent: row.marketing_consent || 'unknown',
     marketingConsentSource: row.marketing_consent_source || null,
+    marketingConsentMethod: row.marketing_consent_method || null,
+    marketingConsentObtainedAt: row.marketing_consent_obtained_at || null,
+    // Granted with how, when and evidence: the standard Zoho campaigns and Product Emails require.
+    marketingConsentProven: row.marketing_consent === 'granted' && !!(row.marketing_consent_method && row.marketing_consent_evidence),
     createdAt: row.created_at,
     updatedAt: row.updated_at || null
   };

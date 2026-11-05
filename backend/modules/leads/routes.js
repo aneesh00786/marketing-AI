@@ -95,6 +95,20 @@ const importMailList = z.union([
   z.object({ id: z.number().int().positive() }).strict(),
   z.object({ name: z.string().trim().min(1).max(150) }).strict()
 ]);
+/**
+ * Records marketing consent for leads (granted needs how, when and evidence; or withdrawn / unknown).
+ * The same rules and audit trail as Product Emails, available whether or not that feature is on.
+ */
+router.post('/consent', requireCapability('leads.manage'), wrap(async (req, res) => {
+  try {
+    res.json({ success: true, ...(await require('../mail/productEmails/service').recordConsent(req, req.body)) });
+  } catch (err) {
+    // What is missing (method, date, evidence, the confirmation), in plain words.
+    if (err instanceof z.ZodError) return res.status(400).json({ success: false, code: 'VALIDATION_ERROR', error: err.issues.map(i => i.message).join(' ') });
+    throw err;
+  }
+}));
+
 router.post('/import-bulk', requireCapability('leads.manage'), body(z.object({ leads: z.array(z.record(z.any())).min(1), consent: importConsent.optional(), mailList: importMailList.optional() })), wrap(async (req, res) => {
   const { consent, mailList } = req.valid;
   if (mailList && !req.auth.capabilities.has('mail.send')) {

@@ -16,6 +16,7 @@ import { SocialHubComponent } from './features/social/social-hub.component';
 import { CommandCenterComponent } from './features/command/command-center.component';
 import { IconComponent } from './shared/icon.component';
 import { CallButtonComponent } from './shared/calling/call-button.component';
+import { LeadConsentComponent, consentLabel } from './shared/leads/lead-consent.component';
 import { CountryFilterComponent } from './shared/leads/country-filter.component';
 import { SoftphoneComponent } from './shared/calling/softphone.component';
 import { DashboardComponent, DashboardNavigation } from './features/dashboard/dashboard.component';
@@ -34,7 +35,7 @@ import { findTokens, fillTokens, defaultTokenValues } from './features/mail/temp
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [CommonModule, FormsModule, LoginComponent, SocialHubComponent, CommandCenterComponent, IconComponent, DashboardComponent, LeadDiscoveryComponent, CrmComponent, PlatformAdminComponent, CallButtonComponent, SoftphoneComponent, MembersComponent, TemplatePickerComponent, MailCenterComponent, EmailPreviewComponent, ImportSyncOptionsComponent, LeadsToZohoComponent, CountryFilterComponent],
+  imports: [CommonModule, FormsModule, LoginComponent, SocialHubComponent, CommandCenterComponent, IconComponent, DashboardComponent, LeadDiscoveryComponent, CrmComponent, PlatformAdminComponent, CallButtonComponent, SoftphoneComponent, MembersComponent, TemplatePickerComponent, MailCenterComponent, EmailPreviewComponent, ImportSyncOptionsComponent, LeadsToZohoComponent, CountryFilterComponent, LeadConsentComponent],
   templateUrl: './app.component.html',
   styleUrls: ['./app.component.css']
 })
@@ -1160,6 +1161,16 @@ export class AppComponent implements OnInit, OnDestroy {
         this.showToast(err?.error?.error || 'Export failed.');
       }
     });
+  }
+
+  /** The lead whose marketing consent is being recorded (Leads screen). */
+  consentLead: any = null;
+  leadConsentLabel(ld: any): string { return consentLabel(ld); }
+  onConsentSaved(e: { status: string }): void {
+    const name = this.consentLead?.name || 'the lead';
+    this.consentLead = null;
+    this.showToast(e.status === 'granted' ? `Consent recorded for ${name}. They can now get Zoho campaigns.` : e.status === 'withdrawn' ? `Consent withdrawn for ${name}: no marketing email will reach them.` : `Consent for ${name} is now not recorded.`);
+    this.loadLeads();
   }
 
   loadLeads(): void {

@@ -360,6 +360,7 @@
             <th>Product</th>
             <th>Budget</th>
             <th>Status</th>
+            <th title="Marketing email consent: Zoho campaigns go only to people whose consent is recorded with evidence">Consent</th>
             <th title="Rule-based score: contact details, budget and buying-intent words">Lead score (rule-based)</th>
             <th>AI follow-up advice</th>
             <th>Actions</th>
@@ -383,6 +384,7 @@
             </td>
             <td data-label="Budget">{{ dash(ld.estimatedBudget) }}</td>
             <td data-label="Status" class="one-line">{{ dash(ld.status) }}</td>
+            <td data-label="Consent" class="one-line"><button type="button" class="link-btn consent-badge" [class.consent-ok]="ld.marketingConsentProven" [class.consent-off]="ld.marketingConsent === 'withdrawn'" (click)="consentLead = ld" [title]="'Marketing consent: ' + leadConsentLabel(ld) + '. Click to record.'">{{ leadConsentLabel(ld) }}</button></td>
             <td data-label="Lead score">
               <div class="score-pill" *ngIf="ld.score !== null" [class.score-hot]="ld.category === 'Hot'" [class.score-warm]="ld.category === 'Warm'" [class.score-cold]="ld.category === 'Cold'"
                    [title]="scoreFactorsText(ld)">
@@ -398,6 +400,7 @@
             <td data-label="Actions" class="actions-cell">
               <div class="button-group">
                 <button class="btn btn-secondary btn-sm" (click)="openEditLead(ld)">Edit</button>
+                <button class="btn btn-secondary btn-sm" (click)="consentLead = ld" title="Record marketing email consent (how, when and evidence)">Consent…</button>
                 <button class="btn btn-secondary btn-sm" *ngIf="ld.googlePlace" (click)="viewPlaceDetails(ld)" title="Show this business's details live from Google Maps">📍 Live details</button>
                 <button class="btn btn-secondary btn-sm" (click)="quickEmailLead(ld)" [disabled]="!ld.hasValidEmail" [title]="ld.hasValidEmail ? 'Draft an email about ' + (ld.productName || 'their needs') : 'No valid email address'">✉️ Email</button>
                 <button class="btn btn-secondary btn-sm" (click)="qualifySingleLead(ld)" title="Refresh the rule-based score and ask AI for advice">⚡ AI advice</button>
@@ -406,10 +409,10 @@
             </td>
           </tr>
           <tr *ngIf="!leadsLoading && leads.length === 0">
-            <td colspan="12" class="empty-state">No leads match. Click "📂 Import Excel / CSV" or "+ Add Lead" to get started.</td>
+            <td colspan="13" class="empty-state">No leads match. Click "📂 Import Excel / CSV" or "+ Add Lead" to get started.</td>
           </tr>
           <tr *ngIf="leadsLoading && leads.length === 0">
-            <td colspan="12" class="empty-state">Loading leads…</td>
+            <td colspan="13" class="empty-state">Loading leads…</td>
           </tr>
         </tbody>
       </table>
@@ -1274,3 +1277,6 @@
     <app-icon name="sparkles" [size]="16"></app-icon><span>{{ toastMessage }}</span>
   </div>
 </div>
+
+<!-- Marketing consent for one lead (Leads screen) -->
+<app-lead-consent *ngIf="consentLead" [lead]="consentLead" (close)="consentLead = null" (saved)="onConsentSaved($event)"></app-lead-consent>

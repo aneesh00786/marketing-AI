@@ -376,3 +376,36 @@ test('country: saved on create, edit and import; filters the Leads list, export 
   assert.equal(other.data.leads.length, 0, 'another workspace sees none');
   assert.ok(!other.data.countries.some(c => c.country === 'India'), 'and not their countries');
 });
+
+test('consent on the Leads screen: works without Product Emails, needs evidence to grant, and is what campaigns use', async () => {
+  const before = process.env.PRODUCT_EMAILS_ENABLED;
+  delete process.env.PRODUCT_EMAILS_ENABLED;
+  try {
+    const stamp = Date.now();
+    const ws = await h.createWorkspace({ name: `Consent leads ${stamp}` });
+    const lead = (await create(ws.token, { name: `Consent ${stamp}`, email: `consent.${stamp}@acme.io` })).data.lead;
+    assert.deepEqual([lead.marketingConsent, lead.marketingConsentProven], ['unknown', false]);
+    const consent = body => h.api('POST', '/api/v1/leads/consent', { token: ws.token, body });
+    // Granting without evidence (or without confirming it is held) is refused.
+    assert.equal((await consent({ leadIds: [lead.id], status: 'granted', method: 'web_form', obtainedAt: '2026-10-01', evidence: 'x', attest: true })).status, 400);
+    assert.equal((await consent({ leadIds: [lead.id], status: 'granted', method: 'web_form', obtainedAt: '2026-10-01', evidence: 'Form #4411' })).status, 400);
+    const ok = await consent({ leadIds: [lead.id], status: 'granted', method: 'web_form', obtainedAt: '2026-10-01', evidence: 'Form #4411', attest: true });
+    assert.equal(ok.status, 200, JSON.stringify(ok.data));
+    const shown = (await h.api('GET', `/api/v1/leads?q=consent.${stamp}`, { token: ws.token })).data.leads[0];
+    assert.deepEqual([shown.marketingConsent, shown.marketingConsentProven, shown.marketingConsentMethod], ['granted', true, 'web_form']);
+    // A contact list with this person now counts them as reachable for Zoho campaigns.
+    const list = await h.api('POST', '/api/v1/mail/campaigns/contact-lists', { token: ws.token, body: { name: `Consent list ${stamp}`, leadIds: [lead.id] } });
+    assert.equal(list.status, 200, JSON.stringify(list.data));
+    const lists = (await h.api('GET', '/api/v1/mail/campaigns/contact-lists', { token: ws.token })).data.lists;
+    assert.deepEqual(lists.filter(l => l.name === `Consent list ${stamp}`).map(l => [l.reachable, l.noConsent]), [[1, 0]]);
+    // Withdrawn: no longer reachable.
+    assert.equal((await consent({ leadIds: [lead.id], status: 'withdrawn', note: 'Asked by phone' })).status, 200);
+    const after = (await h.api('GET', '/api/v1/mail/campaigns/contact-lists', { token: ws.token })).data.lists.find(l => l.name === `Consent list ${stamp}`);
+    assert.deepEqual([after.reachable, after.noConsent], [0, 1]);
+    // Another workspace cannot record consent for this lead.
+    const other = await h.createWorkspace({ name: `Consent other ${stamp}` });
+    assert.equal((await h.api('POST', '/api/v1/leads/consent', { token: other.token, body: { leadIds: [lead.id], status: 'unknown' } })).status, 404);
+  } finally {
+    if (before === undefined) delete process.env.PRODUCT_EMAILS_ENABLED; else process.env.PRODUCT_EMAILS_ENABLED = before;
+  }
+});
