@@ -555,6 +555,25 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     expect(comp.form.subject).withContext('the form is not reloaded').toBe('Unsaved subject');
   });
 
+  it('a send Zoho is holding shows "Waiting for Zoho" (not an error) and offers no Send', () => {
+    comp.zoho = { canCompose: true, canSend: true, connection: { connected: true } };
+    const held = { id: 6, name: 'Kerala', status: 'needs_review', submitStage: 'send', providerCode: 'ZOHO_HELD', approved: true, zohoPrepared: true, version: 2, html: ORIGINAL, lists: [] };
+    (comp as any).setSelected(held);
+    fixture.detectChanges();
+    expect(comp.statusLabel(held.status, held)).toBe('Waiting for Zoho');
+    expect(comp.tone(held.status, held)).toBe('warn');
+    expect(comp.statusLabel('needs_review', { status: 'needs_review', providerCode: '500' })).toBe('Unknown — check');
+    expect(el().textContent).toContain("Waiting for Zoho — please don't send it again.");
+    expect(el().textContent).not.toContain('Outcome unknown.');
+    expect(el().querySelector('.note.error')).toBeNull();
+    expect(button('Send through Zoho')).toBeUndefined();
+    button('Check Zoho now').click();
+    http.expectOne(r => r.method === 'POST' && r.url.endsWith('/campaigns/6/refresh')).flush({ campaign: { ...held, status: 'submitted', providerCode: null } });
+    http.match(r => /\/mail\/campaigns$/.test(r.url)).forEach(r => r.flush({ campaigns: [] }));
+    fixture.detectChanges();
+    expect(el().textContent).not.toContain('Waiting for Zoho');
+  });
+
   it('sent campaigns can be deleted by those who send, after a confirmation that Zoho keeps its copy', () => {
     const sent = { id: 7, name: 'Spring', status: 'submitted' };
     comp.zoho = { canCompose: true, canSend: false, connection: { connected: true } };

@@ -157,7 +157,8 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
   }
 
   /** Tag/dot tone for a campaign status (the label always says the status too). */
-  tone(s: string): string {
+  tone(s: string, c?: any): string {
+    if (this.waitingForZoho(c)) return 'warn';
     if (s === 'submitted') return 'good';
     if (s === 'approved') return 'info';
     if (s === 'failed' || s === 'needs_review') return 'bad';
@@ -660,7 +661,13 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
     });
   }
 
-  statusLabel(s: string): string {
+  /** Zoho is holding the send (reviewing contacts new to it) and usually sends it by itself later. */
+  waitingForZoho(c: any): boolean {
+    return !!c && c.status === 'needs_review' && c.providerCode === 'ZOHO_HELD';
+  }
+
+  statusLabel(s: string, c?: any): string {
+    if (this.waitingForZoho(c)) return 'Waiting for Zoho';
     return ({ draft: 'Draft', approved: 'Approved', submitting: 'Submitting…', submitted: 'Submitted to Zoho', failed: 'Not sent', needs_review: 'Unknown — check' } as any)[s] || s;
   }
 

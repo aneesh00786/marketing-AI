@@ -571,8 +571,19 @@ async function deliver(ctx, row, extraKeys = [], { retried = false } = {}) {
 const NO_LISTS_RE = /no lists? (are |is )?selected/i;
 const NO_LISTS_HELP = 'Zoho: the lists for this campaign have nobody Zoho can email yet, so nothing was sent. Contacts new to Zoho may be held for review or until they confirm by email, or the people may be unsubscribed or bounced in Zoho. Check Zoho Campaigns → Contacts, then send again.';
 
+/**
+ * Said at the send step: the campaign exists in Zoho, and Zoho often sends it by itself once it has
+ * reviewed contacts new to it. So it is not "failed": it waits (no edit, no resend) until Zoho sends it,
+ * which the worker and "Refresh status" pick up, or until it is checked and marked not done.
+ */
+const ZOHO_HELD = 'ZOHO_HELD';
+const NO_LISTS_HELD = 'Waiting for Zoho: it has not sent this campaign yet because it is still reviewing contacts new to it. Zoho usually sends it by itself once they are approved. Marketech.ai keeps checking and marks it sent when it goes. Do not send it again, here or in Zoho.';
+
 async function fail(ctx, row, stage, err) {
-  if (NO_LISTS_RE.test(String(err.message || ''))) err.message = NO_LISTS_HELP;
+  if (NO_LISTS_RE.test(String(err.message || ''))) {
+    if (stage === 'send') Object.assign(err, { message: NO_LISTS_HELD, outcomeUnknown: true, providerCode: ZOHO_HELD, code: ZOHO_HELD });
+    else err.message = NO_LISTS_HELP;
+  }
   const unknown = !!err.outcomeUnknown;
   await setState(row.id, unknown ? 'needs_review' : 'failed', {
     submit_stage: stage,
@@ -680,8 +691,14 @@ async function refresh(ctx, id) {
   if (norm(d.campaign_status) === 'sent' && (row.temp_lists_json || row.contact_list_key) && !row.temp_lists_deleted_at) {
     await require('../contacts/zohoUpload').cleanupTempLists(row).catch(() => false);
   }
-  if (row.status === 'needs_review' && SENT_LIKE.has(norm(d.campaign_status))) {
-    await run("UPDATE mail_campaigns SET status = 'submitted', submit_stage = NULL, submitted_at = COALESCE(submitted_at, UTC_TIMESTAMP()) WHERE id = ? AND status = 'needs_review'", [row.id]);
+  // Zoho sent it after all (an unclear reply, or a refusal Zoho later reversed, e.g. contacts held for review).
+  const ownKey = row.zoho_key_version === row.version;
+  if ((row.status === 'needs_review' || (row.status === 'failed' && ownKey)) && SENT_LIKE.has(norm(d.campaign_status))) {
+    // MySQL applies SET left to right: the provider fields read the old status, so they come first.
+    await run(`UPDATE mail_campaigns SET provider_message = CASE WHEN status = 'failed' OR provider_code = 'ZOHO_HELD' THEN 'Zoho sent it after first holding it.' ELSE provider_message END,
+      provider_code = CASE WHEN status = 'failed' OR provider_code = 'ZOHO_HELD' THEN NULL ELSE provider_code END,
+      status = 'submitted', submit_stage = NULL, submitted_at = COALESCE(submitted_at, UTC_TIMESTAMP())
+      WHERE id = ? AND status IN ('needs_review', 'failed')`, [row.id]);
     await audit(ctx, 'mail.campaign_reconciled', { resourceType: 'mail_campaign', resourceId: row.id, metadata: { stage: row.submit_stage, zohoStatus: d.campaign_status } });
   }
   return getOne(ctx, row.id);

@@ -81,8 +81,8 @@
               <app-icon *ngIf="!c.thumbHtml" name="campaigns" [size]="22"></app-icon>
             </span>
             <span class="ec-item-body">
-            <span class="ec-item-title"><span class="ec-dot" [ngClass]="tone(c.status)" aria-hidden="true"></span><b>{{ c.name }}</b>
-              <span class="mx-tag" [ngClass]="tone(c.status)">{{ statusLabel(c.status) }}</span></span>
+            <span class="ec-item-title"><span class="ec-dot" [ngClass]="tone(c.status, c)" aria-hidden="true"></span><b>{{ c.name }}</b>
+              <span class="mx-tag" [ngClass]="tone(c.status, c)">{{ statusLabel(c.status, c) }}</span></span>
             <span class="ec-item-sub">{{ c.subject || 'No subject' }}</span>
             <span class="ec-item-meta">{{ (c.updatedAt || c.createdAt) | date:'MMM d, y, h:mm a' }}</span>
             <span class="ec-item-stats" *ngIf="c.report?.emails_sent_count != null">
@@ -122,7 +122,7 @@
         <div class="ec-detail-status">
           <button type="button" class="btn btn-secondary btn-sm ec-back" (click)="close()">← Zoho Campaigns</button>
           <h3>{{ form.name || 'Untitled campaign' }}</h3>
-          <span class="mx-tag" [ngClass]="tone(selected.status)">{{ statusLabel(selected.status) }}</span>
+          <span class="mx-tag" [ngClass]="tone(selected.status, selected)">{{ statusLabel(selected.status, selected) }}</span>
           <span class="mx-tag warn" *ngIf="dirty">Unsaved changes</span>
           <span class="muted small ec-saved">Last saved {{ (selected.updatedAt || selected.createdAt) | date:'MMM d, h:mm a' }}</span>
         </div>
@@ -141,7 +141,14 @@
         </div>
       </div>
 
-      <div class="review" *ngIf="selected.status === 'needs_review'" role="alert">
+      <div class="review" *ngIf="waitingForZoho(selected)" role="status">
+        <b>Waiting for Zoho — please don't send it again.</b> Zoho has this campaign but hasn't sent it yet: it is still reviewing contacts new to it, and usually sends the campaign by itself once they are approved (this can take a few hours). Marketech.ai checks Zoho every few minutes and marks it sent when it goes. Sending again, here or in Zoho, is not needed.
+        <div class="ec-inline-actions">
+          <button class="btn btn-secondary btn-sm" (click)="refresh()" [disabled]="busy === 'refresh'"><app-icon name="refresh" [size]="15"></app-icon>{{ busy === 'refresh' ? 'Checking…' : 'Check Zoho now' }}</button>
+          <button *ngIf="canSend" class="btn btn-secondary btn-sm" (click)="resolve()" title="Only if Zoho shows it was never sent: lets you change it and send again">Zoho won't send it — stop waiting</button>
+        </div>
+      </div>
+      <div class="review" *ngIf="selected.status === 'needs_review' && !waitingForZoho(selected)" role="alert">
         <b>Outcome unknown.</b> Zoho did not confirm the last {{ selected.submitStage === 'create' ? 'preparation' : 'send' }} request. "Refresh status" settles it when Zoho shows the result. It is never resent automatically.
         <div class="ec-inline-actions">
           <button class="btn btn-secondary btn-sm" (click)="refresh()" [disabled]="busy === 'refresh'"><app-icon name="refresh" [size]="15"></app-icon>Refresh status</button>

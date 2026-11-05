@@ -147,6 +147,12 @@ async function processZohoCleanup() {
   try {
     const rows = await all(`SELECT id, workspace_id FROM mail_campaigns WHERE status = 'submitted' AND (temp_lists_json IS NOT NULL OR contact_list_key IS NOT NULL)
       AND temp_lists_deleted_at IS NULL AND submitted_at < UTC_TIMESTAMP() - INTERVAL 1 MINUTE AND workspace_id IN ${require('../lib/workspaceStatus').ACTIVE_WORKSPACES} ORDER BY submitted_at LIMIT 5`);
+    // Waiting at the send step but prepared in Zoho: Zoho may still send it (e.g. once it approves new
+    // contacts). Checked for a week after approval, least recently checked first.
+    const held = await all(`SELECT id, workspace_id FROM mail_campaigns WHERE status IN ('needs_review', 'failed') AND submit_stage = 'send' AND zoho_campaign_key IS NOT NULL
+      AND zoho_key_version = version AND approved_at > UTC_TIMESTAMP() - INTERVAL 7 DAY AND (last_checked_at IS NULL OR last_checked_at < UTC_TIMESTAMP() - INTERVAL 2 MINUTE)
+      AND workspace_id IN ${require('../lib/workspaceStatus').ACTIVE_WORKSPACES} ORDER BY last_checked_at IS NOT NULL, last_checked_at LIMIT 5`);
+    rows.push(...held);
     const svc = require('../modules/mail/campaigns/campaignService');
     for (const r of rows) {
       await svc.refresh({ auth: { workspaceId: r.workspace_id, actorType: 'worker', capabilities: new Set(['mail.send']) } }, r.id).catch(err => log('zoho cleanup error:', err.message));
@@ -235,4 +241,4 @@ if (require.main === module) {
   loop().then(() => process.exit(0)).catch(err => { log('fatal:', err.message); process.exit(1); });
 }
 
-module.exports = { processWorkspacePurge, processPublishing, processProcessing, processBackground, processOutreach, processProductEmails, processAutomation, scheduleRecurring, HANDLERS };
+module.exports = { processZohoCleanup, processWorkspacePurge, processPublishing, processProcessing, processBackground, processOutreach, processProductEmails, processAutomation, scheduleRecurring, HANDLERS };
