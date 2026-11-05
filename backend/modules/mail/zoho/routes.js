@@ -28,6 +28,8 @@ router.use((req, res, next) => {
 });
 
 router.get('/status', requireCapability('mail.view'), wrap(async (req, res) => res.json({ success: true, ...(await svc.status(req)) })));
+// The Zoho org number for "Open in Zoho" links (whoever sends campaigns may set it).
+router.put('/web-org', requireCapability('mail.send'), wrap(async (req, res) => res.json({ success: true, ...(await svc.setWebOrg(req, req.body || {})) })));
 router.post('/connect', requireCapability('mail.configure'), wrap(async (req, res) => res.json({ success: true, ...(await svc.startConnect(req)) })));
 router.post('/disconnect', requireCapability('mail.configure'), wrap(async (req, res) => res.json({ success: true, ...(await svc.disconnect(req)) })));
 // The workspace's own Zoho API client (Mail Center → Settings). The secret is accepted, never returned.

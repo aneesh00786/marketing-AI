@@ -142,6 +142,7 @@ function presentConnection(row) {
     location: row.location,
     // Zoho Campaigns' web address for this account's region (links that open a campaign in Zoho).
     webUrl: zoho.resolveDataCenter(row.location, row.accounts_server)?.campaigns || null,
+    webOrg: row.web_org || null,
     scopes: parseScopes(row.scopes),
     // Connections made before campaign delivery was added lack some scopes: reconnect to grant them.
     missingScopes: missingScopes(row),
@@ -169,6 +170,21 @@ async function status(ctx) {
     // The Zoho API does not report plan or sending limits; they are not assumed here.
     limits: { known: false, note: 'Sending limits depend on your Zoho Campaigns plan and Zoho\'s policies; Marketech.ai cannot read them from the API.' }
   };
+}
+
+/**
+ * Saves the Zoho Campaigns org number from an address pasted by the person (or "org831854179", or the
+ * digits), so links open campaigns in Zoho directly. Only the digits are kept.
+ */
+async function setWebOrg(ctx, input) {
+  const raw = String(input?.value ?? input?.url ?? '').trim().slice(0, 500);
+  const m = /(?:^|[/\s])org(\d{5,20})(?:[/?#\s]|$)/i.exec(raw) || /^(\d{5,20})$/.exec(raw);
+  if (!m) throw httpError(400, 'Paste the address of any page in Zoho Campaigns (it contains "org" and a number, e.g. …/campaigns/org831854179/home.do).', 'INVALID_ZOHO_ORG');
+  const row = await connectionRow(ws(ctx));
+  if (!row || row.status === 'disconnected') throw httpError(409, 'Connect Zoho Campaigns first (Mail Settings).', 'NOT_CONNECTED');
+  await run('UPDATE mail_provider_connections SET web_org = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?', [m[1], row.id]);
+  await audit(ctx, 'mail.zoho.web_org_set', { resourceType: 'mail_provider', resourceId: PROVIDER, metadata: { org: m[1] } });
+  return { webOrg: m[1] };
 }
 
 async function startConnect(ctx) {
@@ -347,6 +363,7 @@ async function assertContactSync(workspaceId) {
 }
 
 module.exports = {
+  setWebOrg,
   reviewAndLaunch,
   PROVIDER,
   canSyncNames,

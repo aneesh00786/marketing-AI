@@ -30,7 +30,7 @@ const DELETE_SCOPES = REQUESTED_SCOPES;
 let keySeq = 9000 + Math.floor(Math.random() * 1e6) * 10;
 
 function fakeZoho() {
-  const z = { calls: [], codes: {}, refresh: {}, access: {}, accounts: {}, issued: 0, createResponder: null, sendResponder: null, refreshResponder: null, reviewResponder: null };
+  const z = { calls: [], codes: {}, refresh: {}, access: {}, accounts: {}, issued: 0, createResponder: null, sendResponder: null, refreshResponder: null, reviewResponder: null, contactState: null, confirmNames: false };
   z.account = (name, { lists = [{ listkey: 'L1', listname: 'Opted-in customers', noofcontacts: '120' }], topics = [] } = {}) => {
     z.accounts[name] = { lists, topics, campaigns: {} };
     return name;
@@ -75,7 +75,8 @@ function fakeZoho() {
         }
         if (endpoint === 'topics') return h.json(200, { code: '0', topicDetails: acct.topics });
         if (endpoint === 'getlistsubscribers') {
-          const all = (acct.contacts || {})[params.listkey] || [];
+          // Lists made by an upload hold the added addresses; each is active unless a test says otherwise.
+          const all = (acct.contacts || {})[params.listkey] || ((acct.added || {})[params.listkey] || []).map(e => ({ contact_email: e, state: (z.contactState || {})[e] || (z.holdContacts ? 'pending' : 'active') }));
           const from = Number(params.fromindex) - 1;
           return h.json(200, { status: 'success', code: 0, list_of_details: all.filter(c => (c.state || 'active') === params.status).slice(from, from + Number(params.range)) });
         }
@@ -103,7 +104,8 @@ function fakeZoho() {
           assert.ok(u.pathname.endsWith('/api/v1.1/json/listsubscribe'), u.pathname);
           if (z.nameResponder) { const r = z.nameResponder(params, acct); if (r) return r; }
           acct.names = { ...acct.names, [JSON.parse(params.contactinfo)['Contact Email']]: { list: params.listkey, ...JSON.parse(params.contactinfo) } };
-          return h.json(200, { status: 'success', code: '0', message: 'A confirmation email is sent to the user. User needs to confirm to successfully subscribe.' });
+          // Zoho: lists with a sign-up form email a confirmation (double opt-in); others just update the fields.
+          return h.json(200, { status: 'success', code: '0', message: z.confirmNames ? 'A confirmation email is sent to the user. User needs to confirm to successfully subscribe.' : 'Contact information updated.' });
         }
         if (endpoint === 'listunsubscribe') {
           assert.ok(u.pathname.endsWith('/api/v1.1/json/listunsubscribe'), u.pathname);
@@ -707,6 +709,19 @@ async function contactCampaign(ws, leads, { extra = { lists: [] } } = {}) {
   return a.data.campaign;
 }
 
+/**
+ * Zoho campaigns go only to contacts with recorded marketing consent: tests about uploading and sending
+ * record it (method and evidence, as Product Emails requires) for the workspace's own contacts.
+ */
+async function consentAll(ws) {
+  await db().run(`INSERT INTO leads (workspace_id, name, email, status, marketing_consent, marketing_consent_source, marketing_consent_method, marketing_consent_evidence, marketing_consent_obtained_at, created_at, updated_at)
+    SELECT c.workspace_id, c.email, c.email, 'New', 'granted', 'test', 'web_form', 'Signed up on the test form', UTC_TIMESTAMP(), UTC_TIMESTAMP(), UTC_TIMESTAMP()
+    FROM mail_contacts c WHERE c.workspace_id = ? AND c.source <> 'zoho' AND NOT EXISTS (SELECT 1 FROM leads l WHERE l.workspace_id = c.workspace_id AND LOWER(TRIM(l.email)) = c.email)`, [ws.workspaceId]);
+  await db().run(`UPDATE leads l JOIN mail_contacts c ON c.workspace_id = l.workspace_id AND c.email = LOWER(TRIM(l.email))
+    SET l.marketing_consent = 'granted', l.marketing_consent_method = 'web_form', l.marketing_consent_evidence = 'Signed up on the test form', l.marketing_consent_obtained_at = UTC_TIMESTAMP()
+    WHERE l.workspace_id = ? AND l.marketing_consent = 'unknown'`, [ws.workspaceId]);
+}
+
 async function freshConnected(name, opts = {}) {
   const ws = await h.createWorkspace({ name });
   const account = `acct-${name.replace(/\W/g, '')}-${Math.random()}`;
@@ -1127,7 +1142,9 @@ test('personalization: Zoho merge tags from the Merge Tags menu (custom default 
 test('unsubscribes are kept in Marketech.ai: the campaign link confirms, then stops the address in every list', async () => {
   const { ws } = await freshConnected('Own unsubscribe');
   const a = await capi(ws, 'POST', '/contact-lists', { name: 'A', emails: ['kim@shop.io', 'other@x.io'] });
+  await consentAll(ws);
   await capi(ws, 'POST', '/contact-lists', { name: 'B', emails: ['kim@shop.io'] });
+  await consentAll(ws);
   const c = (await capi(ws, 'POST', '', { ...GOOD, lists: [], mailListIds: [a.data.list.id] })).data.campaign;
   const url = require('../modules/mail/campaigns/campaignService').campaignUnsubscribeUrl({ id: c.id, workspace_id: ws.workspaceId });
   assert.match(url, /\/api\/v1\/mail\/unsubscribe\/c\/\d+-[a-f0-9]{32}\?e=\$\[UD:CONTACT_EMAIL\]\$$/);
@@ -1313,12 +1330,13 @@ test('contact lists in Marketech.ai: create, add leads / typed people, view with
   assert.equal(made.data.added, 3);
   assert.deepEqual(made.data.skipped.map(x => x.email), ['not-an-email']);
   assert.equal((await capi(ws, 'POST', '/contact-lists', { name: 'Sydney buyers' })).status, 409, 'names are unique');
+  await consentAll(ws);
   const id = made.data.list.id;
   const again = await capi(ws, 'POST', `/contact-lists/${id}/contacts`, { emails: ['kim@shop.com.au', 'new@x.io'] });
   assert.deepEqual([again.data.added, again.data.alreadyIn], [1, 1]);
   const lists = (await capi(ws, 'GET', '/contact-lists')).data;
   const l = lists.lists.find(x => x.id === id);
-  assert.deepEqual([l.total, l.reachable, l.inZoho], [4, 3, false], 'the stop-list wins');
+  assert.deepEqual([l.total, l.reachable, l.noConsent, l.inZoho], [4, 2, 1, false], 'the stop-list wins; new@x.io has no recorded consent, so it is not counted as reachable');
   const view = await capi(ws, 'GET', `/contact-lists/${id}/contacts?status=all`);
   const kim = view.data.contacts.find(c => c.email === 'kim@shop.com.au');
   assert.deepEqual([kim.name, kim.company, kim.phone, kim.status], ['Kim Lee', 'Shop', '0400', 'subscribed']);
@@ -1364,6 +1382,7 @@ test('send to a Marketech.ai list: uploaded to a Zoho list of the same name, sen
   await db().run("INSERT INTO email_suppressions (workspace_id, email, reason, source) VALUES (?, 'stop@x.io', 'unsubscribed', 'test')", [ws.workspaceId]);
   const people = Array.from({ length: 23 }, (_, i) => ({ name: `Person ${i}`, company: 'Shop', email: `p${i}@shop.io` }));
   const made = await capi(ws, 'POST', '/contact-lists', { name: 'Trade show', emails: ['known@x.io', 'stop@x.io'], contacts: people });
+  await consentAll(ws);
   const listId = made.data.list.id;
   const old = (await capi(ws, 'GET', '/contact-lists')).data.lists.find(l => l.name === 'Old customers');
   const c = (await capi(ws, 'POST', '', { ...GOOD, lists: [], mailListIds: [listId, old.id] })).data.campaign;
@@ -1409,6 +1428,7 @@ test('send to a Marketech.ai list: uploaded to a Zoho list of the same name, sen
 test('sending starts the upload right away without the worker; a waiting upload is started by a status check', async () => {
   const { ws, acct } = await freshConnected('Upload inline');
   const made = await capi(ws, 'POST', '/contact-lists', { name: 'Just me', emails: ['me@x.io'] });
+  await consentAll(ws);
   const c = (await capi(ws, 'POST', '', { ...GOOD, lists: [], mailListIds: [made.data.list.id] })).data.campaign;
   await capi(ws, 'POST', `/${c.id}/approve`, {});
   const waitFor = async () => { for (let i = 0; i < 100; i++) { if ((await row(c.id)).status !== 'submitting') return; await new Promise(r => setTimeout(r, 20)); } };
@@ -1435,6 +1455,7 @@ test('sending starts the upload right away without the worker; a waiting upload 
 test('upload failure leaves the campaign not sent; sending again reuses what was uploaded', async () => {
   const { ws, acct } = await freshConnected('Upload fail');
   const made = await capi(ws, 'POST', '/contact-lists', { name: 'Fair', emails: Array.from({ length: 15 }, (_, i) => `f${i}@fair.io`) });
+  await consentAll(ws);
   const c = (await capi(ws, 'POST', '', { ...GOOD, lists: [], mailListIds: [made.data.list.id] })).data.campaign;
   await capi(ws, 'POST', `/${c.id}/approve`, {});
   await capi(ws, 'POST', `/${c.id}/send`, { confirm: true });
@@ -1504,6 +1525,7 @@ test('import: rows become leads; with consent they get it recorded and go into a
 test('import: into an existing contact list here', async () => {
   const { ws } = await freshConnected('Import existing');
   const list = (await capi(ws, 'POST', '/contact-lists', { name: 'Existing', emails: ['a@m.com.au'] })).data.list;
+  await consentAll(ws);
   const r = await importLeads(ws, { leads: [{ name: 'Kim Lee', email: 'kim@shop.com.au' }], mailList: { id: list.id } });
   assert.equal(r.status, 200, JSON.stringify(r.data));
   assert.equal(r.data.list.added, 1);
@@ -1525,6 +1547,7 @@ test('import: bad consent details refuse the whole import; adding to a list need
 test('contacts Zoho holds back (new contacts under review or awaiting confirmation): nothing is sent, the reason is clear, Send again reuses the upload', async () => {
   const { ws, acct } = await freshConnected('Held contacts');
   const made = await capi(ws, 'POST', '/contact-lists', { name: 'New leads', emails: ['n1@new.io', 'n2@new.io'] });
+  await consentAll(ws);
   const c = (await capi(ws, 'POST', '', { ...GOOD, lists: [], mailListIds: [made.data.list.id] })).data.campaign;
   await capi(ws, 'POST', `/${c.id}/approve`, {});
   await capi(ws, 'POST', `/${c.id}/send`, { confirm: true });
@@ -1570,7 +1593,7 @@ test('Zoho holds the send ("No lists selected") and sends it later by itself: it
   assert.equal(held.status, 'needs_review', 'waiting, not failed: it cannot be edited or sent again meanwhile');
   assert.equal(held.submit_stage, 'send');
   assert.equal(held.provider_code, 'ZOHO_HELD');
-  assert.match(held.provider_message, /^Waiting for Zoho.*press Send.*do not send it again/s);
+  assert.match(held.provider_message, /^Waiting for Zoho.*press Send.*do not send it again/si);
   assert.equal((await capi(ws, 'POST', `/${c.id}/send`, { confirm: true })).status, 409, 'no resend while waiting');
   // Still held in Zoho: the worker asks again, and it keeps waiting.
   const worker = require('../workers/socialWorker');
@@ -1682,7 +1705,7 @@ test('"Content not reviewed" and Zoho refuses the review request: it waits and s
   assert.equal(res.status, 409);
   let r = await row(c.id);
   assert.deepEqual([r.status, r.provider_code], ['needs_review', 'ZOHO_HELD']);
-  assert.match(r.provider_message, /^Waiting for Zoho: .*press Send once it says the campaign is approved/s);
+  assert.match(r.provider_message, /^Waiting for Zoho: .*press Send once it shows approved/s);
   assert.ok(r.provider_message.includes('Marketech'), 'names the Zoho campaign');
   // The worker asks again (still refused): it keeps waiting, and nothing is sent twice.
   Z.sendResponder = () => h.json(200, { status: 'error', code: '6611', message: 'Content not reviewed' });
@@ -1696,6 +1719,152 @@ test('"Content not reviewed" and Zoho refuses the review request: it waits and s
   for (let i = 0; i < 40 && (await row(c.id)).status !== 'submitted'; i++) await require('../workers/socialWorker').processZohoCleanup();
   r = await row(c.id);
   assert.equal(r.status, 'submitted');
+});
+
+test('Open in Zoho: the org number is taken from a pasted Zoho address and shown with the connection', async () => {
+  const { ws } = await freshConnected('Web org');
+  const put = body => h.api('PUT', '/api/v1/mail/zoho/web-org', { token: ws.token, body });
+  assert.equal((await put({ value: 'https://example.com/nothing' })).status, 400);
+  assert.equal((await put({ value: 'https://campaigns.zoho.com/campaigns/org831854179/home.do#emailcampaign/1/cmpdetails' })).data.webOrg, '831854179');
+  const st = await h.api('GET', '/api/v1/mail/zoho/status', { token: ws.token });
+  assert.deepEqual([st.data.connection.webOrg, st.data.connection.webUrl], ['831854179', 'https://campaigns.zoho.com']);
+  assert.equal((await put({ value: 'org123456' })).data.webOrg, '123456');
+});
+
+/** A campaign to a new Marketech.ai list of `n` people, approved and handed to the upload worker. */
+async function uploadCampaign(ws, n, prefix) {
+  const people = Array.from({ length: n }, (_, i) => ({ name: `Person ${i}`, company: 'Shop', email: `${prefix}${i}@shop.io` }));
+  const listId = (await capi(ws, 'POST', '/contact-lists', { name: `List ${prefix}`, contacts: people })).data.list.id;
+  await consentAll(ws);
+  const c = (await capi(ws, 'POST', '', { ...GOOD, name: `Upload ${prefix}`, lists: [], mailListIds: [listId] })).data.campaign;
+  await capi(ws, 'POST', `/${c.id}/approve`, {});
+  assert.equal((await capi(ws, 'POST', `/${c.id}/send`, { confirm: true })).status, 200);
+  const job = await db().get("SELECT * FROM background_jobs WHERE workspace_id = ? AND job_type = 'zoho_campaign_upload' ORDER BY id DESC LIMIT 1", [ws.workspaceId]);
+  return { c, people, job };
+}
+
+test('readiness: uploaded contacts all active in Zoho: counted, and the campaign is sent from Marketech.ai', async () => {
+  const { ws } = await freshConnected('Ready upload', { connect: { scope: DELETE_SCOPES } });
+  const { c, job } = await uploadCampaign(ws, 3, 'ok');
+  const r = await require('../modules/mail/contacts/zohoUpload').runUploadJob(job);
+  assert.equal(r.delivered, true, JSON.stringify(r));
+  const after = await row(c.id);
+  assert.equal(after.status, 'submitted');
+  const ready = JSON.parse(after.zoho_readiness_json);
+  assert.deepEqual([ready.total, ready.active, ready.notActive, ready.unsubscribed, ready.bounced], [3, 3, 0, 0, 0]);
+  assert.deepEqual(ready.names, { sent: 3, failed: 0, confirmations: 0 }, 'names updated without confirmation (list without a sign-up form)');
+  const shown = (await capi(ws, 'GET', `/${c.id}`)).data.campaign;
+  assert.equal(shown.zohoReadiness.active, 3, 'shown with the campaign');
+});
+
+test('readiness: new contacts not active in Zoho yet: "No lists selected" is explained with the counts, nothing is sent twice', async () => {
+  const { ws, acct } = await freshConnected('Pending upload');
+  const { c, people, job } = await uploadCampaign(ws, 4, 'pend');
+  Z.contactState = Object.fromEntries(people.map((p, i) => [p.email, i === 3 ? 'unsub' : 'pending']));
+  Z.sendResponder = () => h.json(200, { status: 'error', code: '6606', message: 'No lists selected for this campaign' });
+  Z.reviewResponder = () => h.json(400, { status_code: 400, code: '5014', message: 'Campaign cannot be reviewed' });
+  try {
+    await require('../modules/mail/contacts/zohoUpload').runUploadJob(job);
+  } finally { Z.sendResponder = null; Z.reviewResponder = null; Z.contactState = null; }
+  const after = await row(c.id);
+  assert.deepEqual([after.status, after.provider_code], ['needs_review', 'ZOHO_HELD'], 'waiting, not failed and not sent');
+  const ready = JSON.parse(after.zoho_readiness_json);
+  assert.deepEqual([ready.total, ready.active, ready.unsubscribed, ready.notActive], [4, 0, 1, 3]);
+  assert.match(after.provider_message, /^Waiting for Zoho: none of the 4 contacts in its lists are active in Zoho yet/);
+  assert.ok(!/No lists selected/.test(after.provider_message), 'a specific cause, not Zoho\'s generic reply');
+  assert.ok(after.provider_message.length <= 500);
+  assert.equal(apiCalls('sendcampaign').filter(x => x.params.campaignkey === after.zoho_campaign_key).length, 1);
+  assert.equal(Object.values(acct.campaigns).filter(x => x.status === 'Sent').length, 0, 'nothing was sent');
+});
+
+test('readiness: when Zoho asks contacts to confirm their subscription, names stop after the first (no more confirmation emails)', async () => {
+  const { ws, acct } = await freshConnected('Confirm names', { connect: { scope: DELETE_SCOPES } });
+  const { c, job } = await uploadCampaign(ws, 5, 'conf');
+  Z.confirmNames = true;
+  try { await require('../modules/mail/contacts/zohoUpload').runUploadJob(job); } finally { Z.confirmNames = false; }
+  const after = await row(c.id);
+  const ready = JSON.parse(after.zoho_readiness_json);
+  assert.deepEqual(ready.names, { sent: 1, failed: 0, confirmations: 1 });
+  const listKey = JSON.parse(after.temp_lists_json)[0].key;
+  assert.equal(apiCalls('listsubscribe').filter(x => x.params.listkey === listKey).length, 1, 'one confirmation at most');
+  assert.equal(acct.added[listKey].length, 5, 'every contact was still added to the list');
+});
+
+test('readiness: unsubscribed and bounced contacts in Zoho are counted and never made emailable', async () => {
+  const { ws } = await freshConnected('Opt-outs counted');
+  const { c, people, job } = await uploadCampaign(ws, 3, 'opt');
+  Z.contactState = { [people[0].email]: 'unsub', [people[1].email]: 'bounce' };
+  try { await require('../modules/mail/contacts/zohoUpload').runUploadJob(job); } finally { Z.contactState = null; }
+  const ready = JSON.parse((await row(c.id)).zoho_readiness_json);
+  assert.deepEqual([ready.active, ready.unsubscribed, ready.bounced, ready.notActive], [1, 1, 1, 0]);
+});
+
+test('readiness: Zoho permission error while counting does not stop or fake the send', async () => {
+  const { ws } = await freshConnected('Count denied');
+  const { c, job } = await uploadCampaign(ws, 2, 'deny');
+  const routes = Z.routes[1].respond;
+  Z.routes[1].respond = (url, init) => (url.includes('getlistsubscribers') ? h.json(200, { status: 'error', code: '1005', message: 'Scope does not match' }) : routes(url, init));
+  let r;
+  try { r = await require('../modules/mail/contacts/zohoUpload').runUploadJob(job); } finally { Z.routes[1].respond = routes; }
+  assert.equal(r.delivered, true, JSON.stringify(r));
+  const after = await row(c.id);
+  assert.equal(after.status, 'submitted', 'sent: only the count could not be read');
+  assert.equal(JSON.parse(after.zoho_readiness_json).active, undefined, 'no counts are invented');
+});
+
+test('consent: only contacts with recorded consent (or from your own Zoho lists) are uploaded; the rest are counted and left out', async () => {
+  const { ws, acct } = await freshConnected('Consent rule', { connect: { scope: DELETE_SCOPES }, account: { lists: [{ listkey: 'ZC', listname: 'Zoho subscribers', noofcontacts: '1' }] } });
+  acct.contacts = { ZC: [{ contact_email: 'fromzoho@x.io', firstname: 'Zed' }] };
+  await require('../modules/mail/contacts/zohoImport').importFromZoho(ws.workspaceId);
+  const people = ['granted', 'noevidence', 'unknown', 'withdrawn', 'stopped'].map(k => ({ name: `Person ${k}`, company: 'Shop', email: `${k}@shop.io` }));
+  const listId = (await capi(ws, 'POST', '/contact-lists', { name: 'Mixed consent', emails: ['fromzoho@x.io'], contacts: people })).data.list.id;
+  const lead = (email, consent, method, evidence) => db().run(`INSERT INTO leads (workspace_id, name, email, status, marketing_consent, marketing_consent_method, marketing_consent_evidence, marketing_consent_obtained_at, created_at, updated_at)
+    VALUES (?, ?, ?, 'New', ?, ?, ?, '2026-10-01 09:00:00', UTC_TIMESTAMP(), UTC_TIMESTAMP())`, [ws.workspaceId, email, email, consent, method, evidence]);
+  await lead('granted@shop.io', 'granted', 'web_form', 'Signed up on the website form');
+  await lead('noevidence@shop.io', 'granted', null, null);
+  await lead('withdrawn@shop.io', 'withdrawn', 'web_form', 'Signed up, later withdrew');
+  await lead('stopped@shop.io', 'granted', 'web_form', 'Signed up');
+  await db().run("INSERT INTO email_suppressions (workspace_id, email, reason, source) VALUES (?, 'stopped@shop.io', 'complaint', 'test')", [ws.workspaceId]);
+
+  const l = (await capi(ws, 'GET', '/contact-lists')).data.lists.find(x => x.id === listId);
+  assert.deepEqual([l.total, l.reachable, l.noConsent], [6, 2, 3], 'granted + from Zoho; no evidence, unknown and withdrawn have no consent; the complaint is stopped');
+  const c = (await capi(ws, 'POST', '', { ...GOOD, name: 'Consent send', lists: [], mailListIds: [listId] })).data.campaign;
+  const v = (await capi(ws, 'POST', `/${c.id}/validate`, {})).data.validation;
+  assert.ok(v.warnings.some(w => /^3 contact\(s\) in the chosen lists have no recorded marketing consent and are left out/.test(w)), JSON.stringify(v.warnings));
+  await capi(ws, 'POST', `/${c.id}/approve`, {});
+  assert.equal((await capi(ws, 'POST', `/${c.id}/send`, { confirm: true })).status, 200);
+  const job = await db().get("SELECT * FROM background_jobs WHERE workspace_id = ? AND job_type = 'zoho_campaign_upload' ORDER BY id DESC LIMIT 1", [ws.workspaceId]);
+  assert.equal((await require('../modules/mail/contacts/zohoUpload').runUploadJob(job)).delivered, true);
+  const after = await row(c.id);
+  const key = JSON.parse(after.temp_lists_json)[0].key;
+  assert.deepEqual(acct.added[key].sort(), ['fromzoho@x.io', 'granted@shop.io'], 'nobody without consent reaches Zoho, and the stop-list and withdrawals always win');
+  const ready = JSON.parse(after.zoho_readiness_json);
+  assert.deepEqual(ready.consent, { uploaded: 2, noConsent: 3 });
+  const named = apiCalls('listsubscribe').filter(x => x.params.listkey === key);
+  assert.deepEqual(named.map(x => [JSON.parse(x.params.contactinfo)['Contact Email'], x.params.source]), [['granted@shop.io', 'Marketech.ai · consent: web form · 2026-10-01']],
+    'Zoho\'s contact source says how and when consent was given (never the evidence text); contacts Zoho already has are not touched');
+});
+
+test('consent: a list where nobody has consent cannot be sent, with the reason', async () => {
+  const { ws } = await freshConnected('No consent list');
+  const listId = (await capi(ws, 'POST', '/contact-lists', { name: 'Cold', contacts: [{ name: 'A', email: 'a@cold.io' }, { name: 'B', email: 'b@cold.io' }] })).data.list.id;
+  const c = (await capi(ws, 'POST', '', { ...GOOD, name: 'Cold send', lists: [], mailListIds: [listId] })).data.campaign;
+  const v = (await capi(ws, 'POST', `/${c.id}/validate`, {})).data.validation;
+  assert.equal(v.ready, false);
+  assert.ok(v.problems.some(p => /Nobody in the chosen lists can get marketing email: 2 contact\(s\) have no recorded marketing consent/.test(p)), JSON.stringify(v.problems));
+});
+
+test('consent: leads picked for a campaign need recorded consent; the picker shows why others cannot be added', async () => {
+  const { ws } = await freshConnected('Picked consent');
+  const add = (email, consent, method, evidence) => db().run(`INSERT INTO leads (workspace_id, name, email, status, marketing_consent, marketing_consent_method, marketing_consent_evidence, created_at, updated_at)
+    VALUES (?, ?, ?, 'New', ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`, [ws.workspaceId, email, email, consent, method, evidence]);
+  const yes = (await add('yes@lead.io', 'granted', 'written', 'Signed order form')).lastID;
+  const no = (await add('no@lead.io', 'unknown', null, null)).lastID;
+  const opts = (await capi(ws, 'GET', '/lead-options?q=lead.io')).data.leads;
+  assert.equal(opts.find(x => x.id === yes).eligible, true);
+  const cold = opts.find(x => x.id === no);
+  assert.equal(cold.eligible, false);
+  assert.ok(cold.reasons.some(r => /consent/i.test(r)), JSON.stringify(cold.reasons));
 });
 
 test('a held send can be marked not done right away, but only while Zoho has not sent it', async () => {
@@ -1761,6 +1930,7 @@ test('Send again straight after the Zoho campaign was deleted prepares a new one
 test('a temporary Zoho list deleted in Zoho is made again, and the campaign goes to the new one', async () => {
   const { ws, acct } = await freshConnected('List deleted in Zoho');
   const made = await capi(ws, 'POST', '/contact-lists', { name: 'Fresh leads', emails: ['a1@fresh.io'] });
+  await consentAll(ws);
   const c = (await capi(ws, 'POST', '', { ...GOOD, lists: [], mailListIds: [made.data.list.id] })).data.campaign;
   await capi(ws, 'POST', `/${c.id}/approve`, {});
   await capi(ws, 'POST', `/${c.id}/send`, { confirm: true });

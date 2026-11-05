@@ -11,7 +11,7 @@ describe('ContactListsComponent (lists kept in Marketech.ai)', () => {
   const button = (text: string) => Array.from(el().querySelectorAll('button')).find(b => b.textContent!.trim().includes(text)) as HTMLButtonElement;
   const LISTS = [
     { id: 1, name: 'Compiled B2B Oct 26', source: 'zoho', inZoho: true, total: 7380, reachable: 7219 },
-    { id: 2, name: 'Sydney buyers', source: 'local', inZoho: false, total: 3, reachable: 3 }
+    { id: 2, name: 'Sydney buyers', source: 'local', inZoho: false, total: 3, reachable: 2, noConsent: 1 }
   ];
   const SYNC = { status: 'succeeded', result: { lists: 4, contacts: 7387 } };
 
@@ -111,10 +111,11 @@ describe('ContactListsComponent (lists kept in Marketech.ai)', () => {
     button('View contacts').click(); fixture.detectChanges();
     let req = http.expectOne(r => r.url.endsWith('/contact-lists/1/contacts'));
     expect(req.request.params.get('status')).toBe('all');
-    req.flush({ contacts: [{ id: 5, email: 'kim@shop.io', name: 'Kim Lee', company: 'Shop', phone: '0400', location: 'Sydney', status: 'unsubscribed', leadStatus: 'Contacted' }], page: 1, pageSize: 50, hasMore: false });
+    req.flush({ contacts: [{ id: 5, email: 'kim@shop.io', name: 'Kim Lee', company: 'Shop', phone: '0400', location: 'Sydney', status: 'unsubscribed', consent: 'none', leadStatus: 'Contacted' }], page: 1, pageSize: 50, hasMore: false });
     fixture.detectChanges();
     const cells = Array.from(el().querySelectorAll('.zl-ctable tbody td')).map(td => td.textContent!.trim());
-    expect(cells.slice(0, 8)).toEqual(['1', 'Kim Lee', 'Shop', 'kim@shop.io', '0400', 'Sydney', 'Unsubscribed', 'Contacted']);
+    expect(cells.slice(0, 9)).toEqual(['1', 'Kim Lee', 'Shop', 'kim@shop.io', '0400', 'Sydney', 'Unsubscribed', 'Not recorded', 'Contacted']);
+    expect(['granted', 'zoho', 'withdrawn', 'none'].map(x => comp.consentLabel(x))).toEqual(['Given', 'Zoho subscriber', 'Withdrawn', 'Not recorded']);
     comp.viewing!.q = 'kim';
     comp.view(comp.viewing!.list, 'subscribed', 1, 'kim');
     req = http.expectOne(r => r.url.endsWith('/contact-lists/1/contacts') && r.params.get('status') === 'subscribed' && r.params.get('q') === 'kim');

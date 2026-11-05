@@ -1,6 +1,7 @@
 const { run, get, all } = require('../../../db/database');
 const zoho = require('../zoho/zohoService');
 const campaignContacts = require('../campaigns/campaignContacts');
+const consent = require('./consent');
 
 /**
  * Sending a campaign to Marketech.ai lists (worker job "zoho_campaign_upload"):
@@ -20,14 +21,26 @@ const EMPTY = ['2203', '995', '2502'];
 
 const parse = (v, d) => { try { return v ? JSON.parse(v) : d; } catch { return d; } };
 
-/** Everyone in a list who can be emailed, once each. */
+/**
+ * Everyone in a list who may get the campaign, once each: subscribed, not on the stop-list, and with
+ * marketing consent (see consent.js). consent_info: how and when consent was given, for Zoho's source.
+ */
 async function reachable(workspaceId, listId) {
   return all(
-    `SELECT DISTINCT c.id, c.email, c.first_name, c.last_name, c.company, c.in_zoho
+    `SELECT DISTINCT c.id, c.email, c.first_name, c.last_name, c.company, c.in_zoho, c.source, ${consent.consentInfoSql('c')} AS consent_info
      FROM mail_list_members m JOIN mail_contacts c ON c.id = m.contact_id
      LEFT JOIN email_suppressions s ON s.workspace_id = c.workspace_id AND s.email = c.email
-     WHERE m.list_id = ? AND c.workspace_id = ? AND m.status = 'subscribed' AND s.email IS NULL
+     WHERE m.list_id = ? AND c.workspace_id = ? AND m.status = 'subscribed' AND s.email IS NULL AND ${consent.eligibleSql('c')}
      ORDER BY c.id`, [listId, workspaceId]);
+}
+
+/** How many subscribed, not stopped people in a list are left out for lack of marketing consent. */
+async function withoutConsent(workspaceId, listId) {
+  const r = await get(
+    `SELECT COUNT(DISTINCT c.id) AS n FROM mail_list_members m JOIN mail_contacts c ON c.id = m.contact_id
+     LEFT JOIN email_suppressions s ON s.workspace_id = c.workspace_id AND s.email = c.email
+     WHERE m.list_id = ? AND c.workspace_id = ? AND m.status = 'subscribed' AND s.email IS NULL AND NOT ${consent.eligibleSql('c')}`, [listId, workspaceId]);
+  return Number(r?.n) || 0;
 }
 
 /** Creates the temporary Zoho list with its first addresses (or finds the one an earlier try made). */
@@ -45,20 +58,68 @@ async function createZohoList(workspaceId, name, first, ownKeys) {
   }
 }
 
-/** Sends names for people Zoho does not know yet (best effort: the merge tag default is used otherwise). */
-async function sendNames(workspaceId, listKey, people) {
-  if (!zoho.canSyncNames(await zoho.connectionRow(workspaceId))) return 0;
+/**
+ * Sends names for people Zoho does not know yet (best effort: the merge tag default is used otherwise).
+ * Stops at the first reply saying Zoho emailed a confirmation (see campaignContacts.subscribeName).
+ */
+async function sendNames(workspaceId, listKey, people, { topicId = null } = {}) {
+  const state = { sent: 0, failed: 0, confirmations: 0, stopped: false, skipped: 0 };
+  if (!zoho.canSyncNames(await zoho.connectionRow(workspaceId))) return state;
   const todo = people.map(p => ({ p, n: campaignContacts.greetingName({ name: [p.first_name, p.last_name].filter(Boolean).join(' '), company: p.company }) })).filter(x => x.n);
-  let next = 0, sent = 0;
+  const info = ({ p, n }) => ({ 'Contact Email': p.email, 'First Name': n.first, ...(n.last ? { 'Last Name': n.last } : {}) });
+  // Zoho's documented contact source carries how and when consent was given; topic_id the campaign's topic.
+  const extra = ({ p }) => ({ source: consent.zohoSource(p.consent_info), ...(topicId ? { topic_id: String(topicId) } : {}) });
+  let next = 0;
+  // One at a time until Zoho shows whether it asks for confirmations, then in parallel.
+  if (todo.length) { const x = todo[next++]; await campaignContacts.subscribeName(workspaceId, listKey, info(x), state, extra(x)); }
   const worker = async () => {
-    while (next < todo.length) {
-      const { p, n } = todo[next++];
-      const info = { 'Contact Email': p.email, 'First Name': n.first, ...(n.last ? { 'Last Name': n.last } : {}) };
-      try { await zoho.writeCall(workspaceId, 'json/listsubscribe', { listkey: listKey, contactinfo: JSON.stringify(info), source: 'Marketech.ai' }); sent++; } catch { /* default used */ }
-    }
+    while (next < todo.length) { const x = todo[next++]; await campaignContacts.subscribeName(workspaceId, listKey, info(x), state, extra(x)); }
   };
   await Promise.all(Array.from({ length: Math.min(NAME_CONCURRENCY, todo.length) }, worker));
-  return sent;
+  if (process.env.ZOHO_LOG !== 'off' && (state.sent || state.failed)) {
+    console.log(`[zoho] ${new Date().toISOString()} listsubscribe names listkey="${listKey}" sent=${state.sent} failed=${state.failed} confirmationsAsked=${state.confirmations} stoppedAfterConfirmation=${state.stopped}`);
+  }
+  return state;
+}
+
+/**
+ * What Zoho reports for the lists of a send: it emails only contacts it shows as "active"; the others
+ * are unsubscribed, bounced, or not active yet (new contacts it is still reviewing, or waiting for
+ * them to confirm). Counts per state are read up to COUNT_CAP each. No addresses are kept.
+ */
+const COUNT_CAP = 500;
+async function countInState(workspaceId, key, status) {
+  let n = 0;
+  for (let page = 1; ; page++) {
+    const r = await campaignContacts.readListPage(workspaceId, key, status, page);
+    n += r.contacts.length;
+    if (!r.hasMore) return { n, capped: false };
+    if (n >= COUNT_CAP) return { n, capped: true };
+  }
+}
+async function listReadiness(workspaceId, keys) {
+  const byKey = new Map((await campaignContacts.fetchLists(workspaceId)).map(l => [l.key, l]));
+  const lists = [];
+  for (const key of [...new Set(keys)]) {
+    const l = byKey.get(key);
+    const [active, unsubscribed, bounced] = [await countInState(workspaceId, key, 'active'), await countInState(workspaceId, key, 'unsub'), await countInState(workspaceId, key, 'bounce')];
+    lists.push({ name: l?.name || null, total: l ? l.contacts : null, active: active.n, unsubscribed: unsubscribed.n, bounced: bounced.n, capped: active.capped || unsubscribed.capped || bounced.capped });
+  }
+  const sum = f => lists.reduce((n, x) => n + (x[f] || 0), 0);
+  const total = lists.length && lists.every(x => x.total != null) ? sum('total') : null;
+  const r = { checkedAt: new Date().toISOString(), lists, total, active: sum('active'), unsubscribed: sum('unsubscribed'), bounced: sum('bounced'), capped: lists.some(x => x.capped) };
+  r.notActive = total != null ? Math.max(0, total - r.active - r.unsubscribed - r.bounced) : null;
+  if (process.env.ZOHO_LOG !== 'off') console.log(`[zoho] ${r.checkedAt} readiness lists=${lists.length} total=${total ?? 'unknown'} active=${r.active} notActive=${r.notActive ?? 'unknown'} unsubscribed=${r.unsubscribed} bounced=${r.bounced}`);
+  return r;
+}
+
+/** Saves the readiness (and name-update outcome) on the campaign. */
+async function saveReadiness(campaignId, readiness, names = null) {
+  const prev = await get('SELECT zoho_readiness_json FROM mail_campaigns WHERE id = ?', [campaignId]);
+  const keep = parse(prev?.zoho_readiness_json, {});
+  const value = { ...readiness, names: names || keep.names || null, consent: keep.consent || null };
+  await run('UPDATE mail_campaigns SET zoho_readiness_json = ? WHERE id = ?', [JSON.stringify(value), campaignId]);
+  return value;
 }
 
 async function uploadLists(row) {
@@ -73,6 +134,9 @@ async function uploadLists(row) {
 
   const temp = parse(row.temp_lists_json, []);
   const existing = new Set((await campaignContacts.fetchLists(workspaceId)).map(l => l.name));
+  const names = { sent: 0, failed: 0, confirmations: 0 };
+  const consentCount = { uploaded: total, noConsent: 0 };
+  for (const l of lists) consentCount.noConsent += await withoutConsent(workspaceId, l.id);
   let done = 0;
   for (const l of lists) {
     const list = people.get(l.id);
@@ -92,7 +156,8 @@ async function uploadLists(row) {
       done += part.length;
       if (b % PROGRESS_EVERY === 0) await run('UPDATE mail_campaigns SET upload_done = ? WHERE id = ?', [done, row.id]);
     }
-    await sendNames(workspaceId, key, list.filter(c => !c.in_zoho));
+    const n = await sendNames(workspaceId, key, list.filter(c => !c.in_zoho), { topicId: row.topic_id || null });
+    names.sent += n.sent; names.failed += n.failed; names.confirmations += n.confirmations;
     const ids = list.map(c => c.id);
     for (let i = 0; i < ids.length; i += 500) {
       const part = ids.slice(i, i + 500);
@@ -100,6 +165,7 @@ async function uploadLists(row) {
     }
   }
   await run('UPDATE mail_campaigns SET upload_done = ? WHERE id = ?', [done, row.id]);
+  await run('UPDATE mail_campaigns SET zoho_readiness_json = ? WHERE id = ?', [JSON.stringify({ names, consent: consentCount }), row.id]);
   return temp.map(t => t.key);
 }
 
@@ -138,6 +204,13 @@ async function runUploadJob(job) {
   try {
     keys = await uploadLists(row);
     const ready = keys.length ? await waitForZohoContacts(row.workspace_id, keys) : { ok: false, lists: [] };
+    // What Zoho shows for these contacts (active = emailable now), kept and shown with the campaign.
+    // A failed count (e.g. a missing permission) never stops the send: it is just not shown.
+    if (ready.ok && keys.length) {
+      try { await saveReadiness(row.id, await listReadiness(row.workspace_id, keys)); } catch (err) {
+        if (process.env.ZOHO_LOG !== 'off') console.log(`[zoho] ${new Date().toISOString()} readiness not read: ${String(err.message).slice(0, 200)}`);
+      }
+    }
     if (!ready.ok) throw keys.length ? listsEmptyError(ready.lists) : Object.assign(new Error('Nobody in the chosen lists can be emailed (all unsubscribed or bounced), so nothing was sent. Choose other lists (Recipients).'), { status: 400, code: 'NO_RECIPIENTS' });
   } catch (err) {
     await svc.failSubmission(ctx, row, 'upload', err).catch(() => null);
@@ -194,4 +267,4 @@ async function kickUpload(workspaceId, campaignId) {
   return true;
 }
 
-module.exports = { runUploadJob, cleanupTempLists, uploadLists, kickUpload, waitForZohoContacts };
+module.exports = { listReadiness, saveReadiness, runUploadJob, cleanupTempLists, uploadLists, kickUpload, waitForZohoContacts };

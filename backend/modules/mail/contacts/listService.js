@@ -57,7 +57,8 @@ async function lists(ctx) {
   const rows = await all(
     `SELECT l.id, l.name, l.source, l.zoho_list_key, l.created_at, l.updated_at,
        COUNT(m.contact_id) AS total,
-       SUM(m.status = 'subscribed' AND s.email IS NULL) AS reachable
+       SUM(m.status = 'subscribed' AND s.email IS NULL AND ${require('./consent').eligibleSql('c')}) AS reachable,
+       SUM(m.status = 'subscribed' AND s.email IS NULL AND NOT ${require('./consent').eligibleSql('c')}) AS no_consent
      FROM mail_lists l
      LEFT JOIN mail_list_members m ON m.list_id = l.id
      LEFT JOIN mail_contacts c ON c.id = m.contact_id
@@ -67,7 +68,7 @@ async function lists(ctx) {
   return {
     lists: rows.map(r => ({
       id: r.id, name: r.name, source: r.source, inZoho: !!r.zoho_list_key, zohoListKey: r.zoho_list_key || null,
-      total: Number(r.total) || 0, reachable: Number(r.reachable) || 0, createdAt: r.created_at, updatedAt: r.updated_at
+      total: Number(r.total) || 0, reachable: Number(r.reachable) || 0, noConsent: Number(r.no_consent) || 0, createdAt: r.created_at, updatedAt: r.updated_at
     })),
     contacts: Number((await get('SELECT COUNT(*) AS n FROM mail_contacts WHERE workspace_id = ?', [ws(ctx)])).n) || 0,
     sync: await require('./zohoImport').importStatus(ws(ctx))
@@ -177,7 +178,7 @@ async function listContacts(ctx, id, { status = 'all', q = '', page = 1 } = {}) 
     params.push(like, like, like, like, like);
   }
   const rows = await all(
-    `SELECT c.id, c.email, c.first_name, c.last_name, c.company, c.phone, c.city, c.state, c.country, m.status, m.added_at, s.reason AS stop
+    `SELECT c.id, c.email, c.first_name, c.last_name, c.company, c.phone, c.city, c.state, c.country, c.source, m.status, m.added_at, s.reason AS stop
      FROM mail_list_members m
      JOIN mail_contacts c ON c.id = m.contact_id
      LEFT JOIN email_suppressions s ON s.workspace_id = ? AND s.email = c.email
@@ -186,9 +187,13 @@ async function listContacts(ctx, id, { status = 'all', q = '', page = 1 } = {}) 
   const pageRows = rows.slice(0, PAGE_SIZE);
   const emails = pageRows.map(r => r.email);
   const leads = emails.length ? await all(
-    `SELECT LOWER(TRIM(email)) AS email, id, status FROM leads WHERE workspace_id = ? AND LOWER(TRIM(email)) IN (${emails.map(() => '?').join(',')}) ORDER BY id DESC`, [ws(ctx), ...emails]) : [];
+    `SELECT LOWER(TRIM(email)) AS email, id, status, marketing_consent, marketing_consent_method, marketing_consent_evidence FROM leads WHERE workspace_id = ? AND LOWER(TRIM(email)) IN (${emails.map(() => '?').join(',')}) ORDER BY id DESC`, [ws(ctx), ...emails]) : [];
   const byEmail = new Map();
   for (const l of leads) if (!byEmail.has(l.email)) byEmail.set(l.email, l);
+  // Marketing consent, by the same rule as campaign uploads (contacts/consent.js): withdrawn on any lead wins.
+  const withdrawn = new Set(leads.filter(l => l.marketing_consent === 'withdrawn').map(l => l.email));
+  const granted = new Set(leads.filter(l => l.marketing_consent === 'granted' && l.marketing_consent_method && l.marketing_consent_evidence).map(l => l.email));
+  const consentOf = r => (withdrawn.has(r.email) ? 'withdrawn' : r.source === 'zoho' ? 'zoho' : granted.has(r.email) ? 'granted' : 'none');
   return {
     contacts: pageRows.map(r => ({
       id: r.id, email: r.email,
@@ -197,6 +202,7 @@ async function listContacts(ctx, id, { status = 'all', q = '', page = 1 } = {}) 
       location: [r.city, r.state, r.country].filter(Boolean).join(', ') || null,
       status: r.stop === 'unsubscribed' ? 'unsubscribed' : r.stop ? 'bounced' : r.status,
       addedAt: r.added_at,
+      consent: consentOf(r),
       leadId: byEmail.get(r.email)?.id || null, leadStatus: byEmail.get(r.email)?.status || null
     })),
     page: p, pageSize: PAGE_SIZE, hasMore: rows.length > PAGE_SIZE

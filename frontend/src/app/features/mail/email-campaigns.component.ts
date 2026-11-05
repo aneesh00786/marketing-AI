@@ -616,6 +616,22 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
     });
   }
 
+  /** What Zoho reported for the recipients (it emails only "active" contacts), as label/value pairs. */
+  readinessItems(c: any): { label: string; value: string; tone?: string }[] {
+    const r = c?.zohoReadiness;
+    if (!r || r.active == null) return [];
+    const n = (v: number) => `${v}${r.capped ? '+' : ''}`;
+    return [
+      ...(r.total != null ? [{ label: 'Contacts in Zoho lists', value: String(r.total) }] : []),
+      { label: 'Active (can be emailed)', value: n(r.active), tone: r.active ? 'good' : 'bad' },
+      ...(r.notActive ? [{ label: 'Not active yet (review or confirmation)', value: String(r.notActive), tone: 'warn' }] : []),
+      ...(r.unsubscribed ? [{ label: 'Unsubscribed', value: n(r.unsubscribed) }] : []),
+      ...(r.bounced ? [{ label: 'Bounced', value: n(r.bounced) }] : []),
+      ...(r.names?.confirmations ? [{ label: 'Asked by Zoho to confirm by email', value: String(r.names.confirmations), tone: 'warn' }] : []),
+      ...(r.consent?.noConsent ? [{ label: 'Left out: no marketing consent', value: String(r.consent.noConsent) }] : [])
+    ];
+  }
+
   /** The campaign opened in Zoho to send it there by hand (the first send to newly uploaded contacts). */
   openedInZoho: number | null = null;
 
@@ -623,7 +639,24 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
   zohoCampaignUrl(c: any): string {
     const base = String(this.zoho?.connection?.webUrl || 'https://campaigns.zoho.com').replace(/\/$/, '');
     const id = /^\d{5,25}$/.test(String(c?.zohoCampaignId || '')) ? c.zohoCampaignId : null;
-    return id ? `${base}/campaigns/home.do#emailcampaign/${id}/cmpdetails` : `${base}/campaigns/home.do`;
+    const org = /^\d{5,20}$/.test(String(this.zoho?.connection?.webOrg || '')) ? `org${this.zoho.connection.webOrg}/` : '';
+    return id ? `${base}/campaigns/${org}home.do#emailcampaign/${id}/cmpdetails` : `${base}/campaigns/${org}home.do`;
+  }
+
+  /** A Zoho Campaigns address pasted once: its org number makes the links open campaigns directly. */
+  zohoOrgInput = '';
+  saveZohoOrg(): void {
+    const value = this.zohoOrgInput.trim();
+    if (!value || this.busy) return;
+    this.busy = 'org';
+    this.http.put<any>(`${apiRoot()}/api/v1/mail/zoho/web-org`, { value }).subscribe({
+      next: r => {
+        this.busy = ''; this.zohoOrgInput = '';
+        this.zoho = { ...this.zoho, connection: { ...(this.zoho?.connection || {}), webOrg: r.webOrg } };
+        this.toast.emit('Saved. "Open in Zoho" now opens the campaign directly.');
+      },
+      error: e => { this.busy = ''; this.toast.emit(this.err(e)); }
+    });
   }
 
   /** Back from Zoho after sending it there: check Zoho right away, so it shows as sent without another click. */

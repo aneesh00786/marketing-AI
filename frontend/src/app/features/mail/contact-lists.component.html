@@ -49,7 +49,7 @@
     <div class="zl-row cl-row" role="row" *ngFor="let l of visibleLists">
       <span role="cell" class="zl-name"><b>{{ l.name }}</b><small class="zl-badge" *ngIf="l.inZoho" title="This list is also in Zoho Campaigns">Also in Zoho</small></span>
       <span role="cell" class="zl-count">{{ l.total | number }}</span>
-      <span role="cell" class="zl-count">{{ l.reachable | number }}</span>
+      <span role="cell" class="zl-count">{{ l.reachable | number }}<small class="muted cl-noconsent" *ngIf="l.noConsent" [title]="l.noConsent + ' contact(s) have no recorded marketing consent and are left out of campaigns'"> · {{ l.noConsent | number }} no consent</small></span>
       <span role="cell" class="zl-actions">
         <button type="button" class="btn btn-secondary btn-sm" (click)="view(l)">View contacts</button>
         <button *ngIf="canManage" type="button" class="btn btn-secondary btn-sm" (click)="openForm('add', l)">Add contacts</button>
@@ -57,7 +57,7 @@
       </span>
     </div>
   </div>
-  <p class="muted small zl-foot">"Can be emailed" leaves out people who unsubscribed or bounced; they are never sent to.</p>
+  <p class="muted small zl-foot">"Can be emailed" counts people with recorded marketing consent (or from your own Zoho lists) who have not unsubscribed or bounced. Others are never sent campaigns: record consent on their lead (how and when it was given) to include them.</p>
 </section>
 
 <!-- New list / add contacts -->
@@ -174,7 +174,7 @@
     <p class="muted small zl-range" *ngIf="!v.loading && v.contacts.length">{{ viewRange }}</p>
     <div class="zl-ctable" *ngIf="!v.loading && v.contacts.length">
       <table aria-label="Contacts">
-        <thead><tr><th class="zl-sno">#</th><th>Contact</th><th>Business</th><th>Email</th><th>Phone</th><th>Location</th><th>Status</th><th>Lead</th><th *ngIf="canManage"><span class="sr-only">Actions</span></th></tr></thead>
+        <thead><tr><th class="zl-sno">#</th><th>Contact</th><th>Business</th><th>Email</th><th>Phone</th><th>Location</th><th>Status</th><th>Consent</th><th>Lead</th><th *ngIf="canManage"><span class="sr-only">Actions</span></th></tr></thead>
         <tbody>
           <tr *ngFor="let c of v.contacts; let i = index">
             <td class="zl-sno">{{ (v.page - 1) * v.pageSize + i + 1 }}</td>
@@ -184,6 +184,7 @@
             <td class="zl-nowrap">{{ c.phone || '—' }}</td>
             <td>{{ c.location || '—' }}</td>
             <td><span class="zl-status" [class.cl-bad]="c.status !== 'subscribed'">{{ statusLabel(c.status) }}</span></td>
+            <td><span class="zl-status cl-consent" [class.cl-bad]="c.consent === 'withdrawn' || c.consent === 'none'">{{ consentLabel(c.consent) }}</span></td>
             <td><span class="zl-status" *ngIf="c.leadStatus; else noLead">{{ c.leadStatus }}</span><ng-template #noLead><span class="muted small">—</span></ng-template></td>
             <td *ngIf="canManage" class="zl-nowrap"><button type="button" class="btn btn-secondary btn-sm" [disabled]="removing === c.id" (click)="remove(c)">{{ removing === c.id ? 'Removing…' : 'Remove' }}</button></td>
           </tr>

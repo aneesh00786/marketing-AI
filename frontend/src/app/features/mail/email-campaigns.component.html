@@ -149,6 +149,16 @@
           <button class="btn btn-secondary btn-sm" (click)="refresh()" [disabled]="busy === 'refresh'"><app-icon name="refresh" [size]="15"></app-icon>{{ busy === 'refresh' ? 'Checking…' : 'Check Zoho now' }}</button>
           <button *ngIf="canSend" class="btn btn-secondary btn-sm" (click)="resolve()" title="Only if Zoho shows it was never sent: lets you change it and send again">Zoho won't send it — stop waiting</button>
         </div>
+        <dl class="ec-ready" *ngIf="readinessItems(selected).length" aria-label="What Zoho shows for the recipients">
+          <div *ngFor="let it of readinessItems(selected)" [ngClass]="it.tone || ''"><dt>{{ it.label }}</dt><dd>{{ it.value }}</dd></div>
+        </dl>
+        <form class="ec-zoho-org" *ngIf="canSend && !zoho?.connection?.webOrg" (submit)="$event.preventDefault(); saveZohoOrg()">
+          <label for="ec-zoho-org">Zoho opened its sign-in page? Paste the address of any Zoho Campaigns page from your browser once (it contains "org" and a number), so the button opens the campaign directly:</label>
+          <span class="ec-inline-actions">
+            <input id="ec-zoho-org" class="hud-input" name="zohoOrg" [(ngModel)]="zohoOrgInput" placeholder="https://campaigns.zoho.com/campaigns/org…/home.do" autocomplete="off" />
+            <button type="submit" class="btn btn-secondary btn-sm" [disabled]="!zohoOrgInput.trim() || busy === 'org'">{{ busy === 'org' ? 'Saving…' : 'Save' }}</button>
+          </span>
+        </form>
       </div>
       <div class="review" *ngIf="selected.status === 'needs_review' && !waitingForZoho(selected)" role="alert">
         <b>Outcome unknown.</b> Zoho did not confirm the last {{ selected.submitStage === 'create' ? 'preparation' : 'send' }} request. "Refresh status" settles it when Zoho shows the result. It is never resent automatically.
@@ -164,6 +174,10 @@
         <span><span class="ec-dot" aria-hidden="true"></span>{{ uploadText }}</span>
         <span class="ec-upload-bar" *ngIf="selected.upload?.total" aria-hidden="true"><i [style.width.%]="uploadPct"></i></span>
       </div>
+      <p class="muted small ec-ready-line" *ngIf="!waitingForZoho(selected) && readinessItems(selected).length">
+        Zoho recipients<span *ngIf="selected.zohoReadiness?.checkedAt"> ({{ selected.zohoReadiness.checkedAt | date:'MMM d, h:mm a' }})</span>:
+        <ng-container *ngFor="let it of readinessItems(selected); let last = last">{{ it.label }} {{ it.value }}{{ last ? '' : ' · ' }}</ng-container>
+      </p>
       <p class="muted small ec-temp-note" *ngIf="selected.status === 'submitted' && selected.tempListsPending">The temporary Zoho list(s) for this send are removed once Zoho reports it sent{{ zoho?.connection?.canDeleteLists === false ? ' (reconnect Zoho to allow this)' : '' }}.</p>
 
       <!-- Results exist only once Zoho has the campaign -->

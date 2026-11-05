@@ -238,3 +238,12 @@
 .ec-upload-bar i { display: block; height: 100%; background: #2a78d6; }
 .ec-legacy { margin: 10px 0 2px; }
 .ec-temp-note { margin: 4px 0; }
+.ec-zoho-org { display: flex; flex-direction: column; gap: 6px; width: 100%; font-size: 12.5px; }
+.ec-zoho-org .hud-input { flex: 1 1 260px; min-width: 0; }
+.ec-ready { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 0; font-size: 12.5px; }
+.ec-ready div { display: flex; gap: 6px; align-items: baseline; }
+.ec-ready dt { font-weight: 400; }
+.ec-ready dd { margin: 0; font-weight: 700; }
+.ec-ready .good dd { color: var(--success-text, inherit); }
+.ec-ready .bad dd { color: var(--danger-text, inherit); }
+.ec-ready-line { margin: 6px 0; }

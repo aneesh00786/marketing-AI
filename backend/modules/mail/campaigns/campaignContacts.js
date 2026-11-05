@@ -114,7 +114,8 @@ async function assess(workspaceId, campaignId) {
   if (!rows.length) return [];
   const leadIds = rows.filter(r => r.lead_id).map(r => r.lead_id);
   const leads = leadIds.length ? await all(`SELECT ${LEAD_COLUMNS} FROM leads WHERE workspace_id = ? AND id IN (${placeholders(leadIds.length)})`, [workspaceId, ...leadIds]) : [];
-  const byLead = new Map((await withEligibility(workspaceId, leads, { requireConsent: false })).map(l => [l.id, l]));
+  // Zoho campaigns are marketing email: a picked lead needs recorded consent (see contacts/consent.js).
+  const byLead = new Map((await withEligibility(workspaceId, leads, { requireConsent: true })).map(l => [l.id, l]));
   const blocked = rows.some(r => !r.lead_id) ? await blockedAddresses(workspaceId) : new Set();
   return rows.map(r => {
     const lead = r.lead_id ? byLead.get(r.lead_id) : null;
@@ -128,6 +129,7 @@ async function assess(workspaceId, campaignId) {
       name: lead ? lead.name : r.name,
       company: lead ? lead.company : r.company,
       source: r.source,
+      consentInfo: lead && lead.consent === 'granted' && lead.consentMethod ? `${lead.consentMethod}|${lead.consentObtainedAt ? new Date(lead.consentObtainedAt).toISOString().slice(0, 10) : ''}` : null,
       sourceListKey: r.source_list_key,
       syncedVersion: r.synced_version,
       eligible: reasons.length === 0,
@@ -332,6 +334,23 @@ function greetingName(c) {
 }
 
 /**
+ * One name update through json/listsubscribe. Zoho documents that this call emails a confirmation
+ * (double opt-in) for lists with a sign-up form, and the contact then waits until confirming; for
+ * other lists it only updates the fields. When Zoho's reply says a confirmation was sent, the rest of
+ * this run sends no more names (no further confirmation emails), and it is counted: those contacts
+ * are not emailable until they confirm. state: { sent, failed, confirmations, stopped } for the run.
+ */
+const CONFIRMATION_RE = /confirm/i;
+async function subscribeName(workspaceId, listKey, info, state, { source = 'Marketech.ai', topic_id } = {}) {
+  if (state.stopped) { state.skipped = (state.skipped || 0) + 1; return; }
+  try {
+    const res = await zoho.writeCall(workspaceId, 'json/listsubscribe', { listkey: listKey, contactinfo: JSON.stringify(info), source, ...(topic_id ? { topic_id } : {}) });
+    state.sent++;
+    if (CONFIRMATION_RE.test(String(res?.message || ''))) { state.confirmations++; state.stopped = true; }
+  } catch { state.failed++; }
+}
+
+/**
  * Sends the names of contacts just added from leads to Zoho, so $[FNAME]$ / $[LNAME]$ are filled.
  * Best effort: a failure never stops the send (the merge tag's default is used for that person).
  * Contacts picked from a Zoho list are skipped: Zoho already has their details.
@@ -342,19 +361,18 @@ async function syncNames(workspaceId, listKey, contacts) {
   if (!named.length) return { sent: 0, failed: 0, skipped: 0, allowed: true };
   if (!zoho.canSyncNames(row)) return { sent: 0, failed: 0, skipped: named.length, allowed: false };
   const todo = named.slice(0, NAME_SYNC_MAX);
-  let sent = 0, failed = 0, next = 0;
+  const state = { sent: 0, failed: 0, confirmations: 0, stopped: false, skipped: 0 };
+  let next = 0;
   const worker = async () => {
     while (next < todo.length) {
       const { c, n } = todo[next++];
-      const info = { 'Contact Email': c.email, 'First Name': n.first, ...(n.last ? { 'Last Name': n.last } : {}) };
-      try {
-        await zoho.writeCall(workspaceId, 'json/listsubscribe', { listkey: listKey, contactinfo: JSON.stringify(info), source: 'Marketech.ai' });
-        sent++;
-      } catch { failed++; }
+      await subscribeName(workspaceId, listKey, { 'Contact Email': c.email, 'First Name': n.first, ...(n.last ? { 'Last Name': n.last } : {}) }, state, { source: require('../contacts/consent').zohoSource(c.consentInfo) });
     }
   };
+  // One at a time until Zoho shows whether it asks for confirmations, then in parallel.
+  if (todo.length) { const first = todo[next++]; await subscribeName(workspaceId, listKey, { 'Contact Email': first.c.email, 'First Name': first.n.first, ...(first.n.last ? { 'Last Name': first.n.last } : {}) }, state, { source: require('../contacts/consent').zohoSource(first.c.consentInfo) }); }
   await Promise.all(Array.from({ length: Math.min(NAME_SYNC_CONCURRENCY, todo.length) }, worker));
-  return { sent, failed, skipped: named.length - todo.length, allowed: true };
+  return { sent: state.sent, failed: state.failed, confirmations: state.confirmations, skipped: named.length - todo.length + state.skipped, allowed: true };
 }
 
 /** Creates the generated list with its first addresses, or finds it if an earlier try made it. */
@@ -421,4 +439,4 @@ async function syncForSend(ctx, row, { listKeys }) {
   return listKey;
 }
 
-module.exports = { importOptOutsFrom, MAX_CONTACTS, personName, businessName, greetingName, syncNames, assess, notOnLists, selection, setLeads, addFromZoho, copySelection, removeContacts, syncForSend, fetchLists, readListPage, isSyncList, PAGE_SIZE };
+module.exports = { subscribeName, importOptOutsFrom, MAX_CONTACTS, personName, businessName, greetingName, syncNames, assess, notOnLists, selection, setLeads, addFromZoho, copySelection, removeContacts, syncForSend, fetchLists, readListPage, isSyncList, PAGE_SIZE };

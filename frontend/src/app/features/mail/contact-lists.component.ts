@@ -7,7 +7,7 @@ import { IconComponent } from '../../shared/icon.component';
 import { CountryFilterComponent, LeadCountry } from '../../shared/leads/country-filter.component';
 import { parseLeadSheet, LeadSheetRow } from '../leads/lead-sheet';
 
-export interface MList { id: number; name: string; source: string; inZoho: boolean; total: number; reachable: number; updatedAt?: string; }
+export interface MList { id: number; name: string; source: string; inZoho: boolean; total: number; reachable: number; noConsent?: number; updatedAt?: string; }
 interface ManualContact { name: string; company: string; email: string; phone: string; }
 interface LeadOpt { id: number; name: string; email: string; company?: string | null; country?: string | null; address?: string | null; eligible?: boolean; reasons?: string[]; }
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -229,6 +229,8 @@ export class ContactListsComponent implements OnInit, OnDestroy {
     return `Showing ${from.toLocaleString('en-US')}–${(from + v.contacts.length - 1).toLocaleString('en-US')}`;
   }
 
+  /** Marketing consent as campaigns use it (see backend contacts/consent.js). */
+  consentLabel(s: string): string { return ({ granted: 'Given', zoho: 'Zoho subscriber', withdrawn: 'Withdrawn', none: 'Not recorded' } as any)[s] || '—'; }
   statusLabel(s: string): string { return ({ subscribed: 'Subscribed', unsubscribed: 'Unsubscribed', bounced: 'Bounced' } as any)[s] || s; }
 
   remove(c: any): void {

@@ -39,7 +39,7 @@ describe('EmailCampaignsComponent: Choose Template', () => {
   afterEach(() => {
     flushContacts();
     // Choosing a template never saves, sends or contacts Zoho by itself.
-    http.expectNone(r => r.method !== 'GET' && !/\/(duplicate|refresh)$/.test(r.url));
+    http.expectNone(r => r.method !== 'GET' && !/\/(duplicate|refresh|web-org)$/.test(r.url));
     http.verify();
   });
 
@@ -567,6 +567,14 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     expect(el().textContent).not.toContain('Outcome unknown.');
     expect(el().querySelector('.note.error')).toBeNull();
     expect(button('Send through Zoho')).toBeUndefined();
+    // What Zoho shows for the recipients: the specific reason it holds the send.
+    (comp as any).setSelected({ ...held, zohoReadiness: { total: 70, active: 0, notActive: 68, unsubscribed: 2, bounced: 0, names: { confirmations: 1 } } });
+    fixture.detectChanges();
+    const ready = Array.from(el().querySelectorAll('.ec-ready > div')).map(d => d.textContent!.replace(/\s+/g, ' ').trim());
+    expect(ready).toEqual(['Contacts in Zoho lists70', 'Active (can be emailed)0', 'Not active yet (review or confirmation)68', 'Unsubscribed2', 'Asked by Zoho to confirm by email1']);
+    expect(comp.readinessItems({ zohoReadiness: { active: 5, capped: true } })[0]).toEqual({ label: 'Active (can be emailed)', value: '5+', tone: 'good' });
+    (comp as any).setSelected(held);
+    fixture.detectChanges();
     // Open in Zoho: this campaign's page in the account's Zoho region, in a new tab.
     expect(el().textContent).toContain('Open Zoho Campaigns ↗');
     comp.zoho = { canCompose: true, canSend: true, connection: { connected: true, webUrl: 'https://campaigns.zoho.in' } };
@@ -584,6 +592,18 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     http.expectOne(r => r.method === 'POST' && r.url.endsWith('/campaigns/6/refresh')).flush({ campaign: { ...held, zohoCampaignId: '1178368000002566702' } });
     http.match(r => /\/mail\/campaigns$/.test(r.url)).forEach(r => r.flush({ campaigns: [] }));
     expect(comp.zohoCampaignUrl({ zohoCampaignId: 'x/../evil' })).toBe('https://campaigns.zoho.in/campaigns/home.do');
+    // Without the org number Zoho shows its sign-in page: pasting one Zoho address saves it, and links use it.
+    fixture.detectChanges();
+    const orgInput = el().querySelector('#ec-zoho-org') as HTMLInputElement;
+    expect(orgInput).toBeTruthy();
+    comp.zohoOrgInput = 'https://campaigns.zoho.in/campaigns/org831854179/home.do#campaigns';
+    comp.saveZohoOrg();
+    const save = http.expectOne(r => r.method === 'PUT' && r.url.endsWith('/mail/zoho/web-org'));
+    expect(save.request.body).toEqual({ value: 'https://campaigns.zoho.in/campaigns/org831854179/home.do#campaigns' });
+    save.flush({ webOrg: '831854179' });
+    fixture.detectChanges();
+    expect(el().querySelector('#ec-zoho-org')).toBeNull();
+    expect((el().querySelector('a.ec-open-zoho') as HTMLAnchorElement).getAttribute('href')).toBe('https://campaigns.zoho.in/campaigns/org831854179/home.do#emailcampaign/1178368000002566702/cmpdetails');
     button('Check Zoho now').click();
     http.expectOne(r => r.method === 'POST' && r.url.endsWith('/campaigns/6/refresh')).flush({ campaign: { ...held, status: 'submitted', providerCode: null } });
     http.match(r => /\/mail\/campaigns$/.test(r.url)).forEach(r => r.flush({ campaigns: [] }));

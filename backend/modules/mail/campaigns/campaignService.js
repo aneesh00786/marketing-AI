@@ -90,6 +90,8 @@ function present(row, { full = false } = {}) {
     zohoPrepared: !!row.zoho_campaign_key && row.zoho_key_version === row.version,
     // Zoho's numeric id (opens the campaign in Zoho), for this version only.
     zohoCampaignId: row.zoho_key_version === row.version ? row.zoho_campaign_id || null : null,
+    // What Zoho showed for the recipients (active = emailable now), when last checked. Counts only.
+    zohoReadiness: parse(row.zoho_readiness_json, null),
     zohoStatus: row.zoho_status,
     providerCode: row.provider_code,
     providerMessage: row.provider_message,
@@ -130,12 +132,14 @@ async function getOne(ctx, id) {
  * The chosen Marketech.ai lists with their counts: everyone who can be emailed (subscribed, not on
  * the stop-list) and how many of them are not in Zoho yet (they add to the Zoho plan's contacts).
  */
+const ELIGIBLE_SQL = require('../contacts/consent').eligibleSql('c');
 async function mailListsOf(workspaceId, ids) {
   if (!ids.length) return [];
   const rows = await all(
     `SELECT l.id, l.name,
-       COUNT(DISTINCT CASE WHEN m.status = 'subscribed' AND s.email IS NULL THEN c.id END) AS reachable,
-       COUNT(DISTINCT CASE WHEN m.status = 'subscribed' AND s.email IS NULL AND c.in_zoho = 0 THEN c.id END) AS new_to_zoho
+       COUNT(DISTINCT CASE WHEN m.status = 'subscribed' AND s.email IS NULL AND ${ELIGIBLE_SQL} THEN c.id END) AS reachable,
+       COUNT(DISTINCT CASE WHEN m.status = 'subscribed' AND s.email IS NULL AND ${ELIGIBLE_SQL} AND c.in_zoho = 0 THEN c.id END) AS new_to_zoho,
+       COUNT(DISTINCT CASE WHEN m.status = 'subscribed' AND s.email IS NULL AND NOT ${ELIGIBLE_SQL} THEN c.id END) AS no_consent
      FROM mail_lists l
      LEFT JOIN mail_list_members m ON m.list_id = l.id
      LEFT JOIN mail_contacts c ON c.id = m.contact_id
@@ -143,7 +147,7 @@ async function mailListsOf(workspaceId, ids) {
      WHERE l.workspace_id = ? AND l.id IN (${ids.map(() => '?').join(',')})
      GROUP BY l.id`, [workspaceId, ...ids]);
   const byId = new Map(rows.map(r => [r.id, r]));
-  return ids.map(id => byId.get(id)).filter(Boolean).map(r => ({ id: r.id, name: r.name, reachable: Number(r.reachable) || 0, newToZoho: Number(r.new_to_zoho) || 0 }));
+  return ids.map(id => byId.get(id)).filter(Boolean).map(r => ({ id: r.id, name: r.name, reachable: Number(r.reachable) || 0, newToZoho: Number(r.new_to_zoho) || 0, noConsent: Number(r.no_consent) || 0 }));
 }
 
 /** Refuses list ids from another workspace (or deleted lists). */
@@ -277,7 +281,8 @@ const addContactsFromZoho = (ctx, id, input) => changeContacts(ctx, id, input, c
 const removeContacts = (ctx, id, input) => changeContacts(ctx, id, input, contactsSvc.removeContacts);
 
 /** Leads to choose from, with why each one can or cannot be emailed. */
-const leadOptions = (ctx, query) => require('../productEmails/service').listRecipients(ctx, query, { maxSelect: contactsSvc.MAX_CONTACTS, maxPageSize: 2000, requireConsent: false });
+// Zoho campaigns are marketing email: leads without recorded consent are shown, greyed out, with the reason.
+const leadOptions = (ctx, query) => require('../productEmails/service').listRecipients(ctx, query, { maxSelect: contactsSvc.MAX_CONTACTS, maxPageSize: 2000, requireConsent: true });
 
 /**
  * Topics of the Zoho account. Accounts with topic management must give every campaign a topic
@@ -345,9 +350,13 @@ async function validateRow(ctx, row, { checkZoho = true } = {}) {
   const mailLists = await mailListsOf(ws(ctx), parse(row.mail_list_ids_json, []));
   const listPeople = mailLists.reduce((n, l) => n + l.reachable, 0);
   if (parse(row.mail_list_ids_json, []).length && mailLists.length !== parse(row.mail_list_ids_json, []).length) problems.push('Some chosen lists were deleted. Choose the lists again (Recipients).');
+  const noConsent = mailLists.reduce((n, l) => n + l.noConsent, 0);
   if (!keys.length && !eligible && !listPeople) {
-    problems.push(mailLists.length ? 'Nobody in the chosen lists can be emailed (all unsubscribed or bounced). Choose other lists.' : contacts.length ? 'None of the selected contacts can be emailed. Choose others or a list.' : 'Choose at least one contact list.');
+    problems.push(mailLists.length ? (noConsent
+      ? `Nobody in the chosen lists can get marketing email: ${noConsent.toLocaleString('en-US')} contact(s) have no recorded marketing consent, and the others are unsubscribed or bounced. Record consent on their leads, or choose other lists.`
+      : 'Nobody in the chosen lists can be emailed (all unsubscribed or bounced). Choose other lists.') : contacts.length ? 'None of the selected contacts can be emailed. Choose others or a list.' : 'Choose at least one contact list.');
   }
+  if (noConsent && (listPeople || eligible || keys.length)) warnings.push(`${noConsent.toLocaleString('en-US')} contact(s) in the chosen lists have no recorded marketing consent and are left out of this campaign. Record consent on their leads (how and when it was given) to include them.`);
   if (listPeople) {
     const fresh = mailLists.reduce((n, l) => n + l.newToZoho, 0);
     warnings.push(`${listPeople.toLocaleString('en-US')} contact(s) from ${mailLists.map(l => `"${l.name}"`).join(', ')} are put into Zoho for this send; the temporary Zoho list is deleted once Zoho reports it sent.`);
@@ -719,8 +728,18 @@ async function refresh(ctx, id) {
   return getOne(ctx, row.id);
 }
 
+/**
+ * Why Zoho held the send, from what it reports for the recipients: none active yet (new contacts it
+ * is still reviewing or waiting to confirm) is the usual cause of its "No lists selected" reply.
+ */
+function heldCause(r) {
+  if (!r || r.active == null) return 'it reviews the first campaign sent to newly uploaded contacts';
+  if (r.active === 0 && r.total) return `none of the ${r.total} contacts in its lists are active in Zoho yet (new contacts it is still reviewing or waiting to confirm by email; it emails only active ones)`;
+  return `it shows ${r.active}${r.capped ? '+' : ''}${r.total != null ? ` of ${r.total}` : ''} contacts as active but still holds this first campaign to newly uploaded contacts`;
+}
+
 /** Said when the campaign can only be sent from Zoho once its review passes. */
-const pressSendInZoho = row => `Waiting for Zoho: it reviews the first campaign sent to newly uploaded contacts, and that first send has to be made in Zoho. Click "Open in Zoho" (it is named "${zohoCampaignName(row)}" there) and press Send once it says the campaign is approved; Marketech.ai then marks it sent here, so do not send it again here. After that, campaigns to these contacts send from Marketech.ai as usual.`;
+const pressSendInZoho = (row, readiness) => `Waiting for Zoho: ${heldCause(readiness)}, so this first send has to be made in Zoho. Click "Open in Zoho" ("${zohoCampaignName(row)}") and press Send once it shows approved; Marketech.ai then marks it sent. Do not send it again here.`;
 
 /**
  * Zoho answered "Content not reviewed" (6611): it reviews every campaign before sending, and only its
@@ -755,7 +774,15 @@ async function launchForReview(ctx, row, sendErr, { throwIfWaiting = false } = {
     await audit(ctx, 'mail.campaign_submitted', { resourceType: 'mail_campaign', resourceId: row.id, metadata: { zohoCampaignKey: row.zoho_campaign_key, zohoStatus: launched.status, review: true } });
     return getOne(ctx, row.id);
   }
-  const message = pressSendInZoho(row) + (reason ? ` (Zoho's review request: ${reason})` : '');
+  // What Zoho shows for the recipients now (from the Send button only: it costs a few reads).
+  let readiness = parse(row.zoho_readiness_json, null);
+  if (throwIfWaiting) {
+    const keys = [...parse(row.list_keys_json, []), ...parse(row.temp_lists_json, []).map(t => t.key), ...(row.contact_list_key ? [row.contact_list_key] : [])];
+    if (keys.length) {
+      try { readiness = await require('../contacts/zohoUpload').saveReadiness(row.id, await require('../contacts/zohoUpload').listReadiness(ws(ctx), keys)); } catch { /* kept as it was */ }
+    }
+  }
+  const message = pressSendInZoho(row, readiness) + (reason ? ` (Review request: ${reason.slice(0, 80)})` : '');
   await setState(row.id, 'needs_review', { submit_stage: 'send', provider_code: ZOHO_HELD, provider_message: message.slice(0, 500), last_checked_at: toDbDateTime(new Date()) });
   if (throwIfWaiting) {
     await audit(ctx, 'mail.campaign_submit_unknown', { resourceType: 'mail_campaign', resourceId: row.id, metadata: { stage: 'send', code: '6611' } });
