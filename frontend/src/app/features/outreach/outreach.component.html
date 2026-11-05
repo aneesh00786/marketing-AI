@@ -178,6 +178,7 @@
             <select class="hud-input" [(ngModel)]="audienceFilter.productId"><option [ngValue]="null">Any</option><option *ngFor="let p of products" [ngValue]="p.id">{{ p.name }}</option></select>
           </label>
           <label class="field"><span>Min. lead score</span><input class="hud-input" type="number" min="0" max="100" [(ngModel)]="audienceFilter.minScore" placeholder="any" /></label>
+          <label class="field" *ngIf="leadCountries.length"><span>Country</span><app-country-filter [countries]="leadCountries" [(value)]="audienceFilter.country"></app-country-filter></label>
           <button class="btn btn-secondary" (click)="previewAudience()" [disabled]="busy === 'audience'">{{ busy === 'audience' ? 'Finding…' : 'Find leads' }}</button>
         </div>
 
@@ -187,7 +188,7 @@
             <tbody>
               <tr *ngFor="let a of audience" [class.dim]="!a.eligible || a.inCampaign">
                 <td><input type="checkbox" [disabled]="!a.eligible || a.inCampaign" [checked]="audienceSelected.has(a.leadId)" (change)="toggleLead(a.leadId)" [attr.aria-label]="'Select ' + a.name" /></td>
-                <td>{{ a.name }}<div class="muted small">{{ a.company || '' }}</div></td>
+                <td>{{ a.name }}<div class="muted small">{{ a.company || '' }}{{ a.country ? (a.company ? ' · ' : '') + a.country : '' }}</div></td>
                 <td>{{ a.email || '—' }}</td>
                 <td>{{ a.status || '—' }}</td>
                 <td>{{ a.score ?? '—' }}</td>

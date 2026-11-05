@@ -4,11 +4,12 @@ import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { apiRoot } from '../../core/api-base';
 import { IconComponent } from '../../shared/icon.component';
+import { CountryFilterComponent, LeadCountry } from '../../shared/leads/country-filter.component';
 import { parseLeadSheet, LeadSheetRow } from '../leads/lead-sheet';
 
 export interface MList { id: number; name: string; source: string; inZoho: boolean; total: number; reachable: number; updatedAt?: string; }
 interface ManualContact { name: string; company: string; email: string; phone: string; }
-interface LeadOpt { id: number; name: string; email: string; company?: string | null; eligible?: boolean; reasons?: string[]; }
+interface LeadOpt { id: number; name: string; email: string; company?: string | null; country?: string | null; eligible?: boolean; reasons?: string[]; }
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const SYNC_POLL_MS = 3000;
 const emptyContact = (): ManualContact => ({ name: '', company: '', email: '', phone: '' });
@@ -23,7 +24,7 @@ type Status = 'all' | 'subscribed' | 'unsubscribed' | 'bounced';
 @Component({
   selector: 'app-contact-lists',
   standalone: true,
-  imports: [CommonModule, FormsModule, IconComponent],
+  imports: [CommonModule, FormsModule, IconComponent, CountryFilterComponent],
   templateUrl: './contact-lists.component.html',
   styleUrls: ['../command/command-center.component.css', './mail-ui.css', './contact-lists-shared.css', './contact-lists.component.css']
 })
@@ -112,6 +113,7 @@ export class ContactListsComponent implements OnInit, OnDestroy {
   // ---------- New list / add contacts ----------
   form: { mode: 'create' | 'add'; list: MList | null; name: string; emails: string; manual: ManualContact[]; draft: ManualContact; picked: Map<number, LeadOpt>; skipped: { email: string; reason: string }[] } | null = null;
   leadOptions: LeadOpt[] = [];
+  leadCountries: LeadCountry[] = [];
   leadsLoading = false;
   saving = false;
 
@@ -120,18 +122,22 @@ export class ContactListsComponent implements OnInit, OnDestroy {
     this.picker = null;
     this.leadsLoading = true;
     this.http.get<any>(`${this.base}/lead-options`, { params: { pageSize: '2000' } }).subscribe({
-      next: r => { this.leadsLoading = false; this.leadOptions = r.leads || []; },
+      next: r => { this.leadsLoading = false; this.leadOptions = r.leads || []; this.leadCountries = r.countries || []; },
       error: e => { this.leadsLoading = false; this.leadOptions = []; this.toast.emit(this.err(e)); }
     });
   }
 
   get addableLeads(): LeadOpt[] { return this.leadOptions.filter(l => l.eligible !== false); }
 
-  picker: { query: string; sel: Set<number> } | null = null;
-  openPicker(): void { this.picker = { query: '', sel: new Set(this.form?.picked.keys() || []) }; }
+  picker: { query: string; country: string; sel: Set<number> } | null = null;
+  openPicker(): void { this.picker = { query: '', country: '', sel: new Set(this.form?.picked.keys() || []) }; }
+  /** Filtered by the search and the country ('none' = leads without a country). */
+  get pickerFiltered(): boolean { return !!(this.picker?.query.trim() || this.picker?.country); }
   get pickerLeads(): LeadOpt[] {
     const q = (this.picker?.query || '').trim().toLowerCase();
-    const hit = (l: LeadOpt) => !q || [l.name, l.email, l.company].some(v => String(v || '').toLowerCase().includes(q));
+    const country = this.picker?.country || '';
+    const inCountry = (l: LeadOpt) => !country || (country === 'none' ? !l.country : l.country === country);
+    const hit = (l: LeadOpt) => inCountry(l) && (!q || [l.name, l.email, l.company].some(v => String(v || '').toLowerCase().includes(q)));
     return [...this.addableLeads.filter(hit), ...this.leadOptions.filter(l => l.eligible === false).filter(hit)];
   }
   get pickerShownAddable(): LeadOpt[] { return this.pickerLeads.filter(l => l.eligible !== false); }

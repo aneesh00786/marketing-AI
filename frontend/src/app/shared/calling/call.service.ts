@@ -36,6 +36,8 @@ export class CallService {
   /** Off for every new call: the caller turns it on after telling the customer. */
   transcribe = false;
   contactId: number | null = null;
+  /** A follow-up from a campaign's results: the call is kept with that campaign and person. */
+  followUp: { campaignId: number; email: string } | null = null;
   transcriptState: '' | 'saving' | 'saved' | 'failed' = '';
 
   private base = `${apiRoot()}/api/v1/calling`;
@@ -63,11 +65,12 @@ export class CallService {
   setAudioElement(el: HTMLAudioElement): void { this.audio = el; }
 
   /** Opens the panel with the number ready. The call starts only when the user presses Call. */
-  prepare(phone: string, name = '', contactId: number | null = null): void {
+  prepare(phone: string, name = '', contactId: number | null = null, followUp: { campaignId: number; email: string } | null = null): void {
     if (this.inCall) { this.message = 'Finish the current call first.'; return; }
     this.number = phone;
     this.name = name;
     this.contactId = contactId;
+    this.followUp = followUp;
     this.transcribe = false;
     this.transcriptState = '';
     this.state = 'idle';
@@ -109,7 +112,10 @@ export class CallService {
         throw new Error('Allow microphone access in your browser to make calls.');
       });
       this.message = 'Connecting…';
-      const session = await firstValueFrom(this.http.post<any>(`${this.base}/token`, { to: this.number, name: this.name || undefined, contactId: this.contactId ?? undefined, transcribe: this.transcribe }));
+      const session = await firstValueFrom(this.http.post<any>(`${this.base}/token`, {
+        to: this.number, name: this.name || undefined, contactId: this.contactId ?? undefined, transcribe: this.transcribe,
+        ...(this.followUp ? { campaignId: this.followUp.campaignId, email: this.followUp.email } : {})
+      }));
       this.callLogId = session.callLogId ?? null;
       await this.loadSdk();
       this.connect(session);

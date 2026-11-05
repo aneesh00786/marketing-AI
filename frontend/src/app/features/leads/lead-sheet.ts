@@ -2,7 +2,7 @@ import * as XLSX from 'xlsx';
 
 /** One spreadsheet row, mapped from known column names only (blank cells stay blank). */
 export interface LeadSheetRow {
-  name: string; companyName: string; email: string; phone: string;
+  name: string; companyName: string; email: string; phone: string; country?: string;
   product: string; productId: string; estimatedBudget: string; notes: string;
 }
 
@@ -29,6 +29,7 @@ export function parseLeadSheet(file: File): Promise<{ rows: LeadSheetRow[]; skip
           companyName: pick(row, ['Company', 'company', 'Company Name', 'Organisation', 'Organization', 'Business', 'Business Name']),
           email: pick(row, ['Email', 'email', 'E-mail', 'Email Address', 'Contact Email']),
           phone: pick(row, ['Phone', 'phone', 'Mobile', 'Phone Number', 'Contact Number']),
+          country: pick(row, ['Country', 'country', 'Country Name']),
           product: pick(row, ['Product', 'product', 'Product Name', 'Interest', 'interest']),
           productId: pick(row, ['Product ID', 'product_id', 'productId', 'Product Id']),
           estimatedBudget: pick(row, ['Budget', 'budget', 'Estimated Budget', 'Deal Value']),

@@ -315,3 +315,40 @@ test('export: every lead matching the filters (not just one page), only this wor
   const anon = await h.api('GET', '/api/v1/leads/export', {});
   assert.equal(anon.status, 401);
 });
+
+test('country: saved on create, edit and import; filters the Leads list, export and lead pickers; counts per country', async () => {
+  const stamp = Date.now();
+  const au = (await create(A.token, { name: `Country AU ${stamp}`, email: `au.${stamp}@acme.io`, country: ' Australia ' })).data.lead;
+  assert.equal(au.country, 'Australia');
+  const none = (await create(A.token, { name: `Country None ${stamp}`, email: `none.${stamp}@acme.io` })).data.lead;
+  assert.equal(none.country, null);
+  const imp = await h.api('POST', '/api/v1/leads/import-bulk', { token: A.token, body: { leads: [{ name: `Country IN ${stamp}`, email: `in.${stamp}@acme.io`, country: 'India' }] } });
+  assert.equal(imp.status, 200, JSON.stringify(imp.data));
+  const inId = imp.data.leadIds ? imp.data.leadIds[0] : (await h.db().get('SELECT id FROM leads WHERE email = ?', [`in.${stamp}@acme.io`])).id;
+  assert.equal((await h.api('PATCH', `/api/v1/leads/${none.id}`, { token: A.token, body: { country: 'India' } })).data.lead.country, 'India');
+  await h.api('PATCH', `/api/v1/leads/${none.id}`, { token: A.token, body: { country: '' } });
+
+  const list = async params => (await h.api('GET', `/api/v1/leads?${new URLSearchParams({ q: `${stamp}`, ...params })}`, { token: A.token })).data;
+  assert.deepEqual((await list({ country: 'Australia' })).leads.map(l => l.id), [au.id]);
+  assert.deepEqual((await list({ country: 'India' })).leads.map(l => l.id), [inId]);
+  assert.deepEqual((await list({ country: 'none' })).leads.map(l => l.id), [none.id], 'leads without a country');
+  const countries = (await list({})).countries;
+  assert.ok(countries.find(c => c.country === 'Australia').count >= 1);
+  assert.ok(countries.some(c => c.country === null), 'the "no country" group is counted too');
+  const exp = await h.api('GET', `/api/v1/leads/export?q=${stamp}&country=India`, { token: A.token });
+  assert.deepEqual(exp.data.leads.map(l => l.id), [inId]);
+  const pick = await h.api('GET', `/api/v1/mail/campaigns/lead-options?q=${stamp}&country=Australia`, { token: A.token });
+  assert.equal(pick.status, 200, JSON.stringify(pick.data));
+  assert.deepEqual(pick.data.leads.map(l => [l.id, l.country]), [[au.id, 'Australia']]);
+  assert.ok(pick.data.countries.some(c => c.country === 'India'));
+  // Outreach (and Command Center) audience: the country filter, and each lead's country.
+  const aud = await h.api('POST', '/api/v1/outreach/audience/preview', { token: A.token, body: { filter: { country: 'India' } } });
+  assert.equal(aud.status, 200, JSON.stringify(aud.data));
+  assert.ok(aud.data.audience.length >= 1 && aud.data.audience.every(x => x.country === 'India'));
+  assert.ok(aud.data.audience.some(x => x.leadId === inId));
+  const audNone = await h.api('POST', '/api/v1/outreach/audience/preview', { token: A.token, body: { filter: { country: 'none' } } });
+  assert.ok(audNone.data.audience.some(x => x.leadId === none.id) && audNone.data.audience.every(x => !x.country));
+  const other = await h.api('GET', `/api/v1/leads?country=Australia&q=${stamp}`, { token: B.token });
+  assert.equal(other.data.leads.length, 0, 'another workspace sees none');
+  assert.ok(!other.data.countries.some(c => c.country === 'India'), 'and not their countries');
+});

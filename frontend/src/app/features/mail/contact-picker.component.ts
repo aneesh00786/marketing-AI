@@ -2,6 +2,7 @@ import { AfterViewInit, Component, ElementRef, EventEmitter, HostListener, Input
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../services/api.service';
+import { CountryFilterComponent, LeadCountry } from '../../shared/leads/country-filter.component';
 
 export interface PickedContact { id: number; name: string; email: string; company: string | null; productId?: number | null; }
 
@@ -16,7 +17,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 @Component({
   selector: 'app-contact-picker',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, CountryFilterComponent],
   templateUrl: './contact-picker.component.html',
   styleUrls: ['../command/command-center.component.css', './mail-ui.css', './contact-picker.component.css']
 })
@@ -41,6 +42,8 @@ export class ContactPickerComponent implements OnInit, AfterViewInit {
   choice: any = null;
   /** Leads CRM product filter: a product id, 'none' (no product) or 'all'. */
   productFilter: number | 'none' | 'all' = 'all';
+  countryFilter = '';
+  countries: LeadCountry[] = [];
   private timer: any = null;
   private seq = 0;
   private submitted = false;
@@ -102,8 +105,9 @@ export class ContactPickerComponent implements OnInit, AfterViewInit {
       this.error = null;
       const params: any = { q: this.query.trim(), limit: 50 };
       if (this.productFilter !== 'all') params.productId = this.productFilter;
+      if (this.countryFilter) params.country = this.countryFilter;
       this.api.getLeads(params).subscribe({
-        next: (res: any) => { if (mySeq !== this.seq) return; this.loading = false; this.results = res.leads || []; },
+        next: (res: any) => { if (mySeq !== this.seq) return; this.loading = false; this.results = res.leads || []; if (res.countries) this.countries = res.countries; },
         error: (err: any) => { if (mySeq !== this.seq) return; this.loading = false; this.results = []; this.error = err?.status === 403 ? 'Your role cannot view contacts.' : (err?.error?.error || 'Contacts could not be loaded.'); }
       });
     };

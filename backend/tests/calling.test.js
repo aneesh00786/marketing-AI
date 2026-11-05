@@ -302,3 +302,47 @@ test('starting calls is limited per user', async () => {
   assert.equal(last.status, 429);
   assert.equal((await start(sales)).status, 200, 'other users are not affected');
 });
+
+// ------------------------------------------------------------------ campaign follow-up history
+
+test('a follow-up call from a campaign is linked to it; the recipient\'s history shows emails both ways and the call as a conversation', async () => {
+  const u = await staff('sales');
+  const ws = u.workspaceId;
+  const camp = await h.db().run("INSERT INTO mail_campaigns (workspace_id, name, status, created_at, updated_at) VALUES (?, 'Spring', 'submitted', UTC_TIMESTAMP(), UTC_TIMESTAMP())", [ws]);
+  const other = await h.createWorkspace({ name: 'Other campaign ws' });
+  const foreign = await h.db().run("INSERT INTO mail_campaigns (workspace_id, name, status, created_at, updated_at) VALUES (?, 'Theirs', 'submitted', UTC_TIMESTAMP(), UTC_TIMESTAMP())", [other.workspaceId]);
+  const bad = await api(u, 'POST', '/token', { to: '+91 98765 43210', campaignId: foreign.lastID });
+  assert.equal(bad.status, 400, 'a campaign from another workspace is refused');
+  assert.equal(bad.data.code, 'INVALID_CAMPAIGN');
+
+  const id = await begin(u, { name: 'Ann Lee', transcribe: true, campaignId: camp.lastID, email: 'Ann@Acme.io' });
+  const row = await h.db().get('SELECT campaign_id, email FROM crm_call_logs WHERE id = ?', [id]);
+  assert.deepEqual([row.campaign_id, row.email], [camp.lastID, 'ann@acme.io']);
+  await end(u, id);
+  telnyx.sttReply = [{ text: 'Hi Ann.', segments: [{ start: 0, end: 1, text: 'Hi Ann, following up on our email.' }] }, { text: 'Yes', segments: [{ start: 2, end: 3, text: 'Yes, send me the pricing.' }] }];
+  await audio(u, id, 'agent');
+  await audio(u, id, 'customer');
+  // An earlier call to the same number from another campaign of this workspace is found by its number;
+  // a plain CRM call (no campaign, so no workspace) is not shown.
+  const camp2 = await h.db().run("INSERT INTO mail_campaigns (workspace_id, name, status, created_at, updated_at) VALUES (?, 'Winter', 'submitted', UTC_TIMESTAMP(), UTC_TIMESTAMP())", [ws]);
+  const earlier = await begin(u, { name: 'Ann', campaignId: camp2.lastID });
+  await end(u, earlier, { durationSeconds: 0, answered: false });
+  const crmCall = await begin(u, { name: 'Ann' });
+  await end(u, crmCall);
+
+  await h.db().run("INSERT INTO emails (workspace_id, sender_email, recipient_email, recipient_name, subject, body, status, sent_at) VALUES (?, 'sales@us.io', 'ann@acme.io', 'Ann', 'Following up: Spring', '<p>Hi Ann</p>', 'Sent', UTC_TIMESTAMP())", [ws]);
+  await h.db().run("INSERT INTO emails (workspace_id, sender, sender_email, recipient_email, subject, body, status, received_at) VALUES (?, 'Ann', 'ANN@acme.io', 'sales@us.io', 'Re: Following up', 'Sounds good', 'Unread', DATE_ADD(UTC_TIMESTAMP(), INTERVAL 1 SECOND))", [ws]);
+  await h.db().run("INSERT INTO emails (workspace_id, sender_email, recipient_email, subject, body, status, sent_at) VALUES (?, 'x@us.io', 'ann@acme.io', 'Other workspace', 'no', 'Sent', UTC_TIMESTAMP())", [other.workspaceId]);
+
+  const hist = await h.api('GET', `/api/v1/mail/campaigns/${camp.lastID}/recipient-history?email=ann%40acme.io&phone=${encodeURIComponent('+91 98765 43210')}`, { token: u.token });
+  assert.equal(hist.status, 200, JSON.stringify(hist.data));
+  assert.deepEqual(hist.data.emails.map(e => [e.direction, e.subject]), [['received', 'Re: Following up'], ['sent', 'Following up: Spring']], 'both ways, newest first, this workspace only');
+  assert.equal(hist.data.emails[1].preview, 'Hi Ann');
+  assert.deepEqual(hist.data.calls.map(c => c.id), [earlier, id], 'campaign calls of this workspace only');
+  const call = hist.data.calls.find(c => c.id === id);
+  assert.equal(call.campaignId, camp.lastID);
+  assert.deepEqual(call.conversation.map(l => [l.speaker, l.text]), [['agent', 'Hi Ann, following up on our email.'], ['customer', 'Yes, send me the pricing.']]);
+  assert.equal(hist.data.calls.find(c => c.id === earlier).answered, false);
+  assert.equal((await h.api('GET', `/api/v1/mail/campaigns/${camp.lastID}/recipient-history?email=nope`, { token: u.token })).status, 400);
+  assert.equal((await h.api('GET', `/api/v1/mail/campaigns/${camp.lastID}/recipient-history?email=ann%40acme.io`, { token: other.token })).status, 404, 'another workspace');
+});

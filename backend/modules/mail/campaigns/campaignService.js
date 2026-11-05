@@ -679,6 +679,41 @@ async function contentByToken(token) {
   return row ? withOwnUnsubscribe(toZohoMergeTags(row.html_content), row) : null;
 }
 
+// ------------------------------------------------------------------ communication history
+
+/**
+ * Everything with one campaign recipient, for "Follow up → History": the emails sent to them and
+ * received from them in this workspace (Sent Mail and Inbox), and the calls made to them from this
+ * workspace (by email, or by the last 9 digits of their number), with each call's transcript as a
+ * conversation when it was transcribed. Read only. For roles with mail.send.
+ */
+async function recipientHistory(ctx, id, { email, phone } = {}) {
+  await requireRow(ctx, id);
+  const addr = String(email || '').trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr) || addr.length > 255) throw httpError(400, 'Give the recipient\'s email address.', 'VALIDATION_ERROR');
+  const digits = String(phone || '').replace(/\D/g, '');
+  const tail = digits.length >= 7 ? digits.slice(-9) : null;
+  const emails = await all(
+    `SELECT id, sender, sender_email, recipient_email, recipient_name, subject, body, status, smtp_status, sent_at, received_at
+     FROM emails WHERE workspace_id = ? AND (LOWER(TRIM(recipient_email)) = ? OR LOWER(TRIM(sender_email)) = ?)
+     ORDER BY COALESCE(received_at, sent_at) DESC, id DESC LIMIT 50`, [ws(ctx), addr, addr]);
+  const logs = require('../../calling/callLogService');
+  const calls = await all(
+    `${logs.SELECT} WHERE l.campaign_id IN (SELECT id FROM mail_campaigns WHERE workspace_id = ?) AND (l.email = ?${tail ? " OR RIGHT(REGEXP_REPLACE(l.phone, '[^0-9]', ''), 9) = ?" : ''})
+     ORDER BY l.started_at DESC, l.id DESC LIMIT 50`, tail ? [ws(ctx), addr, tail] : [ws(ctx), addr]);
+  await audit(ctx, 'mail.campaign_recipient_history_viewed', { resourceType: 'mail_campaign', resourceId: Number(id), metadata: { emails: emails.length, calls: calls.length } });
+  const text = v => String(v || '').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+  return {
+    emails: emails.map(e => {
+      const inbound = String(e.sender_email || '').trim().toLowerCase() === addr;
+      return { id: e.id, direction: inbound ? 'received' : 'sent', subject: e.subject || '(no subject)', status: e.status || null,
+        at: inbound ? (e.received_at || e.sent_at) : (e.sent_at || e.received_at), preview: text(e.body).slice(0, 600) };
+    }),
+    // The conversation is the transcript text (empty unless the call was transcribed).
+    calls: calls.map(r => ({ ...logs.present(r), campaignId: r.campaign_id || null, conversation: logs.conversation(r) }))
+  };
+}
+
 // ------------------------------------------------------------------ unsubscribes kept in Marketech.ai
 
 /**
@@ -849,4 +884,4 @@ async function listContacts(ctx, listKey, { status = 'subscribed', page = 1 } = 
   return { contacts, page: p, pageSize: contactsSvc.PAGE_SIZE, hasMore };
 }
 
-module.exports = { unsubscribeFromCampaign, campaignUnsubscribeUrl, deliver, failSubmission: (...a) => fail(...a), list, getOne, create, update, duplicate, remove, getContacts, setContactLeads, addContactsFromZoho, removeContacts, leadOptions, zohoAudiences, listContacts, validate, approve, send, refresh, resolve, contentByToken, recipientActivity, RECIPIENT_ACTIONS, contactsIn, toZohoMergeTags };
+module.exports = { recipientHistory, unsubscribeFromCampaign, campaignUnsubscribeUrl, deliver, failSubmission: (...a) => fail(...a), list, getOne, create, update, duplicate, remove, getContacts, setContactLeads, addContactsFromZoho, removeContacts, leadOptions, zohoAudiences, listContacts, validate, approve, send, refresh, resolve, contentByToken, recipientActivity, RECIPIENT_ACTIONS, contactsIn, toZohoMergeTags };

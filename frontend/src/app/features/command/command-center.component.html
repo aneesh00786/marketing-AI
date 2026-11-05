@@ -173,6 +173,7 @@
             <div class="chips"><button type="button" *ngFor="let s of leadStatuses" class="chip" [class.on]="audienceFilter.statuses.includes(s)" (click)="toggleStatus(s)">{{ s }}</button></div>
           </div>
           <label class="field"><span>Min. lead score</span><input class="hud-input" type="number" min="0" max="100" [(ngModel)]="audienceFilter.minScore" placeholder="any" /></label>
+          <label class="field" *ngIf="leadCountries.length"><span>Country</span><app-country-filter [countries]="leadCountries" [(value)]="audienceFilter.country"></app-country-filter></label>
           <label class="inline" *ngIf="program.productId"><input type="checkbox" [(ngModel)]="audienceFilter.anyProduct" /> Include leads not linked to {{ program.product?.name || 'this product' }}</label>
           <button class="btn btn-secondary" (click)="previewAudience()" [disabled]="busy === 'audience'">{{ busy === 'audience' ? 'Finding…' : 'Find leads' }}</button>
         </div>
@@ -184,7 +185,7 @@
             <tbody>
               <tr *ngFor="let a of audience" [class.dim]="!a.eligible">
                 <td><input type="checkbox" [disabled]="!a.eligible || briefLocked && program.status === 'built'" [checked]="audienceSelected.has(a.leadId)" (change)="toggleLead(a.leadId)" [attr.aria-label]="'Select ' + a.name" /></td>
-                <td>{{ a.name }}<div class="muted small">{{ a.company || '' }} {{ a.status ? '· ' + a.status : '' }}</div></td>
+                <td>{{ a.name }}<div class="muted small">{{ a.company || '' }} {{ a.country ? '· ' + a.country : '' }} {{ a.status ? '· ' + a.status : '' }}</div></td>
                 <td>{{ a.email || '—' }}</td>
                 <td>{{ a.score }} <span class="muted small">{{ a.category }}</span></td>
                 <td class="small"><span *ngIf="!a.eligible" class="warn-text">Excluded: {{ a.reason }}</span><span *ngIf="a.eligible">{{ a.reasons.join(' · ') || 'In your CRM' }}</span></td>

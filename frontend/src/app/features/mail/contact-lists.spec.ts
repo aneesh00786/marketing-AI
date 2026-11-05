@@ -81,6 +81,27 @@ describe('ContactListsComponent (lists kept in Marketech.ai)', () => {
     expect(comp.form).toBeNull();
   });
 
+  it('Choose leads: filter by country (or leads without one) together with the search', () => {
+    start();
+    button('New list').click(); fixture.detectChanges();
+    http.expectOne(r => r.url.endsWith('/lead-options')).flush({
+      leads: [{ id: 7, name: 'Priya', email: 'p@a.io', country: 'India', eligible: true }, { id: 8, name: 'Sam', email: 's@a.io', country: 'Australia', eligible: true },
+        { id: 9, name: 'Pat', email: 'pat@a.io', country: null, eligible: true }],
+      countries: [{ country: 'Australia', count: 1 }, { country: 'India', count: 1 }, { country: null, count: 1 }] });
+    fixture.detectChanges();
+    comp.openPicker(); fixture.detectChanges();
+    const sel = el().querySelector('.zl-picker app-country-filter select') as HTMLSelectElement;
+    expect(Array.from(sel.options).map(o => o.textContent!.trim())).toEqual(['All countries', 'Australia (1)', 'India (1)', 'No country (1)']);
+    expect(el().querySelector('.zl-picker')!.textContent).toContain('p@a.io · India');
+    sel.value = 'India'; sel.dispatchEvent(new Event('change')); fixture.detectChanges();
+    expect(comp.pickerLeads.map(l => l.id)).toEqual([7]);
+    expect(el().querySelector('.zl-pick-all')!.textContent).toContain('Select all shown (1)');
+    comp.picker!.country = 'none'; fixture.detectChanges();
+    expect(comp.pickerLeads.map(l => l.id)).toEqual([9]);
+    comp.picker!.country = 'Australia'; comp.picker!.query = 'priya'; fixture.detectChanges();
+    expect(el().querySelector('.zl-pick-none')!.textContent).toContain('No leads match “priya” in Australia.');
+  });
+
   it('View contacts: status tabs, search, details and lead status; remove one', () => {
     start();
     button('View contacts').click(); fixture.detectChanges();

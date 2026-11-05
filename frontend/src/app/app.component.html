@@ -335,6 +335,13 @@
         <option value="">All statuses</option>
         <option *ngFor="let st of leadStatuses" [value]="st">{{ st }}</option>
       </select>
+      <select class="hud-input" [(ngModel)]="leadFilters.country" (change)="applyLeadFilters()" aria-label="Filter by country">
+        <option value="">All countries</option>
+        <ng-container *ngFor="let c of leadCountries">
+          <option *ngIf="c.country" [value]="c.country">{{ c.country }} ({{ c.count }})</option>
+          <option *ngIf="!c.country" value="none">No country ({{ c.count }})</option>
+        </ng-container>
+      </select>
       <input class="hud-input" [(ngModel)]="leadFilters.q" (keyup.enter)="applyLeadFilters()" placeholder="Search name, email, company or phone" aria-label="Search leads" />
       <button class="btn btn-secondary btn-sm" (click)="applyLeadFilters()">Search</button>
       <span class="lead-count">{{ leadTotal }} lead{{ leadTotal === 1 ? '' : 's' }}</span>
@@ -347,6 +354,7 @@
             <th class="sl-cell freeze freeze-1">#</th>
             <th class="freeze freeze-2 freeze-edge">Contact</th>
             <th>Company</th>
+            <th>Country</th>
             <th>Email</th>
             <th>Phone</th>
             <th>Product</th>
@@ -364,6 +372,7 @@
               <div class="lead-sub has-note-tip" *ngIf="ld.notes" tabindex="0" [attr.aria-label]="'Notes: ' + ld.notes"
                    (mouseenter)="showNoteTip($event, ld.notes)" (mouseleave)="hideNoteTip()" (focus)="showNoteTip($event, ld.notes)" (blur)="hideNoteTip()">📝 {{ ld.notes | slice:0:50 }}{{ ld.notes.length > 50 ? '…' : '' }}</div></td>
             <td data-label="Company" class="company-cell">{{ dash(ld.companyName) }}</td>
+            <td data-label="Country" class="one-line">{{ dash(ld.country) }}</td>
             <td data-label="Email" class="one-line"><a *ngIf="ld.email" [href]="'mailto:' + ld.email" [title]="ld.email">{{ ld.email }}</a><ng-container *ngIf="!ld.email">—</ng-container></td>
             <td data-label="Phone" class="one-line"><span class="phone-line">{{ dash(ld.phone) }}<app-call-button [phone]="ld.phone" [name]="ld.name"></app-call-button></span></td>
             <td data-label="Product" class="product-cell">
@@ -397,10 +406,10 @@
             </td>
           </tr>
           <tr *ngIf="!leadsLoading && leads.length === 0">
-            <td colspan="11" class="empty-state">No leads match. Click "📂 Import Excel / CSV" or "+ Add Lead" to get started.</td>
+            <td colspan="12" class="empty-state">No leads match. Click "📂 Import Excel / CSV" or "+ Add Lead" to get started.</td>
           </tr>
           <tr *ngIf="leadsLoading && leads.length === 0">
-            <td colspan="11" class="empty-state">Loading leads…</td>
+            <td colspan="12" class="empty-state">Loading leads…</td>
           </tr>
         </tbody>
       </table>
@@ -773,13 +782,15 @@
         <label class="form-group"><span>Email body (customer-facing)</span><textarea class="hud-textarea" rows="6" [(ngModel)]="dispatchBody" maxlength="4000"></textarea></label>
         <div class="form-group">
           <span>Leads ({{ dispatchSelectedCount }} selected)</span>
+          <app-country-filter *ngIf="leadCountries.length" [countries]="leadCountries" [(value)]="dispatchCountry" [showCounts]="false"></app-country-filter>
           <div class="dispatch-lead-list">
-            <label *ngFor="let ld of leads" class="dispatch-lead" [class.disabled]="!ld.hasValidEmail">
+            <label *ngFor="let ld of dispatchLeads" class="dispatch-lead" [class.disabled]="!ld.hasValidEmail">
               <input type="checkbox" [disabled]="!ld.hasValidEmail" [checked]="dispatchLeadIds.has(ld.id)" (change)="toggleDispatchLead(ld.id)" />
               <span>{{ ld.name }}</span>
-              <span class="muted small">{{ ld.hasValidEmail ? ld.email : 'no valid email' }}</span>
+              <span class="muted small">{{ ld.hasValidEmail ? ld.email : 'no valid email' }}{{ ld.country ? ' · ' + ld.country : '' }}</span>
             </label>
             <div *ngIf="!leads.length" class="muted small">No leads in this workspace yet.</div>
+            <div *ngIf="leads.length && !dispatchLeads.length" class="muted small">No leads in this country.</div>
           </div>
         </div>
       </div>
@@ -1090,6 +1101,11 @@
           <div class="form-group">
             <label>Company</label>
             <input type="text" class="hud-input" [(ngModel)]="newLead.company_name" placeholder="Company name" />
+          </div>
+          <div class="form-group">
+            <label>Country</label>
+            <input type="text" class="hud-input" [(ngModel)]="newLead.country" placeholder="e.g. Australia" list="lead-country-options" />
+            <datalist id="lead-country-options"><ng-container *ngFor="let c of leadCountries"><option *ngIf="c.country" [value]="c.country"></option></ng-container></datalist>
           </div>
           <div class="form-group">
             <label>Estimated budget</label>

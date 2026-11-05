@@ -16,6 +16,7 @@ import { SocialHubComponent } from './features/social/social-hub.component';
 import { CommandCenterComponent } from './features/command/command-center.component';
 import { IconComponent } from './shared/icon.component';
 import { CallButtonComponent } from './shared/calling/call-button.component';
+import { CountryFilterComponent } from './shared/leads/country-filter.component';
 import { SoftphoneComponent } from './shared/calling/softphone.component';
 import { DashboardComponent, DashboardNavigation } from './features/dashboard/dashboard.component';
 import { LeadDiscoveryComponent } from './features/leads/lead-discovery.component';
@@ -33,7 +34,7 @@ import { findTokens, fillTokens, defaultTokenValues } from './features/mail/temp
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [CommonModule, FormsModule, LoginComponent, SocialHubComponent, CommandCenterComponent, IconComponent, DashboardComponent, LeadDiscoveryComponent, CrmComponent, PlatformAdminComponent, CallButtonComponent, SoftphoneComponent, MembersComponent, TemplatePickerComponent, MailCenterComponent, EmailPreviewComponent, ImportSyncOptionsComponent, LeadsToZohoComponent],
+  imports: [CommonModule, FormsModule, LoginComponent, SocialHubComponent, CommandCenterComponent, IconComponent, DashboardComponent, LeadDiscoveryComponent, CrmComponent, PlatformAdminComponent, CallButtonComponent, SoftphoneComponent, MembersComponent, TemplatePickerComponent, MailCenterComponent, EmailPreviewComponent, ImportSyncOptionsComponent, LeadsToZohoComponent, CountryFilterComponent],
   templateUrl: './app.component.html',
   styleUrls: ['./app.component.css']
 })
@@ -474,7 +475,9 @@ export class AppComponent implements OnInit, OnDestroy {
   newLead: any = this.blankLead();
   leadProducts: any[] = [];
   leadStatuses: string[] = [];
-  leadFilters = { productId: '', status: '', q: '' };
+  leadFilters = { productId: '', status: '', country: '', q: '' };
+  /** Countries of this workspace's leads with counts (null = no country), for the country filter. */
+  leadCountries: { country: string | null; count: number }[] = [];
   leadPage = 1;
   leadTotal = 0;
   readonly leadPageSize = 50;
@@ -527,6 +530,12 @@ export class AppComponent implements OnInit, OnDestroy {
   dispatchSubject = '';
   dispatchBody = '';
   dispatchLeadIds = new Set<number>();
+  /** Country filter in Create Mail Drafts ('' all, 'none' without a country). */
+  dispatchCountry = '';
+  get dispatchLeads(): any[] {
+    const c = this.dispatchCountry;
+    return c ? this.leads.filter(l => c === 'none' ? !l.country : l.country === c) : this.leads;
+  }
   isDispatching = false;
   showNewBusinessModal: boolean = false;
   newBusiness = {
@@ -1099,7 +1108,7 @@ export class AppComponent implements OnInit, OnDestroy {
   // 3. LEADS CRM & EXCEL / CSV IMPORTER
   // ==========================================
   private blankLead(): any {
-    return { name: '', phone: '', email: '', company_name: '', estimated_budget: '', notes: '', productId: null, status: 'New' };
+    return { name: '', phone: '', email: '', company_name: '', country: '', estimated_budget: '', notes: '', productId: null, status: 'New' };
   }
 
   leadExportOpen = false;
@@ -1112,6 +1121,7 @@ export class AppComponent implements OnInit, OnDestroy {
     const params: any = {};
     if (this.leadFilters.productId) params.productId = this.leadFilters.productId;
     if (this.leadFilters.status) params.status = this.leadFilters.status;
+    if (this.leadFilters.country) params.country = this.leadFilters.country;
     if (this.leadFilters.q.trim()) params.q = this.leadFilters.q.trim();
     this.apiService.exportLeads(params).subscribe({
       next: (res) => {
@@ -1143,6 +1153,7 @@ export class AppComponent implements OnInit, OnDestroy {
     const params: any = { page: this.leadPage, limit: this.leadPageSize };
     if (this.leadFilters.productId) params.productId = this.leadFilters.productId;
     if (this.leadFilters.status) params.status = this.leadFilters.status;
+    if (this.leadFilters.country) params.country = this.leadFilters.country;
     if (this.leadFilters.q.trim()) params.q = this.leadFilters.q.trim();
     this.apiService.getLeads(params).subscribe({
       next: (res) => {
@@ -1150,6 +1161,7 @@ export class AppComponent implements OnInit, OnDestroy {
         this.leads = res.leads || [];
         this.leadTotal = res.total ?? this.leads.length;
         this.leadStatuses = res.statuses || this.leadStatuses;
+        if (res.countries) this.leadCountries = res.countries;
       },
       error: (err) => {
         this.leadsLoading = false;
@@ -1238,7 +1250,7 @@ export class AppComponent implements OnInit, OnDestroy {
   openEditLead(ld: any): void {
     this.editingLeadId = ld.id;
     this.newLead = {
-      name: ld.name || '', phone: ld.phone || '', email: ld.email || '', company_name: ld.companyName || '',
+      name: ld.name || '', phone: ld.phone || '', email: ld.email || '', company_name: ld.companyName || '', country: ld.country || '',
       estimated_budget: ld.estimatedBudget || '', notes: ld.notes || '', productId: ld.productId ?? null, status: ld.status || 'New'
     };
     if (!this.leadProducts.length) this.loadLeadProducts();
@@ -1351,6 +1363,7 @@ export class AppComponent implements OnInit, OnDestroy {
       email: this.newLead.email?.trim() || null,
       phone: this.newLead.phone?.trim() || null,
       companyName: this.newLead.company_name?.trim() || null,
+      country: this.newLead.country?.trim() || null,
       estimatedBudget: this.newLead.estimated_budget?.trim() || null,
       notes: this.newLead.notes?.trim() || null,
       productId: this.newLead.productId ? Number(this.newLead.productId) : null
@@ -1770,6 +1783,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.dispatchSubject = idea.subject || '';
     this.dispatchBody = idea.email_body || '';
     this.dispatchLeadIds = new Set<number>();
+    this.dispatchCountry = '';
   }
 
   closeDispatch(): void {
@@ -1922,6 +1936,7 @@ export function leadExportRows(leads: any[], forCsv: boolean): Record<string, st
     '#': i + 1,
     Name: safe(l.name),
     Company: safe(l.companyName),
+    Country: safe(l.country),
     Email: safe(l.email),
     Phone: safe(l.phone),
     Product: safe(l.productName),

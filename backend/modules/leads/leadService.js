@@ -114,6 +114,7 @@ function present(row) {
     emailIssue: emailIssue(row.email),
     phone: row.phone || null,
     companyName: row.company_name || null,
+    country: row.country || null,
     estimatedBudget: row.estimated_budget || null,
     notes: row.notes || null,
     status: row.status || null,
@@ -150,7 +151,7 @@ async function selectLead() {
 }
 
 /** The WHERE clause for the Leads list filters (also used by the export). */
-async function leadWhere(workspaceId, { productId, status, q, source } = {}) {
+async function leadWhere(workspaceId, { productId, status, q, source, country } = {}) {
   const where = ['l.workspace_id = ?'];
   const params = [workspaceId];
   // source: 'discovery' = found with AI Lead Discovery (Google Places), 'crm' = all other leads.
@@ -166,6 +167,9 @@ async function leadWhere(workspaceId, { productId, status, q, source } = {}) {
     params.push(Number(productId));
   }
   if (status && STATUSES.includes(status)) { where.push('l.status = ?'); params.push(status); }
+  // country: a country name, or 'none' for leads without one.
+  if (country === 'none') where.push("(l.country IS NULL OR l.country = '')");
+  else if (country) { where.push('l.country = ?'); params.push(String(country).slice(0, 100)); }
   if (q) {
     where.push('(l.name LIKE ? OR l.email LIKE ? OR l.company_name LIKE ? OR l.phone LIKE ?)');
     const like = `%${String(q).slice(0, 100)}%`;
@@ -174,13 +178,19 @@ async function leadWhere(workspaceId, { productId, status, q, source } = {}) {
   return { where, params };
 }
 
-async function listLeads(workspaceId, { productId, status, q, source, page = 1, limit = 50 } = {}) {
-  const { where, params } = await leadWhere(workspaceId, { productId, status, q, source });
+/** The countries of a workspace's leads with how many each, for the country filter (most first). */
+async function leadCountries(workspaceId) {
+  const rows = await all(`SELECT NULLIF(TRIM(country), '') AS country, COUNT(*) AS n FROM leads WHERE workspace_id = ? GROUP BY NULLIF(TRIM(country), '') ORDER BY n DESC, country`, [workspaceId]);
+  return rows.map(r => ({ country: r.country || null, count: Number(r.n) }));
+}
+
+async function listLeads(workspaceId, { productId, status, q, source, country, page = 1, limit = 50 } = {}) {
+  const { where, params } = await leadWhere(workspaceId, { productId, status, q, source, country });
   const lim = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 200);
   const pg = Math.max(parseInt(page, 10) || 1, 1);
   const rows = await all(`${await selectLead()} WHERE ${where.join(' AND ')} ORDER BY l.id DESC LIMIT ${lim} OFFSET ${(pg - 1) * lim}`, params);
   const total = await get(`SELECT COUNT(*) AS c FROM leads l WHERE ${where.join(' AND ')}`, params);
-  return { leads: rows.map(present), total: Number(total?.c || 0), page: pg, limit: lim };
+  return { leads: rows.map(present), total: Number(total?.c || 0), page: pg, limit: lim, countries: await leadCountries(workspaceId) };
 }
 
 const EXPORT_MAX = 10000;
@@ -209,6 +219,7 @@ function normalizeInput(input) {
     email,
     phone: clean(input.phone),
     company_name: clean(input.companyName ?? input.company_name),
+    country: clean(input.country ?? input.Country)?.slice(0, 100) || null,
     estimated_budget: clean(input.estimatedBudget ?? input.estimated_budget),
     notes: clean(input.notes),
     status,
@@ -236,10 +247,10 @@ async function createLead(ctx, input, { withAi = true } = {}) {
   }
   const { score, category } = scoreLead(data);
   const ins = await run(
-    `INSERT INTO leads (workspace_id, name, email, phone, company_name, estimated_budget, notes, status, product_id, product_interest,
+    `INSERT INTO leads (workspace_id, name, email, phone, company_name, country, estimated_budget, notes, status, product_id, product_interest,
        product_review_note, ai_score, ai_category, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
-    [workspaceId, data.name, data.email, data.phone, data.company_name, data.estimated_budget, data.notes, data.status || 'New',
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+    [workspaceId, data.name, data.email, data.phone, data.company_name, data.country, data.estimated_budget, data.notes, data.status || 'New',
       product?.id || null, data.product_interest || product?.name || null, reviewNote, score, category]
   );
   await audit(ctx, 'leads.created', { resourceType: 'lead', resourceId: ins.lastID, metadata: { productId: product?.id || null } });
@@ -255,7 +266,7 @@ async function updateLead(ctx, id, input) {
   const data = normalizeInput(input);
   const sets = [];
   const params = [];
-  const map = { name: 'name', email: 'email', phone: 'phone', companyName: 'company_name', company_name: 'company_name', estimatedBudget: 'estimated_budget', estimated_budget: 'estimated_budget', notes: 'notes', status: 'status' };
+  const map = { name: 'name', email: 'email', phone: 'phone', country: 'country', companyName: 'company_name', company_name: 'company_name', estimatedBudget: 'estimated_budget', estimated_budget: 'estimated_budget', notes: 'notes', status: 'status' };
   const seen = new Set();
   for (const [k, col] of Object.entries(map)) {
     if (input[k] === undefined || seen.has(col)) continue;
@@ -337,10 +348,10 @@ async function importLeads(ctx, rows) {
 
     const { score, category } = scoreLead(data);
     const ins = await run(
-      `INSERT INTO leads (workspace_id, name, email, phone, company_name, estimated_budget, notes, status, product_id, product_interest,
+      `INSERT INTO leads (workspace_id, name, email, phone, company_name, country, estimated_budget, notes, status, product_id, product_interest,
          product_review_note, ai_score, ai_category, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
-      [workspaceId, data.name, data.email, data.phone, data.company_name, data.estimated_budget, data.notes, data.status || 'Imported',
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+      [workspaceId, data.name, data.email, data.phone, data.company_name, data.country, data.estimated_budget, data.notes, data.status || 'Imported',
         product?.id || null, product?.name || rawName || data.product_interest || null, reviewNote, score, category]
     );
     if (data.email && !existingEmails.has(data.email.toLowerCase())) existingEmails.set(data.email.toLowerCase(), ins.lastID);
@@ -466,6 +477,7 @@ ${lines.map(l => (l.startsWith('A few things it does:')
 }
 
 module.exports = {
+  leadCountries,
   STATUSES,
   exportLeads,
   LEADS_AI_EXCLUDE,

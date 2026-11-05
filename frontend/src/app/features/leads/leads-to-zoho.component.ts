@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { apiRoot } from '../../core/api-base';
+import { CountryFilterComponent, LeadCountry } from '../../shared/leads/country-filter.component';
 
 /**
  * Leads → "Add to contact list": pick leads (only those that may be emailed can be ticked; the others
@@ -11,7 +12,7 @@ import { apiRoot } from '../../core/api-base';
 @Component({
   selector: 'app-leads-to-zoho',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, CountryFilterComponent],
   templateUrl: './leads-to-zoho.component.html',
   styleUrls: ['../command/command-center.component.css', '../mail/mail-ui.css', './leads-to-zoho.component.css']
 })
@@ -30,6 +31,8 @@ export class LeadsToZohoComponent implements OnInit {
   listName = '';
   q = '';
   show: 'eligible' | 'all' = 'eligible';
+  country = '';
+  countries: LeadCountry[] = [];
   leads: any[] = [];
   total = 0;
   eligibleCount = 0;
@@ -53,8 +56,9 @@ export class LeadsToZohoComponent implements OnInit {
     this.loading = true;
     const params: any = { q: this.q.trim(), pageSize: '100' };
     if (this.show === 'eligible') params.eligibility = 'eligible';
+    if (this.country) params.country = this.country;
     this.http.get<any>(`${this.base}/lead-options`, { params }).subscribe({
-      next: r => { this.loading = false; this.leads = r.leads || []; this.total = r.total || 0; this.eligibleCount = r.eligibleCount || 0; },
+      next: r => { this.loading = false; this.leads = r.leads || []; if (r.countries) this.countries = r.countries; this.total = r.total || 0; this.eligibleCount = r.eligibleCount || 0; },
       error: e => { this.loading = false; this.leads = []; this.toast.emit(e?.error?.error || 'Could not load leads.'); }
     });
   }

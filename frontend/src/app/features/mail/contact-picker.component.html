@@ -22,6 +22,10 @@
               <option [ngValue]="'none'">No product</option>
             </select>
           </label>
+          <label class="cp-filter" *ngIf="countries.length">
+            <span>Country</span>
+            <app-country-filter [countries]="countries" [(value)]="countryFilter" (valueChange)="search(true)" [showCounts]="false"></app-country-filter>
+          </label>
           <input #searchBox type="search" class="hud-input" [(ngModel)]="query" (ngModelChange)="search()" placeholder="Search by name, email or company" aria-label="Search contacts" aria-controls="cp-results" />
         </div>
         <p class="cp-scope" *ngIf="productFilter !== 'all'">Showing contacts linked to <strong>{{ productFilter === 'none' ? 'no product' : productName(productFilter) }}</strong> in Leads. Choose “All contacts” to see everyone.</p>
@@ -41,6 +45,7 @@
             </span>
             <span class="cp-side">
               <span class="cp-company" *ngIf="l.companyName">{{ l.companyName }}</span>
+              <span class="cp-company" *ngIf="l.country && !countryFilter">{{ l.country }}</span>
               <span class="cp-product" *ngIf="l.productId && productFilter === 'all'">{{ productName(l.productId) }}</span>
             </span>
           </button>

@@ -71,8 +71,9 @@ describe('CampaignMetricsComponent', () => {
     const pop = () => el().querySelector('.cm-pop') as HTMLElement;
     expect(pop().querySelector('h3')!.textContent).toContain('Sent');
     const cells = Array.from(pop().querySelectorAll('tbody tr:first-child td')).map(td => td.textContent!.trim());
-    expect([cells[0], cells[1], ...cells.slice(3)]).toEqual(['1', 'Ann Lee', 'Acme', 'ann@acme.io', '0400', 'Sydney', '2', 'Nov 05, 2026 09:10 AM', '—', 'Contacted']);
-    expect(Array.from(pop().querySelectorAll('thead th')).map(th => th.textContent!.trim())[2]).withContext('next to the name, always in view').toBe('Follow up');
+    expect(cells.slice(0, 10)).toEqual(['1', 'Ann Lee', 'Acme', 'ann@acme.io', '0400', 'Sydney', '2', 'Nov 05, 2026 09:10 AM', '—', 'Contacted']);
+    const heads = Array.from(pop().querySelectorAll('thead th')).map(th => th.textContent!.trim());
+    expect(heads[heads.length - 1]).withContext('the last column').toBe('Follow up');
     // Follow up by email: Compose opens with the person and a follow-up subject (nothing is sent).
     let asked: any = null;
     TestBed.inject(ComposeRequestService).requests$.subscribe(x => asked = x);
@@ -80,6 +81,27 @@ describe('CampaignMetricsComponent', () => {
     (pop().querySelector('.cm-follow .cm-act') as HTMLButtonElement).click();
     expect(asked).toEqual({ email: 'ann@acme.io', name: 'Ann Lee', subject: 'Following up: A quick idea for', body: 'Hi Ann,\n\n' });
     expect(pop().querySelector('.cm-follow app-call-button')).withContext('the call button sits beside it').toBeTruthy();
+    // History: every email (both ways) and call with this person; call text shown as a conversation.
+    (Array.from(pop().querySelectorAll('.cm-follow .cm-act')).find(b => b.textContent!.includes('🕘')) as HTMLButtonElement).click();
+    fixture.detectChanges();
+    const hist = http.expectOne(r => r.url.endsWith('/mail/campaigns/7/recipient-history'));
+    expect(hist.request.params.get('email')).toBe('ann@acme.io');
+    expect(hist.request.params.get('phone')).toBe('0400');
+    hist.flush({ emails: [{ id: 2, direction: 'received', subject: 'Re: A quick idea', status: 'received', at: '2026-11-05T10:00:00Z', preview: 'Sounds good' }, { id: 1, direction: 'sent', subject: 'A quick idea', status: 'sent', at: '2026-11-05T09:00:00Z', preview: 'Hi Ann' }],
+      calls: [{ id: 9, startedAt: '2026-11-05T11:00:00Z', answered: true, durationSeconds: 75, callerName: 'Sam', campaignId: 7, transcribed: true, transcriptStatus: 'done', conversation: [{ speaker: 'agent', text: 'Hi Ann' }, { speaker: 'customer', text: 'Hello' }] },
+        { id: 8, startedAt: '2026-11-04T11:00:00Z', answered: true, durationSeconds: 30, transcribed: false, conversation: [] }] });
+    fixture.detectChanges();
+    const hv = pop().querySelector('.cm-history') as HTMLElement;
+    expect(pop().querySelector('.cm-tabs')).withContext('the list is hidden while history is open').toBeNull();
+    expect(hv.textContent).toContain('↙ Received');
+    expect(hv.textContent).toContain('Re: A quick idea');
+    expect(hv.textContent).toContain('📞 1:15');
+    expect(hv.textContent).toContain('Sam: Hi Ann');
+    expect(hv.textContent).toContain('Ann Lee: Hello');
+    expect(hv.textContent).toContain('Not transcribed');
+    (Array.from(hv.querySelectorAll('button')).find(b => b.textContent!.includes('Back')) as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect(pop().querySelector('.cm-tabs')).toBeTruthy();
     (Array.from(pop().querySelectorAll('.cm-pop-foot button')).find(b => b.textContent!.includes('Next')) as HTMLButtonElement).click();
     req = http.expectOne(r => r.url.endsWith('/mail/campaigns/7/recipients'));
     expect(req.request.params.get('page')).toBe('2');

@@ -268,7 +268,9 @@ test('import: product link, the reviewed details are saved on the lead, safe re-
   const [a, b, c] = r.data.results.map(x => x.placeId);
   // Business 801 is imported with the details the user reviewed; 802 by an older client without them.
   const shown = r.data.results[0];
-  const details = [{ placeId: a, name: shown.name, category: shown.category, address: shown.address, phone: shown.phone, website: shown.website, googleMapsUri: shown.googleMapsUri, rating: 4.2, ratingCount: 31 },
+  assert.equal(shown.countryCode, 'IN', 'each result carries the country of its Google address');
+  // A business whose Google address is in another country than the search keeps its own country.
+  const details = [{ placeId: a, name: shown.name, category: shown.category, address: shown.address, countryCode: 'AE', phone: shown.phone, website: shown.website, googleMapsUri: shown.googleMapsUri, rating: 4.2, ratingCount: 31 },
     { placeId: 'ChIJnotInThisRun12345', name: 'Injected', phone: '+1 555 0100' }];
   const imp = await api(A, 'POST', `/runs/${r.data.run.id}/import`, { placeIds: [a, b, c, 'ChIJnotInThisRun12345'], details });
   assert.equal(imp.status, 200, JSON.stringify(imp.data));
@@ -288,6 +290,7 @@ test('import: product link, the reviewed details are saved on the lead, safe re-
   for (const v of ['Category: Wholesaler', 'Address: 801 Market Road, Kochi, Kerala 682001, India', 'Website: https://business801.in/', 'Google rating: 4.2 (31 reviews)', 'Google Maps: https://maps.google.com/?cid=1801']) assert.ok(full.notes.includes(v), v);
   const bare = leads.find(l => l.place_id === b);
   assert.deepEqual([bare.email, bare.phone, bare.company_name], [null, null, null], 'without details nothing is invented');
+  assert.deepEqual([full.country, bare.country], ['United Arab Emirates', 'India'], 'the address country from Google; otherwise the search country');
   assert.match(bare.name, /^Prospect \d+: Wholesale distributors .* \(Kochi, Kerala, India\)$/);
   assert.ok(!JSON.stringify(await db().all('SELECT name FROM leads WHERE workspace_id = ?', [A.workspaceId])).includes('Injected'), 'details for places outside the search are ignored');
   const again = await api(A, 'POST', `/runs/${r.data.run.id}/import`, { placeIds: [a] });

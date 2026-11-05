@@ -2,6 +2,7 @@ import { Component, EventEmitter, Input, OnDestroy, OnInit, Output } from '@angu
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { OutreachApiService } from './outreach-api.service';
+import { CountryFilterComponent, LeadCountry } from '../../shared/leads/country-filter.component';
 
 type View = 'list' | 'new' | 'detail';
 type Tab = 'sequence' | 'audience' | 'launch' | 'results';
@@ -18,7 +19,7 @@ const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 @Component({
   selector: 'app-outreach',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, CountryFilterComponent],
   templateUrl: './outreach.component.html',
   styleUrls: ['./outreach.component.css']
 })
@@ -51,7 +52,8 @@ export class OutreachComponent implements OnInit, OnDestroy {
 
   form = this.blankForm();
 
-  audienceFilter = { statuses: [] as string[], productId: null as number | null, minScore: null as number | null };
+  audienceFilter = { statuses: [] as string[], productId: null as number | null, minScore: null as number | null, country: '' };
+  leadCountries: LeadCountry[] = [];
   audience: any[] = [];
   audienceSelected = new Set<number>();
   audienceLoaded = false;
@@ -67,7 +69,7 @@ export class OutreachComponent implements OnInit, OnDestroy {
     this.loadAll();
     if (this.initialCampaignId) this.openCampaign(this.initialCampaignId, 'sequence');
     this.api.products().subscribe({ next: r => this.products = r.products || [], error: () => this.products = [] });
-    this.api.leadStatuses().subscribe({ next: r => this.leadStatuses = r.statuses || [], error: () => this.leadStatuses = [] });
+    this.api.leadStatuses().subscribe({ next: r => { this.leadStatuses = r.statuses || []; this.leadCountries = r.countries || []; }, error: () => this.leadStatuses = [] });
   }
 
   ngOnDestroy(): void {
@@ -239,6 +241,7 @@ export class OutreachComponent implements OnInit, OnDestroy {
     if (this.audienceFilter.statuses.length) f.statuses = this.audienceFilter.statuses;
     if (this.audienceFilter.productId) f.productId = this.audienceFilter.productId;
     if (this.audienceFilter.minScore !== null && this.audienceFilter.minScore !== undefined && String(this.audienceFilter.minScore) !== '') f.minScore = Number(this.audienceFilter.minScore);
+    if (this.audienceFilter.country) f.country = this.audienceFilter.country;
     this.busy = 'audience';
     this.api.previewAudience(f).subscribe({
       next: r => {

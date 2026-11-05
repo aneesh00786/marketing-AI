@@ -647,6 +647,8 @@ const importSchema = z.object({
     name: detailText(255),
     category: detailText(120),
     address: detailText(500),
+    // The country of the business's address on Google (ISO code), saved as the lead's country.
+    countryCode: z.string().trim().regex(/^[A-Za-z]{2}$/).nullable().optional().catch(null),
     phone: detailText(50),
     website: z.string().trim().max(500).url().refine(u => /^https?:\/\//i.test(u)).nullable().optional(),
     googleMapsUri: z.string().trim().max(500).url().refine(u => /^https:\/\//i.test(u)).nullable().optional(),
@@ -721,9 +723,9 @@ async function importSelected(ctx, runIdRaw, input) {
       };
       const { score, category } = leadService.scoreLead(lead);
       const ins = await tx.run(
-        `INSERT INTO leads (workspace_id, name, email, phone, company_name, estimated_budget, notes, status, product_id, product_interest, product_review_note, ai_score, ai_category, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, NULL, ?, 'Imported', ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
-        [workspaceId, lead.name, lead.email, lead.phone, lead.company_name, lead.notes, product.id, lead.product_interest, null, score, category]
+        `INSERT INTO leads (workspace_id, name, email, phone, company_name, country, estimated_budget, notes, status, product_id, product_interest, product_review_note, ai_score, ai_category, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, NULL, ?, 'Imported', ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+        [workspaceId, lead.name, lead.email, lead.phone, lead.company_name, places.countryName(d?.countryCode) || places.countryName(r.country_code), lead.notes, product.id, lead.product_interest, null, score, category]
       );
       await tx.run('INSERT INTO lead_place_refs (workspace_id, lead_id, place_id, run_id, created_at) VALUES (?, ?, ?, ?, UTC_TIMESTAMP())', [workspaceId, ins.lastID, placeId, runId]);
       await tx.run('UPDATE lead_discovery_places SET imported_lead_id = ? WHERE id = ?', [ins.lastID, p.id]);

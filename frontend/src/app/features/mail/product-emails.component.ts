@@ -6,6 +6,7 @@ import { apiRoot } from '../../core/api-base';
 import { AuthStateService } from '../../core/auth-state.service';
 import { TemplatePickerComponent } from './template-picker.component';
 import { EmailPreviewComponent } from './email-preview.component';
+import { CountryFilterComponent, LeadCountry } from '../../shared/leads/country-filter.component';
 
 /**
  * Mail Center → Product emails: Product → Leads → personalized emails → preview → send.
@@ -17,7 +18,7 @@ import { EmailPreviewComponent } from './email-preview.component';
 @Component({
   selector: 'app-product-emails',
   standalone: true,
-  imports: [CommonModule, FormsModule, EmailPreviewComponent, TemplatePickerComponent],
+  imports: [CommonModule, FormsModule, EmailPreviewComponent, TemplatePickerComponent, CountryFilterComponent],
   templateUrl: './product-emails.component.html',
   styleUrls: ['../command/command-center.component.css', './mail-ui.css', './product-emails.component.css']
 })
@@ -36,6 +37,8 @@ export class ProductEmailsComponent implements OnInit, OnDestroy {
   q = '';
   status = '';
   eligibility = '';
+  country = '';
+  countries: LeadCountry[] = [];
   productLeadsOnly = false;
   eligibleIds: number[] = [];
   maxBatch = 100;
@@ -100,9 +103,11 @@ export class ProductEmailsComponent implements OnInit, OnDestroy {
     if (this.q.trim()) params.q = this.q.trim();
     if (this.status) params.status = this.status;
     if (this.eligibility) params.eligibility = this.eligibility;
+    if (this.country) params.country = this.country;
     if (this.productLeadsOnly) params.productLeadsOnly = '1';
     this.http.get<any>(`${this.base}/recipients`, { params }).subscribe({
       next: r => {
+        if (r.countries) this.countries = r.countries;
         this.product = r.product; this.leads = r.leads; this.total = r.total; this.eligibleIds = r.eligibleIds; this.maxBatch = r.maxBatch; this.error = '';
         // A selection that is no longer eligible under the current filter results is kept only if still eligible.
         for (const id of [...this.selected]) if (!r.eligibleIds.includes(id) && !r.leads.some((l: any) => l.id === id && l.eligible)) this.selected.delete(id);

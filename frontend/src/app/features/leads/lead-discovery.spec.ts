@@ -229,13 +229,13 @@ describe('LeadDiscoveryComponent: search form', () => {
 
     it('importing sends the details shown for each selected business, so they are saved on the leads', () => {
       withResults();
-      comp.data.results[0].address = '1 Market Rd'; comp.data.results[0].website = 'https://alpha.in/'; comp.data.results[0].googleMapsUri = 'https://maps.google.com/?cid=1';
+      comp.data.results[0].address = '1 Market Rd'; comp.data.results[0].website = 'https://alpha.in/'; comp.data.results[0].googleMapsUri = 'https://maps.google.com/?cid=1'; comp.data.results[0].countryCode = 'IN';
       comp.clearSelection();
       comp.selected.add('a');
       comp.importSelected();
       const req = http.expectOne(r => r.url.endsWith('/runs/1/import'));
       expect(req.request.body.placeIds).toEqual(['a']);
-      expect(req.request.body.details).toEqual([{ placeId: 'a', name: 'Alpha', category: 'Wholesaler', address: '1 Market Rd', phone: '1', website: 'https://alpha.in/', googleMapsUri: 'https://maps.google.com/?cid=1', rating: 4.6, ratingCount: 10 }]);
+      expect(req.request.body.details).toEqual([{ placeId: 'a', name: 'Alpha', category: 'Wholesaler', address: '1 Market Rd', countryCode: 'IN', phone: '1', website: 'https://alpha.in/', googleMapsUri: 'https://maps.google.com/?cid=1', rating: 4.6, ratingCount: 10 }]);
       req.flush({ created: [{ placeId: 'a', leadId: 9 }], duplicates: [], skipped: [], failed: [] });
     });
 

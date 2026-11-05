@@ -51,10 +51,12 @@ function conversation(r) {
   return [...side('agent', 'agent_segments'), ...side('customer', 'customer_segments')].sort((a, b) => a.start - b.start);
 }
 
-async function createLog(ctx, { phone, name, contactId, transcribe }) {
+async function createLog(ctx, { phone, name, contactId, transcribe, campaignId = null, email = null }) {
   const ins = await run(
-    `INSERT INTO crm_call_logs (user_id, contact_id, phone, name, transcribe, transcript_status, started_at) VALUES (?, ?, ?, ?, ?, 'none', UTC_TIMESTAMP())`,
-    [ctx.auth.userId, contactId ?? null, phone, name ? String(name).slice(0, 255) : null, transcribe ? 1 : 0]
+    `INSERT INTO crm_call_logs (user_id, contact_id, phone, name, transcribe, transcript_status, campaign_id, email, started_at)
+     VALUES (?, ?, ?, ?, ?, 'none', ?, ?, UTC_TIMESTAMP())`,
+    [ctx.auth.userId, contactId ?? null, phone, name ? String(name).slice(0, 255) : null, transcribe ? 1 : 0,
+      campaignId || null, email ? String(email).trim().toLowerCase().slice(0, 255) : null]
   );
   return ins.lastID;
 }
@@ -155,4 +157,4 @@ async function removeTranscript(ctx, rawId) {
   return getCall(ctx, row.id);
 }
 
-module.exports = { createLog, endLog, addTrack, listCalls, getCall, removeTranscript, TRACKS };
+module.exports = { createLog, endLog, addTrack, listCalls, getCall, removeTranscript, present, conversation, SELECT, TRACKS };

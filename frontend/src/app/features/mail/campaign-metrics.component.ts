@@ -191,7 +191,7 @@ export class CampaignMetricsComponent implements OnChanges {
     this.loadRecipients(1);
   }
 
-  closeRecipients(): void { this.showRecipients = false; this.seq++; }
+  closeRecipients(): void { this.showRecipients = false; this.history = null; this.seq++; }
 
   @HostListener('document:keydown.escape') onEscape(): void { if (this.showRecipients) this.closeRecipients(); }
 
@@ -234,6 +234,36 @@ export class CampaignMetricsComponent implements OnChanges {
         this.error = e?.status === 403 ? 'Your role cannot see recipient activity.' : (e?.error?.error || 'Recipient activity could not be loaded from Zoho.');
       }
     });
+  }
+
+  // ---------- Follow up → History ----------
+  history: { r: any; loading: boolean; error: string; emails: any[]; calls: any[] } | null = null;
+
+  openHistory(r: any): void {
+    this.history = { r, loading: true, error: '', emails: [], calls: [] };
+    this.loadHistory();
+  }
+
+  loadHistory(): void {
+    const h = this.history;
+    if (!h || !this.campaignId) return;
+    h.loading = true; h.error = '';
+    this.api.getRecipientHistory(this.campaignId, h.r.email, h.r.phone).subscribe({
+      next: (res: any) => { if (this.history !== h) return; h.loading = false; h.emails = res.emails || []; h.calls = res.calls || []; },
+      error: (e: any) => { if (this.history !== h) return; h.loading = false; h.error = e?.error?.error || 'The history could not be loaded.'; }
+    });
+  }
+
+  duration(sec: number | null): string {
+    const n = Math.max(0, Number(sec) || 0);
+    return `${Math.floor(n / 60)}:${String(n % 60).padStart(2, '0')}`;
+  }
+
+  /** Why a call has no text. */
+  transcriptNote(c: any): string {
+    if (!c.answered) return 'Not answered.';
+    if (!c.transcribed) return 'Not transcribed ("Transcribe this call" was not ticked).';
+    return { pending: 'The transcript is being prepared…', failed: 'The transcript could not be made.' }[c.transcriptStatus as string] || 'No speech was recognised.';
   }
 
   /** Follow up one recipient by email: Compose opens with them and a subject filled in (nothing is sent yet). */

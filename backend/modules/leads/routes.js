@@ -31,6 +31,7 @@ const leadFields = {
   email: z.string().max(255).nullable().optional(),
   phone: str(50),
   companyName: str(255),
+  country: str(100),
   company_name: str(255),
   estimatedBudget: str(100),
   estimated_budget: str(100),
@@ -59,7 +60,7 @@ router.get('/', requireCapability('leads.view'), wrap(async (req, res) => {
 router.get('/export', requireCapability('leads.view'), wrap(async (req, res) => {
   const result = await leadService.exportLeads(ws(req), req.query);
   await audit(req, 'leads.exported', { resourceType: 'lead', metadata: { count: result.leads.length, truncated: result.truncated,
-    filters: { productId: req.query.productId || null, status: req.query.status || null, q: req.query.q ? String(req.query.q).slice(0, 100) : null } } });
+    filters: { productId: req.query.productId || null, status: req.query.status || null, country: req.query.country ? String(req.query.country).slice(0, 100) : null, q: req.query.q ? String(req.query.q).slice(0, 100) : null } } });
   res.json({ success: true, ...result });
 }));
 

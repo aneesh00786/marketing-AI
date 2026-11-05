@@ -432,6 +432,11 @@ export class ApiService {
     return this.http.get(`${this.baseUrl}/mail/tracking/drafts/${draftId}`);
   }
 
+  /** Follow up → History: emails both ways and calls with one recipient of a campaign. */
+  getRecipientHistory(campaignId: number, email: string, phone?: string | null): Observable<any> {
+    return this.http.get(`${this.baseUrl}/mail/campaigns/${campaignId}/recipient-history`, { params: { email, ...(phone ? { phone } : {}) } });
+  }
+
   getCampaignRecipients(campaignId: number, activity: string, page = 1): Observable<any> {
     return this.http.get(`${this.baseUrl}/mail/campaigns/${campaignId}/recipients`, { params: { activity, page: String(page) } });
   }

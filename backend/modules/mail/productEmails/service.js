@@ -85,6 +85,7 @@ async function withEligibility(workspaceId, leads, { requireConsent = true } = {
       name: l.name,
       email: email || null,
       company: l.company_name || null,
+      country: l.country || null,
       status: l.status,
       productId: l.product_id || null,
       productInterest: l.product_interest || null,
@@ -99,7 +100,7 @@ async function withEligibility(workspaceId, leads, { requireConsent = true } = {
   });
 }
 
-const LEAD_COLUMNS = 'id, name, email, company_name, status, product_id, product_interest, marketing_consent, marketing_consent_source, marketing_consent_method, marketing_consent_obtained_at, marketing_consent_evidence';
+const LEAD_COLUMNS = 'id, name, email, company_name, country, status, product_id, product_interest, marketing_consent, marketing_consent_source, marketing_consent_method, marketing_consent_obtained_at, marketing_consent_evidence';
 
 /**
  * Leads of the workspace for the recipient picker: searchable and filterable, each with its
@@ -115,6 +116,8 @@ async function listRecipients(ctx, query = {}, { maxSelect = maxBatch(), maxPage
     params.push(like, like, like);
   }
   if (query.status) { where.push('status = ?'); params.push(String(query.status).slice(0, 50)); }
+  if (query.country === 'none') where.push("(country IS NULL OR country = '')");
+  else if (query.country) { where.push('country = ?'); params.push(String(query.country).slice(0, 100)); }
   let product = null;
   if (query.productId) {
     product = await resolveSelectedProduct(ws(ctx), query.productId);
@@ -137,7 +140,8 @@ async function listRecipients(ctx, query = {}, { maxSelect = maxBatch(), maxPage
     // Distinct addresses only; capped at the batch size (or the caller's own limit).
     eligibleIds: dedupeByEmail(leads.filter(l => l.eligible)).slice(0, maxSelect).map(l => l.id),
     eligibleCount: leads.filter(l => l.eligible).length,
-    maxBatch: maxBatch()
+    maxBatch: maxBatch(),
+    countries: await require('../../leads/leadService').leadCountries(ws(ctx))
   };
 }
 

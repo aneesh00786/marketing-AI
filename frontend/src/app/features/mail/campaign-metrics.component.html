@@ -117,6 +117,46 @@
       </div>
       <button type="button" class="cm-x" aria-label="Close" (click)="closeRecipients()">✕</button>
     </header>
+    <!-- Follow up → History: every email and call with one person -->
+    <div class="cm-history" *ngIf="history as hs">
+      <div class="cm-hist-head">
+        <button type="button" class="btn btn-secondary btn-sm" (click)="history = null">← Back to the list</button>
+        <div class="cm-hist-who"><b>{{ hs.r.name || hs.r.email }}</b><small>{{ hs.r.email }}{{ hs.r.phone ? ' · ' + hs.r.phone : '' }}{{ hs.r.company ? ' · ' + hs.r.company : '' }}</small></div>
+        <span class="cm-follow">
+          <button type="button" class="cm-act" (click)="emailRecipient(hs.r)" [attr.aria-label]="'Email ' + (hs.r.name || hs.r.email)" title="Email">✉</button>
+          <app-call-button [phone]="hs.r.phone" [name]="hs.r.name || hs.r.company || hs.r.email" [campaignId]="campaignId" [email]="hs.r.email"></app-call-button>
+          <button type="button" class="btn btn-secondary btn-sm" (click)="loadHistory()" [disabled]="hs.loading">↻ Refresh</button>
+        </span>
+      </div>
+      <p class="cm-muted" *ngIf="hs.loading">Loading emails and calls…</p>
+      <div class="note error" *ngIf="hs.error" role="alert">{{ hs.error }}</div>
+      <div class="cm-hist-cols" *ngIf="!hs.loading && !hs.error">
+        <section class="cm-hist-col" aria-label="Emails">
+          <h4>Emails <span class="cm-pop-count">{{ hs.emails.length }}</span></h4>
+          <p class="cm-muted" *ngIf="!hs.emails.length">No emails sent to or received from {{ hs.r.email }} yet.</p>
+          <details class="cm-hist-item" *ngFor="let e of hs.emails">
+            <summary><span class="cm-dir" [class.in]="e.direction === 'received'">{{ e.direction === 'received' ? '↙ Received' : '↗ Sent' }}</span>
+              <b>{{ e.subject }}</b><small>{{ e.at | date:'d MMM y, h:mm a' }}{{ e.status ? ' · ' + e.status : '' }}</small></summary>
+            <p class="cm-hist-text">{{ e.preview || '(no text)' }}</p>
+          </details>
+        </section>
+        <section class="cm-hist-col" aria-label="Calls">
+          <h4>Calls <span class="cm-pop-count">{{ hs.calls.length }}</span></h4>
+          <p class="cm-muted" *ngIf="!hs.calls.length">No follow-up calls yet{{ hs.r.phone ? "" : " (no phone number known)" }}.</p>
+          <details class="cm-hist-item" *ngFor="let c of hs.calls" [open]="c.conversation?.length && c === hs.calls[0]">
+            <summary><span class="cm-dir" [class.missed]="!c.answered">{{ c.answered ? '📞 ' + duration(c.durationSeconds) : '📞 Not answered' }}</span>
+              <b>{{ c.startedAt | date:'d MMM y, h:mm a' }}</b><small>{{ c.callerName ? 'by ' + c.callerName : '' }}{{ c.campaignId === campaignId ? ' · from this campaign' : '' }}</small></summary>
+            <div class="cm-convo" *ngIf="c.conversation?.length; else noText">
+              <p *ngFor="let l of c.conversation" [class.them]="l.speaker !== 'agent'"><b>{{ l.speaker === 'agent' ? (c.callerName || 'You') : (hs.r.name || 'Customer') }}:</b> {{ l.text }}</p>
+            </div>
+            <ng-template #noText><p class="cm-muted cm-hist-text">{{ transcriptNote(c) }}</p></ng-template>
+          </details>
+        </section>
+      </div>
+      <p class="cm-note">Emails from Sent Mail and Inbox in this workspace; calls made with 📞 from this workspace's campaigns. Call text is kept only when "Transcribe this call" was ticked (tell the person first); audio is never stored.</p>
+    </div>
+
+    <ng-container *ngIf="!history">
     <div class="cm-tabs" role="tablist" aria-label="Recipient activity">
       <button type="button" role="tab" *ngFor="let a of popupActivities" [class.on]="activity === a.key" [attr.aria-selected]="activity === a.key" (click)="selectActivity(a.key)">
         {{ a.label }}<span *ngIf="activityCount(a.key) !== null"> {{ activityCount(a.key) | number }}</span>
@@ -129,15 +169,11 @@
     <p class="cm-muted" *ngIf="!loading && !error && !noList(activity) && !notSent && !recipients.length">No one in this group{{ page > 1 ? ' on this page' : '' }}.</p>
     <div class="cm-table" *ngIf="!loading && recipients.length">
       <table aria-label="Recipients">
-        <thead><tr><th>#</th><th>Contact</th><th>Follow up</th><th>Business</th><th>Email</th><th>Phone</th><th>Location</th><th>Opens</th><th>Last opened</th><th>Clicks</th><th>Lead status</th></tr></thead>
+        <thead><tr><th>#</th><th>Contact</th><th>Business</th><th>Email</th><th>Phone</th><th>Location</th><th>Opens</th><th>Last opened</th><th>Clicks</th><th>Lead status</th><th>Follow up</th></tr></thead>
         <tbody>
           <tr *ngFor="let r of recipients; let i = index">
             <td class="cm-n">{{ (page - 1) * pageSize + i + 1 }}</td>
             <td>{{ r.name || r.contactName || '—' }}</td>
-            <td class="cm-nw cm-follow">
-              <button type="button" class="cm-act" (click)="emailRecipient(r)" [title]="'Email ' + (r.name || r.email)" [attr.aria-label]="'Email ' + (r.name || r.email)">✉</button>
-              <app-call-button [phone]="r.phone" [name]="r.name || r.company || r.email"></app-call-button>
-            </td>
             <td>{{ r.company || '—' }}</td>
             <td class="cm-email">{{ r.email }}</td>
             <td class="cm-nw">{{ r.phone || '—' }}</td>
@@ -146,6 +182,11 @@
             <td class="cm-nw">{{ r.lastOpenedAt || '—' }}</td>
             <td class="cm-n">{{ r.clicks ?? '—' }}</td>
             <td><span class="cm-status" *ngIf="r.leadStatus; else noLead">{{ r.leadStatus }}</span><ng-template #noLead><small class="cm-muted">Not in Leads</small></ng-template></td>
+            <td class="cm-nw cm-follow">
+              <button type="button" class="cm-act" (click)="emailRecipient(r)" [title]="'Email ' + (r.name || r.email)" [attr.aria-label]="'Email ' + (r.name || r.email)">✉</button>
+              <app-call-button [phone]="r.phone" [name]="r.name || r.company || r.email" [campaignId]="campaignId" [email]="r.email"></app-call-button>
+              <button type="button" class="cm-act" (click)="openHistory(r)" [title]="'History with ' + (r.name || r.email)" [attr.aria-label]="'Emails and calls with ' + (r.name || r.email)">🕘</button>
+            </td>
           </tr>
         </tbody>
       </table>
@@ -159,6 +200,7 @@
         <button type="button" class="btn btn-secondary btn-sm" (click)="loadRecipients(page + 1)" [disabled]="!hasMore || loading">Next →</button>
       </ng-container>
     </footer>
-    <p class="cm-note">Read from Zoho when you open this list; not stored in Marketech.ai. Business, phone and lead status come from your Leads when the email matches. Follow up with ✉ (opens Compose) or 📞 (calls through your phone line; shown when a number is known).</p>
+    <p class="cm-note">Read from Zoho when you open this list; not stored in Marketech.ai. Business, phone and lead status come from your Leads when the email matches. Follow up with ✉ (opens Compose), 📞 (calls through your phone line; shown when a number is known) and 🕘 (every email and call with that person).</p>
+    </ng-container>
   </div>
 </div>

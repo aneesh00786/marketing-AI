@@ -53,6 +53,8 @@ router.get('/zoho-lists', requireCapability('mail.send'), wrap(async (req, res) 
 // The Zoho plan's contact limit (Zoho's API does not report it): set by those who configure mail.
 // Contact lists kept in Marketech.ai (Zoho gets a list only when a campaign is sent to it).
 const mailLists = require('../contacts/listService');
+// Follow up → History: emails and calls with one recipient of this campaign.
+router.get('/:id/recipient-history', requireCapability('mail.send'), wrap(async (req, res) => res.json({ success: true, ...(await svc.recipientHistory(req, req.params.id, req.query)) })));
 router.get('/contact-lists', requireCapability('mail.send'), wrap(async (req, res) => res.json({ success: true, ...(await mailLists.lists(req)) })));
 router.post('/contact-lists', requireCapability('mail.send', 'leads.view'), listsLimit, wrap(async (req, res) => res.json({ success: true, ...(await mailLists.create(req, req.body)) })));
 router.get('/contact-lists/:id/contacts', requireCapability('mail.send'), wrap(async (req, res) => res.json({ success: true, ...(await mailLists.listContacts(req, req.params.id, req.query)) })));

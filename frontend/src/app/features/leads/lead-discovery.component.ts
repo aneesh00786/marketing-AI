@@ -516,7 +516,7 @@ export class LeadDiscoveryComponent implements OnInit, OnDestroy {
     const ids = [...this.selected];
     const byId = new Map<string, any>((this.data.results || []).map((x: any) => [x.placeId, x]));
     const details = ids.map(id => byId.get(id)).filter(Boolean).map((x: any) => ({
-      placeId: x.placeId, name: x.name || null, category: x.category || null, address: x.address || null, phone: x.phone || null,
+      placeId: x.placeId, name: x.name || null, category: x.category || null, address: x.address || null, countryCode: x.countryCode || null, phone: x.phone || null,
       website: x.website || null, googleMapsUri: x.googleMapsUri || null, rating: x.rating ?? null, ratingCount: x.ratingCount ?? null
     }));
     this.http.post<any>(`${this.base}/runs/${this.data.run.id}/import`, { placeIds: ids, details }).subscribe({

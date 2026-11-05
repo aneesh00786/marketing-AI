@@ -32,6 +32,7 @@
             <option value="eligible">Can be emailed</option>
             <option value="all">All leads</option>
           </select>
+          <app-country-filter [countries]="countries" [(value)]="country" (valueChange)="search()"></app-country-filter>
           <button type="button" class="btn btn-secondary btn-sm" (click)="search()">Search</button>
           <button type="button" class="btn btn-secondary btn-sm" (click)="selectAllShown()" [disabled]="!eligibleCount">Select all shown</button>
           <button type="button" class="btn btn-secondary btn-sm" *ngIf="picked.size" (click)="clear()">Clear</button>
@@ -47,7 +48,7 @@
         <div class="ltz-list" *ngIf="!loading && leads.length">
           <label class="ltz-lead" *ngFor="let l of leads" [class.off]="!l.eligible">
             <input type="checkbox" [disabled]="!l.eligible" [checked]="picked.has(l.id)" (change)="toggle(l)" />
-            <span><b>{{ l.name }}</b><small>{{ l.email || 'no email' }}{{ l.company && l.company !== l.name ? ' · ' + l.company : '' }}</small>
+            <span><b>{{ l.name }}</b><small>{{ l.email || 'no email' }}{{ l.company && l.company !== l.name ? ' · ' + l.company : '' }}{{ l.country ? ' · ' + l.country : '' }}</small>
               <small class="ltz-why" *ngIf="!l.eligible">{{ l.reasons?.[0] }}</small></span>
           </label>
         </div>

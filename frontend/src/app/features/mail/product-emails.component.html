@@ -51,16 +51,18 @@
           <option value="eligible">Eligible only</option>
           <option value="ineligible">Not eligible only</option>
         </select>
+        <app-country-filter [countries]="countries" [(value)]="country" (valueChange)="page = 1; loadRecipients()"></app-country-filter>
         <label class="check"><input type="checkbox" [(ngModel)]="productLeadsOnly" (ngModelChange)="page = 1; loadRecipients()" /> Only leads for this product</label>
       </div>
       <div class="table-wrap">
         <table class="tbl">
-          <thead><tr><th></th><th>Lead</th><th>Company</th><th>Status</th><th>Eligibility</th></tr></thead>
+          <thead><tr><th></th><th>Lead</th><th>Company</th><th>Country</th><th>Status</th><th>Eligibility</th></tr></thead>
           <tbody>
             <tr *ngFor="let l of leads" [class.dim]="!l.eligible">
               <td><input type="checkbox" [checked]="selected.has(l.id)" [disabled]="!l.eligible" (change)="toggle(l)" [attr.aria-label]="'Select ' + l.name" /></td>
               <td><b>{{ l.name }}</b><div class="muted small">{{ l.email || 'no email' }}</div></td>
               <td>{{ l.company || '—' }}</td>
+              <td>{{ l.country || '—' }}</td>
               <td>{{ l.status }}</td>
               <td>
                 <span class="tag ok" *ngIf="l.eligible">Eligible</span>

@@ -27,6 +27,9 @@ export class CallButtonComponent {
   @Input() name: string | null | undefined = '';
   /** The CRM contact, so the call shows on their page. */
   @Input() contactId: number | null | undefined = null;
+  /** A follow-up from a campaign's results (keeps the call with that campaign and person). */
+  @Input() campaignId: number | null | undefined = null;
+  @Input() email: string | null | undefined = null;
 
   constructor(private calls: CallService) {}
 
@@ -36,6 +39,7 @@ export class CallButtonComponent {
 
   open(ev: Event): void {
     ev.stopPropagation();
-    this.calls.prepare(String(this.phone), this.name || '', this.contactId ?? null);
+    this.calls.prepare(String(this.phone), this.name || '', this.contactId ?? null,
+      this.campaignId && this.email ? { campaignId: this.campaignId, email: this.email } : null);
   }
 }

@@ -270,7 +270,9 @@ const audienceSchema = z.object({
   filter: z.object({
     statuses: z.array(z.string().max(50)).max(20).optional(),
     productId: z.union([z.number(), z.string(), z.null()]).optional(),
-    minScore: z.number().int().min(0).max(100).optional()
+    minScore: z.number().int().min(0).max(100).optional(),
+    // A country name, or 'none' for leads without one.
+    country: z.string().trim().max(100).optional()
   }).strict().optional()
 }).strict();
 
@@ -284,7 +286,7 @@ async function resolveAudience(ctx, input) {
   let leads;
   if (v.leadIds && v.leadIds.length) {
     const ids = [...new Set(v.leadIds)];
-    leads = await all(`SELECT id, name, email, company_name, status, ai_score, product_id FROM leads WHERE workspace_id = ? AND id IN (${ids.map(() => '?').join(',')})`, [ws(ctx), ...ids]);
+    leads = await all(`SELECT id, name, email, company_name, country, status, ai_score, product_id FROM leads WHERE workspace_id = ? AND id IN (${ids.map(() => '?').join(',')})`, [ws(ctx), ...ids]);
     if (leads.length !== ids.length) throw httpError('One or more selected leads were not found in this workspace.', 404, 'NOT_FOUND');
   } else if (v.filter) {
     const where = ['workspace_id = ?'];
@@ -292,7 +294,9 @@ async function resolveAudience(ctx, input) {
     if (v.filter.statuses && v.filter.statuses.length) { where.push(`status IN (${v.filter.statuses.map(() => '?').join(',')})`); params.push(...v.filter.statuses); }
     if (v.filter.productId) { const p = await resolveSelectedProduct(ws(ctx), v.filter.productId); where.push('product_id = ?'); params.push(p.id); }
     if (v.filter.minScore !== undefined) { where.push('ai_score >= ?'); params.push(v.filter.minScore); }
-    leads = await all(`SELECT id, name, email, company_name, status, ai_score, product_id FROM leads WHERE ${where.join(' AND ')} ORDER BY id DESC LIMIT ${MAX_RECIPIENTS}`, params);
+    if (v.filter.country === 'none') where.push("(country IS NULL OR country = '')");
+    else if (v.filter.country) { where.push('country = ?'); params.push(v.filter.country); }
+    leads = await all(`SELECT id, name, email, company_name, country, status, ai_score, product_id FROM leads WHERE ${where.join(' AND ')} ORDER BY id DESC LIMIT ${MAX_RECIPIENTS}`, params);
   } else {
     throw httpError('Choose leads or a filter.', 400, 'VALIDATION_ERROR');
   }
@@ -303,7 +307,7 @@ async function resolveAudience(ctx, input) {
     if (!email) reason = 'no email address';
     else if (!emailService.isValidRecipient(email)) reason = 'invalid or placeholder email address';
     else if (suppressed.has(email.toLowerCase())) reason = 'unsubscribed or bounced earlier';
-    return { leadId: l.id, name: l.name, email, company: l.company_name, status: l.status, score: l.ai_score, eligible: !reason, reason };
+    return { leadId: l.id, name: l.name, email, company: l.company_name, country: l.country || null, status: l.status, score: l.ai_score, eligible: !reason, reason };
   });
 }
 

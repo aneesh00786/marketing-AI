@@ -327,6 +327,7 @@ async function previewAudience(ctx, id, input = {}) {
     const scoring = leadService.scoreLead(lead);
     const score = lead.ai_score === null || lead.ai_score === undefined ? scoring.score : Number(lead.ai_score);
     if (filter.minScore !== undefined) reasons.push(`Lead score ${score} ≥ ${filter.minScore}`);
+    if (filter.country) reasons.push(filter.country === 'none' ? 'No country recorded' : `In ${filter.country}`);
     const top = scoring.factors.filter(f => f.label !== 'Base score' && f.points > 0).map(f => `${f.label} (+${f.points})`);
     if (top.length) reasons.push(`Score factors: ${top.join(', ')}`);
     return { ...a, score, category: scoring.category, reasons };

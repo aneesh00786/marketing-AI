@@ -2,6 +2,7 @@ import { Component, EventEmitter, OnInit, Output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { CommandApiService } from './command-api.service';
+import { CountryFilterComponent, LeadCountry } from '../../shared/leads/country-filter.component';
 import { OutreachComponent } from '../outreach/outreach.component';
 import { AbTestsComponent } from '../abtests/ab-tests.component';
 import { AutomationsComponent } from '../automation/automations.component';
@@ -23,7 +24,7 @@ const CHANNEL_LABELS: Record<string, string> = { email: 'Email', linkedin: 'Link
 @Component({
   selector: 'app-command-center',
   standalone: true,
-  imports: [CommonModule, FormsModule, OutreachComponent, AbTestsComponent, AutomationsComponent, CampaignAnalyticsComponent, BudgetComponent],
+  imports: [CommonModule, FormsModule, OutreachComponent, AbTestsComponent, AutomationsComponent, CampaignAnalyticsComponent, BudgetComponent, CountryFilterComponent],
   templateUrl: './command-center.component.html',
   styleUrls: ['./command-center.component.css']
 })
@@ -57,7 +58,8 @@ export class CommandCenterComponent implements OnInit {
   briefEdit: any = null;
   editingBrief = false;
 
-  audienceFilter = { statuses: [] as string[], minScore: null as number | null, anyProduct: false };
+  audienceFilter = { statuses: [] as string[], minScore: null as number | null, anyProduct: false, country: '' };
+  leadCountries: LeadCountry[] = [];
   audience: any[] = [];
   audienceSelected = new Set<number>();
   audienceLoaded = false;
@@ -69,7 +71,7 @@ export class CommandCenterComponent implements OnInit {
     this.loadPrograms();
     this.api.meta().subscribe({ next: r => this.kpiMetrics = r.kpiMetrics || {}, error: () => {} });
     this.api.products().subscribe({ next: r => this.products = r.products || [], error: () => this.products = [] });
-    this.api.leadStatuses().subscribe({ next: r => this.leadStatuses = r.statuses || [], error: () => this.leadStatuses = [] });
+    this.api.leadStatuses().subscribe({ next: r => { this.leadStatuses = r.statuses || []; this.leadCountries = r.countries || []; }, error: () => this.leadStatuses = [] });
   }
 
   private blankForm() {
@@ -234,6 +236,7 @@ export class CommandCenterComponent implements OnInit {
     if (this.audienceFilter.statuses.length) f.statuses = this.audienceFilter.statuses;
     if (this.audienceFilter.minScore !== null && String(this.audienceFilter.minScore) !== '') f.minScore = Number(this.audienceFilter.minScore);
     if (this.audienceFilter.anyProduct) f.productId = null;
+    if (this.audienceFilter.country) f.country = this.audienceFilter.country;
     return f;
   }
 
