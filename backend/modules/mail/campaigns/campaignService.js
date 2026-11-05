@@ -733,6 +733,14 @@ async function launchForReview(ctx, row, sendErr, { throwIfWaiting = false } = {
   if (row.zoho_campaign_id) {
     try {
       launched = await zoho.reviewAndLaunch(ws(ctx), row.zoho_campaign_id);
+      if (launched.unconfirmed) {
+        // Zoho said nothing back: what it did shows in the campaign's status (no longer a draft = handed over).
+        const d = await zoho.readCall(ws(ctx), 'getcampaigndetails', { campaignkey: row.zoho_campaign_key, campaigntype: 'normal' }).catch(() => null);
+        const st = d?.campaign_status || null;
+        if (process.env.ZOHO_LOG !== 'off') console.log(`[zoho] ${new Date().toISOString()} reviewandlaunch check campaignkey="${row.zoho_campaign_key}" status="${st || 'unknown'}"`);
+        if (st && norm(st) !== 'draft') launched = { status: st };
+        else { launched = null; reason = st ? 'Zoho accepted the request but the campaign is still a draft' : 'Zoho accepted the request; its status could not be read'; }
+      }
     } catch (err) {
       reason = String(err.message || '').slice(0, 200);
     }

@@ -1632,6 +1632,27 @@ test('"No lists selected" (newly uploaded contacts): Send hands the campaign to 
   assert.equal(acct.campaigns[r.zoho_campaign_key].status, 'ContentToBeReviewed');
 });
 
+test('review-and-launch with an empty reply: the campaign\'s status in Zoho decides', async () => {
+  const { ws, acct } = await freshConnected('Empty review reply');
+  const hold = () => h.json(200, { status: 'error', code: '6606', message: 'No lists selected for this campaign' });
+  // Zoho moves it to review but says nothing: handed over.
+  const c = (await capi(ws, 'POST', '', GOOD)).data.campaign;
+  await capi(ws, 'POST', `/${c.id}/approve`, {});
+  Z.sendResponder = hold;
+  Z.reviewResponder = id => { Object.values(acct.campaigns).find(x => x.id === id).status = 'Under Review'; return new Response(null, { status: 200 }); };
+  try { assert.equal((await capi(ws, 'POST', `/${c.id}/send`, { confirm: true })).status, 200); } finally { Z.sendResponder = null; Z.reviewResponder = null; }
+  assert.deepEqual([(await row(c.id)).status, (await row(c.id)).zoho_status], ['submitted', 'Under Review']);
+  // Says nothing and it stays a draft: still waiting, and told to send from Zoho.
+  const c2 = (await capi(ws, 'POST', '', { ...GOOD, name: 'Empty reply 2' })).data.campaign;
+  await capi(ws, 'POST', `/${c2.id}/approve`, {});
+  Z.sendResponder = hold;
+  Z.reviewResponder = () => new Response(null, { status: 200 });
+  try { assert.equal((await capi(ws, 'POST', `/${c2.id}/send`, { confirm: true })).status, 409); } finally { Z.sendResponder = null; Z.reviewResponder = null; }
+  const r2 = await row(c2.id);
+  assert.equal(r2.status, 'needs_review');
+  assert.match(r2.provider_message, /press Send.*still a draft/s);
+});
+
 test('"Content not reviewed" (Zoho reviews every campaign): Send hands it to Zoho\'s review, which sends it', async () => {
   const { ws, acct } = await freshConnected('Content review');
   const c = (await capi(ws, 'POST', '', GOOD)).data.campaign;

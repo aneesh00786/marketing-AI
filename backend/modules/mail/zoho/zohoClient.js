@@ -229,11 +229,14 @@ async function reviewAndLaunch(dc, accessToken, campaignId) {
   let data = null;
   try { data = text ? JSON.parse(text) : null; } catch { data = null; }
   logZoho('reviewandlaunch', { http: res.status, campaignId, status_code: data?.status_code, code: data?.code, message: data?.message || data?.error, status: data?.campaign_details?.status || data?.campaign_status,
+    redirected: res.redirected ? new URL(res.url).host : undefined,
     reply: text ? text.replace(/[\w.+-]+@[\w-]+(\.[\w-]+)+/g, '[email]').replace(/\s+/g, ' ') : '(empty)' });
   if (res.status === 401) throw zohoError('Zoho rejected the access token.', { status: 409, code: 'ZOHO_UNAUTHORIZED', providerCode: '401' });
   const status = String(data?.campaign_details?.status || data?.campaign_status || '');
   const norm = status.toLowerCase().replace(/[^a-z]/g, '');
   if (res.ok && data && (LAUNCHED_STATUSES.has(norm) || String(data.status_code) === '200')) return { status: status || 'ContentToBeReviewed', data };
+  // Accepted without saying what happened (e.g. an empty reply): the caller checks the campaign's status in Zoho.
+  if (res.ok && !res.redirected && (!data || (!data.code && !data.message && !data.error))) return { status: null, unconfirmed: true, data };
   const message = String(data?.message || data?.error || `HTTP ${res.status}`).slice(0, 300);
   throw zohoError(`Zoho: ${message}`, { status: 400, code: 'ZOHO_API_ERROR', providerCode: data?.code != null ? String(data.code) : String(res.status) });
 }
