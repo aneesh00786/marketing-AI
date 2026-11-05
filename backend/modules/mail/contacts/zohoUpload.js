@@ -102,6 +102,30 @@ async function uploadLists(row) {
   return temp.map(t => t.key);
 }
 
+/**
+ * Zoho adds contacts in the background, and may hold contacts that are new to it (review, or waiting
+ * for them to confirm by email). A campaign whose lists have nobody Zoho can email is refused by Zoho
+ * ("No lists selected"), so after the upload this waits until at least one uploaded list has
+ * contacts in Zoho, up to ZOHO_LIST_WAIT_MS. Lists whose count Zoho does not report are not waited for.
+ */
+async function waitForZohoContacts(workspaceId, keys) {
+  const limit = Math.max(0, Number(process.env.ZOHO_LIST_WAIT_MS ?? 60000));
+  const step = Math.min(5000, Math.max(250, limit / 6));
+  const started = Date.now();
+  for (;;) {
+    const byKey = new Map((await campaignContacts.fetchLists(workspaceId)).map(l => [l.key, l]));
+    const counts = keys.map(k => byKey.get(k)).filter(Boolean);
+    if (!counts.length || counts.some(l => l.contacts === null || l.contacts > 0)) return { ok: true };
+    if (Date.now() - started >= limit) return { ok: false, lists: counts.map(l => l.name).filter(Boolean) };
+    await new Promise(r => setTimeout(r, step));
+  }
+}
+
+const listsEmptyError = names => Object.assign(new Error(
+  `Zoho has not accepted any of the uploaded contacts yet (${names.length ? `Zoho list ${names.map(n => `"${n}"`).join(', ')}` : 'the uploaded list'} has 0 contacts), so nothing was sent. `
+  + 'Zoho may hold contacts that are new to it for review, or until they confirm by email. Check Zoho Campaigns → Contacts, then send again; what was uploaded is reused.'),
+{ status: 409, code: 'ZOHO_LISTS_EMPTY' });
+
 /** Worker job: upload, then deliver. Errors leave the campaign "not sent" with the reason. */
 async function runUploadJob(job) {
   const svc = require('../campaigns/campaignService');
@@ -112,6 +136,8 @@ async function runUploadJob(job) {
   let keys;
   try {
     keys = await uploadLists(row);
+    const ready = keys.length ? await waitForZohoContacts(row.workspace_id, keys) : { ok: false, lists: [] };
+    if (!ready.ok) throw keys.length ? listsEmptyError(ready.lists) : Object.assign(new Error('Nobody in the chosen lists can be emailed (all unsubscribed or bounced), so nothing was sent. Choose other lists (Recipients).'), { status: 400, code: 'NO_RECIPIENTS' });
   } catch (err) {
     await svc.failSubmission(ctx, row, 'upload', err).catch(() => null);
     return { failed: true, error: String(err.message).slice(0, 300) };
@@ -167,4 +193,4 @@ async function kickUpload(workspaceId, campaignId) {
   return true;
 }
 
-module.exports = { runUploadJob, cleanupTempLists, uploadLists, kickUpload };
+module.exports = { runUploadJob, cleanupTempLists, uploadLists, kickUpload, waitForZohoContacts };

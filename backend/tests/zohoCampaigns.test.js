@@ -17,6 +17,7 @@ process.env.APP_BASE_URL = 'https://app.marketech.test';
 // Connecting copies Zoho's lists right away; only the test about that copy lets it run.
 process.env.ZOHO_IMPORT_INLINE = '0';
 process.env.ZOHO_UPLOAD_INLINE = '0';
+process.env.ZOHO_LIST_WAIT_MS = '300';
 const DELIVERY_SCOPES = 'ZohoCampaigns.campaign.CREATE,ZohoCampaigns.campaign.READ,ZohoCampaigns.campaign.UPDATE,ZohoCampaigns.contact.READ';
 const ALL_SCOPES = `${DELIVERY_SCOPES},ZohoCampaigns.contact.CREATE`;
 // What the app asks for: contact.UPDATE is optional (names for personalization).
@@ -66,7 +67,11 @@ function fakeZoho() {
         const account = z.access[token];
         if (!account) return h.json(401, { status: 'error', code: '1007', message: 'Unauthorized key' });
         const acct = z.accounts[account];
-        if (endpoint === 'getmailinglists') return h.json(200, { status: 'success', code: '0', list_of_details: acct.lists });
+        if (endpoint === 'getmailinglists') {
+          // Like Zoho: a list made here counts the contacts added to it (unless a test holds them back).
+          const counted = acct.lists.map(l => (acct.added || {})[l.listkey] && !z.holdContacts ? { ...l, noofcontacts: String(acct.added[l.listkey].length) } : l);
+          return h.json(200, { status: 'success', code: '0', list_of_details: counted });
+        }
         if (endpoint === 'topics') return h.json(200, { code: '0', topicDetails: acct.topics });
         if (endpoint === 'getlistsubscribers') {
           const all = (acct.contacts || {})[params.listkey] || [];
@@ -1496,4 +1501,40 @@ test('import: bad consent details refuse the whole import; adding to a list need
   const r = await importLeads(member, { leads: [{ name: 'A', email: 'a@b.com.au' }], mailList: { name: 'X' } });
   assert.equal(r.status, 403);
   assert.equal(Number((await db().get('SELECT COUNT(*) AS n FROM leads WHERE workspace_id = ?', [ws.workspaceId])).n), before, 'refused before importing');
+});
+
+test('contacts Zoho holds back (new contacts under review or awaiting confirmation): nothing is sent, the reason is clear, Send again reuses the upload', async () => {
+  const { ws, acct } = await freshConnected('Held contacts');
+  const made = await capi(ws, 'POST', '/contact-lists', { name: 'New leads', emails: ['n1@new.io', 'n2@new.io'] });
+  const c = (await capi(ws, 'POST', '', { ...GOOD, lists: [], mailListIds: [made.data.list.id] })).data.campaign;
+  await capi(ws, 'POST', `/${c.id}/approve`, {});
+  await capi(ws, 'POST', `/${c.id}/send`, { confirm: true });
+  const job = async () => db().get("SELECT * FROM background_jobs WHERE workspace_id = ? AND job_type = 'zoho_campaign_upload' ORDER BY id DESC LIMIT 1", [ws.workspaceId]);
+  Z.holdContacts = true;
+  let r;
+  try { r = await require('../modules/mail/contacts/zohoUpload').runUploadJob(await job()); } finally { Z.holdContacts = false; }
+  assert.equal(r.failed, true, JSON.stringify(r));
+  const failed = await row(c.id);
+  assert.equal(failed.status, 'failed');
+  assert.equal(failed.provider_code, 'ZOHO_LISTS_EMPTY');
+  assert.match(failed.provider_message, /Zoho list "New leads" has 0 contacts.*nothing was sent.*confirm by email/s);
+  assert.equal(apiCalls('createCampaign').filter(x => x.params.campaignname && x.params.list_details.includes(JSON.parse(failed.temp_lists_json)[0].key)).length, 0, 'no empty campaign was created in Zoho');
+  // Once Zoho has them, Send again reuses the same Zoho list.
+  const listsBefore = acct.lists.length;
+  assert.equal((await capi(ws, 'POST', `/${c.id}/send`, { confirm: true })).status, 200);
+  r = await require('../modules/mail/contacts/zohoUpload').runUploadJob(await job());
+  assert.equal(r.delivered, true, JSON.stringify(r));
+  assert.equal(acct.lists.length, listsBefore, 'no second Zoho list');
+  assert.equal((await row(c.id)).status, 'submitted');
+});
+
+test('Zoho\'s "No lists selected" reply is explained in plain words', async () => {
+  const { ws } = await freshConnected('No lists reply');
+  const c = (await capi(ws, 'POST', '', GOOD)).data.campaign;
+  await capi(ws, 'POST', `/${c.id}/approve`, {});
+  Z.createResponder = () => h.json(200, { status: 'error', code: '2001', message: 'No lists selected for this campaign' });
+  try { await capi(ws, 'POST', `/${c.id}/send`, { confirm: true }); } finally { Z.createResponder = null; }
+  const failed = await row(c.id);
+  assert.equal(failed.status, 'failed');
+  assert.match(failed.provider_message, /^Zoho: the lists for this campaign have nobody Zoho can email yet, so nothing was sent\./);
 });

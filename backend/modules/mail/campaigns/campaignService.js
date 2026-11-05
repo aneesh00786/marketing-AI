@@ -488,6 +488,7 @@ async function deliver(ctx, row, extraKeys = []) {
     try {
       const contactList = await contactsSvc.syncForSend(ctx, row, { listKeys: keys.slice() });
       if (contactList) keys.push(contactList);
+      if (!keys.length) throw httpError(400, 'This campaign has no list with anyone to email, so nothing was sent. Choose a contact list (Recipients).', 'NO_RECIPIENTS');
     } catch (err) {
       return fail(ctx, row, 'sync', err);
     }
@@ -539,7 +540,12 @@ async function deliver(ctx, row, extraKeys = []) {
   try { return await refresh(ctx, row.id); } catch { return getOne(ctx, row.id); }
 }
 
+/** Zoho's reply when the campaign's lists have nobody it can email, said in plain words. */
+const NO_LISTS_RE = /no lists? (are |is )?selected/i;
+const NO_LISTS_HELP = 'Zoho: the lists for this campaign have nobody Zoho can email yet, so nothing was sent. Contacts new to Zoho may be held for review or until they confirm by email, or the people may be unsubscribed or bounced in Zoho. Check Zoho Campaigns → Contacts, then send again.';
+
 async function fail(ctx, row, stage, err) {
+  if (NO_LISTS_RE.test(String(err.message || ''))) err.message = NO_LISTS_HELP;
   const unknown = !!err.outcomeUnknown;
   await setState(row.id, unknown ? 'needs_review' : 'failed', {
     submit_stage: stage,
