@@ -12,8 +12,8 @@ An enterprise-grade, AI-driven marketing and B2B sales acceleration operating sy
 - Grounds recommendations in your live digital product catalog and real-world features.
 
 ### 2. 🌐 Real-Time Digital Product Management & Web Extractor
-- Add and manage proprietary digital products (e.g., **ThriveWoo Smart FMCG Sales App**, **SafeTrack Bus SaaS**).
-- **Live URL Extractor**: Point to any live product URL (e.g., `https://thrivewoo.com`) to extract real-time feature matrices, taglines, and descriptions on the fly.
+- Add and manage your own digital products (apps, SaaS, services).
+- **Live URL Extractor**: Point to any live product URL (e.g., `https://www.yourproduct.com`) to extract real-time feature matrices, taglines, and descriptions on the fly.
 - Strict feature fidelity without hallucinated or fabricated pricing.
 
 ### 3. 🎯 AI-Powered Leads CRM & Excel Bulk Import

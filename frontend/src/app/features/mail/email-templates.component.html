@@ -44,7 +44,7 @@
               <textarea class="hud-input tpl-ai-prompt" name="prompt" rows="9" maxlength="1500" [(ngModel)]="ai.prompt" placeholder="e.g. Promote our compostable takeaway boxes to cafés: 15% off the first order this month."></textarea>
               <small class="muted tpl-ai-count" [class.near]="ai.prompt.length > 1350">{{ ai.prompt.length | number }} / 1,500</small></label>
             <label><span>Website link <small class="muted">(the AI reads it for facts, logo, colours and pictures)</small></span>
-              <input class="hud-input" name="url" maxlength="500" [(ngModel)]="ai.url" placeholder="e.g. thrivewoo.com/product" /></label>
+              <input class="hud-input" name="url" maxlength="500" [(ngModel)]="ai.url" placeholder="e.g. www.yourproduct.com/product" /></label>
             <div class="tpl-ai-row">
               <label><span>Type</span><select class="hud-input" name="type" [(ngModel)]="ai.type"><option *ngFor="let x of aiTypes" [value]="x">{{ x }}</option></select></label>
               <label><span>Tone</span><select class="hud-input" name="tone" [(ngModel)]="ai.tone"><option *ngFor="let x of aiTones" [value]="x">{{ x }}</option></select></label>

@@ -104,19 +104,22 @@ async function initDatabase() {
   }
 }
 
-// MySQL Live Integration Helper for Traivo (thrivewoo)
+// Optional live integration with an external Traivo MySQL database (legacy workspace only).
+// Off unless TRAIVO_DB_NAME is set; host, port, user and password come from TRAIVO_DB_*.
 let traivoPool = null;
+const traivoDbName = () => (process.env.TRAIVO_DB_NAME || '').trim() || null;
 
 function getTraivoPool() {
   if (!traivoPool) {
     try {
       const mysql = require('mysql2/promise');
+      if (!traivoDbName()) return null;
       traivoPool = mysql.createPool({
-        host: '127.0.0.1',
-        port: 3306,
-        user: 'root',
-        password: '',
-        database: 'thrivewoo',
+        host: process.env.TRAIVO_DB_HOST || '127.0.0.1',
+        port: parseInt(process.env.TRAIVO_DB_PORT || '3306', 10),
+        user: process.env.TRAIVO_DB_USER || 'root',
+        password: process.env.TRAIVO_DB_PASSWORD || '',
+        database: traivoDbName(),
         waitForConnections: true,
         connectionLimit: 5,
         queueLimit: 0
@@ -132,13 +135,13 @@ async function queryTraivoMySQL() {
   try {
     const pool = getTraivoPool();
     // Counts are reported only when the Traivo database answers; never placeholder numbers.
-    if (!pool) return { connected: false, message: 'MySQL driver unavailable', totalProducts: null, totalOrders: null, sampleProducts: [] };
+    if (!pool) return { connected: false, database: traivoDbName(), message: traivoDbName() ? 'MySQL driver unavailable' : 'No Traivo database is configured (TRAIVO_DB_NAME).', totalProducts: null, totalOrders: null, sampleProducts: [] };
     const [productsCount] = await pool.query('SELECT count(*) as count FROM products');
     const [ordersCount] = await pool.query('SELECT count(*) as count FROM sales_orders');
     const [sampleProducts] = await pool.query('SELECT id, name, category_id, base_sell_price FROM products LIMIT 6');
     return {
       connected: true,
-      database: 'thrivewoo',
+      database: traivoDbName(),
       totalProducts: Number(productsCount[0]?.count || 0),
       totalOrders: Number(ordersCount[0]?.count || 0),
       sampleProducts: sampleProducts || []
@@ -146,7 +149,7 @@ async function queryTraivoMySQL() {
   } catch (err) {
     return {
       connected: false,
-      database: 'thrivewoo',
+      database: traivoDbName(),
       error: err.message,
       totalProducts: null,
       totalOrders: null,

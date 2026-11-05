@@ -129,7 +129,7 @@ async function createDemo() {
   workspaceForRecords = W;
   await run("INSERT INTO workspace_members (workspace_id, user_id, role, status, created_at) VALUES (?, ?, 'Workspace Owner', 'Active', UTC_TIMESTAMP())", [W, user.lastID]);
   await run(
-    "INSERT INTO business_profiles (workspace_id, business_name, industry, website_url, description, products_json, brand_voice, created_at) VALUES (?, 'Coastal Distribution Tech', 'B2B Software', 'https://thrivewoo.com', 'B2B software for FMCG distributors and their field sales teams.', '[]', 'Professional and practical', UTC_TIMESTAMP())",
+    "INSERT INTO business_profiles (workspace_id, business_name, industry, website_url, description, products_json, brand_voice, created_at) VALUES (?, 'Coastal Distribution Tech', 'B2B Software', 'https://coastal-distribution.example.com', 'B2B software for FMCG distributors and their field sales teams.', '[]', 'Professional and practical', UTC_TIMESTAMP())",
     [W]
   );
   await run("INSERT INTO social_settings (workspace_id, timezone, require_approval, created_at) VALUES (?, 'UTC', 1, UTC_TIMESTAMP())", [W]);
@@ -147,11 +147,11 @@ async function createDemo() {
 
   // Social accounts (demo_ ids: never synced, publishing refused).
   const accountDefs = [
-    { key: 'fb', provider: 'meta', type: 'facebook_page', name: 'ThriveWoo Facebook Page', platform: 'facebook', followers: [2310, 2480],
+    { key: 'fb', provider: 'meta', type: 'facebook_page', name: 'Coastal Distribution Tech (Facebook)', platform: 'facebook', followers: [2310, 2480],
       scopes: ['pages_show_list', 'pages_read_engagement', 'pages_manage_posts', 'pages_read_user_content', 'pages_manage_engagement', 'read_insights'] },
-    { key: 'ig', provider: 'meta', type: 'instagram_business', name: 'thrivewoo.app (Instagram)', platform: 'instagram', followers: [1180, 1342], username: 'thrivewoo.app',
+    { key: 'ig', provider: 'meta', type: 'instagram_business', name: 'coastal.distribution (Instagram)', platform: 'instagram', followers: [1180, 1342], username: 'coastal.distribution',
       scopes: ['instagram_basic', 'instagram_content_publish', 'instagram_manage_comments', 'instagram_manage_insights'] },
-    { key: 'li', provider: 'linkedin', type: 'linkedin_organization', name: 'ThriveWoo LinkedIn Page', platform: 'linkedin', followers: [860, 925],
+    { key: 'li', provider: 'linkedin', type: 'linkedin_organization', name: 'Coastal Distribution Tech (LinkedIn)', platform: 'linkedin', followers: [860, 925],
       scopes: ['r_organization_social', 'w_organization_social', 'rw_organization_admin'] }
   ];
   const accounts = {};

@@ -163,13 +163,13 @@
 
 
   <!-- =================================================================== -->
-  <!-- TAB 1: DIGITAL PRODUCTS HUB (THRIVEWOO & AI URL EXTRACTOR) -->
+  <!-- TAB 1: DIGITAL PRODUCTS HUB (AI URL EXTRACTOR) -->
   <!-- =================================================================== -->
   <section *ngIf="currentRoute === 'products'" class="hud-panel full-width-panel">
     <div class="panel-header">
       <div>
         <h2>Digital products hub & AI feature extractor</h2>
-        <p class="subtitle">Manage digital platforms for marketing. Enter a product URL (e.g. <code>https://thrivewoo.com</code>) to automatically extract core features with AI.</p>
+        <p class="subtitle">Manage digital platforms for marketing. Enter a product URL (e.g. <code>https://www.yourproduct.com</code>) to automatically extract core features with AI.</p>
       </div>
       <div class="header-actions">
         <button class="btn btn-primary" (click)="showNewProductModal = true">➕ Add Product Manually</button>
@@ -182,7 +182,7 @@
         <h3>⚡ AI URL Product Extractor (Fastest Method)</h3>
         <span class="badge badge-accent">Auto Scrapes & Synthesizes Features</span>
       </div>
-      <p class="helper-text">Enter any product website URL (like <code>https://thrivewoo.com</code> or your other product link). AI will read the website and extract all features and market details automatically:</p>
+      <p class="helper-text">Enter any product website URL (like <code>https://www.yourproduct.com</code>). AI will read the website and extract all features and market details automatically:</p>
       <div class="extractor-input-group">
         <input type="text" class="hud-input extractor-input" [(ngModel)]="productUrlInput" placeholder="Enter product link (e.g. https://your-product.com)" (keyup.enter)="extractFeaturesFromUrl()" />
         <button class="btn btn-primary" (click)="extractFeaturesFromUrl()" [disabled]="isExtractingUrl">
@@ -235,10 +235,10 @@
     </div>
 
     <div class="digital-products-grid">
-      <div *ngFor="let prod of digitalProducts" class="digital-product-card" [class.flagship]="prod.url?.includes('thrivewoo')">
+      <div *ngFor="let prod of digitalProducts" class="digital-product-card">
         <div class="card-badge-row">
-          <span class="pill-badge" [class.owner-badge]="prod.url?.includes('thrivewoo')">
-            {{ prod.url?.includes('thrivewoo') ? '★ FLAGSHIP DIGITAL PRODUCT' : 'ACTIVE DIGITAL PLATFORM' }}
+          <span class="pill-badge">
+            ACTIVE DIGITAL PRODUCT
           </span>
           <span class="chip active">🟢 {{ prod.status || 'Active' }}</span>
         </div>
@@ -269,7 +269,7 @@
           <button class="btn btn-secondary btn-sm" (click)="currentRoute = 'businesses'">
             📢 Generate Campaign
           </button>
-          <button *ngIf="!prod.url?.includes('thrivewoo')" class="btn btn-danger btn-sm" (click)="deleteDigitalProduct(prod.id)">
+          <button class="btn btn-danger btn-sm" (click)="deleteDigitalProduct(prod.id)">
             ✕ Remove
           </button>
         </div>
@@ -635,8 +635,8 @@
         <button class="chip-action-btn" (click)="sendPresetPrompt('Can you see my product details and features?')">🔍 See Product Details</button>
         <button class="chip-action-btn" (click)="sendPresetPrompt('What are my emails?')">📬 Check Emails</button>
         <button class="chip-action-btn" (click)="sendPresetPrompt('Who are my top leads?')">👥 Top Leads</button>
-        <button class="chip-action-btn" (click)="sendPresetPrompt('Draft an email to Michael Chang about ThriveWoo')">📝 Draft to Michael</button>
-        <button class="chip-action-btn" (click)="sendPresetPrompt('Create a LinkedIn post for ThriveWoo')">📱 LinkedIn Post</button>
+        <button class="chip-action-btn" (click)="sendPresetPrompt('Draft a follow-up email to my top lead')">📝 Draft follow-up</button>
+        <button class="chip-action-btn" (click)="sendPresetPrompt('Create a LinkedIn post for my product')">📱 LinkedIn Post</button>
         <button class="chip-action-btn" (click)="sendPresetPrompt('Sync my company email')">🔄 Sync Mailbox</button>
       </div>
 
@@ -645,7 +645,7 @@
         <button class="btn btn-mic-quick" [class.listening]="isListeningQuickChat" (click)="toggleVoiceDictation()" title="Voice Dictation: Speak in English">
           {{ isListeningQuickChat ? '🔴' : '🎙️' }}
         </button>
-        <input type="text" class="hud-input" [(ngModel)]="quickTextInput" placeholder="Ask Mark anything or give command (e.g. 'Draft email to Michael Chang about ThriveWoo')" (keyup.enter)="sendQuickText()" [disabled]="isProcessingChat" />
+        <input type="text" class="hud-input" [(ngModel)]="quickTextInput" placeholder="Ask Mark anything or give a command (e.g. 'Draft a follow-up email to my top lead')" (keyup.enter)="sendQuickText()" [disabled]="isProcessingChat" />
         <button class="btn btn-primary" (click)="sendQuickText()" [disabled]="isProcessingChat">
           {{ isProcessingChat ? '...' : 'SEND' }}
         </button>
@@ -663,11 +663,11 @@
     <div class="hud-panel data-panel">
       <div class="data-section">
         <div class="section-title-row">
-          <h2>ThriveWoo platform summary</h2>
+          <h2>{{ auth.workspace?.name || 'Workspace' }} summary</h2>
           <span class="chip active">🟢 Digital SaaS</span>
         </div>
         <p class="helper-text" style="color: var(--text-muted); font-size: 13px;">
-          Smart FMCG B2B Sales App — Staff Performance Tracking, Buying Patterns, Customer-Specific Discounts & In-App Messaging.
+          Products, leads and mail drafts in this workspace.
         </p>
         <div class="traivo-quick-stats">
           <div class="mini-stat">
@@ -1168,7 +1168,7 @@
         </div>
         <div class="form-group">
           <label>Core Features (One per line)</label>
-          <textarea class="hud-textarea" rows="3" [(ngModel)]="newProduct.featuresText" placeholder="Automated Order Routing&#10;Live Stock Sync&#10;Mobile Van Sales App"></textarea>
+          <textarea class="hud-textarea" rows="3" [(ngModel)]="newProduct.featuresText" placeholder="One feature per line, e.g.&#10;Online ordering&#10;Real-time reports&#10;Mobile app"></textarea>
         </div>
         <div class="form-group">
           <label>Target Audience</label>
@@ -1236,11 +1236,11 @@
       <div class="modal-body">
         <div class="form-group">
           <label>Customer Name</label>
-          <input type="text" class="hud-input" [(ngModel)]="newBooking.customer_name" placeholder="e.g. Michael Chang" />
+          <input type="text" class="hud-input" [(ngModel)]="newBooking.customer_name" placeholder="e.g. Alex Morgan" />
         </div>
         <div class="form-group">
           <label>Service / Demonstration Type</label>
-          <input type="text" class="hud-input" [(ngModel)]="newBooking.service" placeholder="ThriveWoo Wholesale Ordering Demonstration" />
+          <input type="text" class="hud-input" [(ngModel)]="newBooking.service" placeholder="e.g. Product demo" />
         </div>
         <div class="form-group">
           <label>Date</label>
@@ -1252,7 +1252,7 @@
         </div>
         <div class="form-group">
           <label>Notes</label>
-          <input type="text" class="hud-input" [(ngModel)]="newBooking.notes" placeholder="Demonstrate mobile van sales order booking and live stock sync" />
+          <input type="text" class="hud-input" [(ngModel)]="newBooking.notes" placeholder="e.g. What to show and questions to cover" />
         </div>
       </div>
       <div class="modal-footer">

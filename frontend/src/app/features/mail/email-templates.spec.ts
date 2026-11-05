@@ -73,7 +73,7 @@ describe('EmailTemplatesComponent', () => {
     expect(dlg().textContent).toContain('Describe the email, or give a website link (Content).');
     const go = () => dlg().querySelector('button[type=submit]') as HTMLButtonElement;
     expect(go().disabled).toBeTrue();
-    comp.ai!.url = 'thrivewoo.com';
+    comp.ai!.url = 'brightcart.com';
     comp.ai!.color = 'red';
     fixture.detectChanges();
     expect(comp.aiProblem).toContain('#4f46e5');
@@ -82,13 +82,13 @@ describe('EmailTemplatesComponent', () => {
     fixture.detectChanges();
     go().click();
     const req = http.expectOne(r => r.method === 'POST' && r.url === `${BASE}/generate`);
-    expect(req.request.body).toEqual(jasmine.objectContaining({ prompt: 'Promote boxes', url: 'thrivewoo.com', type: 'Promotion', tone: 'Friendly', brandColor: '#0f766e', images: true,
+    expect(req.request.body).toEqual(jasmine.objectContaining({ prompt: 'Promote boxes', url: 'brightcart.com', type: 'Promotion', tone: 'Friendly', brandColor: '#0f766e', images: true,
       style: 'modern', theme: 'light', font: 'sans', buttonShape: 'rounded', sections: ['features'], length: 'medium', language: 'English', logoAssetId: '', socials: {} }));
     expect(req.request.body.importId).toMatch(/^[a-f0-9]{32}$/);
     req.flush({ name: 'Boxes promo', subject: 'Packaging they can compost', category: 'Promotion', provider: 'OpenAI',
       html: '<p>Hi {{first_name}}, save [Discount] by [Offer end date]. $[LI:UNSUBSCRIBE]$ [Discount]</p><script>window.__pwned = 1</script>',
       importId: 'a'.repeat(32), images: { website: 1, stock: 1, stockAvailable: true },
-      website: { url: 'https://thrivewoo.com/', title: 'ThriveWoo', logo: true, color: '#0f766e' } });
+      website: { url: 'https://brightcart.com/', title: 'BrightCart', logo: true, color: '#0f766e' } });
     fixture.detectChanges();
     expect(dlg().textContent).toContain('Packaging they can compost');
     expect(dlg().textContent).toContain('2 placeholder(s)');

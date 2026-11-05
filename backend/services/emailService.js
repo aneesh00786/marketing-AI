@@ -150,11 +150,11 @@ async function getRawMailConfig(workspaceId) {
       imap_host: process.env.IMAP_HOST || 'imap.zoho.com',
       imap_port: parseInt(process.env.IMAP_PORT || '993', 10),
       imap_tls: 1,
-      imap_user: process.env.IMAP_USER || 'support@thrivewoo.com',
+      imap_user: process.env.IMAP_USER || null,
       imap_pass: process.env.IMAP_PASS || '',
-      sender_name: process.env.MAIL_FROM_NAME || 'ThriveWoo Support',
-      sender_email: process.env.MAIL_FROM_ADDRESS || 'support@thrivewoo.com',
-      status: 'Connected'
+      sender_name: process.env.MAIL_FROM_NAME || null,
+      sender_email: process.env.MAIL_FROM_ADDRESS || null,
+      status: process.env.MAIL_FROM_ADDRESS ? 'Connected' : 'Not Configured'
     };
   }
   // Mailbox passwords are encrypted at rest; decrypt only for transport use.
@@ -224,9 +224,7 @@ async function setMarketingApproval(workspaceId, { approved, userId, note }) {
 }
 
 function usesZepto(workspaceId, config) {
-  if (config.provider === 'zeptomail') return true;
-  // Historical heuristic kept for the legacy workspace only.
-  return isLegacy(workspaceId) && !!(config.sender_email && config.sender_email.includes('thrivewoo.com'));
+  return config.provider === 'zeptomail';
 }
 
 const PLACEHOLDER_HOST = /(^|\.)(invalid|example|test|localhost)$|(^|\.)example\.(com|net|org)$/i;

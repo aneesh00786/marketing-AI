@@ -25,7 +25,7 @@
 4. **📬 Email Command Center (Mail Getting & Sending):**
    - **Mail Getting (Inbox):** Urgent priority digest with read/unread tracking and incoming client replies (Apex Wholesale, Metro Academy, Horizon Beverage).
    - **Need to Send Mail (Outbox):** Dedicated email composition & dispatch modal. Live timestamping and database logging of all sent emails.
-   - **Voice Email Dispatch:** Tell Mark via voice: *"Mark, send an email to Michael Chang saying..."* and Mark automatically logs and dispatches the email.
+   - **Voice Email Dispatch:** Tell Mark via voice: *"Mark, send an email to Alex Morgan saying..."* and Mark automatically logs and dispatches the email.
 5. **📅 Scheduled Appointments & Demos:**
    - Demonstrations calendar with date, time, and service type.
    - Booking modal and 1-click test simulation.
@@ -34,7 +34,7 @@
    - Context-aware marketing generation: when asked for "My Business", it generates Traivo wholesale van sales campaigns; when asked for a client's business, it generates tailored campaigns specifically for *their* business model and target audience.
    - 1-Click **"Dispatch Campaign to Leads"** workflow.
 7. **📦 Traivo MySQL Live Synchronization:**
-   - Direct connection to local MySQL database `thrivewoo` (127.0.0.1:3306) with 181 active products and 57 sales orders.
+   - Optional direct connection to an external Traivo MySQL database, set with `TRAIVO_DB_NAME` (and `TRAIVO_DB_HOST`, `TRAIVO_DB_USER`, `TRAIVO_DB_PASSWORD`) in `backend/.env`.
 
 ---
 
@@ -46,7 +46,7 @@
      node -v
      ```
 2. **Operating System:** Windows 10 or Windows 11 (supports full desktop controls like Calc, Notepad, volume keys, and hardware stats).
-3. **(Optional) Local MySQL:** If you wish to connect your live database, MySQL 8.x running on `127.0.0.1:3306` with user `root` and database `thrivewoo`.
+3. **(Optional) Local MySQL:** If you wish to connect your live database, MySQL 8.x, with the database name in `TRAIVO_DB_NAME` (off when unset).
    - *Note:* If MySQL is not running, the system automatically uses the embedded SQLite database (`tradesage.db`), so the application runs **100% out of the box with zero configuration!**
 
 ---
@@ -160,11 +160,11 @@ Once the app is running in your browser:
    - *"Mark, what are our recent client replies?"*
    - *"Mark, give me marketing ideas for my business."*
    - *"Mark, give me marketing ideas for Metro Central School District."*
-   - *"Mark, send an email to Michael Chang saying our team will call him tomorrow at 2 PM."*
+   - *"Mark, send an email to Alex Morgan saying our team will call him tomorrow at 2 PM."*
    - *"Mark, what are our hardware system stats?"*
 3. Explore the dedicated tabs:
    - **👥 Leads CRM:** Track leads and 1-click email prospects.
    - **📬 Email Command Center:** View inbox replies and send outbound emails.
    - **📅 Appointments:** Check demo schedules.
    - **🚀 Connected Businesses & Campaigns:** Generate playbooks for any connected business and 1-click dispatch to leads.
-   - **📦 Traivo MySQL:** View live 181 wholesale SKUs from MySQL `thrivewoo`.
+   - **📦 Traivo MySQL:** View live products from the database set in `TRAIVO_DB_NAME`.

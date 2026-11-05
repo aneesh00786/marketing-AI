@@ -4,7 +4,7 @@ import { sampleCampaignHtml } from './sample-email';
 import { EmailContentEditorComponent } from './email-content-editor.component';
 
 describe('Fill in the template (placeholders)', () => {
-  const sample = sampleCampaignHtml('ThriveWoo');
+  const sample = sampleCampaignHtml('BrightCart');
 
   it('finds every [bracketed] part of the sample once, including the hidden preview text, and its sample link', () => {
     const found = findPlaceholders(sample);
@@ -24,12 +24,12 @@ describe('Fill in the template (placeholders)', () => {
 
   it('fills typed values (escaped) and links; leaves empty ones and Zoho merge tags alone', () => {
     const out = fillPlaceholders(sample, { '[Your name]': 'Aneesh <CEO>', '[Benefit 1, e.g. next-day delivery]': 'Next-day delivery', '[Your role]': '  ' },
-      { 'https://example.com': 'https://thrivewoo.com/book' });
+      { 'https://example.com': 'https://brightcart.com/book' });
     expect(out).toContain('Aneesh &lt;CEO&gt;');
     expect(out).not.toContain('[Your name]');
     expect(out).toContain('<li style="margin-bottom:6px;">Next-day delivery</li>');
     expect(out).toContain('[Your role]');
-    expect(out).toContain('href="https://thrivewoo.com/book"');
+    expect(out).toContain('href="https://brightcart.com/book"');
     expect(out).toContain('$[FNAME|there]$');
     expect(out).toContain('$[LI:UNSUBSCRIBE]$');
     expect(fillPlaceholders('<a href="https://example.com">x</a>', {}, { 'https://example.com': 'javascript:alert(1)' })).toContain('https://example.com');

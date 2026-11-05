@@ -247,7 +247,7 @@
             <option *ngFor="let p of products" [ngValue]="p.id">{{ p.name }}</option>
           </select>
         </label>
-        <label>Target audience<input class="hud-input" [(ngModel)]="campaignForm.targetAudience" placeholder="e.g. FMCG distributors with 5–50 van routes" /></label>
+        <label>Target audience<input class="hud-input" [(ngModel)]="campaignForm.targetAudience" placeholder="e.g. Small business owners in your city" /></label>
         <label class="span-2">Offer<input class="hud-input" [(ngModel)]="campaignForm.offer" placeholder="Only real offers — e.g. 14-day free pilot" /></label>
         <label class="span-2">Key message<textarea class="hud-textarea" rows="2" [(ngModel)]="campaignForm.keyMessage"></textarea></label>
         <label>Start date<input type="date" class="hud-input" [(ngModel)]="campaignForm.startDate" /></label>

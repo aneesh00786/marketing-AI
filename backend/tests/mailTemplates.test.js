@@ -585,8 +585,8 @@ test('Create with AI options: style, sections, language, audience, button link, 
     void up;
 
     const r = await t(B, 'POST', '/generate', { prompt: 'Invite customers to our live demo', type: 'Announcement', style: 'corporate', theme: 'dark', font: 'serif', buttonShape: 'pill',
-      sections: ['testimonial', 'stats', 'event'], length: 'short', audience: 'café owners', language: 'Malayalam', ctaUrl: 'https://thrivewoo.com/register',
-      logoAssetId: logo.data.id, importId, images: false, socials: { linkedin: 'https://linkedin.com/company/thrivewoo' }, address: 'Level 2, 10 Example St, Sydney' });
+      sections: ['testimonial', 'stats', 'event'], length: 'short', audience: 'café owners', language: 'Malayalam', ctaUrl: 'https://brightcart.com/register',
+      logoAssetId: logo.data.id, importId, images: false, socials: { linkedin: 'https://linkedin.com/company/brightcart' }, address: 'Level 2, 10 Example St, Sydney' });
     assert.equal(r.status, 200, JSON.stringify(r.data));
     assert.match(seen.prompt, /in Malayalam/);
     assert.match(seen.prompt, /<untrusted_content source="audience">\s*café owners/);
@@ -601,9 +601,9 @@ test('Create with AI options: style, sections, language, audience, button link, 
     assert.match(html, /Georgia/, 'serif font');
     assert.match(html, /border-radius:999px/, 'pill buttons');
     assert.match(html, /background:#111827/, 'dark theme');
-    assert.match(html, /href="https:\/\/thrivewoo\.com\/register"/);
+    assert.match(html, /href="https:\/\/brightcart\.com\/register"/);
     assert.ok(html.includes(`/api/v1/mail/assets/${logo.data.id}`), 'the uploaded logo');
-    assert.match(html, /href="https:\/\/linkedin\.com\/company\/thrivewoo"[^>]*>LinkedIn</);
+    assert.match(html, /href="https:\/\/linkedin\.com\/company\/brightcart"[^>]*>LinkedIn</);
     assert.match(html, /Level 2, 10 Example St, Sydney/);
     assert.doesNotMatch(html, /\$\[HF:ORGADDRESS\]\$/, 'the given address replaces Zoho\'s');
     assert.equal(r.data.importId, importId);

@@ -416,7 +416,7 @@ ${digitalProductsList.map(p => `  * [PRODUCT] ${p.name} (URL: ${p.url}):
     Features: ${p.features_json}`).join('\n')}
 - Connected Businesses:
 ${connectedBiz.map(b => `  * ${b.business_type === 'owner' ? '[MY BUSINESS]' : '[CLIENT BUSINESS]'} ${b.name} (${b.industry}): ${b.description}`).join('\n')}
-- Traivo Database: ${traivoStats.connected ? `MySQL 'thrivewoo' with ${traivoStats.totalProducts} catalog products and ${traivoStats.totalOrders} sales orders.` : 'not connected (no figures available).'}
+- Traivo Database: ${traivoStats.connected ? `MySQL '${traivoStats.database}' with ${traivoStats.totalProducts} catalog products and ${traivoStats.totalOrders} sales orders.` : 'not connected (no figures available).'}
 - Recent Client Inquiries (${clients.length} total): ${clients.map(c => `${c.company_name} (Contact: ${c.contact_name}, Interest: ${c.product_interest}, Status: ${c.status})`).join('; ')}
 - Recent Client Email Replies (${replies.length} total): ${replies.map(r => `${r.customer_name} from ${r.company_name}: "${r.reply_text}" [Sentiment: ${r.sentiment}]`).join('; ')}`;
 
@@ -616,15 +616,15 @@ ${connectedBiz.map(b => `  * ${b.business_type === 'owner' ? '[MY BUSINESS]' : '
       fastReply = null;
     } else if (lower.includes('traivo') && (lower.includes('database') || lower.includes('product') || lower.includes('sku') || lower.includes('catalog'))) {
       fastReply = traivoStats.connected
-        ? `Your Traivo B2B database is connected live to MySQL database 'thrivewoo'. It currently has ${traivoStats.totalProducts} products and ${traivoStats.totalOrders} sales orders.`
+        ? `Your Traivo B2B database is connected live to MySQL database '${traivoStats.database}'. It currently has ${traivoStats.totalProducts} products and ${traivoStats.totalOrders} sales orders.`
         : `Sir, the Traivo database is not reachable right now${traivoStats.error ? ` (${traivoStats.error})` : ''}, so I have no product or order counts to report.`;
     }
-    // 9. Digital Product Details & Live Features Seeing ("can the ai see this details", "what are the features of thrivewoo", etc.)
+    // 9. Digital Product Details & Live Features Seeing ("can the ai see this details", "what are the features of my product", etc.)
     else if (
-      (lower.includes('detail') && (lower.includes('see') || lower.includes('product') || lower.includes('thrivewoo') || lower.includes('feature') || lower.includes('site') || lower.includes('website') || lower.includes('url') || lower.includes('ai') || lower.includes('cant') || lower.includes("can't") || lower.includes('can ') || lower.includes('show') || lower.includes('what'))) ||
-      (lower.includes('feature') && (lower.includes('product') || lower.includes('thrivewoo') || lower.includes('what are') || lower.includes('show') || lower.includes('list') || lower.includes('my') || lower.includes('see'))) ||
+      (lower.includes('detail') && (lower.includes('see') || lower.includes('product') || lower.includes('feature') || lower.includes('site') || lower.includes('website') || lower.includes('url') || lower.includes('ai') || lower.includes('cant') || lower.includes("can't") || lower.includes('can ') || lower.includes('show') || lower.includes('what'))) ||
+      (lower.includes('feature') && (lower.includes('product') || lower.includes('what are') || lower.includes('show') || lower.includes('list') || lower.includes('my') || lower.includes('see'))) ||
       (lower.includes('product') && (lower.includes('what are') || lower.includes('tell me') || lower.includes('what do i have') || lower.includes('show me') || lower.includes('details') || lower.includes('see'))) ||
-      (lower.includes('what does') && (lower.includes('thrivewoo') || lower.includes('safetrack') || lower.includes('product') || lower.includes('app') || lower.includes('do')))
+      (lower.includes('what does') && (lower.includes('product') || lower.includes('app') || lower.includes('do')))
     ) {
       // A product named in the message, or the workspace's only product; never an arbitrary first one.
       const targetProd = (await findProductNamedIn(req.auth.workspaceId, cleanMsg)) || (digitalProductsList.length === 1 ? digitalProductsList[0] : null);
@@ -858,7 +858,7 @@ app.get(['/api/v1/b2b/statistics', '/api/b2b/statistics'], requireCapability('an
         pipelineValue: null, // not tracked; never a placeholder figure
         traivoDatabase: {
           connected: traivoStats.connected,
-          databaseName: 'thrivewoo',
+          databaseName: traivoStats.database || null,
           totalProducts: traivoStats.totalProducts,
           totalOrders: traivoStats.totalOrders,
           sampleProducts: traivoStats.sampleProducts
@@ -1023,7 +1023,7 @@ app.all(['/api/tools/get_business_info', '/api/business_info'], async (req, res)
       success: true,
       business_info: {
         flagship_product: 'Traivo - B2B Sales & Distribution Platform',
-        database_sync: `MySQL thrivewoo (${traivoStats.totalProducts} active products, ${traivoStats.totalOrders} orders)`,
+        database_sync: `MySQL ${traivoStats.database} (${traivoStats.totalProducts} active products, ${traivoStats.totalOrders} orders)`,
         connected_businesses_count: businesses.length,
         connected_businesses: businesses.map(b => b.name)
       }

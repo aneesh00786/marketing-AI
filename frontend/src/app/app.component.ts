@@ -442,7 +442,7 @@ export class AppComponent implements OnInit, OnDestroy {
   dialogueTranscript: Array<{ sender: string; text: string; role: 'user' | 'agent'; time?: string }> = [
     {
       sender: 'MARK',
-      text: 'Standing by, sir. Tap the orb or speak in English. I can extract features for your digital products, score leads, draft approved HTML emails, and execute marketing campaigns for ThriveWoo or any connected client.',
+      text: 'Standing by, sir. Tap the orb or speak in English. I can extract features for your digital products, score leads, draft approved HTML emails, and run marketing campaigns for your business.',
       role: 'agent',
       time: 'Ready'
     }
@@ -452,10 +452,10 @@ export class AppComponent implements OnInit, OnDestroy {
   quickTextInput: string = '';
   isProcessingChat: boolean = false;
 
-  // 1. Digital Products Hub (ThriveWoo Flagship & URL Extractor)
+  // 1. Digital Products Hub (URL Extractor)
   digitalProducts: any[] = [];
   selectedProduct: any = null;
-  productUrlInput: string = 'https://thrivewoo.com';
+  productUrlInput: string = '';
   isExtractingUrl: boolean = false;
   extractedProductPreview: any = null;
   showNewProductModal: boolean = false;
@@ -563,10 +563,10 @@ export class AppComponent implements OnInit, OnDestroy {
   showBookingModal: boolean = false;
   newBooking = {
     customer_name: '',
-    service: 'ThriveWoo B2B Wholesale Platform Demo',
+    service: '',
     date: '2026-10-24',
     time: '02:00 PM',
-    notes: 'Walkthrough of mobile field sales order booking, wholesale tiers, and live inventory sync.'
+    notes: ''
   };
 
   // Executive Briefing Cache & Toast
@@ -1031,9 +1031,13 @@ export class AppComponent implements OnInit, OnDestroy {
     this.apiService.getDigitalProducts().subscribe({
       next: (res) => {
         this.digitalProducts = res.products || [];
+        // Products can change anywhere (added, deleted, cleared): drop what no longer exists.
+        if (this.selectedProduct && !this.digitalProducts.some(p => p.id === this.selectedProduct.id)) this.selectedProduct = null;
         if (this.digitalProducts.length > 0 && !this.selectedProduct) {
           this.selectedProduct = this.digitalProducts[0];
         }
+        // The Leads product filter and lead form use their own list: keep it in step.
+        this.loadLeadProducts();
       },
       error: (err) => console.warn('Error loading digital products:', err)
     });
@@ -1042,7 +1046,7 @@ export class AppComponent implements OnInit, OnDestroy {
   extractFeaturesFromUrl(): void {
     const url = (this.productUrlInput || '').trim();
     if (!url) {
-      this.showToast('Please enter a product website URL (e.g. https://thrivewoo.com)');
+      this.showToast('Please enter a product website URL (e.g. https://www.yourproduct.com)');
       return;
     }
     this.isExtractingUrl = true;
@@ -1108,7 +1112,7 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   askRogerAboutProduct(prod: any): void {
-    const prodName = prod?.name || 'ThriveWoo';
+    const prodName = prod?.name || 'my product';
     this.currentRoute = 'voice';
     this.quickTextInput = `Can you see the details and features of ${prodName}?`;
     this.sendQuickText();
@@ -1183,7 +1187,11 @@ export class AppComponent implements OnInit, OnDestroy {
 
   loadLeadProducts(): void {
     this.apiService.getLeadProducts().subscribe({
-      next: (res) => this.leadProducts = res.products || [],
+      next: (res) => {
+        this.leadProducts = res.products || [];
+        const f = this.leadFilters.productId;
+        if (f && f !== 'none' && !this.leadProducts.some(p => String(p.id) === String(f))) { this.leadFilters.productId = ''; this.applyLeadFilters(); }
+      },
       error: () => this.leadProducts = []
     });
   }
