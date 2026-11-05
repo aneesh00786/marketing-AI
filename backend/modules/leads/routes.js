@@ -32,6 +32,7 @@ const leadFields = {
   phone: str(50),
   companyName: str(255),
   country: str(100),
+  address: str(500),
   company_name: str(255),
   estimatedBudget: str(100),
   estimated_budget: str(100),

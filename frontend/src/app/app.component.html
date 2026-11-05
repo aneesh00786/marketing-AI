@@ -342,7 +342,7 @@
           <option *ngIf="!c.country" value="none">No country ({{ c.count }})</option>
         </ng-container>
       </select>
-      <input class="hud-input" [(ngModel)]="leadFilters.q" (keyup.enter)="applyLeadFilters()" placeholder="Search name, email, company or phone" aria-label="Search leads" />
+      <input class="hud-input" [(ngModel)]="leadFilters.q" (keyup.enter)="applyLeadFilters()" placeholder="Search name, email, company, phone or address" aria-label="Search leads" />
       <button class="btn btn-secondary btn-sm" (click)="applyLeadFilters()">Search</button>
       <span class="lead-count">{{ leadTotal }} lead{{ leadTotal === 1 ? '' : 's' }}</span>
     </div>
@@ -371,7 +371,7 @@
             <td data-label="Contact" class="contact-cell freeze freeze-2 freeze-edge"><strong>{{ ld.name }}</strong>
               <div class="lead-sub has-note-tip" *ngIf="ld.notes" tabindex="0" [attr.aria-label]="'Notes: ' + ld.notes"
                    (mouseenter)="showNoteTip($event, ld.notes)" (mouseleave)="hideNoteTip()" (focus)="showNoteTip($event, ld.notes)" (blur)="hideNoteTip()">📝 {{ ld.notes | slice:0:50 }}{{ ld.notes.length > 50 ? '…' : '' }}</div></td>
-            <td data-label="Company" class="company-cell">{{ dash(ld.companyName) }}</td>
+            <td data-label="Company" class="company-cell">{{ dash(ld.companyName) }}<div class="lead-sub lead-address" *ngIf="ld.address" [title]="ld.address">📍 {{ ld.address }}</div></td>
             <td data-label="Country" class="one-line">{{ dash(ld.country) }}</td>
             <td data-label="Email" class="one-line"><a *ngIf="ld.email" [href]="'mailto:' + ld.email" [title]="ld.email">{{ ld.email }}</a><ng-container *ngIf="!ld.email">—</ng-container></td>
             <td data-label="Phone" class="one-line"><span class="phone-line">{{ dash(ld.phone) }}<app-call-button [phone]="ld.phone" [name]="ld.name"></app-call-button></span></td>
@@ -1096,6 +1096,10 @@
             <option *ngFor="let p of leadProducts" [ngValue]="p.id">{{ p.name }}</option>
           </select>
           <span class="helper-text" *ngIf="!leadProducts.length">No products in this workspace yet — add one in Digital Products to link leads to it.</span>
+        </div>
+        <div class="form-group">
+          <label>Address</label>
+          <input type="text" class="hud-input" [(ngModel)]="newLead.address" maxlength="500" placeholder="Street, area, city, postal code" />
         </div>
         <div class="form-row">
           <div class="form-group">

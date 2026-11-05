@@ -316,6 +316,27 @@ test('export: every lead matching the filters (not just one page), only this wor
   assert.equal(anon.status, 401);
 });
 
+test('address: saved on create, edit and import; the Leads search and export match it', async () => {
+  const stamp = Date.now();
+  const A = await h.createWorkspace({ name: `Address A ${stamp}` });
+  const created = await h.api('POST', '/api/v1/leads', { token: A.token, body: { name: `Addr One ${stamp}`, address: ' 12 MG Road, Ernakulam, Kerala 682016 ' } });
+  assert.equal(created.status, 200, JSON.stringify(created.data));
+  const one = created.data.lead;
+  assert.equal(one.address, '12 MG Road, Ernakulam, Kerala 682016');
+  const imp = await h.api('POST', '/api/v1/leads/import-bulk', { token: A.token, body: { leads: [{ name: `Addr Two ${stamp}`, address: 'Peenya Industrial Area, Bengaluru 560058' }] } });
+  assert.equal(imp.status, 200, JSON.stringify(imp.data));
+  const search = async q => (await h.api('GET', `/api/v1/leads?q=${encodeURIComponent(q)}`, { token: A.token })).data.leads.map(l => l.name);
+  assert.deepEqual(await search('Ernakulam'), [`Addr One ${stamp}`], 'a city in the address');
+  assert.deepEqual(await search('560058'), [`Addr Two ${stamp}`], 'a postal code');
+  const patched = await h.api('PATCH', `/api/v1/leads/${one.id}`, { token: A.token, body: { address: 'Kakkanad, Kochi' } });
+  assert.equal(patched.data.lead.address, 'Kakkanad, Kochi');
+  assert.deepEqual(await search('Ernakulam'), [], 'the old address no longer matches');
+  const exp = await h.api('GET', `/api/v1/leads/export?q=Kakkanad`, { token: A.token });
+  assert.deepEqual(exp.data.leads.map(l => l.address), ['Kakkanad, Kochi']);
+  const B = await h.createWorkspace({ name: `Address B ${stamp}` });
+  assert.equal((await h.api('GET', `/api/v1/leads?q=Kakkanad`, { token: B.token })).data.leads.length, 0, 'another workspace sees none');
+});
+
 test('country: saved on create, edit and import; filters the Leads list, export and lead pickers; counts per country', async () => {
   const stamp = Date.now();
   const au = (await create(A.token, { name: `Country AU ${stamp}`, email: `au.${stamp}@acme.io`, country: ' Australia ' })).data.lead;

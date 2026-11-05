@@ -291,6 +291,7 @@ test('import: product link, the reviewed details are saved on the lead, safe re-
   const bare = leads.find(l => l.place_id === b);
   assert.deepEqual([bare.email, bare.phone, bare.company_name], [null, null, null], 'without details nothing is invented');
   assert.deepEqual([full.country, bare.country], ['United Arab Emirates', 'India'], 'the address country from Google; otherwise the search country');
+  assert.deepEqual([full.address, bare.address], ['801 Market Road, Kochi, Kerala 682001, India', null], 'the Google address is the lead\'s address');
   assert.match(bare.name, /^Prospect \d+: Wholesale distributors .* \(Kochi, Kerala, India\)$/);
   assert.ok(!JSON.stringify(await db().all('SELECT name FROM leads WHERE workspace_id = ?', [A.workspaceId])).includes('Injected'), 'details for places outside the search are ignored');
   const again = await api(A, 'POST', `/runs/${r.data.run.id}/import`, { placeIds: [a] });

@@ -30,6 +30,7 @@ export function parseLeadSheet(file: File): Promise<{ rows: LeadSheetRow[]; skip
           email: pick(row, ['Email', 'email', 'E-mail', 'Email Address', 'Contact Email']),
           phone: pick(row, ['Phone', 'phone', 'Mobile', 'Phone Number', 'Contact Number']),
           country: pick(row, ['Country', 'country', 'Country Name']),
+          address: pick(row, ['Address', 'address', 'Street Address', 'Full Address', 'Location']),
           product: pick(row, ['Product', 'product', 'Product Name', 'Interest', 'interest']),
           productId: pick(row, ['Product ID', 'product_id', 'productId', 'Product Id']),
           estimatedBudget: pick(row, ['Budget', 'budget', 'Estimated Budget', 'Deal Value']),

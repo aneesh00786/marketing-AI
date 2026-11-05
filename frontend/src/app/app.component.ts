@@ -1122,7 +1122,7 @@ export class AppComponent implements OnInit, OnDestroy {
   // 3. LEADS CRM & EXCEL / CSV IMPORTER
   // ==========================================
   private blankLead(): any {
-    return { name: '', phone: '', email: '', company_name: '', country: '', estimated_budget: '', notes: '', productId: null, status: 'New' };
+    return { name: '', phone: '', email: '', company_name: '', country: '', address: '', estimated_budget: '', notes: '', productId: null, status: 'New' };
   }
 
   leadExportOpen = false;
@@ -1268,7 +1268,7 @@ export class AppComponent implements OnInit, OnDestroy {
   openEditLead(ld: any): void {
     this.editingLeadId = ld.id;
     this.newLead = {
-      name: ld.name || '', phone: ld.phone || '', email: ld.email || '', company_name: ld.companyName || '', country: ld.country || '',
+      name: ld.name || '', phone: ld.phone || '', email: ld.email || '', company_name: ld.companyName || '', country: ld.country || '', address: ld.address || '',
       estimated_budget: ld.estimatedBudget || '', notes: ld.notes || '', productId: ld.productId ?? null, status: ld.status || 'New'
     };
     if (!this.leadProducts.length) this.loadLeadProducts();
@@ -1382,6 +1382,7 @@ export class AppComponent implements OnInit, OnDestroy {
       phone: this.newLead.phone?.trim() || null,
       companyName: this.newLead.company_name?.trim() || null,
       country: this.newLead.country?.trim() || null,
+      address: this.newLead.address?.trim() || null,
       estimatedBudget: this.newLead.estimated_budget?.trim() || null,
       notes: this.newLead.notes?.trim() || null,
       productId: this.newLead.productId ? Number(this.newLead.productId) : null
@@ -1955,6 +1956,7 @@ export function leadExportRows(leads: any[], forCsv: boolean): Record<string, st
     Name: safe(l.name),
     Company: safe(l.companyName),
     Country: safe(l.country),
+    Address: safe(l.address),
     Email: safe(l.email),
     Phone: safe(l.phone),
     Product: safe(l.productName),

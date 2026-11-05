@@ -115,6 +115,7 @@ function present(row) {
     phone: row.phone || null,
     companyName: row.company_name || null,
     country: row.country || null,
+    address: row.address || null,
     estimatedBudget: row.estimated_budget || null,
     notes: row.notes || null,
     status: row.status || null,
@@ -171,9 +172,10 @@ async function leadWhere(workspaceId, { productId, status, q, source, country } 
   if (country === 'none') where.push("(l.country IS NULL OR l.country = '')");
   else if (country) { where.push('l.country = ?'); params.push(String(country).slice(0, 100)); }
   if (q) {
-    where.push('(l.name LIKE ? OR l.email LIKE ? OR l.company_name LIKE ? OR l.phone LIKE ?)');
+    // Address too: a street, area, city or PIN code finds the leads there.
+    where.push('(l.name LIKE ? OR l.email LIKE ? OR l.company_name LIKE ? OR l.phone LIKE ? OR l.address LIKE ?)');
     const like = `%${String(q).slice(0, 100)}%`;
-    params.push(like, like, like, like);
+    params.push(like, like, like, like, like);
   }
   return { where, params };
 }
@@ -220,6 +222,7 @@ function normalizeInput(input) {
     phone: clean(input.phone),
     company_name: clean(input.companyName ?? input.company_name),
     country: clean(input.country ?? input.Country)?.slice(0, 100) || null,
+    address: clean(input.address ?? input.Address)?.slice(0, 500) || null,
     estimated_budget: clean(input.estimatedBudget ?? input.estimated_budget),
     notes: clean(input.notes),
     status,
@@ -247,10 +250,10 @@ async function createLead(ctx, input, { withAi = true } = {}) {
   }
   const { score, category } = scoreLead(data);
   const ins = await run(
-    `INSERT INTO leads (workspace_id, name, email, phone, company_name, country, estimated_budget, notes, status, product_id, product_interest,
+    `INSERT INTO leads (workspace_id, name, email, phone, company_name, country, address, estimated_budget, notes, status, product_id, product_interest,
        product_review_note, ai_score, ai_category, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
-    [workspaceId, data.name, data.email, data.phone, data.company_name, data.country, data.estimated_budget, data.notes, data.status || 'New',
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+    [workspaceId, data.name, data.email, data.phone, data.company_name, data.country, data.address, data.estimated_budget, data.notes, data.status || 'New',
       product?.id || null, data.product_interest || product?.name || null, reviewNote, score, category]
   );
   await audit(ctx, 'leads.created', { resourceType: 'lead', resourceId: ins.lastID, metadata: { productId: product?.id || null } });
@@ -266,7 +269,7 @@ async function updateLead(ctx, id, input) {
   const data = normalizeInput(input);
   const sets = [];
   const params = [];
-  const map = { name: 'name', email: 'email', phone: 'phone', country: 'country', companyName: 'company_name', company_name: 'company_name', estimatedBudget: 'estimated_budget', estimated_budget: 'estimated_budget', notes: 'notes', status: 'status' };
+  const map = { name: 'name', email: 'email', phone: 'phone', country: 'country', address: 'address', companyName: 'company_name', company_name: 'company_name', estimatedBudget: 'estimated_budget', estimated_budget: 'estimated_budget', notes: 'notes', status: 'status' };
   const seen = new Set();
   for (const [k, col] of Object.entries(map)) {
     if (input[k] === undefined || seen.has(col)) continue;
@@ -348,10 +351,10 @@ async function importLeads(ctx, rows) {
 
     const { score, category } = scoreLead(data);
     const ins = await run(
-      `INSERT INTO leads (workspace_id, name, email, phone, company_name, country, estimated_budget, notes, status, product_id, product_interest,
+      `INSERT INTO leads (workspace_id, name, email, phone, company_name, country, address, estimated_budget, notes, status, product_id, product_interest,
          product_review_note, ai_score, ai_category, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
-      [workspaceId, data.name, data.email, data.phone, data.company_name, data.country, data.estimated_budget, data.notes, data.status || 'Imported',
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+      [workspaceId, data.name, data.email, data.phone, data.company_name, data.country, data.address, data.estimated_budget, data.notes, data.status || 'Imported',
         product?.id || null, product?.name || rawName || data.product_interest || null, reviewNote, score, category]
     );
     if (data.email && !existingEmails.has(data.email.toLowerCase())) existingEmails.set(data.email.toLowerCase(), ins.lastID);
