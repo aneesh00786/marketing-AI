@@ -508,12 +508,26 @@ export class LeadDiscoveryComponent implements OnInit, OnDestroy {
   selectAllEligible(): void { for (const x of this.visible) if (x.eligible) this.selected.add(x.placeId); }
   clearSelection(): void { this.selected.clear(); }
 
+  /** Header checkbox: every eligible business the filters show, on all pages. */
+  get shownEligible(): any[] { return this.visible.filter(x => x.eligible); }
+  get allShownSelected(): boolean { const s = this.shownEligible; return !!s.length && s.every(x => this.selected.has(x.placeId)); }
+  get someShownSelected(): boolean { return !this.allShownSelected && this.shownEligible.some(x => this.selected.has(x.placeId)); }
+  toggleAllShown(): void {
+    const all = this.allShownSelected;
+    for (const x of this.shownEligible) all ? this.selected.delete(x.placeId) : this.selected.add(x.placeId);
+  }
+
+  /** What Import takes: ticked businesses the current filters show (hidden ones are left out). */
+  get importIds(): string[] { return this.visible.filter(x => x.eligible && this.selected.has(x.placeId)).map(x => x.placeId); }
+  /** Ticked businesses the filters hide; they are not imported. */
+  get hiddenSelected(): number { return this.selected.size - this.importIds.length; }
+
   importSelected(): void {
-    if (!this.data || !this.selected.size) return;
+    const ids = this.importIds;
+    if (!this.data || !ids.length) return;
     this.phase = 'importing';
-    this.status = `Importing ${this.selected.size} lead(s)…`;
+    this.status = `Importing ${ids.length} lead(s)…`;
     // The details shown for each selected business are saved on its lead.
-    const ids = [...this.selected];
     const byId = new Map<string, any>((this.data.results || []).map((x: any) => [x.placeId, x]));
     const details = ids.map(id => byId.get(id)).filter(Boolean).map((x: any) => ({
       placeId: x.placeId, name: x.name || null, category: x.category || null, address: x.address || null, countryCode: x.countryCode || null, phone: x.phone || null,

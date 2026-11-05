@@ -219,8 +219,9 @@
       <button class="btn btn-secondary btn-sm" (click)="selectAllEligible()" type="button">{{ filtersActive ? 'Select shown eligible' : 'Select all eligible' }}</button>
       <button class="btn btn-secondary btn-sm" (click)="clearSelection()" type="button">Clear selection</button>
       <span class="grow"></span>
-      <button class="btn btn-primary" type="button" (click)="importSelected()" [disabled]="!selected.size || phase === 'importing'" [title]="'Imported leads are linked to ' + data.run.productName">Import {{ selected.size }} selected for {{ data.run.productName }}</button>
+      <button class="btn btn-primary" type="button" (click)="importSelected()" [disabled]="!importIds.length || phase === 'importing'" [title]="'Imported leads are linked to ' + data.run.productName">Import {{ importIds.length }} selected for {{ data.run.productName }}</button>
     </div>
+    <p class="muted small" *ngIf="hiddenSelected > 0" role="status">{{ hiddenSelected }} other selected business(es) are hidden by the filters and will not be imported. <button type="button" class="link-btn" (click)="resetFilters()">Show them</button></p>
 
     <div class="map-wrap" *ngIf="view === 'map'">
       <div class="note" *ngIf="mapNote">{{ mapNote }}</div>
@@ -230,7 +231,8 @@
       <table class="tbl results-tbl">
         <thead>
           <tr>
-            <th class="freeze freeze-1"></th><th class="sl-cell freeze freeze-2">#</th><th class="freeze freeze-3 freeze-edge">Business</th><th *ngIf="shows('contactPerson')">Contact person</th><th *ngIf="shows('email')">Email</th><th *ngIf="shows('address')">Address</th><th *ngIf="shows('phone')">Phone</th><th *ngIf="shows('website')">Website</th><th>Duplicate check</th><th>Fit for {{ data.run.productName }} (AI)</th>
+            <th class="freeze freeze-1"><input type="checkbox" [checked]="allShownSelected" [indeterminate]="someShownSelected" [disabled]="!shownEligible.length" (change)="toggleAllShown()"
+              [attr.aria-label]="allShownSelected ? 'Unselect all shown' : 'Select all shown eligible businesses'" [title]="allShownSelected ? 'Unselect all shown' : 'Select all ' + shownEligible.length + ' eligible shown (all pages)'" /></th><th class="sl-cell freeze freeze-2">#</th><th class="freeze freeze-3 freeze-edge">Business</th><th *ngIf="shows('contactPerson')">Contact person</th><th *ngIf="shows('email')">Email</th><th *ngIf="shows('address')">Address</th><th *ngIf="shows('phone')">Phone</th><th *ngIf="shows('website')">Website</th><th>Duplicate check</th><th>Fit for {{ data.run.productName }} (AI)</th>
           </tr>
         </thead>
         <tbody>

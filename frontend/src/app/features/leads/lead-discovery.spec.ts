@@ -239,6 +239,40 @@ describe('LeadDiscoveryComponent: search form', () => {
       req.flush({ created: [{ placeId: 'a', leadId: 9 }], duplicates: [], skipped: [], failed: [] });
     });
 
+    it('Import takes only the selected businesses the filters show, and says how many are hidden', () => {
+      withResults();
+      comp.clearSelection();
+      comp.selected.add('a'); comp.selected.add('b');
+      fixture.detectChanges();
+      const importBtn = () => Array.from(el().querySelectorAll('button')).find(b => b.textContent!.includes('selected for P')) as HTMLButtonElement;
+      expect(importBtn().textContent).toContain('Import 2 selected');
+      comp.filters.hasEmail = true;   // Beta has no email
+      fixture.detectChanges();
+      expect(importBtn().textContent).toContain('Import 1 selected');
+      expect(el().textContent).toContain('1 other selected business(es) are hidden by the filters and will not be imported.');
+      comp.importSelected();
+      const req = http.expectOne(r => r.url.endsWith('/runs/1/import'));
+      expect(req.request.body.placeIds).toEqual(['a']);
+      req.flush({ created: [{ placeId: 'a', leadId: 9 }], duplicates: [], skipped: [], failed: [] });
+      expect(comp.selected.has('b')).withContext('the hidden one stays selected').toBeTrue();
+    });
+
+    it('the header checkbox selects or clears every eligible business shown (all pages)', () => {
+      withResults();
+      comp.clearSelection(); fixture.detectChanges();
+      const head = () => el().querySelector('table.results-tbl thead input[type=checkbox]') as HTMLInputElement;
+      expect(head().checked).toBeFalse();
+      head().click(); fixture.detectChanges();
+      expect([...comp.selected].sort()).toEqual(['a', 'b'], 'not the ineligible one');
+      expect(head().checked).toBeTrue();
+      comp.selected.delete('b'); fixture.detectChanges();
+      expect(head().indeterminate).toBeTrue();
+      comp.filters.hasEmail = true; fixture.detectChanges();   // only Alpha shown, and it is selected
+      expect(head().checked).toBeTrue();
+      head().click(); fixture.detectChanges();
+      expect(comp.selected.size).toBe(0);
+    });
+
     it('rows are numbered, continuing across pages', () => {
       withResults();
       const nums = () => Array.from(el().querySelectorAll('table.results-tbl tbody td.sl-cell')).map(td => td.textContent!.trim());
