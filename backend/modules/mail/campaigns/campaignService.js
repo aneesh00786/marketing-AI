@@ -577,7 +577,7 @@ const NO_LISTS_HELP = 'Zoho: the lists for this campaign have nobody Zoho can em
  * which the worker and "Refresh status" pick up, or until it is checked and marked not done.
  */
 const ZOHO_HELD = 'ZOHO_HELD';
-const NO_LISTS_HELD = 'Waiting for Zoho: it has not sent this campaign yet because it is still reviewing contacts new to it. Zoho usually sends it by itself once they are approved. Marketech.ai keeps checking and marks it sent when it goes. Do not send it again, here or in Zoho.';
+const NO_LISTS_HELD = 'Waiting for Zoho: it would not send this campaign yet, usually because it is still reviewing the campaign or contacts new to it. Marketech.ai asks Zoho again every few minutes and sends this same campaign as soon as Zoho allows it, so nobody gets it twice. Do not send it again here.';
 
 async function fail(ctx, row, stage, err) {
   if (NO_LISTS_RE.test(String(err.message || ''))) {
@@ -685,6 +685,11 @@ async function refresh(ctx, id) {
     picked = { pending: true, ...(total ? { recipients_count: total } : {}) };
   }
   if (picked) picked.insights = insightsOf(d);
+  // Held by Zoho and still a draft there (e.g. Zoho has now approved it): ask Zoho to send this same campaign again.
+  if (row.status === 'needs_review' && row.provider_code === ZOHO_HELD && row.zoho_key_version === row.version && norm(d.campaign_status) === 'draft') {
+    await run('UPDATE mail_campaigns SET zoho_status = ?, last_checked_at = UTC_TIMESTAMP() WHERE id = ?', [d.campaign_status || null, row.id]);
+    return sendHeld(ctx, row);
+  }
   await run('UPDATE mail_campaigns SET zoho_status = ?, report_json = ?, last_checked_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP() WHERE id = ?',
     [d.campaign_status || null, picked ? JSON.stringify(picked) : null, row.id]);
   // Sent: the temporary Zoho lists made from Marketech.ai lists are removed (contacts stay in Zoho).
@@ -705,6 +710,27 @@ async function refresh(ctx, id) {
 }
 
 /**
+ * Sends a campaign Zoho held, again: the same Zoho campaign (Zoho refuses a second send of a sent
+ * one, so nobody gets it twice). Still held: it keeps waiting. Another refusal: it fails, with Zoho's reason.
+ */
+async function sendHeld(ctx, row) {
+  try {
+    const res = await zoho.writeCall(ws(ctx), 'sendcampaign', { campaignkey: row.zoho_campaign_key });
+    await setState(row.id, 'submitted', { submit_stage: null, zoho_status: res.campaign_status || null, provider_code: null, provider_message: 'Zoho sent it after first holding it.', submitted_at: toDbDateTime(new Date()) });
+    await audit(ctx, 'mail.campaign_submitted', { resourceType: 'mail_campaign', resourceId: row.id, metadata: { zohoCampaignKey: row.zoho_campaign_key, zohoStatus: res.campaign_status || null, afterHold: true } });
+  } catch (err) {
+    if (NO_LISTS_RE.test(String(err.message || ''))) return getOne(ctx, row.id);
+    if (String(err.providerCode || '') === '6600') {
+      await setState(row.id, 'submitted', { submit_stage: null, zoho_status: 'Sent', provider_code: null, provider_message: 'Zoho sent it after first holding it.', submitted_at: toDbDateTime(new Date()) });
+    } else if (!err.outcomeUnknown) {
+      await setState(row.id, 'failed', { submit_stage: 'send', provider_code: String(err.providerCode || err.code || 'ERROR').slice(0, 20), provider_message: String(err.message || '').slice(0, 500) });
+      await audit(ctx, 'mail.campaign_submit_failed', { resourceType: 'mail_campaign', resourceId: row.id, metadata: { stage: 'send', afterHold: true, code: err.providerCode || err.code || null } });
+    }
+  }
+  return getOne(ctx, row.id);
+}
+
+/**
  * After checking Zoho: an unclear submission may be marked "not done" (so it can be sent again)
  * only after a wait, and only if Zoho still shows no sent campaign / no delivery object.
  */
@@ -712,7 +738,8 @@ async function resolve(ctx, id, { confirm } = {}) {
   if (confirm !== true) throw httpError(400, 'Explicit confirmation (confirm: true) is required.', 'CONFIRMATION_REQUIRED');
   const row = await requireRow(ctx, id);
   if (row.status !== 'needs_review') throw httpError(409, 'Only a submission with an unknown outcome can be resolved.', 'NOT_NEEDS_REVIEW');
-  if (Date.now() - new Date(row.updated_at).getTime() < REVIEW_WAIT_MS) throw httpError(409, 'Wait at least 10 minutes after the request, then check again.', 'TOO_EARLY');
+  // A send Zoho held is known not sent (Zoho said so), so it needs no wait: Zoho's status is still checked below.
+  if (row.provider_code !== ZOHO_HELD && Date.now() - new Date(row.updated_at).getTime() < REVIEW_WAIT_MS) throw httpError(409, 'Wait at least 10 minutes after the request, then check again.', 'TOO_EARLY');
   if (row.submit_stage === 'create' && !row.zoho_campaign_key) {
     const hit = await findCreated(ctx, row);
     if (hit) { await refresh(ctx, id); throw httpError(409, 'Zoho has the campaign; it was prepared. Send again to send it.', 'ALREADY_PREPARED'); }

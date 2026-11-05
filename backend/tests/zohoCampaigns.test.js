@@ -1552,10 +1552,12 @@ test('Zoho holds the send ("No lists selected") and sends it later by itself: it
   assert.equal(held.provider_code, 'ZOHO_HELD');
   assert.match(held.provider_message, /^Waiting for Zoho.*Do not send it again/s);
   assert.equal((await capi(ws, 'POST', `/${c.id}/send`, { confirm: true })).status, 409, 'no resend while waiting');
-  // Still unsent in Zoho: the worker leaves it waiting.
+  // Still held in Zoho: the worker asks again, and it keeps waiting.
   const worker = require('../workers/socialWorker');
-  await worker.processZohoCleanup();
+  Z.sendResponder = () => h.json(200, { status: 'error', code: '2001', message: 'No lists selected for this campaign' });
+  try { await worker.processZohoCleanup(); } finally { Z.sendResponder = null; }
   assert.equal((await row(c.id)).status, 'needs_review');
+  assert.equal(apiCalls('sendcampaign').filter(x => x.params.campaignkey === held.zoho_campaign_key).length, 2, 'asked again');
   // Zoho approves the contacts and sends it on its own.
   acct.campaigns[held.zoho_campaign_key].status = 'Sent';
   await db().run('UPDATE mail_campaigns SET last_checked_at = UTC_TIMESTAMP() - INTERVAL 5 MINUTE WHERE id = ?', [c.id]);
@@ -1565,7 +1567,48 @@ test('Zoho holds the send ("No lists selected") and sends it later by itself: it
   assert.equal(sent.zoho_status, 'Sent');
   assert.ok(sent.submitted_at);
   assert.equal(sent.provider_code, null);
-  assert.equal(apiCalls('sendcampaign').filter(x => x.params.campaignkey === held.zoho_campaign_key).length, 1, 'never sent twice');
+  assert.equal(apiCalls('sendcampaign').filter(x => x.params.campaignkey === held.zoho_campaign_key).length, 2, 'not asked again once sent');
+});
+
+test('Zoho approves a held campaign but leaves it a draft: the worker sends that same campaign once', async () => {
+  const { ws, acct } = await freshConnected('Held then approved');
+  const c = (await capi(ws, 'POST', '', GOOD)).data.campaign;
+  await capi(ws, 'POST', `/${c.id}/approve`, {});
+  Z.sendResponder = () => h.json(200, { status: 'error', code: '2001', message: 'No lists selected for this campaign' });
+  try { await capi(ws, 'POST', `/${c.id}/send`, { confirm: true }); } finally { Z.sendResponder = null; }
+  const held = await row(c.id);
+  assert.equal(acct.campaigns[held.zoho_campaign_key].status, 'Draft');
+  await require('../workers/socialWorker').processZohoCleanup();
+  const sent = await row(c.id);
+  assert.equal(sent.status, 'submitted');
+  assert.equal(sent.provider_code, null);
+  assert.equal(acct.campaigns[held.zoho_campaign_key].status, 'Sent');
+  const sends = apiCalls('sendcampaign').filter(x => x.params.campaignkey === held.zoho_campaign_key).length;
+  assert.equal(sends, 2, 'the first (held) request and one more');
+  // A later check does not send it again.
+  await db().run('UPDATE mail_campaigns SET last_checked_at = UTC_TIMESTAMP() - INTERVAL 5 MINUTE WHERE id = ?', [c.id]);
+  await capi(ws, 'POST', `/${c.id}/refresh`, {});
+  assert.equal(apiCalls('sendcampaign').filter(x => x.params.campaignkey === held.zoho_campaign_key).length, sends);
+});
+
+test('a held send can be marked not done right away, but only while Zoho has not sent it', async () => {
+  const { ws, acct } = await freshConnected('Held stop waiting');
+  const c = (await capi(ws, 'POST', '', GOOD)).data.campaign;
+  await capi(ws, 'POST', `/${c.id}/approve`, {});
+  Z.sendResponder = () => h.json(200, { status: 'error', code: '2001', message: 'No lists selected for this campaign' });
+  try { await capi(ws, 'POST', `/${c.id}/send`, { confirm: true }); } finally { Z.sendResponder = null; }
+  const held = await row(c.id);
+  acct.campaigns[held.zoho_campaign_key].status = 'Sent';
+  assert.equal((await capi(ws, 'POST', `/${c.id}/resolve`, { confirm: true })).status, 409, 'Zoho sent it: not marked not done');
+  assert.equal((await row(c.id)).status, 'submitted');
+
+  const c2 = (await capi(ws, 'POST', '', { ...GOOD, name: 'Held stop 2' })).data.campaign;
+  await capi(ws, 'POST', `/${c2.id}/approve`, {});
+  Z.sendResponder = () => h.json(200, { status: 'error', code: '2001', message: 'No lists selected for this campaign' });
+  try { await capi(ws, 'POST', `/${c2.id}/send`, { confirm: true }); } finally { Z.sendResponder = null; }
+  const r = await capi(ws, 'POST', `/${c2.id}/resolve`, { confirm: true });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal((await row(c2.id)).status, 'failed', 'no 10-minute wait');
 });
 
 test('a prepared campaign deleted in Zoho: the status check stops failing, and Send prepares a new one', async () => {
