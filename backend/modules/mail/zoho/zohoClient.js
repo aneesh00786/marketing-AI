@@ -11,15 +11,16 @@
  * The Campaigns API host follows Zoho's regional domain pattern; only campaigns.zoho.com is shown
  * in the API documentation, so other regions must be confirmed with a test account.
  */
+// ma: the Marketing Automation API host (v2.1), used only to hand a campaign to Zoho's content review.
 const DATA_CENTERS = {
-  us: { accounts: 'https://accounts.zoho.com', campaigns: 'https://campaigns.zoho.com' },
-  eu: { accounts: 'https://accounts.zoho.eu', campaigns: 'https://campaigns.zoho.eu' },
-  in: { accounts: 'https://accounts.zoho.in', campaigns: 'https://campaigns.zoho.in' },
-  au: { accounts: 'https://accounts.zoho.com.au', campaigns: 'https://campaigns.zoho.com.au' },
-  jp: { accounts: 'https://accounts.zoho.jp', campaigns: 'https://campaigns.zoho.jp' },
-  ca: { accounts: 'https://accounts.zohocloud.ca', campaigns: 'https://campaigns.zohocloud.ca' },
-  sa: { accounts: 'https://accounts.zoho.sa', campaigns: 'https://campaigns.zoho.sa' },
-  uk: { accounts: 'https://accounts.zoho.uk', campaigns: 'https://campaigns.zoho.uk' }
+  us: { accounts: 'https://accounts.zoho.com', campaigns: 'https://campaigns.zoho.com', ma: 'https://ma.zoho.com' },
+  eu: { accounts: 'https://accounts.zoho.eu', campaigns: 'https://campaigns.zoho.eu', ma: 'https://ma.zoho.eu' },
+  in: { accounts: 'https://accounts.zoho.in', campaigns: 'https://campaigns.zoho.in', ma: 'https://ma.zoho.in' },
+  au: { accounts: 'https://accounts.zoho.com.au', campaigns: 'https://campaigns.zoho.com.au', ma: 'https://ma.zoho.com.au' },
+  jp: { accounts: 'https://accounts.zoho.jp', campaigns: 'https://campaigns.zoho.jp', ma: 'https://ma.zoho.jp' },
+  ca: { accounts: 'https://accounts.zohocloud.ca', campaigns: 'https://campaigns.zohocloud.ca', ma: 'https://ma.zohocloud.ca' },
+  sa: { accounts: 'https://accounts.zoho.sa', campaigns: 'https://campaigns.zoho.sa', ma: 'https://ma.zoho.sa' },
+  uk: { accounts: 'https://accounts.zoho.uk', campaigns: 'https://campaigns.zoho.uk', ma: 'https://ma.zoho.uk' }
 };
 
 // Documented minimum scopes: campaign.CREATE (createCampaign), campaign.UPDATE (sendcampaign),
@@ -185,7 +186,38 @@ async function call(dc, accessToken, endpoint, params = {}) {
   return data;
 }
 
+/**
+ * Accounts moved to Zoho's newer platform review every campaign before it goes out, and the v1.1
+ * sendcampaign cannot hand a campaign to that review (it answers 6611 "Content not reviewed").
+ * The v2.1 reviewandlaunch does: Zoho reviews it, then sends it by itself. Not in Zoho's public API
+ * docs (taken from Zoho support's guidance to another integration), so any failure here only means
+ * "not handed over": the campaign keeps waiting and the person is told to press Send in Zoho.
+ */
+const LAUNCHED_STATUSES = new Set(['contenttobereviewed', 'underreview', 'scheduled', 'sendingshortly', 'sending', 'inprogress', 'sent']);
+async function reviewAndLaunch(dc, accessToken, campaignId) {
+  if (!/^\d{5,25}$/.test(String(campaignId || ''))) throw zohoError('No Zoho campaign id to hand over for review.', { status: 400, code: 'ZOHO_NO_CAMPAIGN_ID' });
+  if (!dc.ma) throw zohoError('Zoho review is not available in this region.', { status: 400, code: 'ZOHO_NO_REVIEW_API' });
+  let res;
+  try {
+    res = await fetch(`${dc.ma}/api/v2.1/campaigns/${campaignId}/reviewandlaunch?send_mode=sendnow&schedule_type=sendnow`, {
+      method: 'PUT',
+      headers: { Authorization: `Zoho-oauthtoken ${accessToken}` },
+      signal: AbortSignal.timeout(TIMEOUT_MS)
+    });
+  } catch (err) {
+    throw zohoError('Zoho did not confirm handing the campaign over for review.', { code: 'ZOHO_OUTCOME_UNKNOWN', outcomeUnknown: true });
+  }
+  const data = await res.json().catch(() => null);
+  if (res.status === 401) throw zohoError('Zoho rejected the access token.', { status: 409, code: 'ZOHO_UNAUTHORIZED', providerCode: '401' });
+  const status = String(data?.campaign_details?.status || data?.campaign_status || '');
+  const norm = status.toLowerCase().replace(/[^a-z]/g, '');
+  if (res.ok && data && (LAUNCHED_STATUSES.has(norm) || String(data.status_code) === '200')) return { status: status || 'ContentToBeReviewed', data };
+  const message = String(data?.message || data?.error || `HTTP ${res.status}`).slice(0, 300);
+  throw zohoError(`Zoho: ${message}`, { status: 400, code: 'ZOHO_API_ERROR', providerCode: data?.code != null ? String(data.code) : String(res.status) });
+}
+
 module.exports = {
+  reviewAndLaunch,
   DATA_CENTERS,
   SCOPES,
   CONTACT_DELETE_SCOPE,

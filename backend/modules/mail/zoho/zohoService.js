@@ -321,6 +321,12 @@ async function writeCall(workspaceId, endpoint, params) {
   }
 }
 
+/** Hands a Zoho campaign (by its numeric id) to Zoho's content review; Zoho sends it once approved. */
+async function reviewAndLaunch(workspaceId, campaignId) {
+  const s = await session(workspaceId);
+  return zoho.reviewAndLaunch(s.dc, s.accessToken, campaignId);
+}
+
 /** Throws unless the workspace is connected with every scope campaign delivery needs. */
 async function assertReady(workspaceId) {
   const row = await connectionRow(workspaceId);
@@ -339,6 +345,7 @@ async function assertContactSync(workspaceId) {
 }
 
 module.exports = {
+  reviewAndLaunch,
   PROVIDER,
   canSyncNames,
   canDeleteLists,

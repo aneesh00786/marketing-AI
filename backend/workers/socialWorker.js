@@ -10,7 +10,7 @@ const path = require('path');
 const os = require('os');
 require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
 
-const { all, closeDatabase } = require('../db/database');
+const { all, run, closeDatabase } = require('../db/database');
 const publishingService = require('../modules/social/publishingService');
 const jobsService = require('../modules/social/jobsService');
 const campaignService = require('../modules/social/campaignService');
@@ -152,6 +152,8 @@ async function processZohoCleanup() {
     const held = await all(`SELECT id, workspace_id FROM mail_campaigns WHERE status IN ('needs_review', 'failed') AND submit_stage = 'send' AND zoho_campaign_key IS NOT NULL
       AND zoho_key_version = version AND approved_at > UTC_TIMESTAMP() - INTERVAL 7 DAY AND (last_checked_at IS NULL OR last_checked_at < UTC_TIMESTAMP() - INTERVAL 2 MINUTE)
       AND workspace_id IN ${require('../lib/workspaceStatus').ACTIVE_WORKSPACES} ORDER BY last_checked_at IS NOT NULL, last_checked_at LIMIT 5`);
+    // Stamped first, so one that keeps failing to check does not hold the others back.
+    if (held.length) await run(`UPDATE mail_campaigns SET last_checked_at = UTC_TIMESTAMP() WHERE id IN (${held.map(() => '?').join(', ')})`, held.map(r => r.id));
     rows.push(...held);
     const svc = require('../modules/mail/campaigns/campaignService');
     for (const r of rows) {

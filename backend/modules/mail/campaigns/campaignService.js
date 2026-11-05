@@ -529,9 +529,10 @@ async function deliver(ctx, row, extraKeys = [], { retried = false } = {}) {
         ...(topicId ? { topicId } : {})
       });
       key = String(res.campaignKey || res.campaign_key || '');
+      const zohoId = String(res.campaignId || res.campaign_id || '');
       if (!KEY_RE.test(key)) throw Object.assign(new Error('Zoho did not return a campaign key.'), { outcomeUnknown: true, code: 'ZOHO_BAD_RESPONSE' });
       try {
-        await setState(row.id, 'submitting', { submit_stage: 'send', zoho_campaign_key: key, zoho_key_version: row.version });
+        await setState(row.id, 'submitting', { submit_stage: 'send', zoho_campaign_key: key, zoho_key_version: row.version, zoho_campaign_id: /^\d{5,25}$/.test(zohoId) ? zohoId : null });
       } catch (dbErr) {
         // Zoho created the object but it could not be recorded: settle it by checking, never by recreating.
         throw Object.assign(new Error(`Zoho prepared the campaign (key ${key}) but it could not be recorded.`), { outcomeUnknown: true, code: 'ZOHO_KEY_NOT_RECORDED' });
@@ -555,6 +556,11 @@ async function deliver(ctx, row, extraKeys = [], { retried = false } = {}) {
       const fresh = await get('SELECT * FROM mail_campaigns WHERE id = ?', [row.id]);
       const lists = extraKeys.length ? extraKeys : parse(fresh.temp_lists_json, []).map(t => t.key);
       return deliver(ctx, { ...fresh, status: 'submitting' }, lists, { retried: true });
+    }
+    if (NOT_REVIEWED_RE.test(String(err.message || ''))) {
+      // Zoho reviews every campaign first: hand this one to the review (it then sends it), or wait.
+      const fresh = await get('SELECT * FROM mail_campaigns WHERE id = ?', [row.id]);
+      return launchForReview(ctx, { ...fresh, zoho_campaign_key: key }, err, { throwIfWaiting: true });
     }
     if (err.providerCode === '6600') {
       await setState(row.id, 'submitted', { submit_stage: null, zoho_status: 'Sent', provider_code: '6600', provider_message: 'Zoho reports the campaign was already sent.', submitted_at: toDbDateTime(new Date()) });
@@ -711,6 +717,40 @@ async function refresh(ctx, id) {
   return getOne(ctx, row.id);
 }
 
+/** Said when the campaign can only be sent from Zoho once its review passes. */
+const pressSendInZoho = row => `Waiting for Zoho: it reviews every new campaign before it goes out, and it would not take the send request from Marketech.ai. Open "${zohoCampaignName(row)}" in Zoho Campaigns and press Send once it says the campaign is approved. Marketech.ai then marks it sent here, so do not send it again here.`;
+
+/**
+ * Zoho answered "Content not reviewed" (6611): it reviews every campaign before sending, and only its
+ * newer API can hand one to that review. Handed over: Zoho sends it once approved, so it counts as
+ * submitted. Not possible (no id, region, scope or Zoho refused): it waits, and the person is told to
+ * press Send in Zoho. throwIfWaiting: from the Send button, which reports a refusal as an error.
+ */
+async function launchForReview(ctx, row, sendErr, { throwIfWaiting = false } = {}) {
+  let launched = null;
+  let reason = null;
+  if (row.zoho_campaign_id) {
+    try {
+      launched = await zoho.reviewAndLaunch(ws(ctx), row.zoho_campaign_id);
+    } catch (err) {
+      reason = String(err.message || '').slice(0, 200);
+    }
+  }
+  if (launched) {
+    await setState(row.id, 'submitted', { submit_stage: null, zoho_status: launched.status, provider_code: null,
+      provider_message: 'Handed to Zoho\'s content review: Zoho sends it as soon as the review passes.', submitted_at: toDbDateTime(new Date()) });
+    await audit(ctx, 'mail.campaign_submitted', { resourceType: 'mail_campaign', resourceId: row.id, metadata: { zohoCampaignKey: row.zoho_campaign_key, zohoStatus: launched.status, review: true } });
+    return getOne(ctx, row.id);
+  }
+  const message = pressSendInZoho(row) + (reason ? ` (Zoho's review request: ${reason})` : '');
+  await setState(row.id, 'needs_review', { submit_stage: 'send', provider_code: ZOHO_HELD, provider_message: message.slice(0, 500), last_checked_at: toDbDateTime(new Date()) });
+  if (throwIfWaiting) {
+    await audit(ctx, 'mail.campaign_submit_unknown', { resourceType: 'mail_campaign', resourceId: row.id, metadata: { stage: 'send', code: '6611' } });
+    throw Object.assign(httpError(409, message, ZOHO_HELD), { providerCode: ZOHO_HELD, cause: sendErr });
+  }
+  return getOne(ctx, row.id);
+}
+
 /**
  * Sends a campaign Zoho held, again: the same Zoho campaign (Zoho refuses a second send of a sent
  * one, so nobody gets it twice). Still held: it keeps waiting. Another refusal: it fails, with Zoho's reason.
@@ -721,6 +761,7 @@ async function sendHeld(ctx, row) {
     await setState(row.id, 'submitted', { submit_stage: null, zoho_status: res.campaign_status || null, provider_code: null, provider_message: 'Zoho sent it after first holding it.', submitted_at: toDbDateTime(new Date()) });
     await audit(ctx, 'mail.campaign_submitted', { resourceType: 'mail_campaign', resourceId: row.id, metadata: { zohoCampaignKey: row.zoho_campaign_key, zohoStatus: res.campaign_status || null, afterHold: true } });
   } catch (err) {
+    if (NOT_REVIEWED_RE.test(String(err.message || ''))) return launchForReview(ctx, row, err);
     if (zohoHolding(err)) return getOne(ctx, row.id);
     if (String(err.providerCode || '') === '6600') {
       await setState(row.id, 'submitted', { submit_stage: null, zoho_status: 'Sent', provider_code: null, provider_message: 'Zoho sent it after first holding it.', submitted_at: toDbDateTime(new Date()) });
