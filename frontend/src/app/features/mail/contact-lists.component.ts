@@ -9,7 +9,7 @@ import { parseLeadSheet, LeadSheetRow } from '../leads/lead-sheet';
 
 export interface MList { id: number; name: string; source: string; inZoho: boolean; total: number; reachable: number; updatedAt?: string; }
 interface ManualContact { name: string; company: string; email: string; phone: string; }
-interface LeadOpt { id: number; name: string; email: string; company?: string | null; country?: string | null; eligible?: boolean; reasons?: string[]; }
+interface LeadOpt { id: number; name: string; email: string; company?: string | null; country?: string | null; address?: string | null; eligible?: boolean; reasons?: string[]; }
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const SYNC_POLL_MS = 3000;
 const emptyContact = (): ManualContact => ({ name: '', company: '', email: '', phone: '' });
@@ -137,7 +137,7 @@ export class ContactListsComponent implements OnInit, OnDestroy {
     const q = (this.picker?.query || '').trim().toLowerCase();
     const country = this.picker?.country || '';
     const inCountry = (l: LeadOpt) => !country || (country === 'none' ? !l.country : l.country === country);
-    const hit = (l: LeadOpt) => inCountry(l) && (!q || [l.name, l.email, l.company].some(v => String(v || '').toLowerCase().includes(q)));
+    const hit = (l: LeadOpt) => inCountry(l) && (!q || [l.name, l.email, l.company, l.address].some(v => String(v || '').toLowerCase().includes(q)));
     return [...this.addableLeads.filter(hit), ...this.leadOptions.filter(l => l.eligible === false).filter(hit)];
   }
   get pickerShownAddable(): LeadOpt[] { return this.pickerLeads.filter(l => l.eligible !== false); }

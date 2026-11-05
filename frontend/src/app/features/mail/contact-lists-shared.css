@@ -113,3 +113,4 @@
 .zl-del-opt .zl-del-why { color: var(--danger-text, #b91c1c); }
 .zl-del-go { background: var(--danger, #dc2626); color: #fff; border: 0; }
 .zl-del-go:disabled { opacity: 0.6; }
+.zl-pick-addr { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }

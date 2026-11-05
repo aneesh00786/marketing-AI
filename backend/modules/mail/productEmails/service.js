@@ -86,6 +86,7 @@ async function withEligibility(workspaceId, leads, { requireConsent = true } = {
       email: email || null,
       company: l.company_name || null,
       country: l.country || null,
+      address: l.address || null,
       status: l.status,
       productId: l.product_id || null,
       productInterest: l.product_interest || null,
@@ -100,7 +101,7 @@ async function withEligibility(workspaceId, leads, { requireConsent = true } = {
   });
 }
 
-const LEAD_COLUMNS = 'id, name, email, company_name, country, status, product_id, product_interest, marketing_consent, marketing_consent_source, marketing_consent_method, marketing_consent_obtained_at, marketing_consent_evidence';
+const LEAD_COLUMNS = 'id, name, email, company_name, country, address, status, product_id, product_interest, marketing_consent, marketing_consent_source, marketing_consent_method, marketing_consent_obtained_at, marketing_consent_evidence';
 
 /**
  * Leads of the workspace for the recipient picker: searchable and filterable, each with its
@@ -112,8 +113,8 @@ async function listRecipients(ctx, query = {}, { maxSelect = maxBatch(), maxPage
   const q = String(query.q || '').trim().slice(0, 100);
   if (q) {
     const like = `%${q.replace(/[%_\\]/g, '\\$&')}%`;
-    where.push('(name LIKE ? OR email LIKE ? OR company_name LIKE ?)');
-    params.push(like, like, like);
+    where.push('(name LIKE ? OR email LIKE ? OR company_name LIKE ? OR address LIKE ?)');
+    params.push(like, like, like, like);
   }
   if (query.status) { where.push('status = ?'); params.push(String(query.status).slice(0, 50)); }
   if (query.country === 'none') where.push("(country IS NULL OR country = '')");

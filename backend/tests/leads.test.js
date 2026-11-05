@@ -333,6 +333,9 @@ test('address: saved on create, edit and import; the Leads search and export mat
   assert.deepEqual(await search('Ernakulam'), [], 'the old address no longer matches');
   const exp = await h.api('GET', `/api/v1/leads/export?q=Kakkanad`, { token: A.token });
   assert.deepEqual(exp.data.leads.map(l => l.address), ['Kakkanad, Kochi']);
+  // The lead pickers (contact lists, campaigns, product emails) search the address too.
+  const pick = await h.api('GET', '/api/v1/mail/campaigns/lead-options?q=560058', { token: A.token });
+  assert.deepEqual(pick.data.leads.map(l => [l.name, l.address]), [[`Addr Two ${stamp}`, 'Peenya Industrial Area, Bengaluru 560058']]);
   const B = await h.createWorkspace({ name: `Address B ${stamp}` });
   assert.equal((await h.api('GET', `/api/v1/leads?q=Kakkanad`, { token: B.token })).data.leads.length, 0, 'another workspace sees none');
 });

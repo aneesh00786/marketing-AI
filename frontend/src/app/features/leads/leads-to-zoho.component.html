@@ -27,7 +27,7 @@
       <fieldset class="ltz-box">
         <legend>Leads <span class="ltz-muted" *ngIf="picked.size">({{ picked.size }} selected)</span></legend>
         <div class="ltz-tools">
-          <input class="hud-input" type="search" [(ngModel)]="q" (keydown.enter)="search()" placeholder="Search name, email or company" aria-label="Search leads" />
+          <input class="hud-input" type="search" [(ngModel)]="q" (keydown.enter)="search()" placeholder="Search name, email, company or address" aria-label="Search leads" />
           <select class="hud-input" [(ngModel)]="show" (change)="search()" aria-label="Show">
             <option value="eligible">Can be emailed</option>
             <option value="all">All leads</option>

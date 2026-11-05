@@ -26,7 +26,7 @@
             <span>Country</span>
             <app-country-filter [countries]="countries" [(value)]="countryFilter" (valueChange)="search(true)" [showCounts]="false"></app-country-filter>
           </label>
-          <input #searchBox type="search" class="hud-input" [(ngModel)]="query" (ngModelChange)="search()" placeholder="Search by name, email or company" aria-label="Search contacts" aria-controls="cp-results" />
+          <input #searchBox type="search" class="hud-input" [(ngModel)]="query" (ngModelChange)="search()" placeholder="Search by name, email, company or address" aria-label="Search contacts" aria-controls="cp-results" />
         </div>
         <p class="cp-scope" *ngIf="productFilter !== 'all'">Showing contacts linked to <strong>{{ productFilter === 'none' ? 'no product' : productName(productFilter) }}</strong> in Leads. Choose “All contacts” to see everyone.</p>
         <div class="cp-note warn" *ngIf="noneUsable" role="status">None of these contacts has an email address that can receive mail, so none can be selected. Update their emails in Leads, or add a new contact.</div>

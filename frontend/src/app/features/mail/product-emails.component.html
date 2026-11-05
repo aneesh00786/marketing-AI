@@ -41,7 +41,7 @@
         <button class="btn btn-secondary btn-sm" (click)="clearSelection()" [disabled]="!selected.size">Clear</button>
       </div>
       <div class="filters">
-        <input class="hud-input" [(ngModel)]="q" (ngModelChange)="search()" placeholder="Search name, email, company" aria-label="Search leads" />
+        <input class="hud-input" [(ngModel)]="q" (ngModelChange)="search()" placeholder="Search name, email, company or address" aria-label="Search leads" />
         <select class="hud-input" [(ngModel)]="status" (ngModelChange)="page = 1; loadRecipients()" aria-label="Lead status">
           <option value="">All statuses</option>
           <option *ngFor="let s of ['New','Imported','Contacted','Qualified','Demo Scheduled','Proposal','Won','Lost']" [value]="s">{{ s }}</option>

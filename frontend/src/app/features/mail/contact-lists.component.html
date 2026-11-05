@@ -132,7 +132,7 @@
       <button type="button" class="zc-close" aria-label="Close" (click)="picker = null"><app-icon name="x" [size]="18"></app-icon></button>
     </div>
     <label class="zl-search zl-pick-filter"><app-icon name="search" [size]="15"></app-icon>
-      <input class="hud-input" type="search" [(ngModel)]="picker.query" placeholder="Filter by name, email or company" aria-label="Filter leads" /></label>
+      <input class="hud-input" type="search" [(ngModel)]="picker.query" placeholder="Filter by name, email, company or address" aria-label="Filter leads" /></label>
     <app-country-filter class="zl-pick-country" *ngIf="leadCountries.length" [countries]="leadCountries" [(value)]="picker.country"></app-country-filter>
     <div class="zl-pick-list">
       <label class="zl-pick-row zl-pick-all" *ngIf="pickerShownAddable.length">
@@ -142,6 +142,7 @@
       <label class="zl-pick-row" *ngFor="let l of pickerLeads" [class.zl-pick-off]="l.eligible === false">
         <input type="checkbox" [checked]="picker.sel.has(l.id)" [disabled]="l.eligible === false" (change)="togglePick(l)" />
         <span><b>{{ l.name }}</b><small>{{ l.email || 'No email' }}{{ l.company && l.company !== l.name ? ' · ' + l.company : '' }}{{ l.country ? ' · ' + l.country : '' }}</small>
+          <small class="zl-pick-addr" *ngIf="l.address" [title]="l.address">📍 {{ l.address }}</small>
           <small class="zl-pick-why" *ngIf="l.eligible === false">{{ (l.reasons || []).join('; ') || 'Cannot be added' }}</small></span>
       </label>
       <p class="muted small zl-pick-none" *ngIf="!pickerLeads.length">No leads match{{ picker.query.trim() ? ' “' + picker.query + '”' : '' }}{{ picker.country ? (picker.country === 'none' ? ' without a country' : ' in ' + picker.country) : '' }}.</p>

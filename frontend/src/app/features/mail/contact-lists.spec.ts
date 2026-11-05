@@ -85,7 +85,7 @@ describe('ContactListsComponent (lists kept in Marketech.ai)', () => {
     start();
     button('New list').click(); fixture.detectChanges();
     http.expectOne(r => r.url.endsWith('/lead-options')).flush({
-      leads: [{ id: 7, name: 'Priya', email: 'p@a.io', country: 'India', eligible: true }, { id: 8, name: 'Sam', email: 's@a.io', country: 'Australia', eligible: true },
+      leads: [{ id: 7, name: 'Priya', email: 'p@a.io', country: 'India', address: '12 MG Road, Ernakulam 682016', eligible: true }, { id: 8, name: 'Sam', email: 's@a.io', country: 'Australia', eligible: true },
         { id: 9, name: 'Pat', email: 'pat@a.io', country: null, eligible: true }],
       countries: [{ country: 'Australia', count: 1 }, { country: 'India', count: 1 }, { country: null, count: 1 }] });
     fixture.detectChanges();
@@ -100,6 +100,10 @@ describe('ContactListsComponent (lists kept in Marketech.ai)', () => {
     expect(comp.pickerLeads.map(l => l.id)).toEqual([9]);
     comp.picker!.country = 'Australia'; comp.picker!.query = 'priya'; fixture.detectChanges();
     expect(el().querySelector('.zl-pick-none')!.textContent).toContain('No leads match “priya” in Australia.');
+    // The search matches the address too, and each lead shows it.
+    comp.picker!.country = ''; comp.picker!.query = 'ernakulam'; fixture.detectChanges();
+    expect(comp.pickerLeads.map(l => l.id)).toEqual([7]);
+    expect(el().querySelector('.zl-pick-addr')!.textContent).toContain('12 MG Road, Ernakulam 682016');
   });
 
   it('View contacts: status tabs, search, details and lead status; remove one', () => {
