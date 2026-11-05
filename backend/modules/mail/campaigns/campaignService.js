@@ -569,6 +569,10 @@ async function deliver(ctx, row, extraKeys = [], { retried = false } = {}) {
 
 /** Zoho's reply when the campaign's lists have nobody it can email, said in plain words. */
 const NO_LISTS_RE = /no lists? (are |is )?selected/i;
+/** Zoho still reviewing a new campaign's content: it can be sent once Zoho approves it. */
+const NOT_REVIEWED_RE = /content (is )?not (yet )?reviewed|(content|campaign) (is )?(under|pending|awaiting) review/i;
+/** A send refused only for now: Zoho is reviewing the campaign or its contacts. */
+const zohoHolding = err => NO_LISTS_RE.test(String(err?.message || '')) || NOT_REVIEWED_RE.test(String(err?.message || ''));
 const NO_LISTS_HELP = 'Zoho: the lists for this campaign have nobody Zoho can email yet, so nothing was sent. Contacts new to Zoho may be held for review or until they confirm by email, or the people may be unsubscribed or bounced in Zoho. Check Zoho Campaigns → Contacts, then send again.';
 
 /**
@@ -580,10 +584,8 @@ const ZOHO_HELD = 'ZOHO_HELD';
 const NO_LISTS_HELD = 'Waiting for Zoho: it would not send this campaign yet, usually because it is still reviewing the campaign or contacts new to it. Marketech.ai asks Zoho again every few minutes and sends this same campaign as soon as Zoho allows it, so nobody gets it twice. Do not send it again here.';
 
 async function fail(ctx, row, stage, err) {
-  if (NO_LISTS_RE.test(String(err.message || ''))) {
-    if (stage === 'send') Object.assign(err, { message: NO_LISTS_HELD, outcomeUnknown: true, providerCode: ZOHO_HELD, code: ZOHO_HELD });
-    else err.message = NO_LISTS_HELP;
-  }
+  if (stage === 'send' && zohoHolding(err)) Object.assign(err, { message: NO_LISTS_HELD, outcomeUnknown: true, providerCode: ZOHO_HELD, code: ZOHO_HELD });
+  else if (NO_LISTS_RE.test(String(err.message || ''))) err.message = NO_LISTS_HELP;
   const unknown = !!err.outcomeUnknown;
   await setState(row.id, unknown ? 'needs_review' : 'failed', {
     submit_stage: stage,
@@ -719,7 +721,7 @@ async function sendHeld(ctx, row) {
     await setState(row.id, 'submitted', { submit_stage: null, zoho_status: res.campaign_status || null, provider_code: null, provider_message: 'Zoho sent it after first holding it.', submitted_at: toDbDateTime(new Date()) });
     await audit(ctx, 'mail.campaign_submitted', { resourceType: 'mail_campaign', resourceId: row.id, metadata: { zohoCampaignKey: row.zoho_campaign_key, zohoStatus: res.campaign_status || null, afterHold: true } });
   } catch (err) {
-    if (NO_LISTS_RE.test(String(err.message || ''))) return getOne(ctx, row.id);
+    if (zohoHolding(err)) return getOne(ctx, row.id);
     if (String(err.providerCode || '') === '6600') {
       await setState(row.id, 'submitted', { submit_stage: null, zoho_status: 'Sent', provider_code: null, provider_message: 'Zoho sent it after first holding it.', submitted_at: toDbDateTime(new Date()) });
     } else if (!err.outcomeUnknown) {

@@ -1591,6 +1591,26 @@ test('Zoho approves a held campaign but leaves it a draft: the worker sends that
   assert.equal(apiCalls('sendcampaign').filter(x => x.params.campaignkey === held.zoho_campaign_key).length, sends);
 });
 
+test('"Content not reviewed" at the send step waits too, and the worker sends it once Zoho has reviewed it', async () => {
+  const { ws, acct } = await freshConnected('Content review');
+  const c = (await capi(ws, 'POST', '', GOOD)).data.campaign;
+  await capi(ws, 'POST', `/${c.id}/approve`, {});
+  Z.sendResponder = () => h.json(200, { status: 'error', code: '2501', message: 'Content not reviewed' });
+  try { await capi(ws, 'POST', `/${c.id}/send`, { confirm: true }); } finally { Z.sendResponder = null; }
+  let r = await row(c.id);
+  assert.deepEqual([r.status, r.provider_code], ['needs_review', 'ZOHO_HELD']);
+  // Still under review when the worker asks again: it keeps waiting.
+  Z.sendResponder = () => h.json(200, { status: 'error', code: '2501', message: 'Content not reviewed' });
+  try { await require('../workers/socialWorker').processZohoCleanup(); } finally { Z.sendResponder = null; }
+  assert.equal((await row(c.id)).status, 'needs_review');
+  // Reviewed: sent.
+  await db().run('UPDATE mail_campaigns SET last_checked_at = UTC_TIMESTAMP() - INTERVAL 5 MINUTE WHERE id = ?', [c.id]);
+  await require('../workers/socialWorker').processZohoCleanup();
+  r = await row(c.id);
+  assert.equal(r.status, 'submitted');
+  assert.equal(acct.campaigns[r.zoho_campaign_key].status, 'Sent');
+});
+
 test('a held send can be marked not done right away, but only while Zoho has not sent it', async () => {
   const { ws, acct } = await freshConnected('Held stop waiting');
   const c = (await capi(ws, 'POST', '', GOOD)).data.campaign;
