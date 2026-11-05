@@ -251,7 +251,7 @@ async function sendOne(campaign, recipient, workerId) {
 async function processOutreach(workerId, { maxPerTick = 20, now = new Date() } = {}) {
   await heartbeat(workerId);
   await recoverStale();
-  const monitored = await all(`SELECT DISTINCT r.workspace_id FROM outreach_recipients r JOIN outreach_campaigns c ON c.id = r.campaign_id WHERE ${MONITORED}`);
+  const monitored = await all(`SELECT DISTINCT r.workspace_id FROM outreach_recipients r JOIN outreach_campaigns c ON c.id = r.campaign_id WHERE ${MONITORED} AND r.workspace_id IN ${require('../../lib/workspaceStatus').ACTIVE_WORKSPACES}`);
   if (monitored.length) {
     await syncInboxes(monitored.map(m => m.workspace_id));
     await detectReplies();

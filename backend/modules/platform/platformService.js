@@ -37,7 +37,8 @@ function requireId(raw, label) {
   return n;
 }
 
-const WORKSPACE_SELECT = `SELECT w.id, w.name, w.plan, w.status, w.created_at,
+const WORKSPACE_SELECT = `SELECT w.id, w.name, w.plan, w.status, w.created_at, w.deleted_at, w.purge_after, w.purged_at, w.delete_reason,
+    (SELECT ${NAME_SQL('d')} FROM users d WHERE d.id = w.deleted_by) AS deleted_by_name,
     (SELECT COUNT(*) FROM workspace_members m WHERE m.workspace_id = w.id AND m.status = 'Active') AS member_count,
     (SELECT GROUP_CONCAT(${NAME_SQL('u')} ORDER BY m.id SEPARATOR ', ') FROM workspace_members m JOIN users u ON u.id = m.user_id
       WHERE m.workspace_id = w.id AND m.status = 'Active' AND m.role = '${OWNER}') AS owners,
@@ -58,7 +59,13 @@ function presentWorkspace(r) {
     leadCount: Number(r.lead_count),
     campaignCount: Number(r.campaign_count),
     lastActivity: r.last_activity,
-    protected: r.id === LEGACY_WORKSPACE_ID
+    protected: r.id === LEGACY_WORKSPACE_ID,
+    // Deleted: closed, restorable until purgeAfter; Purged: erased.
+    deletedAt: r.deleted_at || null,
+    deletedBy: r.deleted_by_name || null,
+    deleteReason: r.delete_reason || null,
+    purgeAfter: r.purge_after || null,
+    purgedAt: r.purged_at || null
   };
 }
 
@@ -72,6 +79,11 @@ async function requireWorkspace(rawId) {
   const row = await get(`${WORKSPACE_SELECT} WHERE w.id = ?`, [requireId(rawId, 'workspace')]);
   if (!row) throw httpError(404, 'Workspace not found.', 'NOT_FOUND');
   return row;
+}
+
+const DELETED_MSG = 'This workspace is deleted. Restore it first.';
+function assertActive(row) {
+  if (row.status && row.status !== 'Active') throw httpError(409, row.status === 'Purged' ? 'This workspace was erased.' : DELETED_MSG, 'WORKSPACE_DELETED');
 }
 
 async function members(workspaceId) {
@@ -107,8 +119,9 @@ async function createWorkspace(ctx, input) {
 
 /** Full access inside a workspace, without joining it. Recorded in that workspace's own log. */
 async function openWorkspace(ctx, rawId) {
-  const row = await get('SELECT id, name, slug, plan FROM workspaces WHERE id = ?', [requireId(rawId, 'workspace')]);
+  const row = await get('SELECT id, name, slug, plan, status FROM workspaces WHERE id = ?', [requireId(rawId, 'workspace')]);
   if (!row) throw httpError(404, 'Workspace not found.', 'NOT_FOUND');
+  assertActive(row);
   const user = await get('SELECT * FROM users WHERE id = ?', [ctx.auth.userId]);
   await auditIn(ctx, row.id, 'platform.workspace_entered', { resourceType: 'workspace', resourceId: row.id });
   return authService.platformAccessSession(user, row);
@@ -134,6 +147,7 @@ const dropGrants = (workspaceId, userId) => run('DELETE FROM workspace_member_ca
 /** Adds a user to a workspace, brings a former member back, or changes a member's role. */
 async function assignUser(ctx, rawId, input) {
   const row = await requireWorkspace(rawId);
+  assertActive(row);
   const v = assignSchema.parse(input || {});
   await requireActiveUser(v.userId);
   const current = await activeMember(row.id, v.userId);
@@ -153,6 +167,7 @@ async function assignUser(ctx, rawId, input) {
 
 async function removeUser(ctx, rawId, rawUserId) {
   const row = await requireWorkspace(rawId);
+  assertActive(row);
   const userId = requireId(rawUserId, 'user');
   const current = await activeMember(row.id, userId);
   if (!current) throw httpError(404, 'This user is not a member of the workspace.', 'NOT_FOUND');

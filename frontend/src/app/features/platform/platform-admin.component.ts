@@ -20,10 +20,12 @@ const errorText = (e: any): string => e?.error?.error || e?.message || 'Request 
   standalone: true,
   imports: [CommonModule, FormsModule, IconComponent],
   templateUrl: './platform-admin.component.html',
-  styleUrls: ['../command/command-center.component.css', '../mail/mail-ui.css', '../crm/crm-ui.css']
+  styleUrls: ['../command/command-center.component.css', '../mail/mail-ui.css', '../crm/crm-ui.css', './platform-admin.component.css']
 })
 export class PlatformAdminComponent implements OnInit, OnDestroy {
   @Output() toast = new EventEmitter<string>();
+  /** A workspace's data was cleared (the app reloads its counts when it is the current one). */
+  @Output() cleared = new EventEmitter<number>();
   /** The new session for a workspace the admin chose to open. */
   @Output() opened = new EventEmitter<any>();
 
@@ -87,7 +89,7 @@ export class PlatformAdminComponent implements OnInit, OnDestroy {
   /** Workspaces this user is not in yet. */
   get addable(): any[] {
     const inside = new Set((this.managing?.workspaces || []).map((w: any) => w.id));
-    return this.allWorkspaces.filter(w => !inside.has(w.id));
+    return this.allWorkspaces.filter(w => !inside.has(w.id) && w.status === 'Active');
   }
 
   /** The list again, then the user being managed, from the fresh data. */
@@ -174,7 +176,7 @@ export class PlatformAdminComponent implements OnInit, OnDestroy {
     });
   }
 
-  back(): void { this.detail = null; this.load(); }
+  back(): void { this.detail = null; this.deleting = null; this.clearing = null; this.load(); }
 
   /** Users not in this workspace yet, for the assign list. */
   get assignable(): any[] {
@@ -228,6 +230,77 @@ export class PlatformAdminComponent implements OnInit, OnDestroy {
     if (!confirm(`Remove ${m.name} from ${this.detail.workspace.name}? They lose access straight away.`)) return;
     this.http.delete<any>(`${this.base}/workspaces/${this.detail.workspace.id}/members/${m.userId}`).subscribe({
       next: r => this.applyMembers(r, 'User removed.'),
+      error: e => this.toast.emit(errorText(e))
+    });
+  }
+
+  // ---------- Clear data (keeps the workspace) ----------
+  clearing: { loading: boolean; busy: boolean; categories: { key: string; label: string; count: number; warn: string | null }[]; picked: Set<string>; name: string; kept: string } | null = null;
+
+  openClear(): void {
+    const c = { loading: true, busy: false, categories: [] as any[], picked: new Set<string>(), name: '', kept: '' };
+    this.clearing = c;
+    this.http.get<any>(`${this.base}/workspaces/${this.detail.workspace.id}/clear-options`).subscribe({
+      next: r => { if (this.clearing !== c) return; c.loading = false; c.categories = r.categories || []; c.kept = r.kept || ''; },
+      error: e => { this.clearing = null; this.toast.emit(errorText(e)); }
+    });
+  }
+
+  toggleClear(key: string): void { const p = this.clearing?.picked; if (!p) return; p.has(key) ? p.delete(key) : p.add(key); }
+  get clearAllPicked(): boolean { return !!this.clearing?.categories.length && this.clearing.categories.every(c => this.clearing!.picked.has(c.key)); }
+  toggleClearAll(): void {
+    const c = this.clearing; if (!c) return;
+    const all = this.clearAllPicked;
+    c.picked = new Set(all ? [] : c.categories.map(x => x.key));
+  }
+  get clearNameMatches(): boolean {
+    return !!this.clearing && this.clearing.name.trim().toLowerCase() === String(this.detail?.workspace.name || '').trim().toLowerCase();
+  }
+  get clearPickedRecords(): number { return (this.clearing?.categories || []).filter(c => this.clearing!.picked.has(c.key)).reduce((n, c) => n + c.count, 0); }
+
+  confirmClear(): void {
+    const c = this.clearing;
+    if (!c || !c.picked.size || !this.clearNameMatches || c.busy) return;
+    if (!confirm(`Permanently erase the selected data of ${this.detail.workspace.name}? This cannot be undone.`)) return;
+    c.busy = true;
+    const id = this.detail.workspace.id;
+    this.http.post<any>(`${this.base}/workspaces/${id}/clear`, { categories: [...c.picked], confirmName: c.name.trim() }).subscribe({
+      next: r => { this.clearing = null; this.toast.emit(`Cleared ${Number(r.total || 0).toLocaleString('en-US')} record(s).`); this.open(id); this.cleared.emit(id); },
+      error: e => { c.busy = false; this.toast.emit(errorText(e)); }
+    });
+  }
+
+  // ---------- Delete / restore a workspace ----------
+  /** The open "Delete workspace" confirmation. */
+  deleting: { name: string; reason: string; busy: boolean } | null = null;
+
+  get deleteNameMatches(): boolean {
+    return !!this.deleting && !!this.detail && this.deleting.name.trim().toLowerCase() === String(this.detail.workspace.name).trim().toLowerCase();
+  }
+
+  openDelete(): void { this.deleting = { name: '', reason: '', busy: false }; }
+
+  confirmDelete(): void {
+    const d = this.deleting;
+    if (!d || !this.deleteNameMatches || d.busy) return;
+    d.busy = true;
+    const id = this.detail.workspace.id;
+    this.http.post<any>(`${this.base}/workspaces/${id}/delete`, { confirmName: d.name.trim(), reason: d.reason.trim() || null }).subscribe({
+      next: r => {
+        this.deleting = null;
+        this.toast.emit(`Workspace deleted. It can be restored until ${new Date(r.purgeAfter).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}; then its data is erased.`);
+        this.open(id);
+        this.allWorkspaces = [];
+      },
+      error: e => { d.busy = false; this.toast.emit(errorText(e)); }
+    });
+  }
+
+  restore(): void {
+    const w = this.detail?.workspace;
+    if (!w || !confirm(`Restore ${w.name}? Its members can sign in again.`)) return;
+    this.http.post<any>(`${this.base}/workspaces/${w.id}/restore`, {}).subscribe({
+      next: r => { this.toast.emit(`Workspace restored. ${r.note}`); this.open(w.id); this.allWorkspaces = []; },
       error: e => this.toast.emit(errorText(e))
     });
   }

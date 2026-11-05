@@ -36,6 +36,14 @@ router.get('/workspaces/:id', send(req => svc.getWorkspace(req, req.params.id)))
 router.post('/workspaces/:id/open', send(req => svc.openWorkspace(req, req.params.id)));
 router.post('/workspaces/:id/members', send(req => svc.assignUser(req, req.params.id, req.body)));
 router.delete('/workspaces/:id/members/:userId', send(req => svc.removeUser(req, req.params.id, req.params.userId)));
+// Delete (closes it, restorable for 30 days, then erased) and restore.
+const deletion = require('./workspaceDeletion');
+router.post('/workspaces/:id/delete', send(req => deletion.deleteWorkspace(req, req.params.id, req.body)));
+router.post('/workspaces/:id/restore', send(req => deletion.restoreWorkspace(req, req.params.id)));
+// Clear data: erase chosen kinds of data at once, keeping the workspace (e.g. test data).
+const clearing = require('./workspaceClear');
+router.get('/workspaces/:id/clear-options', send(req => clearing.options(req, req.params.id)));
+router.post('/workspaces/:id/clear', send(req => clearing.clear(req, req.params.id, req.body)));
 router.get('/users', send(req => svc.listUsers(req.query)));
 router.get('/activity', send(req => svc.listActivity(req.query)));
 

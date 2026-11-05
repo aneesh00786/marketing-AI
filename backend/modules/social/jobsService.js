@@ -29,7 +29,7 @@ async function enqueue(workspaceId, jobType, payload, { idempotencyKey = null, r
 
 async function claimDue(workerId, limit = 3) {
   const due = await all(
-    `SELECT id FROM background_jobs WHERE status = 'queued' AND run_at <= UTC_TIMESTAMP() ORDER BY run_at ASC LIMIT ${Math.max(1, Math.min(20, limit))}`
+    `SELECT id FROM background_jobs WHERE status = 'queued' AND run_at <= UTC_TIMESTAMP() AND workspace_id IN ${require('../../lib/workspaceStatus').ACTIVE_WORKSPACES} ORDER BY run_at ASC LIMIT ${Math.max(1, Math.min(20, limit))}`
   );
   const claimed = [];
   for (const { id } of due) {

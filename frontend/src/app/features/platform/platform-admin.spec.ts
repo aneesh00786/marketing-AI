@@ -218,4 +218,77 @@ describe('PlatformAdminComponent', () => {
     fixture.detectChanges();
     expect(el().querySelector('[role=alert]')!.textContent).toContain('Down');
   }));
+
+  it('delete: only after typing the name; shows when it will be erased; restore brings it back', () => {
+    openWorkspace();
+    button('Delete workspace…').click(); fixture.detectChanges();
+    const go = () => Array.from(el().querySelectorAll('.pa-confirm button')).find(b => b.textContent!.includes('Delete workspace')) as HTMLButtonElement;
+    expect(go().disabled).toBeTrue();
+    expect(el().querySelector('.pa-confirm')!.textContent).toContain('erase all of its data on the 30th day');
+    comp.deleting!.name = 'acme '; comp.deleting!.reason = 'Client left'; fixture.detectChanges();
+    expect(go().disabled).toBeFalse();
+    let toast = '';
+    comp.toast.subscribe(t => toast = t);
+    go().click();
+    const del = url('/workspaces/5/delete', 'POST');
+    expect(del.request.body).toEqual({ confirmName: 'acme', reason: 'Client left' });
+    del.flush({ deleted: true, purgeAfter: '2026-12-05T10:00:00Z', restoreDays: 30, stopped: {} });
+    expect(toast).toContain('can be restored until 5 Dec 2026');
+    const gone = { ...WS, status: 'Deleted', deletedAt: '2026-11-05T10:00:00Z', deletedBy: 'Admin', deleteReason: 'Client left', purgeAfter: '2026-12-05T10:00:00Z' };
+    url('/workspaces/5').flush({ workspace: gone, members: MEMBERS, roles: ROLES });
+    fixture.detectChanges();
+    expect(el().querySelector('.pa-deleted')!.textContent).toContain('Dec 5, 2026');
+    expect(el().querySelector('.pa-deleted')!.textContent).toContain('Reason: Client left');
+    expect(button('Open workspace')).toBeUndefined();
+    expect(el().textContent).not.toContain('Assign a user');
+    spyOn(window, 'confirm').and.returnValue(true);
+    button('Restore workspace').click();
+    url('/workspaces/5/restore', 'POST').flush({ restored: true, note: 'Members can sign in again.' });
+    url('/workspaces/5').flush({ workspace: WS, members: MEMBERS, roles: ROLES });
+    fixture.detectChanges();
+    expect(toast).toContain('Workspace restored');
+    expect(button('Open workspace')).toBeTruthy();
+  });
+
+  it('the platform workspace has no delete option; a deleted one in the list cannot be opened', () => {
+    openWorkspace({ ...WS, protected: true });
+    expect(button('Delete workspace')).toBeUndefined();
+    button('← Workspaces').click();
+    url('/workspaces').flush({ workspaces: [{ ...WS, status: 'Deleted', purgeAfter: '2026-12-05T10:00:00Z' }], roles: ROLES });
+    fixture.detectChanges();
+    const row = el().querySelector('tbody tr')!;
+    expect(row.textContent).toContain('Erased on Dec 5, 2026 unless restored');
+    expect(Array.from(row.querySelectorAll('button')).some(b => b.textContent!.trim() === 'Open')).toBeFalse();
+  });
+
+  it('clear data: pick kinds of data (with counts), type the name, then only those are erased; also for the platform workspace', () => {
+    openWorkspace({ ...WS, protected: true });
+    expect(button('Delete workspace')).toBeUndefined();
+    button('Clear data…').click();
+    url('/workspaces/5/clear-options').flush({ categories: [{ key: 'leads', label: 'Leads and AI Lead Discovery searches', count: 49, warn: null },
+      { key: 'stopList', label: 'Unsubscribes and bounces (stop-list)', count: 3, warn: 'Anyone who unsubscribed could be emailed again.' }], kept: 'Connections are kept.' });
+    fixture.detectChanges();
+    const box = el().querySelector('.pa-confirm') as HTMLElement;
+    expect(box.textContent).toContain('Leads and AI Lead Discovery searches');
+    expect(box.textContent).toContain('49');
+    const go = () => box.querySelector('.pa-clear-go') as HTMLButtonElement;
+    expect(go().disabled).toBeTrue();
+    comp.toggleClear('leads'); comp.clearing!.name = 'Acme'; fixture.detectChanges();
+    expect(go().disabled).toBeFalse();
+    expect(go().textContent).toContain('Erase selected (49 records)');
+    expect(box.textContent).not.toContain('could be emailed again');
+    comp.toggleClear('stopList'); fixture.detectChanges();
+    expect(box.textContent).toContain('could be emailed again');
+    comp.toggleClear('stopList');
+    spyOn(window, 'confirm').and.returnValue(true);
+    let cleared = 0; let toast = '';
+    comp.cleared.subscribe(id => cleared = id); comp.toast.subscribe(t => toast = t);
+    go().click();
+    const req = url('/workspaces/5/clear', 'POST');
+    expect(req.request.body).toEqual({ categories: ['leads'], confirmName: 'Acme' });
+    req.flush({ cleared: { leads: 49 }, total: 49 });
+    url('/workspaces/5').flush({ workspace: { ...WS, protected: true, leadCount: 0 }, members: MEMBERS, roles: ROLES });
+    expect(toast).toBe('Cleared 49 record(s).');
+    expect(cleared).toBe(5);
+  });
 });

@@ -46,7 +46,7 @@ async function resolvePlatformAccess(payload) {
   const { isPlatformAdmin } = require('../lib/platformAdmin');
   if (!(await isPlatformAdmin(payload.userId))) return null;
   const row = await get(
-    `SELECT u.id, u.email, u.display_name, w.id AS workspace_id FROM users u JOIN workspaces w ON w.id = ? WHERE u.id = ? LIMIT 1`,
+    `SELECT u.id, u.email, u.display_name, w.id AS workspace_id FROM users u JOIN workspaces w ON w.id = ? WHERE u.id = ? AND (w.status IS NULL OR w.status = 'Active') LIMIT 1`,
     [payload.workspaceId, payload.userId]
   );
   if (!row) return null;
@@ -76,6 +76,7 @@ async function resolveAuth(token) {
     `SELECT m.workspace_id, m.user_id, m.role, m.status, u.email, u.display_name, u.status AS user_status
      FROM workspace_members m
      JOIN users u ON u.id = m.user_id
+     JOIN workspaces w ON w.id = m.workspace_id AND (w.status IS NULL OR w.status = 'Active')
      WHERE m.user_id = ? AND m.workspace_id = ?
      LIMIT 1`,
     [payload.userId, payload.workspaceId]

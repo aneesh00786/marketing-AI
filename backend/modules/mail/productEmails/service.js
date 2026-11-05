@@ -266,7 +266,7 @@ async function detectUnsubscribeReplies({ workspaceId = null, limit = 200 } = {}
 /** Workspaces whose product emails may still get replies (for the inbox sync). */
 async function monitoredWorkspaces() {
   // Marketing email with an unsubscribe token: batch emails, one-to-one drafts and marketing Compose sends.
-  return (await all(`SELECT DISTINCT workspace_id FROM email_drafts WHERE (batch_id IS NOT NULL OR unsubscribe_token IS NOT NULL) AND status = 'Sent' AND sent_at >= UTC_TIMESTAMP() - INTERVAL ${REPLY_MONITOR_DAYS} DAY`)).map(r => r.workspace_id);
+  return (await all(`SELECT DISTINCT workspace_id FROM email_drafts WHERE (batch_id IS NOT NULL OR unsubscribe_token IS NOT NULL) AND status = 'Sent' AND sent_at >= UTC_TIMESTAMP() - INTERVAL ${REPLY_MONITOR_DAYS} DAY AND workspace_id IN ${require('../../../lib/workspaceStatus').ACTIVE_WORKSPACES}`)).map(r => r.workspace_id);
 }
 
 // ------------------------------------------------------------------ batches
@@ -514,7 +514,7 @@ async function recoverStaleBatches() {
 async function processBatches(workerId, { maxEmails = EMAILS_PER_TICK() } = {}) {
   await recoverStaleBatches();
   const cutoff = new Date(Date.now() - STALE_LOCK_MS).toISOString().replace('T', ' ').substring(0, 19);
-  const candidates = await all("SELECT id FROM mail_draft_batches WHERE status IN ('queued', 'sending') AND (locked_by IS NULL OR locked_at < ?) ORDER BY queued_at, id LIMIT 5", [cutoff]);
+  const candidates = await all(`SELECT id FROM mail_draft_batches WHERE status IN ('queued', 'sending') AND (locked_by IS NULL OR locked_at < ?) ORDER BY queued_at, id LIMIT 5`, [cutoff]);
   let sent = 0;
   for (const { id: batchId } of candidates) {
     const claim = await run(

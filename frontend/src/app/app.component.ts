@@ -314,6 +314,16 @@ export class AppComponent implements OnInit, OnDestroy {
     this.sessionChange = { title, message };
   }
 
+  /** Platform Admin cleared data: when it was this workspace, reload what the sidebar counts. */
+  onWorkspaceCleared(workspaceId: number): void {
+    if (workspaceId !== this.auth.workspace?.id) return;
+    this.leadPage = 1;
+    this.loadLeads();
+    this.loadDigitalProducts();
+    this.loadEmails();
+    if (this.legacyModules) this.loadAppointments();
+  }
+
   reloadForSession(): void {
     window.location.reload();
   }

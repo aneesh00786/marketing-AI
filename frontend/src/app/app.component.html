@@ -288,7 +288,7 @@
 
   <ng-container *ngIf="currentRoute === 'admin' && platformAdmin">
     @defer (on immediate) {
-      <app-platform-admin class="hud-panel full-width-panel" (toast)="showToast($event)" (opened)="startSession($event)"></app-platform-admin>
+      <app-platform-admin class="hud-panel full-width-panel" (toast)="showToast($event)" (opened)="startSession($event)" (cleared)="onWorkspaceCleared($event)"></app-platform-admin>
     }
   </ng-container>
 

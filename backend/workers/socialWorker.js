@@ -146,7 +146,7 @@ async function processAutomation() {
 async function processZohoCleanup() {
   try {
     const rows = await all(`SELECT id, workspace_id FROM mail_campaigns WHERE status = 'submitted' AND (temp_lists_json IS NOT NULL OR contact_list_key IS NOT NULL)
-      AND temp_lists_deleted_at IS NULL AND submitted_at < UTC_TIMESTAMP() - INTERVAL 1 MINUTE ORDER BY submitted_at LIMIT 5`);
+      AND temp_lists_deleted_at IS NULL AND submitted_at < UTC_TIMESTAMP() - INTERVAL 1 MINUTE AND workspace_id IN ${require('../lib/workspaceStatus').ACTIVE_WORKSPACES} ORDER BY submitted_at LIMIT 5`);
     const svc = require('../modules/mail/campaigns/campaignService');
     for (const r of rows) {
       await svc.refresh({ auth: { workspaceId: r.workspace_id, actorType: 'worker', capabilities: new Set(['mail.send']) } }, r.id).catch(err => log('zoho cleanup error:', err.message));
@@ -157,6 +157,15 @@ async function processZohoCleanup() {
 }
 
 /** Campaign budgets: sync provider spend (every 6 hours) and evaluate pacing alerts. */
+/** Erases workspaces deleted more than 30 days ago (see modules/platform/workspaceDeletion.js). */
+async function processWorkspacePurge() {
+  try {
+    for (const r of await require('../modules/platform/workspaceDeletion').purgeDue()) if (r.erased) log(`workspace ${r.id} erased (${r.rows} rows)`);
+  } catch (err) {
+    log('workspace erase error:', err.message);
+  }
+}
+
 async function processBudgets() {
   try {
     await budgetService.processBudgets();
@@ -170,7 +179,7 @@ async function scheduleRecurring() {
   const accounts = await all(
     `SELECT a.id, a.workspace_id, COALESCE(s.analytics_poll_minutes, 360) AS analytics_minutes, COALESCE(s.inbox_poll_minutes, 30) AS inbox_minutes
      FROM social_accounts a LEFT JOIN social_settings s ON s.workspace_id = a.workspace_id
-     WHERE a.status = 'connected' AND a.external_account_id NOT LIKE 'demo\\_%'`
+     WHERE a.status = 'connected' AND a.external_account_id NOT LIKE 'demo\\_%' AND a.workspace_id IN ${require('../lib/workspaceStatus').ACTIVE_WORKSPACES}`
   );
   const now = Date.now();
   for (const a of accounts) {
@@ -200,6 +209,7 @@ async function loop() {
         await scheduleRecurring();
         await processBudgets();
         await processZohoCleanup();
+        await processWorkspacePurge();
         lastSchedule = Date.now();
       }
       const worked = (await processPublishing()) + (await processProcessing()) + (await processBackground()) + (await processOutreach()) + (await processProductEmails()) + (await processAutomation());
@@ -225,4 +235,4 @@ if (require.main === module) {
   loop().then(() => process.exit(0)).catch(err => { log('fatal:', err.message); process.exit(1); });
 }
 
-module.exports = { processPublishing, processProcessing, processBackground, processOutreach, processProductEmails, processAutomation, scheduleRecurring, HANDLERS };
+module.exports = { processWorkspacePurge, processPublishing, processProcessing, processBackground, processOutreach, processProductEmails, processAutomation, scheduleRecurring, HANDLERS };

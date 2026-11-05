@@ -399,11 +399,11 @@ async function processBudgets({ force = false } = {}) {
   if (!force && Date.now() - lastRun.at < 6 * 3600 * 1000) return 0;
   lastRun.at = Date.now();
   let n = 0;
-  for (const src of await all("SELECT s.* FROM budget_spend_sources s JOIN campaign_budgets b ON b.id = s.budget_id WHERE s.status = 'active' AND b.status = 'active'")) {
+  for (const src of await all(`SELECT s.* FROM budget_spend_sources s JOIN campaign_budgets b ON b.id = s.budget_id WHERE s.status = 'active' AND b.status = 'active' AND b.workspace_id IN ${require('../../lib/workspaceStatus').ACTIVE_WORKSPACES}`)) {
     try { await syncSource(src); } catch (e) { /* recorded on the source and raised as an alert */ }
     n++;
   }
-  for (const b of await all("SELECT * FROM campaign_budgets WHERE status = 'active'")) { await evaluateAlerts(b); n++; }
+  for (const b of await all(`SELECT * FROM campaign_budgets WHERE status = 'active' AND workspace_id IN ${require('../../lib/workspaceStatus').ACTIVE_WORKSPACES}`)) { await evaluateAlerts(b); n++; }
   return n;
 }
 

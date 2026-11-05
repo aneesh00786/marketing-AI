@@ -1,0 +1,17 @@
+/* Delete / restore a workspace */
+.pa-danger { border-color: rgba(239, 68, 68, 0.35); }
+.pa-confirm { display: flex; flex-direction: column; gap: 10px; }
+.pa-confirm ul { margin: 0; padding-left: 18px; }
+.pa-field { display: flex; flex-direction: column; gap: 4px; max-width: 420px; }
+.pa-field span { font-size: 0.85rem; }
+.pa-deleted { margin: 0 0 12px; line-height: 1.5; }
+.btn-danger { background: var(--danger-soft, rgba(239, 68, 68, 0.12)); border: 1px solid rgba(239, 68, 68, 0.35); color: var(--danger-text, #b91c1c); }
+.btn-danger:hover:not(:disabled) { background: rgba(239, 68, 68, 0.2); }
+.btn-danger:disabled { opacity: 0.55; cursor: not-allowed; }
+
+/* Clear data */
+.pa-checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 6px 16px; }
+.pa-check { display: flex; gap: 8px; align-items: flex-start; font-size: 0.88rem; cursor: pointer; }
+.pa-check input { margin-top: 3px; }
+.pa-count { display: inline; margin-left: 4px; }
+.pa-warn { display: block; color: var(--danger-text, #b91c1c); }

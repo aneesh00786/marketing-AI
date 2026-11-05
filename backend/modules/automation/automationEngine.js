@@ -307,7 +307,7 @@ async function recoverStale() {
 async function processAutomation(workerId, { maxRuns = 50 } = {}) {
   await recoverStale();
   const created = await matchEvents();
-  const due = await all(`SELECT id FROM automation_runs WHERE status = 'waiting' AND next_run_at <= UTC_TIMESTAMP() ORDER BY next_run_at, id LIMIT ${maxRuns}`);
+  const due = await all(`SELECT id FROM automation_runs WHERE status = 'waiting' AND next_run_at <= UTC_TIMESTAMP() AND workspace_id IN ${require('../../lib/workspaceStatus').ACTIVE_WORKSPACES} ORDER BY next_run_at, id LIMIT ${maxRuns}`);
   let executed = 0;
   for (const { id } of due) {
     const claim = await run("UPDATE automation_runs SET status = 'running', locked_by = ?, locked_at = UTC_TIMESTAMP() WHERE id = ? AND status = 'waiting'", [workerId, id]);

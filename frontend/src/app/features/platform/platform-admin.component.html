@@ -26,14 +26,15 @@
           <tr *ngFor="let w of workspaces">
             <td><button type="button" class="crm-row-link" (click)="open(w.id)">{{ w.name }}</button>
               <span class="mx-tag" *ngIf="w.protected" style="margin-left:6px">Platform</span>
-              <span class="mx-tag warn" *ngIf="w.status !== 'Active'" style="margin-left:6px">{{ w.status }}</span></td>
+              <span class="mx-tag warn" *ngIf="w.status !== 'Active'" style="margin-left:6px">{{ w.status === 'Purged' ? 'Erased' : w.status }}</span>
+              <span class="crm-sub" *ngIf="w.status === 'Deleted' && w.purgeAfter">Erased on {{ w.purgeAfter | date:'MMM d, y' }} unless restored</span></td>
             <td>{{ w.owners || '—' }}</td>
             <td class="num">{{ w.memberCount | number }}</td>
             <td class="num">{{ w.leadCount | number }}</td>
             <td class="num">{{ w.campaignCount | number }}</td>
             <td>{{ w.lastActivity ? (w.lastActivity | date:'MMM d, y') : '—' }}</td>
             <td>{{ w.createdAt | date:'MMM d, y' }}</td>
-            <td><button type="button" class="link-btn" (click)="enter(w.id)" [attr.aria-label]="'Open ' + w.name">Open</button></td>
+            <td><button type="button" class="link-btn" *ngIf="w.status === 'Active'" (click)="enter(w.id)" [attr.aria-label]="'Open ' + w.name">Open</button></td>
           </tr>
         </tbody>
       </table>
@@ -47,9 +48,11 @@
         <button type="button" class="btn btn-secondary btn-sm" (click)="back()">← Workspaces</button>
         <h3>{{ detail.workspace.name }}</h3>
         <span class="mx-tag" *ngIf="detail.workspace.protected">Platform</span>
+        <span class="mx-tag warn" *ngIf="detail.workspace.status !== 'Active'">{{ detail.workspace.status === 'Purged' ? 'Erased' : 'Deleted' }}</span>
       </div>
       <div class="mx-actions">
-        <button type="button" class="btn btn-primary btn-sm" (click)="enter(detail.workspace.id)">Open workspace</button>
+        <button type="button" class="btn btn-primary btn-sm" *ngIf="detail.workspace.status === 'Active'" (click)="enter(detail.workspace.id)">Open workspace</button>
+        <button type="button" class="btn btn-primary btn-sm" *ngIf="detail.workspace.status === 'Deleted'" (click)="restore()">Restore workspace</button>
         <button type="button" class="btn btn-secondary btn-sm" (click)="showActivity({ workspaceId: detail.workspace.id })">View activity</button>
       </div>
     </div>
@@ -62,7 +65,15 @@
         <div><dt>Created</dt><dd>{{ detail.workspace.createdAt | date:'MMM d, y' }}</dd></div>
       </dl>
     </section>
-    <section class="mx-panel">
+    <div class="note error pa-deleted" *ngIf="detail.workspace.status === 'Deleted'" role="status">
+      <b>Deleted {{ detail.workspace.deletedAt | date:'MMM d, y, h:mm a' }}{{ detail.workspace.deletedBy ? ' by ' + detail.workspace.deletedBy : '' }}.</b>
+      {{ detail.workspace.deleteReason ? 'Reason: ' + detail.workspace.deleteReason + '. ' : '' }}Nobody can sign in to it and nothing runs for it.
+      Its data is erased permanently on <b>{{ detail.workspace.purgeAfter | date:'MMM d, y' }}</b> unless you restore it before then.
+    </div>
+    <div class="note error pa-deleted" *ngIf="detail.workspace.status === 'Purged'" role="status">
+      <b>Erased {{ detail.workspace.purgedAt | date:'MMM d, y' }}.</b> Its data and files were deleted; only this record and its activity log remain.
+    </div>
+    <section class="mx-panel" *ngIf="detail.workspace.status === 'Active'">
       <h4 class="mx-subhead">Assign a user</h4>
       <div class="crm-toolbar">
         <select class="hud-input grow" [(ngModel)]="assign.userId" aria-label="User to assign">
@@ -94,6 +105,60 @@
             </tr>
           </tbody>
         </table>
+      </div>
+    </section>
+
+    <section class="mx-panel pa-danger" *ngIf="detail.workspace.status === 'Active'">
+      <h4 class="mx-subhead">Clear data</h4>
+      <ng-container *ngIf="!clearing">
+        <p class="muted small">Erase chosen kinds of data (for example test data) and keep the workspace, its connections and Owners. Erased at once; this cannot be undone.</p>
+        <button type="button" class="btn btn-danger btn-sm" (click)="openClear()">Clear data…</button>
+      </ng-container>
+      <div class="pa-confirm" *ngIf="clearing" role="group" aria-label="Choose the data to clear">
+        <p class="muted small" *ngIf="clearing.loading">Counting records…</p>
+        <ng-container *ngIf="!clearing.loading">
+          <p class="small"><b>Choose what to erase:</b></p>
+          <label class="pa-check pa-check-all"><input type="checkbox" [checked]="clearAllPicked" (change)="toggleClearAll()" /> <b>Select all</b></label>
+          <div class="pa-checks">
+            <label class="pa-check" *ngFor="let c of clearing.categories">
+              <input type="checkbox" [checked]="clearing.picked.has(c.key)" (change)="toggleClear(c.key)" />
+              <span>{{ c.label }} <span class="crm-sub pa-count">{{ c.count | number }}</span>
+                <small class="pa-warn" *ngIf="c.warn && clearing.picked.has(c.key)">⚠ {{ c.warn }}</small></span>
+            </label>
+          </div>
+          <p class="muted small">{{ clearing.kept }}</p>
+          <label class="pa-field"><span>Type <b>{{ detail.workspace.name }}</b> to confirm</span>
+            <input class="hud-input" [(ngModel)]="clearing.name" autocomplete="off" [attr.aria-label]="'Type ' + detail.workspace.name + ' to confirm'" /></label>
+          <div class="mx-actions">
+            <button type="button" class="btn btn-secondary btn-sm" (click)="clearing = null">Cancel</button>
+            <button type="button" class="btn btn-danger btn-sm pa-clear-go" [disabled]="!clearing.picked.size || !clearNameMatches || clearing.busy" (click)="confirmClear()">
+              {{ clearing.busy ? 'Clearing…' : 'Erase selected (' + (clearPickedRecords | number) + ' records)' }}</button>
+          </div>
+        </ng-container>
+      </div>
+    </section>
+
+    <section class="mx-panel pa-danger" *ngIf="detail.workspace.status === 'Active' && !detail.workspace.protected">
+      <h4 class="mx-subhead">Delete workspace</h4>
+      <ng-container *ngIf="!deleting">
+        <p class="muted small">Closes the workspace for everyone straight away and stops everything scheduled in it. You can restore it for 30 days; after that its leads, contacts, campaigns, emails, files and connections are erased permanently.</p>
+        <button type="button" class="btn btn-danger btn-sm" (click)="openDelete()">Delete workspace…</button>
+      </ng-container>
+      <div class="pa-confirm" *ngIf="deleting" role="group" aria-label="Confirm deleting the workspace">
+        <p><b>This will:</b></p>
+        <ul class="small">
+          <li>sign out all {{ detail.workspace.memberCount }} member(s) and block access to it, including "Open workspace";</li>
+          <li>cancel scheduled social posts and queued jobs, and pause outreach, email batches and automations;</li>
+          <li>erase all of its data on the 30th day, unless you restore it first. Accounts of the people in it are not deleted.</li>
+        </ul>
+        <label class="pa-field"><span>Type <b>{{ detail.workspace.name }}</b> to confirm</span>
+          <input class="hud-input" [(ngModel)]="deleting.name" autocomplete="off" [attr.aria-label]="'Type ' + detail.workspace.name + ' to confirm'" /></label>
+        <label class="pa-field"><span>Reason (optional, kept in the activity log)</span>
+          <input class="hud-input" [(ngModel)]="deleting.reason" maxlength="500" placeholder="e.g. Client cancelled" /></label>
+        <div class="mx-actions">
+          <button type="button" class="btn btn-secondary btn-sm" (click)="deleting = null">Cancel</button>
+          <button type="button" class="btn btn-danger btn-sm" [disabled]="!deleteNameMatches || deleting.busy" (click)="confirmDelete()">{{ deleting.busy ? 'Deleting…' : 'Delete workspace' }}</button>
+        </div>
       </div>
     </section>
   </ng-container>
