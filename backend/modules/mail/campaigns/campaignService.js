@@ -317,7 +317,7 @@ async function zohoAudiences(ctx) {
   const lists = (await contactsSvc.fetchLists(ws(ctx))).filter(l => !contactsSvc.isSyncList(l.name));
   const topics = await fetchTopics(ws(ctx));
   const all_ = await require('../contacts/listService').lists(ctx);
-  const mailLists = all_.lists.map(l => ({ id: l.id, name: l.name, reachable: l.reachable, total: l.total, inZoho: l.inZoho }));
+  const mailLists = all_.lists.map(l => ({ id: l.id, name: l.name, reachable: l.reachable, total: l.total, noConsent: l.noConsent || 0, inZoho: l.inZoho }));
   return { lists, mailLists, topics, note: 'Lists and consent are managed in Zoho Campaigns. Contacts you select are added to a new Zoho list when the campaign is sent.' };
 }
 

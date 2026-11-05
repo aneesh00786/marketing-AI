@@ -211,7 +211,15 @@ async function runUploadJob(job) {
         if (process.env.ZOHO_LOG !== 'off') console.log(`[zoho] ${new Date().toISOString()} readiness not read: ${String(err.message).slice(0, 200)}`);
       }
     }
-    if (!ready.ok) throw keys.length ? listsEmptyError(ready.lists) : Object.assign(new Error('Nobody in the chosen lists can be emailed (all unsubscribed or bounced), so nothing was sent. Choose other lists (Recipients).'), { status: 400, code: 'NO_RECIPIENTS' });
+    if (!ready.ok) {
+      if (keys.length) throw listsEmptyError(ready.lists);
+      // Nobody to upload: say whether that is missing consent or opt-outs.
+      let noConsent = 0;
+      for (const id of parse(row.mail_list_ids_json, [])) noConsent += await withoutConsent(row.workspace_id, id);
+      throw Object.assign(new Error(noConsent
+        ? `Nobody in the chosen lists can get marketing email, so nothing was sent: ${noConsent} contact(s) have no recorded marketing consent, and any others unsubscribed or bounced. Record consent (how and when each person agreed) on their leads, or choose other lists (Recipients).`
+        : 'Nobody in the chosen lists can be emailed (all unsubscribed or bounced), so nothing was sent. Choose other lists (Recipients).'), { status: 400, code: noConsent ? 'NO_CONSENT' : 'NO_RECIPIENTS' });
+    }
   } catch (err) {
     await svc.failSubmission(ctx, row, 'upload', err).catch(() => null);
     return { failed: true, error: String(err.message).slice(0, 300) };

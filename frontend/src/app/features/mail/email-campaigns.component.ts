@@ -196,6 +196,9 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
   /** Marketech.ai lists to choose from (Recipients). */
   get mailListOptions(): any[] { return this.audiences?.mailLists || []; }
 
+  /** Some contact list has people left out for lack of marketing consent. */
+  get listsWithoutConsent(): boolean { return (this.mailListOptions || []).some((l: any) => l.noConsent > 0); }
+
   /** People who can be emailed in the chosen lists (a person in two lists is counted in each). */
   get chosenPeople(): number {
     const ids = this.form?.mailListIds as Set<number> | undefined;

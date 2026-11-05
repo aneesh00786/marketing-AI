@@ -266,9 +266,10 @@
             <div class="ec-list-row" *ngFor="let l of mailListOptions">
               <label class="check">
                 <input type="checkbox" [checked]="form.mailListIds.has(l.id)" (change)="toggleMailList(l.id)" [disabled]="!editable || (!l.reachable && !form.mailListIds.has(l.id))" />
-                {{ l.name }} <span class="muted small">({{ l.reachable | number }} can be emailed{{ l.total !== l.reachable ? ' of ' + (l.total | number) : '' }})</span>
+                {{ l.name }} <span class="muted small">({{ l.reachable | number }} can be emailed{{ l.total !== l.reachable ? ' of ' + (l.total | number) : '' }}{{ l.noConsent ? ' · ' + (l.noConsent | number) + ' without marketing consent' : '' }})</span>
               </label>
             </div>
+            <p class="muted small ec-consent-note" *ngIf="listsWithoutConsent">Zoho campaigns go only to people with recorded marketing consent (or from your own Zoho lists). To include someone, record how and when they agreed on their lead (Mail Center → Product Emails → Record consent…). Lists where nobody has consent cannot be chosen.</p>
             <p class="muted small ec-legacy" *ngIf="form.listKeys.size || picksByList.size">Zoho lists chosen before contact lists (untick to stop using them):</p>
             <ng-container *ngFor="let l of audiences?.lists || []">
               <div class="ec-list-row" *ngIf="form.listKeys.has(l.key) || picksByList.get(l.key)">

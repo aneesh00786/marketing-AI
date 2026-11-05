@@ -1854,6 +1854,19 @@ test('consent: a list where nobody has consent cannot be sent, with the reason',
   assert.ok(v.problems.some(p => /Nobody in the chosen lists can get marketing email: 2 contact\(s\) have no recorded marketing consent/.test(p)), JSON.stringify(v.problems));
 });
 
+test('consent: a campaign approved earlier whose lists have nobody with consent is not sent, and says it is consent', async () => {
+  const { ws } = await freshConnected('Approved before consent rule');
+  const { c, job } = await uploadCampaign(ws, 2, 'late');
+  await db().run("UPDATE leads SET marketing_consent = 'unknown' WHERE workspace_id = ?", [ws.workspaceId]);
+  const r = await require('../modules/mail/contacts/zohoUpload').runUploadJob(job);
+  assert.equal(r.failed, true);
+  const after = await row(c.id);
+  assert.deepEqual([after.status, after.provider_code], ['failed', 'NO_CONSENT']);
+  assert.match(after.provider_message, /2 contact\(s\) have no recorded marketing consent/);
+  assert.ok(!/all unsubscribed or bounced/.test(after.provider_message));
+  assert.equal(apiCalls('createCampaign').filter(x => x.params.campaignname.startsWith('Upload late')).length, 0, 'nothing created in Zoho');
+});
+
 test('consent: leads picked for a campaign need recorded consent; the picker shows why others cannot be added', async () => {
   const { ws } = await freshConnected('Picked consent');
   const add = (email, consent, method, evidence) => db().run(`INSERT INTO leads (workspace_id, name, email, status, marketing_consent, marketing_consent_method, marketing_consent_evidence, created_at, updated_at)
