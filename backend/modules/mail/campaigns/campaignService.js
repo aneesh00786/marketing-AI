@@ -718,7 +718,7 @@ async function refresh(ctx, id) {
 }
 
 /** Said when the campaign can only be sent from Zoho once its review passes. */
-const pressSendInZoho = row => `Waiting for Zoho: it reviews every new campaign before it goes out, and it would not take the send request from Marketech.ai. Open "${zohoCampaignName(row)}" in Zoho Campaigns and press Send once it says the campaign is approved. Marketech.ai then marks it sent here, so do not send it again here.`;
+const pressSendInZoho = row => `Waiting for Zoho: it reviews the first campaign sent to newly uploaded contacts, and that first send has to be made in Zoho. Open "${zohoCampaignName(row)}" in Zoho Campaigns and press Send once it says the campaign is approved; Marketech.ai then marks it sent here, so do not send it again here. After that, campaigns to these contacts send from Marketech.ai as usual.`;
 
 /**
  * Zoho answered "Content not reviewed" (6611): it reviews every campaign before sending, and only its
