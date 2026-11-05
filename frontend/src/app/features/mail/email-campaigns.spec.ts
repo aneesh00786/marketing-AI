@@ -482,7 +482,7 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     comp.audiences = { ...comp.audiences, mailLists: [{ id: 9, name: 'Cold', reachable: 0, total: 76, noConsent: 76 }] };
     fixture.detectChanges();
     expect(el().textContent).toContain('0 can be emailed of 76 · 76 without marketing consent');
-    expect(el().querySelector('.ec-consent-note')!.textContent).toContain('Record consent');
+    expect(el().querySelector('.ec-consent-note')!.textContent).toContain('Leads → Consent…');
     comp.audiences = { lists: [], topics: [], mailLists: [{ id: 3, name: 'Trade show', reachable: 24, total: 25, inZoho: false }, { id: 4, name: 'All gone', reachable: 0, total: 2 }] };
     fixture.detectChanges();
     rows.splice(0, rows.length, ...(Array.from(el().querySelectorAll('.ec-list-row')) as HTMLElement[]));
