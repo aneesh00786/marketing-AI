@@ -557,8 +557,8 @@ async function deliver(ctx, row, extraKeys = [], { retried = false } = {}) {
       const lists = extraKeys.length ? extraKeys : parse(fresh.temp_lists_json, []).map(t => t.key);
       return deliver(ctx, { ...fresh, status: 'submitting' }, lists, { retried: true });
     }
-    if (NOT_REVIEWED_RE.test(String(err.message || ''))) {
-      // Zoho reviews every campaign first: hand this one to the review (it then sends it), or wait.
+    if (zohoHolding(err)) {
+      // Zoho holds it (reviewing the campaign or newly uploaded contacts): hand it to the review, or wait.
       const fresh = await get('SELECT * FROM mail_campaigns WHERE id = ?', [row.id]);
       return launchForReview(ctx, { ...fresh, zoho_campaign_key: key }, err, { throwIfWaiting: true });
     }
@@ -762,8 +762,7 @@ async function sendHeld(ctx, row) {
     await setState(row.id, 'submitted', { submit_stage: null, zoho_status: res.campaign_status || null, provider_code: null, provider_message: 'Zoho sent it after first holding it.', submitted_at: toDbDateTime(new Date()) });
     await audit(ctx, 'mail.campaign_submitted', { resourceType: 'mail_campaign', resourceId: row.id, metadata: { zohoCampaignKey: row.zoho_campaign_key, zohoStatus: res.campaign_status || null, afterHold: true } });
   } catch (err) {
-    if (NOT_REVIEWED_RE.test(String(err.message || ''))) return launchForReview(ctx, row, err);
-    if (zohoHolding(err)) return getOne(ctx, row.id);
+    if (zohoHolding(err)) return launchForReview(ctx, row, err);
     if (String(err.providerCode || '') === '6600') {
       await setState(row.id, 'submitted', { submit_stage: null, zoho_status: 'Sent', provider_code: null, provider_message: 'Zoho sent it after first holding it.', submitted_at: toDbDateTime(new Date()) });
     } else if (!err.outcomeUnknown) {

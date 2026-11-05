@@ -1559,6 +1559,8 @@ test('Zoho\'s "No lists selected" reply is explained in plain words', async () =
 });
 
 test('Zoho holds the send ("No lists selected") and sends it later by itself: it waits, then the worker marks it sent', async () => {
+  Z.reviewResponder = () => h.json(400, { status_code: 400, code: '5014', message: 'Campaign cannot be reviewed' });
+  try {
   const { ws, acct } = await freshConnected('Held then sent');
   const c = (await capi(ws, 'POST', '', GOOD)).data.campaign;
   await capi(ws, 'POST', `/${c.id}/approve`, {});
@@ -1568,11 +1570,12 @@ test('Zoho holds the send ("No lists selected") and sends it later by itself: it
   assert.equal(held.status, 'needs_review', 'waiting, not failed: it cannot be edited or sent again meanwhile');
   assert.equal(held.submit_stage, 'send');
   assert.equal(held.provider_code, 'ZOHO_HELD');
-  assert.match(held.provider_message, /^Waiting for Zoho.*Do not send it again/s);
+  assert.match(held.provider_message, /^Waiting for Zoho.*press Send.*do not send it again/s);
   assert.equal((await capi(ws, 'POST', `/${c.id}/send`, { confirm: true })).status, 409, 'no resend while waiting');
   // Still held in Zoho: the worker asks again, and it keeps waiting.
   const worker = require('../workers/socialWorker');
   Z.sendResponder = () => h.json(200, { status: 'error', code: '2001', message: 'No lists selected for this campaign' });
+  await db().run('UPDATE mail_campaigns SET last_checked_at = UTC_TIMESTAMP() - INTERVAL 5 MINUTE WHERE id = ?', [c.id]);
   const asks = () => apiCalls('sendcampaign').filter(x => x.params.campaignkey === held.zoho_campaign_key).length;
   try { for (let i = 0; i < 40 && asks() < 2; i++) await worker.processZohoCleanup(); } finally { Z.sendResponder = null; }
   assert.equal((await row(c.id)).status, 'needs_review');
@@ -1588,9 +1591,12 @@ test('Zoho holds the send ("No lists selected") and sends it later by itself: it
   assert.ok(sent.submitted_at);
   assert.equal(sent.provider_code, null);
   assert.equal(apiCalls('sendcampaign').filter(x => x.params.campaignkey === held.zoho_campaign_key).length, 2, 'not asked again once sent');
+  } finally { Z.reviewResponder = null; }
 });
 
 test('Zoho approves a held campaign but leaves it a draft: the worker sends that same campaign once', async () => {
+  Z.reviewResponder = () => h.json(400, { status_code: 400, code: '5014', message: 'Campaign cannot be reviewed' });
+  try {
   const { ws, acct } = await freshConnected('Held then approved');
   const c = (await capi(ws, 'POST', '', GOOD)).data.campaign;
   await capi(ws, 'POST', `/${c.id}/approve`, {});
@@ -1598,6 +1604,7 @@ test('Zoho approves a held campaign but leaves it a draft: the worker sends that
   try { await capi(ws, 'POST', `/${c.id}/send`, { confirm: true }); } finally { Z.sendResponder = null; }
   const held = await row(c.id);
   assert.equal(acct.campaigns[held.zoho_campaign_key].status, 'Draft');
+  await db().run('UPDATE mail_campaigns SET last_checked_at = UTC_TIMESTAMP() - INTERVAL 5 MINUTE WHERE id = ?', [c.id]);
   for (let i = 0; i < 40 && (await row(c.id)).status !== 'submitted'; i++) await require('../workers/socialWorker').processZohoCleanup();
   const sent = await row(c.id);
   assert.equal(sent.status, 'submitted');
@@ -1609,6 +1616,20 @@ test('Zoho approves a held campaign but leaves it a draft: the worker sends that
   await db().run('UPDATE mail_campaigns SET last_checked_at = UTC_TIMESTAMP() - INTERVAL 5 MINUTE WHERE id = ?', [c.id]);
   await capi(ws, 'POST', `/${c.id}/refresh`, {});
   assert.equal(apiCalls('sendcampaign').filter(x => x.params.campaignkey === held.zoho_campaign_key).length, sends);
+  } finally { Z.reviewResponder = null; }
+});
+
+test('"No lists selected" (newly uploaded contacts): Send hands the campaign to Zoho\'s review when Zoho allows it', async () => {
+  const { ws, acct } = await freshConnected('No lists review');
+  const c = (await capi(ws, 'POST', '', GOOD)).data.campaign;
+  await capi(ws, 'POST', `/${c.id}/approve`, {});
+  Z.sendResponder = () => h.json(200, { status: 'error', code: '6606', message: 'No lists selected for this campaign' });
+  let res;
+  try { res = await capi(ws, 'POST', `/${c.id}/send`, { confirm: true }); } finally { Z.sendResponder = null; }
+  assert.equal(res.status, 200, JSON.stringify(res.data));
+  const r = await row(c.id);
+  assert.deepEqual([r.status, r.zoho_status], ['submitted', 'ContentToBeReviewed']);
+  assert.equal(acct.campaigns[r.zoho_campaign_key].status, 'ContentToBeReviewed');
 });
 
 test('"Content not reviewed" (Zoho reviews every campaign): Send hands it to Zoho\'s review, which sends it', async () => {
@@ -1656,6 +1677,8 @@ test('"Content not reviewed" and Zoho refuses the review request: it waits and s
 });
 
 test('a held send can be marked not done right away, but only while Zoho has not sent it', async () => {
+  Z.reviewResponder = () => h.json(400, { status_code: 400, code: '5014', message: 'Campaign cannot be reviewed' });
+  try {
   const { ws, acct } = await freshConnected('Held stop waiting');
   const c = (await capi(ws, 'POST', '', GOOD)).data.campaign;
   await capi(ws, 'POST', `/${c.id}/approve`, {});
@@ -1673,6 +1696,7 @@ test('a held send can be marked not done right away, but only while Zoho has not
   const r = await capi(ws, 'POST', `/${c2.id}/resolve`, { confirm: true });
   assert.equal(r.status, 200, JSON.stringify(r.data));
   assert.equal((await row(c2.id)).status, 'failed', 'no 10-minute wait');
+  } finally { Z.reviewResponder = null; }
 });
 
 test('a prepared campaign deleted in Zoho: the status check stops failing, and Send prepares a new one', async () => {
