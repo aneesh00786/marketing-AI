@@ -145,6 +145,17 @@ async function refreshAccessToken(dc, refreshToken, cfg = clientConfig()) {
   return { accessToken: data.access_token, expiresIn: Number(data.expires_in) || 3600 };
 }
 
+/**
+ * One console line per Zoho send step (create, send, review): what Zoho answered, for the server log
+ * (pm2 logs). Only ids, codes, statuses and Zoho's message: never tokens, addresses or content.
+ */
+const LOGGED = new Set(['createCampaign', 'sendcampaign', 'reviewandlaunch']);
+function logZoho(endpoint, info) {
+  if (!LOGGED.has(endpoint) || process.env.ZOHO_LOG === 'off') return;
+  const pick = Object.entries(info).filter(([, v]) => v !== undefined && v !== null && v !== '').map(([k, v]) => `${k}=${JSON.stringify(String(v).slice(0, 200))}`);
+  console.log(`[zoho] ${new Date().toISOString()} ${endpoint} ${pick.join(' ')}`);
+}
+
 const isSuccess = d => d && (String(d.status).toLowerCase() === 'success' || ['0', '200', '3023', '6201'].includes(String(d.code)));
 
 /**
@@ -168,10 +179,15 @@ async function call(dc, accessToken, endpoint, params = {}) {
     });
   } catch (err) {
     const code = err?.cause?.code || err?.code;
+    logZoho(endpoint, { result: 'no-reply', error: code || err?.name, campaignkey: params.campaignkey });
     if (!isSend || NOT_CONNECTED_CODES.has(code)) throw zohoError('Zoho Campaigns could not be reached. Try again later.', { code: 'ZOHO_UNREACHABLE' });
     throw zohoError(`Zoho did not confirm the ${endpoint} request (timeout or dropped connection). It may or may not have been carried out.`, { code: 'ZOHO_OUTCOME_UNKNOWN', outcomeUnknown: true });
   }
   const data = await res.json().catch(() => null);
+  logZoho(endpoint, {
+    http: res.status, ok: isSuccess(data), code: data?.code, message: data?.message || data?.error,
+    campaignkey: params.campaignkey || data?.campaignKey, campaignId: data?.campaignId || data?.campaign_id, status: data?.campaign_status
+  });
   if (res.status === 401 || ['401', '1007'].includes(String(data?.code))) {
     throw zohoError('Zoho rejected the access token.', { status: 409, code: 'ZOHO_UNAUTHORIZED', providerCode: data?.code || '401', reauth: true });
   }
@@ -205,9 +221,11 @@ async function reviewAndLaunch(dc, accessToken, campaignId) {
       signal: AbortSignal.timeout(TIMEOUT_MS)
     });
   } catch (err) {
+    logZoho('reviewandlaunch', { result: 'no-reply', error: err?.cause?.code || err?.name, campaignId });
     throw zohoError('Zoho did not confirm handing the campaign over for review.', { code: 'ZOHO_OUTCOME_UNKNOWN', outcomeUnknown: true });
   }
   const data = await res.json().catch(() => null);
+  logZoho('reviewandlaunch', { http: res.status, campaignId, status_code: data?.status_code, code: data?.code, message: data?.message || data?.error, status: data?.campaign_details?.status || data?.campaign_status });
   if (res.status === 401) throw zohoError('Zoho rejected the access token.', { status: 409, code: 'ZOHO_UNAUTHORIZED', providerCode: '401' });
   const status = String(data?.campaign_details?.status || data?.campaign_status || '');
   const norm = status.toLowerCase().replace(/[^a-z]/g, '');

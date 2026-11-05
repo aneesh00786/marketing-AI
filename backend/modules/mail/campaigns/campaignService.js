@@ -45,7 +45,7 @@ const UNSUB_TAG_RE = /\$\[LI:(UNSUBSCRIBE|ORG_OPTOUT)\]\$/i;
 const KEY_RE = /^[A-Za-z0-9_-]{1,100}$/;
 const norm = s => String(s || '').toLowerCase().replace(/[^a-z]/g, '');
 const UPLOAD_STALL_MS = 30 * 60 * 1000;
-const SENT_LIKE = new Set(['sent', 'inprogress', 'scheduled', 'sending']);
+const SENT_LIKE = new Set(['sent', 'inprogress', 'scheduled', 'sending', 'sendingshortly', 'queued']);
 
 const fields = {
   name: z.string().trim().min(1, 'Enter a campaign name.').max(150),
@@ -729,6 +729,7 @@ const pressSendInZoho = row => `Waiting for Zoho: it reviews every new campaign 
 async function launchForReview(ctx, row, sendErr, { throwIfWaiting = false } = {}) {
   let launched = null;
   let reason = null;
+  if (!row.zoho_campaign_id && process.env.ZOHO_LOG !== 'off') console.log(`[zoho] ${new Date().toISOString()} reviewandlaunch skipped: no Zoho campaign id for campaign ${row.id} (Zoho did not return one when it was created)`);
   if (row.zoho_campaign_id) {
     try {
       launched = await zoho.reviewAndLaunch(ws(ctx), row.zoho_campaign_id);

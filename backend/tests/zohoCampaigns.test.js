@@ -1,3 +1,4 @@
+process.env.ZOHO_LOG = process.env.ZOHO_LOG || 'off';
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const h = require('./helpers');
@@ -54,23 +55,6 @@ function fakeZoho() {
         const token = `at-${account}-${++z.issued}`;
         z.access[token] = account;
         return h.json(200, { access_token: token, token_type: 'Bearer', expires_in: 3600 });
-      }
-    },
-    {
-      // Zoho's newer API: hands a campaign (by numeric id) to the content review; Zoho sends it once approved.
-      match: u => /^https:\/\/ma\.zoho\.[a-z.]+\/api\/v2\.1\//.test(u),
-      respond: (url, init) => {
-        const u = new URL(url);
-        const token = String(init.headers.Authorization || '').replace('Zoho-oauthtoken ', '');
-        const id = u.pathname.split('/')[4];
-        z.calls.push({ kind: 'review', id, host: u.host, method: init.method, params: Object.fromEntries(u.searchParams) });
-        const acct = z.accounts[z.access[token]];
-        if (!acct) return h.json(401, { status: 'error', code: '1007' });
-        if (z.reviewResponder) return z.reviewResponder(id, acct);
-        const c = Object.values(acct.campaigns).find(x => x.id === id);
-        if (!c) return h.json(404, { status_code: 404, code: '5014', message: 'Campaign not found' });
-        c.status = 'ContentToBeReviewed';
-        return h.json(200, { status_code: 200, campaign_details: { campaign_id: id, status: 'ContentToBeReviewed' } });
       }
     },
     {
@@ -150,6 +134,23 @@ function fakeZoho() {
           return h.json(200, { status: 'success', code: '0', campaign_status: c.status, 'campaign-details': [{ campaign_name: c.name }], 'campaign-reports': [{ emails_sent_count: c.status === 'Sent' ? '120' : '0', delivered_count: c.status === 'Sent' ? '118' : '0', bounces_count: '2', opens_count: '40' }] });
         }
         return h.json(404, { status: 'error', code: '404' });
+      }
+    },
+    {
+      // Zoho's newer API: hands a campaign (by numeric id) to the content review; Zoho sends it once approved.
+      match: u => /^https:\/\/ma\.zoho\.[a-z.]+\/api\/v2\.1\//.test(u),
+      respond: (url, init) => {
+        const u = new URL(url);
+        const token = String(init.headers.Authorization || '').replace('Zoho-oauthtoken ', '');
+        const id = u.pathname.split('/')[4];
+        z.calls.push({ kind: 'review', id, host: u.host, method: init.method, params: Object.fromEntries(u.searchParams) });
+        const acct = z.accounts[z.access[token]];
+        if (!acct) return h.json(401, { status: 'error', code: '1007' });
+        if (z.reviewResponder) return z.reviewResponder(id, acct);
+        const c = Object.values(acct.campaigns).find(x => x.id === id);
+        if (!c) return h.json(404, { status_code: 404, code: '5014', message: 'Campaign not found' });
+        c.status = 'ContentToBeReviewed';
+        return h.json(200, { status_code: 200, campaign_details: { campaign_id: id, status: 'ContentToBeReviewed' } });
       }
     }
   ];
