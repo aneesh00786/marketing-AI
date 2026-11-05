@@ -117,7 +117,8 @@ async function listReadiness(workspaceId, keys) {
 async function saveReadiness(campaignId, readiness, names = null) {
   const prev = await get('SELECT zoho_readiness_json FROM mail_campaigns WHERE id = ?', [campaignId]);
   const keep = parse(prev?.zoho_readiness_json, {});
-  const value = { ...readiness, names: names || keep.names || null, consent: keep.consent || null };
+  // New counts replace the old ones; what else was recorded (names, consent, Zoho's campaign details) is kept.
+  const value = { ...keep, ...readiness, names: names || keep.names || null, consent: keep.consent || null };
   await run('UPDATE mail_campaigns SET zoho_readiness_json = ? WHERE id = ?', [JSON.stringify(value), campaignId]);
   return value;
 }

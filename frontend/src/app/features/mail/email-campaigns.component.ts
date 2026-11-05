@@ -622,7 +622,10 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
   /** What Zoho reported for the recipients (it emails only "active" contacts), as label/value pairs. */
   readinessItems(c: any): { label: string; value: string; tone?: string }[] {
     const r = c?.zohoReadiness;
-    if (!r || r.active == null) return [];
+    // What Zoho's own campaign details showed when it was last asked (before the send, or a later check).
+    const snap = r?.zohoCampaign;
+    const zohoSide = snap && snap.total != null ? [{ label: `Recipients on the Zoho campaign (${snap.when === 'check' ? 'last check' : 'before sending'})`, value: String(snap.total), tone: snap.total ? 'good' : 'bad' }] : [];
+    if (!r || r.active == null) return zohoSide;
     const n = (v: number) => `${v}${r.capped ? '+' : ''}`;
     return [
       ...(r.total != null ? [{ label: 'Contacts in Zoho lists', value: String(r.total) }] : []),
@@ -631,7 +634,8 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
       ...(r.unsubscribed ? [{ label: 'Unsubscribed', value: n(r.unsubscribed) }] : []),
       ...(r.bounced ? [{ label: 'Bounced', value: n(r.bounced) }] : []),
       ...(r.names?.confirmations ? [{ label: 'Asked by Zoho to confirm by email', value: String(r.names.confirmations), tone: 'warn' }] : []),
-      ...(r.consent?.noConsent ? [{ label: 'Left out: no marketing consent', value: String(r.consent.noConsent) }] : [])
+      ...(r.consent?.noConsent ? [{ label: 'Left out: no marketing consent', value: String(r.consent.noConsent) }] : []),
+      ...zohoSide
     ];
   }
 

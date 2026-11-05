@@ -30,7 +30,7 @@ const DELETE_SCOPES = REQUESTED_SCOPES;
 let keySeq = 9000 + Math.floor(Math.random() * 1e6) * 10;
 
 function fakeZoho() {
-  const z = { calls: [], codes: {}, refresh: {}, access: {}, accounts: {}, issued: 0, createResponder: null, sendResponder: null, refreshResponder: null, reviewResponder: null, contactState: null, confirmNames: false };
+  const z = { calls: [], codes: {}, refresh: {}, access: {}, accounts: {}, issued: 0, createResponder: null, sendResponder: null, refreshResponder: null, reviewResponder: null, contactState: null, confirmNames: false, listDetails: null };
   z.account = (name, { lists = [{ listkey: 'L1', listname: 'Opted-in customers', noofcontacts: '120' }], topics = [] } = {}) => {
     z.accounts[name] = { lists, topics, campaigns: {} };
     return name;
@@ -133,6 +133,9 @@ function fakeZoho() {
           return h.json(200, { status: 'success', code: '200', message: 'Campaign has been sent successfully', campaign_status: 'inprogress' });
         }
         if (endpoint === 'getcampaigndetails') {
+          // Optionally (z.listDetails) like Zoho: the lists attached to the campaign with their recipient counts.
+          const attached = z.listDetails ? Object.keys(JSON.parse(c.params.list_details || '{}')).map(k => ({ listkey: k, listname: (acct.lists.find(l => l.listkey === k) || {}).listname || k, contactscount: String(z.listDetails[k] ?? 0) })) : undefined;
+          if (attached) return h.json(200, { status: 'success', code: '0', campaign_status: c.status, associated_mailing_lists: attached, total_subscribers_count: String(attached.reduce((n, l) => n + Number(l.contactscount), 0)), 'campaign-details': [{ campaign_name: c.name, topic_name: 'Marketing' }] });
           return h.json(200, { status: 'success', code: '0', campaign_status: c.status, 'campaign-details': [{ campaign_name: c.name }], 'campaign-reports': [{ emails_sent_count: c.status === 'Sent' ? '120' : '0', delivered_count: c.status === 'Sent' ? '118' : '0', bounces_count: '2', opens_count: '40' }] });
         }
         return h.json(404, { status: 'error', code: '404' });
@@ -1593,7 +1596,7 @@ test('Zoho holds the send ("No lists selected") and sends it later by itself: it
   assert.equal(held.status, 'needs_review', 'waiting, not failed: it cannot be edited or sent again meanwhile');
   assert.equal(held.submit_stage, 'send');
   assert.equal(held.provider_code, 'ZOHO_HELD');
-  assert.match(held.provider_message, /^Waiting for Zoho.*press Send.*do not send it again/si);
+  assert.match(held.provider_message, /^Waiting for Zoho.*then Send once approved.*do not send it again/si);
   assert.equal((await capi(ws, 'POST', `/${c.id}/send`, { confirm: true })).status, 409, 'no resend while waiting');
   // Still held in Zoho: the worker asks again, and it keeps waiting.
   const worker = require('../workers/socialWorker');
@@ -1673,7 +1676,8 @@ test('review-and-launch with an empty reply: the campaign\'s status in Zoho deci
   try { assert.equal((await capi(ws, 'POST', `/${c2.id}/send`, { confirm: true })).status, 409); } finally { Z.sendResponder = null; Z.reviewResponder = null; }
   const r2 = await row(c2.id);
   assert.equal(r2.status, 'needs_review');
-  assert.match(r2.provider_message, /press Send.*still a draft/s);
+  assert.match(r2.provider_message, /then Send once approved.*still a draft/s);
+  assert.ok(r2.provider_message.length <= 500);
 });
 
 test('"Content not reviewed" (Zoho reviews every campaign): Send hands it to Zoho\'s review, which sends it', async () => {
@@ -1705,7 +1709,7 @@ test('"Content not reviewed" and Zoho refuses the review request: it waits and s
   assert.equal(res.status, 409);
   let r = await row(c.id);
   assert.deepEqual([r.status, r.provider_code], ['needs_review', 'ZOHO_HELD']);
-  assert.match(r.provider_message, /^Waiting for Zoho: .*press Send once it shows approved/s);
+  assert.match(r.provider_message, /^Waiting for Zoho \(Zoho 6611: Content not reviewed\): .*then Send once approved/s);
   assert.ok(r.provider_message.includes('Marketech'), 'names the Zoho campaign');
   // The worker asks again (still refused): it keeps waiting, and nothing is sent twice.
   Z.sendResponder = () => h.json(200, { status: 'error', code: '6611', message: 'Content not reviewed' });
@@ -1770,8 +1774,8 @@ test('readiness: new contacts not active in Zoho yet: "No lists selected" is exp
   assert.deepEqual([after.status, after.provider_code], ['needs_review', 'ZOHO_HELD'], 'waiting, not failed and not sent');
   const ready = JSON.parse(after.zoho_readiness_json);
   assert.deepEqual([ready.total, ready.active, ready.unsubscribed, ready.notActive], [4, 0, 1, 3]);
-  assert.match(after.provider_message, /^Waiting for Zoho: none of the 4 contacts in its lists are active in Zoho yet/);
-  assert.ok(!/No lists selected/.test(after.provider_message), 'a specific cause, not Zoho\'s generic reply');
+  assert.match(after.provider_message, /^Waiting for Zoho \(Zoho 6606: No lists selected for this campaign\): none of the 4 contacts in its lists are active in Zoho yet/);
+  assert.ok(/active in Zoho yet/.test(after.provider_message), 'a specific cause next to Zoho\'s own reply');
   assert.ok(after.provider_message.length <= 500);
   assert.equal(apiCalls('sendcampaign').filter(x => x.params.campaignkey === after.zoho_campaign_key).length, 1);
   assert.equal(Object.values(acct.campaigns).filter(x => x.status === 'Sent').length, 0, 'nothing was sent');
@@ -1878,6 +1882,59 @@ test('consent: leads picked for a campaign need recorded consent; the picker sho
   const cold = opts.find(x => x.id === no);
   assert.equal(cold.eligible, false);
   assert.ok(cold.reasons.some(r => /consent/i.test(r)), JSON.stringify(cold.reasons));
+});
+
+test('send diagnostics: Zoho\'s campaign details are recorded before the send and after it is sent from Zoho; the created key is the one sent', async () => {
+  const { ws, acct } = await freshConnected('Send diagnostics');
+  const c = (await capi(ws, 'POST', '', GOOD)).data.campaign;
+  await capi(ws, 'POST', `/${c.id}/approve`, {});
+  Z.listDetails = { L1: 0 };
+  Z.sendResponder = () => h.json(200, { status: 'error', code: '6606', message: 'No lists selected for this campaign' });
+  Z.reviewResponder = () => h.json(400, { status_code: 400, code: '5014', message: 'Campaign cannot be reviewed' });
+  try { await capi(ws, 'POST', `/${c.id}/send`, { confirm: true }); } finally { Z.sendResponder = null; Z.reviewResponder = null; }
+  let r = await row(c.id);
+  const created = apiCalls('createCampaign').at(-1);
+  const sent = apiCalls('sendcampaign').filter(x => x.params.campaignkey === r.zoho_campaign_key);
+  assert.equal(sent.length, 1, 'one send request');
+  assert.equal(sent[0].method, 'POST');
+  assert.ok(Object.keys(acct.campaigns).includes(r.zoho_campaign_key), 'the key Zoho returned at creation is the one sent');
+  assert.deepEqual(Object.keys(JSON.parse(created.params.list_details)), ['L1'], 'the campaign was created with the chosen list key');
+  let snap = JSON.parse(r.zoho_readiness_json).zohoCampaign;
+  assert.deepEqual([snap.when, snap.status, snap.total, snap.lists.map(l => [l.key, l.contacts]), snap.topic], ['before-send', 'Draft', 0, [['L1', 0]], 'Marketing']);
+  assert.match(r.provider_message, /^Waiting for Zoho \(Zoho 6606: No lists selected for this campaign\)/);
+  // Sent from Zoho by hand: the next check records what changed, and the campaign shows as sent.
+  acct.campaigns[r.zoho_campaign_key].status = 'Sent';
+  Z.listDetails = { L1: 120 };
+  try { await capi(ws, 'POST', `/${c.id}/refresh`, {}); } finally { Z.listDetails = null; }
+  r = await row(c.id);
+  snap = JSON.parse(r.zoho_readiness_json).zohoCampaign;
+  assert.deepEqual([snap.when, snap.status, snap.total], ['check', 'Sent', 120]);
+  assert.equal(r.status, 'submitted');
+  assert.equal(apiCalls('sendcampaign').filter(x => x.params.campaignkey === r.zoho_campaign_key).length, 1, 'never sent twice');
+});
+
+test('send refusals keep Zoho\'s documented reason: 6607 and 6609 fail with it; 6605 is settled by checking Zoho', async () => {
+  const { ws, acct } = await freshConnected('Send codes');
+  for (const [code, message, expectStatus, expectText] of [
+    ['6607', 'No content for this campaign.', 'failed', /^Zoho says this campaign has no content\. \(Zoho 6607: No content for this campaign\.\)$/],
+    ['6609', 'Error in campaign creation.', 'failed', /^Zoho reports an error in creating this campaign\. \(Zoho 6609: Error in campaign creation\.\)$/],
+    ['6605', 'Campaign status is changed.', 'needs_review', /status changed.*\(Zoho 6605: Campaign status is changed\.\)/]
+  ]) {
+    const c = (await capi(ws, 'POST', '', { ...GOOD, name: `Code ${code}` })).data.campaign;
+    await capi(ws, 'POST', `/${c.id}/approve`, {});
+    Z.sendResponder = () => h.json(200, { status: 'error', code, message });
+    try { await capi(ws, 'POST', `/${c.id}/send`, { confirm: true }); } finally { Z.sendResponder = null; }
+    const r = await row(c.id);
+    assert.deepEqual([r.status, r.provider_code], [expectStatus, code], code);
+    assert.match(r.provider_message, expectText, code);
+    if (code === '6605') {
+      // Zoho shows it sent (e.g. from Zoho): the check settles it as sent, without sending again.
+      acct.campaigns[r.zoho_campaign_key].status = 'Sent';
+      await capi(ws, 'POST', `/${c.id}/refresh`, {});
+      assert.equal((await row(c.id)).status, 'submitted');
+      assert.equal(apiCalls('sendcampaign').filter(x => x.params.campaignkey === r.zoho_campaign_key).length, 1);
+    }
+  }
 });
 
 test('a held send can be marked not done right away, but only while Zoho has not sent it', async () => {

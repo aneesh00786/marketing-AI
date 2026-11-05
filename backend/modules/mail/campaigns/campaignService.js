@@ -497,6 +497,52 @@ async function forgetDeletedZohoCampaign(ctx, row) {
 }
 
 /**
+ * What Zoho's campaign details say right before a send request (and on every status check): its
+ * status, the lists attached to it with their recipient counts, and its topic. Logged ([zoho]
+ * campaign …) and kept with the campaign, so a refused send can be compared with Zoho's own screen
+ * and with the same campaign after it is sent from Zoho. Counts, names and keys only.
+ */
+function snapshotOf(d) {
+  const lists = (Array.isArray(d?.associated_mailing_lists) ? d.associated_mailing_lists : []).slice(0, 20).map(l => ({
+    name: String(l.listname || '').slice(0, 100) || null,
+    key: l.listkey ? String(l.listkey).slice(0, 100) : null,
+    contacts: l.contactscount != null ? Number(l.contactscount) || 0 : null
+  }));
+  const det = first(d?.['campaign-details']) || {};
+  const total = d?.total_subscribers_count != null ? Number(d.total_subscribers_count) || 0 : (lists.length && lists.every(l => l.contacts != null) ? lists.reduce((n, l) => n + l.contacts, 0) : null);
+  return { at: new Date().toISOString(), status: d?.campaign_status || null, lists, total, topic: det.topic_name || null };
+}
+async function recordSnapshot(row, key, snap, when) {
+  if (process.env.ZOHO_LOG !== 'off') {
+    console.log(`[zoho] ${snap.at} campaign ${when} campaignkey="${key}" status="${snap.status || 'unknown'}" lists=${JSON.stringify(snap.lists.map(l => `${l.name || l.key || '?'}:${l.contacts ?? '?'}`))} total=${snap.total ?? 'unknown'} topic="${snap.topic || ''}"`);
+  }
+  const prev = await get('SELECT zoho_readiness_json FROM mail_campaigns WHERE id = ?', [row.id]).catch(() => null);
+  const value = { ...parse(prev?.zoho_readiness_json, {}), zohoCampaign: { ...snap, when } };
+  await run('UPDATE mail_campaigns SET zoho_readiness_json = ? WHERE id = ?', [JSON.stringify(value), row.id]).catch(() => null);
+  return snap;
+}
+async function zohoCampaignSnapshot(ctx, row, key, when) {
+  try {
+    const d = await zoho.readCall(ws(ctx), 'getcampaigndetails', { campaignkey: key, campaigntype: 'normal' });
+    return await recordSnapshot(row, key, snapshotOf(d), when);
+  } catch (err) {
+    if (process.env.ZOHO_LOG !== 'off') console.log(`[zoho] ${new Date().toISOString()} campaign ${when} campaignkey="${key}" details not read: ${String(err.message).slice(0, 200)}`);
+    return null;
+  }
+}
+
+/**
+ * Zoho's send refusals by its documented code (error-codes page), said plainly, with Zoho's own code
+ * and words kept. 6606 / 6611 (Zoho holds it), 6600 (already sent) and deleted campaigns are handled
+ * on their own; 6605 means the state changed in Zoho, so the outcome is settled by checking Zoho.
+ */
+const ZOHO_SEND_REASONS = {
+  '6605': 'Zoho says the campaign\'s status changed (it may have been sent, scheduled or changed in Zoho); check its status',
+  '6607': 'Zoho says this campaign has no content',
+  '6609': 'Zoho reports an error in creating this campaign'
+};
+
+/**
  * Creates the Zoho campaign for this version (at most once) with its lists, and sends it.
  * extraKeys: Zoho lists made for this send from Marketech.ai lists.
  */
@@ -554,8 +600,9 @@ async function deliver(ctx, row, extraKeys = [], { retried = false } = {}) {
     }
   }
 
-  // Step 2: send.
+  // Step 2: send (after reading what Zoho's campaign details say, for the record).
   await setState(row.id, 'submitting', { submit_stage: 'send' });
+  await zohoCampaignSnapshot(ctx, row, key, 'before-send');
   try {
     const res = await zoho.writeCall(ws(ctx), 'sendcampaign', { campaignkey: key });
     await setState(row.id, 'submitted', { submit_stage: null, zoho_status: res.campaign_status || null, provider_code: res.code != null ? String(res.code) : null, provider_message: res.message ? String(res.message).slice(0, 500) : null, submitted_at: toDbDateTime(new Date()) });
@@ -601,6 +648,12 @@ const ZOHO_HELD = 'ZOHO_HELD';
 const NO_LISTS_HELD = 'Waiting for Zoho: it would not send this campaign yet, usually because it is still reviewing the campaign or contacts new to it. Marketech.ai asks Zoho again every few minutes and sends this same campaign as soon as Zoho allows it, so nobody gets it twice. Do not send it again here.';
 
 async function fail(ctx, row, stage, err) {
+  // Zoho's documented reason, in plain words, with its code and message kept.
+  const zcode = String(err.providerCode || '');
+  if (stage === 'send' && ZOHO_SEND_REASONS[zcode]) {
+    err.message = `${ZOHO_SEND_REASONS[zcode]}. (Zoho ${zcode}: ${String(err.message || '').replace(/^Zoho:\s*/, '')})`;
+    if (zcode === '6605') err.outcomeUnknown = true;
+  }
   if (stage === 'send' && zohoHolding(err)) Object.assign(err, { message: NO_LISTS_HELD, outcomeUnknown: true, providerCode: ZOHO_HELD, code: ZOHO_HELD });
   else if (NO_LISTS_RE.test(String(err.message || ''))) err.message = NO_LISTS_HELP;
   const unknown = !!err.outcomeUnknown;
@@ -704,6 +757,8 @@ async function refresh(ctx, id) {
     picked = { pending: true, ...(total ? { recipients_count: total } : {}) };
   }
   if (picked) picked.insights = insightsOf(d);
+  // While it waits or failed: what Zoho shows now (e.g. after it was sent from Zoho), logged next to the "before-send" one.
+  if (row.status === 'needs_review' || row.status === 'failed') await recordSnapshot(row, row.zoho_campaign_key, snapshotOf(d), 'check');
   // Held by Zoho and still a draft there (e.g. Zoho has now approved it): ask Zoho to send this same campaign again.
   if (row.status === 'needs_review' && row.provider_code === ZOHO_HELD && row.zoho_key_version === row.version && norm(d.campaign_status) === 'draft') {
     await run('UPDATE mail_campaigns SET zoho_status = ?, last_checked_at = UTC_TIMESTAMP() WHERE id = ?', [d.campaign_status || null, row.id]);
@@ -733,13 +788,18 @@ async function refresh(ctx, id) {
  * is still reviewing or waiting to confirm) is the usual cause of its "No lists selected" reply.
  */
 function heldCause(r) {
+  const snap = r?.zohoCampaign;
+  if ((!r || r.active == null) && snap) {
+    if (!snap.lists.length) return 'its campaign details show no contact list attached to this campaign';
+    if (snap.total === 0) return `its campaign details show ${snap.lists.map(l => `"${l.name || l.key}"`).join(', ')} with 0 recipients (new contacts it has not activated yet)`;
+  }
   if (!r || r.active == null) return 'it reviews the first campaign sent to newly uploaded contacts';
-  if (r.active === 0 && r.total) return `none of the ${r.total} contacts in its lists are active in Zoho yet (new contacts it is still reviewing or waiting to confirm by email; it emails only active ones)`;
+  if (r.active === 0 && r.total) return `none of the ${r.total} contacts in its lists are active in Zoho yet (new contacts it has not activated; it emails only active ones)`;
   return `it shows ${r.active}${r.capped ? '+' : ''}${r.total != null ? ` of ${r.total}` : ''} contacts as active but still holds this first campaign to newly uploaded contacts`;
 }
 
 /** Said when the campaign can only be sent from Zoho once its review passes. */
-const pressSendInZoho = (row, readiness) => `Waiting for Zoho: ${heldCause(readiness)}, so this first send has to be made in Zoho. Click "Open in Zoho" ("${zohoCampaignName(row)}") and press Send once it shows approved; Marketech.ai then marks it sent. Do not send it again here.`;
+const pressSendInZoho = (row, readiness, zohoSaid = '') => `Waiting for Zoho${zohoSaid ? ` (${zohoSaid})` : ''}: ${heldCause(readiness)}. Send this first one from Zoho: "Open in Zoho" ("${zohoCampaignName(row)}"), then Send once approved. Marketech.ai then marks it sent; do not send it again here.`;
 
 /**
  * Zoho answered "Content not reviewed" (6611): it reviews every campaign before sending, and only its
@@ -782,7 +842,11 @@ async function launchForReview(ctx, row, sendErr, { throwIfWaiting = false } = {
       try { readiness = await require('../contacts/zohoUpload').saveReadiness(row.id, await require('../contacts/zohoUpload').listReadiness(ws(ctx), keys)); } catch { /* kept as it was */ }
     }
   }
-  const message = pressSendInZoho(row, readiness) + (reason ? ` (Review request: ${reason.slice(0, 80)})` : '');
+  if (!throwIfWaiting) readiness = parse((await get('SELECT zoho_readiness_json FROM mail_campaigns WHERE id = ?', [row.id]))?.zoho_readiness_json, readiness);
+  else readiness = { ...(readiness || {}), ...(parse((await get('SELECT zoho_readiness_json FROM mail_campaigns WHERE id = ?', [row.id]))?.zoho_readiness_json, {})) };
+  // Zoho's own code and words first, so the actual reason is never hidden.
+  const zohoSaid = sendErr?.providerCode && /^\d+$/.test(String(sendErr.providerCode)) ? `Zoho ${sendErr.providerCode}: ${String(sendErr.message || '').replace(/^Zoho:\s*/, '').slice(0, 80)}` : '';
+  const message = pressSendInZoho(row, readiness, zohoSaid) + (reason ? ` (Review request: ${reason.slice(0, 80)})` : '');
   await setState(row.id, 'needs_review', { submit_stage: 'send', provider_code: ZOHO_HELD, provider_message: message.slice(0, 500), last_checked_at: toDbDateTime(new Date()) });
   if (throwIfWaiting) {
     await audit(ctx, 'mail.campaign_submit_unknown', { resourceType: 'mail_campaign', resourceId: row.id, metadata: { stage: 'send', code: '6611' } });
@@ -796,6 +860,7 @@ async function launchForReview(ctx, row, sendErr, { throwIfWaiting = false } = {
  * one, so nobody gets it twice). Still held: it keeps waiting. Another refusal: it fails, with Zoho's reason.
  */
 async function sendHeld(ctx, row) {
+  await zohoCampaignSnapshot(ctx, row, row.zoho_campaign_key, 'before-send-again');
   try {
     const res = await zoho.writeCall(ws(ctx), 'sendcampaign', { campaignkey: row.zoho_campaign_key });
     await setState(row.id, 'submitted', { submit_stage: null, zoho_status: res.campaign_status || null, provider_code: null, provider_message: 'Zoho sent it after first holding it.', submitted_at: toDbDateTime(new Date()) });

@@ -581,6 +581,7 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     const ready = Array.from(el().querySelectorAll('.ec-ready > div')).map(d => d.textContent!.replace(/\s+/g, ' ').trim());
     expect(ready).toEqual(['Contacts in Zoho lists70', 'Active (can be emailed)0', 'Not active yet (review or confirmation)68', 'Unsubscribed2', 'Asked by Zoho to confirm by email1']);
     expect(comp.readinessItems({ zohoReadiness: { active: 5, capped: true } })[0]).toEqual({ label: 'Active (can be emailed)', value: '5+', tone: 'good' });
+    expect(comp.readinessItems({ zohoReadiness: { zohoCampaign: { when: 'before-send', total: 0, lists: [] } } })).toEqual([{ label: 'Recipients on the Zoho campaign (before sending)', value: '0', tone: 'bad' }]);
     (comp as any).setSelected(held);
     fixture.detectChanges();
     // Open in Zoho: this campaign's page in the account's Zoho region, in a new tab.
