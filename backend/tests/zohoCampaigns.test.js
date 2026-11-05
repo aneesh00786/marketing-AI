@@ -122,6 +122,7 @@ function fakeZoho() {
         }
         const c = acct.campaigns[params.campaignkey];
         if (!c) return h.json(200, { status: 'error', code: '6301', message: 'Invalid campiagn key.' });
+        if (c.deleted) return h.json(200, { status: 'error', code: '6503', message: 'Campaign is deleted' });
         if (endpoint === 'sendcampaign') {
           if (z.sendResponder) return z.sendResponder(c);
           if (c.status === 'Sent') return h.json(200, { status: 'error', code: '6600', message: 'Campaign is sent.' });
@@ -1537,4 +1538,60 @@ test('Zoho\'s "No lists selected" reply is explained in plain words', async () =
   const failed = await row(c.id);
   assert.equal(failed.status, 'failed');
   assert.match(failed.provider_message, /^Zoho: the lists for this campaign have nobody Zoho can email yet, so nothing was sent\./);
+});
+
+test('a prepared campaign deleted in Zoho: the status check stops failing, and Send prepares a new one', async () => {
+  const { ws, acct } = await freshConnected('Deleted in Zoho');
+  const c = (await capi(ws, 'POST', '', GOOD)).data.campaign;
+  await capi(ws, 'POST', `/${c.id}/approve`, {});
+  Z.sendResponder = () => h.json(200, { status: 'error', code: '2001', message: 'Temporary problem' });
+  try { await capi(ws, 'POST', `/${c.id}/send`, { confirm: true }); } finally { Z.sendResponder = null; }
+  const first = await row(c.id);
+  assert.equal(first.status, 'failed');
+  assert.ok(first.zoho_campaign_key, 'prepared in Zoho, not sent');
+  acct.campaigns[first.zoho_campaign_key].deleted = true;
+  // The page's status check: no error, the deleted campaign is forgotten.
+  const check = await capi(ws, 'POST', `/${c.id}/refresh`, {});
+  assert.equal(check.status, 200, JSON.stringify(check.data));
+  const forgot = await row(c.id);
+  assert.equal(forgot.zoho_campaign_key, null);
+  assert.match(forgot.provider_message, /deleted there\. Nothing was sent\. Send again/);
+  const sent = await capi(ws, 'POST', `/${c.id}/send`, { confirm: true });
+  assert.equal(sent.status, 200, JSON.stringify(sent.data));
+  const done = await row(c.id);
+  assert.equal(done.status, 'submitted');
+  assert.notEqual(done.zoho_campaign_key, first.zoho_campaign_key, 'a new Zoho campaign');
+});
+
+test('Send again straight after the Zoho campaign was deleted prepares a new one instead of failing', async () => {
+  const { ws, acct } = await freshConnected('Deleted then send');
+  const c = (await capi(ws, 'POST', '', GOOD)).data.campaign;
+  await capi(ws, 'POST', `/${c.id}/approve`, {});
+  Z.sendResponder = () => h.json(200, { status: 'error', code: '2001', message: 'Temporary problem' });
+  try { await capi(ws, 'POST', `/${c.id}/send`, { confirm: true }); } finally { Z.sendResponder = null; }
+  const key = (await row(c.id)).zoho_campaign_key;
+  acct.campaigns[key].deleted = true;
+  const sent = await capi(ws, 'POST', `/${c.id}/send`, { confirm: true });
+  assert.equal(sent.status, 200, JSON.stringify(sent.data));
+  assert.equal((await row(c.id)).status, 'submitted');
+  assert.equal(apiCalls('createCampaign').length, 2);
+});
+
+test('a temporary Zoho list deleted in Zoho is made again, and the campaign goes to the new one', async () => {
+  const { ws, acct } = await freshConnected('List deleted in Zoho');
+  const made = await capi(ws, 'POST', '/contact-lists', { name: 'Fresh leads', emails: ['a1@fresh.io'] });
+  const c = (await capi(ws, 'POST', '', { ...GOOD, lists: [], mailListIds: [made.data.list.id] })).data.campaign;
+  await capi(ws, 'POST', `/${c.id}/approve`, {});
+  await capi(ws, 'POST', `/${c.id}/send`, { confirm: true });
+  const job = async () => db().get("SELECT * FROM background_jobs WHERE workspace_id = ? AND job_type = 'zoho_campaign_upload' ORDER BY id DESC LIMIT 1", [ws.workspaceId]);
+  Z.holdContacts = true;
+  try { await require('../modules/mail/contacts/zohoUpload').runUploadJob(await job()); } finally { Z.holdContacts = false; }
+  const oldKey = JSON.parse((await row(c.id)).temp_lists_json)[0].key;
+  acct.lists = acct.lists.filter(l => l.listkey !== oldKey);   // deleted in Zoho
+  await capi(ws, 'POST', `/${c.id}/send`, { confirm: true });
+  const r = await require('../modules/mail/contacts/zohoUpload').runUploadJob(await job());
+  assert.equal(r.delivered, true, JSON.stringify(r));
+  const newKey = JSON.parse((await row(c.id)).temp_lists_json)[0].key;
+  assert.notEqual(newKey, oldKey);
+  assert.deepEqual(Object.keys(JSON.parse(apiCalls('createCampaign').at(-1).params.list_details)), [newKey]);
 });

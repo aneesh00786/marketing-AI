@@ -465,11 +465,31 @@ async function send(ctx, id, { confirm } = {}) {
   return deliver(ctx, row);
 }
 
+/** Zoho's code for a campaign that was deleted in Zoho. */
+const ZOHO_DELETED = '6503';
+const zohoDeleted = err => String(err?.providerCode || '') === ZOHO_DELETED || /campaign is deleted/i.test(String(err?.message || ''));
+
+/**
+ * The campaign Zoho prepared for this send was deleted in Zoho. Not sent yet: forget it, so the next
+ * Send prepares a new one. Already sent: keep the record, and stop asking Zoho about it.
+ */
+async function forgetDeletedZohoCampaign(ctx, row) {
+  if (row.status === 'submitted') {
+    await run("UPDATE mail_campaigns SET zoho_status = 'Deleted in Zoho', last_checked_at = UTC_TIMESTAMP() WHERE id = ?", [row.id]);
+  } else {
+    await run(`UPDATE mail_campaigns SET zoho_campaign_key = NULL, zoho_key_version = NULL, zoho_status = NULL,
+      status = CASE WHEN status IN ('needs_review', 'submitting') THEN 'failed' ELSE status END, submit_stage = NULL,
+      provider_code = '6503', provider_message = 'The campaign prepared in Zoho was deleted there. Nothing was sent. Send again to prepare it again.',
+      updated_at = UTC_TIMESTAMP() WHERE id = ?`, [row.id]);
+  }
+  await audit(ctx, 'mail.campaign_zoho_deleted', { resourceType: 'mail_campaign', resourceId: row.id, metadata: { zohoCampaignKey: row.zoho_campaign_key, sent: row.status === 'submitted' } });
+}
+
 /**
  * Creates the Zoho campaign for this version (at most once) with its lists, and sends it.
  * extraKeys: Zoho lists made for this send from Marketech.ai lists.
  */
-async function deliver(ctx, row, extraKeys = []) {
+async function deliver(ctx, row, extraKeys = [], { retried = false } = {}) {
   // Step 1: the Zoho delivery object for this version (created at most once).
   let key = row.zoho_key_version === row.version ? row.zoho_campaign_key : null;
   if (!key) {
@@ -529,6 +549,13 @@ async function deliver(ctx, row, extraKeys = []) {
     await setState(row.id, 'submitted', { submit_stage: null, zoho_status: res.campaign_status || null, provider_code: res.code != null ? String(res.code) : null, provider_message: res.message ? String(res.message).slice(0, 500) : null, submitted_at: toDbDateTime(new Date()) });
     await audit(ctx, 'mail.campaign_submitted', { resourceType: 'mail_campaign', resourceId: row.id, metadata: { zohoCampaignKey: key, zohoStatus: res.campaign_status || null } });
   } catch (err) {
+    if (zohoDeleted(err) && !retried) {
+      // The prepared campaign was deleted in Zoho before it was sent: prepare a new one, once.
+      await forgetDeletedZohoCampaign(ctx, row);
+      const fresh = await get('SELECT * FROM mail_campaigns WHERE id = ?', [row.id]);
+      const lists = extraKeys.length ? extraKeys : parse(fresh.temp_lists_json, []).map(t => t.key);
+      return deliver(ctx, { ...fresh, status: 'submitting' }, lists, { retried: true });
+    }
     if (err.providerCode === '6600') {
       await setState(row.id, 'submitted', { submit_stage: null, zoho_status: 'Sent', provider_code: '6600', provider_message: 'Zoho reports the campaign was already sent.', submitted_at: toDbDateTime(new Date()) });
       await audit(ctx, 'mail.campaign_already_sent', { resourceType: 'mail_campaign', resourceId: row.id });
@@ -629,7 +656,15 @@ async function refresh(ctx, id) {
     return getOne(ctx, row.id);
   }
   if (!row.zoho_campaign_key) return getOne(ctx, row.id);
-  const d = await zoho.readCall(ws(ctx), 'getcampaigndetails', { campaignkey: row.zoho_campaign_key, campaigntype: 'normal' });
+  if (row.zoho_status === 'Deleted in Zoho') return getOne(ctx, row.id);
+  let d;
+  try {
+    d = await zoho.readCall(ws(ctx), 'getcampaigndetails', { campaignkey: row.zoho_campaign_key, campaigntype: 'normal' });
+  } catch (err) {
+    if (!zohoDeleted(err)) throw err;
+    await forgetDeletedZohoCampaign(ctx, row);
+    return getOne(ctx, row.id);
+  }
   const report = first(d['campaign-reports']);
   let picked = report ? Object.fromEntries(REPORT_FIELDS.filter(f => report[f] !== undefined).map(f => [f, report[f]])) : null;
   // While Zoho is still sending it has no report yet: keep what is known (how many it is going to).
@@ -666,7 +701,14 @@ async function resolve(ctx, id, { confirm } = {}) {
     if (hit) { await refresh(ctx, id); throw httpError(409, 'Zoho has the campaign; it was prepared. Send again to send it.', 'ALREADY_PREPARED'); }
     await run("UPDATE mail_campaigns SET status = 'failed', provider_message = 'Not prepared in Zoho (checked).', updated_at = UTC_TIMESTAMP() WHERE id = ? AND status = 'needs_review'", [row.id]);
   } else {
-    const d = await zoho.readCall(ws(ctx), 'getcampaigndetails', { campaignkey: row.zoho_campaign_key, campaigntype: 'normal' });
+    let d;
+    try {
+      d = await zoho.readCall(ws(ctx), 'getcampaigndetails', { campaignkey: row.zoho_campaign_key, campaigntype: 'normal' });
+    } catch (err) {
+      if (!zohoDeleted(err)) throw err;
+      await forgetDeletedZohoCampaign(ctx, row);
+      return getOne(ctx, row.id);
+    }
     if (SENT_LIKE.has(norm(d.campaign_status))) { await refresh(ctx, id); throw httpError(409, `Zoho shows the campaign as "${d.campaign_status}", so it was submitted.`, 'ALREADY_SUBMITTED'); }
     await run("UPDATE mail_campaigns SET status = 'failed', zoho_status = ?, provider_message = 'Not sent by Zoho (checked).', updated_at = UTC_TIMESTAMP() WHERE id = ? AND status = 'needs_review'", [d.campaign_status || null, row.id]);
   }

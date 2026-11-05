@@ -80,8 +80,9 @@ async function uploadLists(row) {
     const already = temp.find(t => t.listId === l.id);
     const name = already ? already.name : (existing.has(l.name) ? `${l.name} - Marketech ${row.id}-${row.version}` : l.name).slice(0, 100);
     const key = await createZohoList(workspaceId, name, list.slice(0, BULK), temp.map(t => t.key));
-    if (!already) {
-      temp.push({ listId: l.id, name, key });
+    if (!already || already.key !== key) {
+      // New, or made again because the earlier one was deleted in Zoho: always send to the current list.
+      if (already) already.key = key; else temp.push({ listId: l.id, name, key });
       await run('UPDATE mail_campaigns SET temp_lists_json = ?, temp_lists_deleted_at = NULL WHERE id = ?', [JSON.stringify(temp), row.id]);
     }
     done += Math.min(BULK, list.length);
