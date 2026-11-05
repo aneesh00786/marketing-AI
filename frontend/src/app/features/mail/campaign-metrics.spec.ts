@@ -71,7 +71,8 @@ describe('CampaignMetricsComponent', () => {
     const pop = () => el().querySelector('.cm-pop') as HTMLElement;
     expect(pop().querySelector('h3')!.textContent).toContain('Sent');
     const cells = Array.from(pop().querySelectorAll('tbody tr:first-child td')).map(td => td.textContent!.trim());
-    expect(cells.slice(0, 10)).toEqual(['1', 'Ann Lee', 'Acme', 'ann@acme.io', '0400', 'Sydney', '2', 'Nov 05, 2026 09:10 AM', '—', 'Contacted']);
+    expect([cells[0], cells[1], ...cells.slice(3)]).toEqual(['1', 'Ann Lee', 'Acme', 'ann@acme.io', '0400', 'Sydney', '2', 'Nov 05, 2026 09:10 AM', '—', 'Contacted']);
+    expect(Array.from(pop().querySelectorAll('thead th')).map(th => th.textContent!.trim())[2]).withContext('next to the name, always in view').toBe('Follow up');
     // Follow up by email: Compose opens with the person and a follow-up subject (nothing is sent).
     let asked: any = null;
     TestBed.inject(ComposeRequestService).requests$.subscribe(x => asked = x);
