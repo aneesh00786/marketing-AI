@@ -152,7 +152,7 @@ async function refreshAccessToken(dc, refreshToken, cfg = clientConfig()) {
 const LOGGED = new Set(['createCampaign', 'sendcampaign', 'reviewandlaunch']);
 function logZoho(endpoint, info) {
   if (!LOGGED.has(endpoint) || process.env.ZOHO_LOG === 'off') return;
-  const pick = Object.entries(info).filter(([, v]) => v !== undefined && v !== null && v !== '').map(([k, v]) => `${k}=${JSON.stringify(String(v).slice(0, 200))}`);
+  const pick = Object.entries(info).filter(([, v]) => v !== undefined && v !== null && v !== '').map(([k, v]) => `${k}=${JSON.stringify(String(v).slice(0, k === 'reply' ? 600 : 200))}`);
   console.log(`[zoho] ${new Date().toISOString()} ${endpoint} ${pick.join(' ')}`);
 }
 
@@ -224,8 +224,12 @@ async function reviewAndLaunch(dc, accessToken, campaignId) {
     logZoho('reviewandlaunch', { result: 'no-reply', error: err?.cause?.code || err?.name, campaignId });
     throw zohoError('Zoho did not confirm handing the campaign over for review.', { code: 'ZOHO_OUTCOME_UNKNOWN', outcomeUnknown: true });
   }
-  const data = await res.json().catch(() => null);
-  logZoho('reviewandlaunch', { http: res.status, campaignId, status_code: data?.status_code, code: data?.code, message: data?.message || data?.error, status: data?.campaign_details?.status || data?.campaign_status });
+  // Read as text first: this API is undocumented, so its exact reply is logged (ids and statuses only).
+  const text = await res.text().catch(() => '');
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch { data = null; }
+  logZoho('reviewandlaunch', { http: res.status, campaignId, status_code: data?.status_code, code: data?.code, message: data?.message || data?.error, status: data?.campaign_details?.status || data?.campaign_status,
+    reply: text ? text.replace(/[\w.+-]+@[\w-]+(\.[\w-]+)+/g, '[email]').replace(/\s+/g, ' ') : '(empty)' });
   if (res.status === 401) throw zohoError('Zoho rejected the access token.', { status: 409, code: 'ZOHO_UNAUTHORIZED', providerCode: '401' });
   const status = String(data?.campaign_details?.status || data?.campaign_status || '');
   const norm = status.toLowerCase().replace(/[^a-z]/g, '');
