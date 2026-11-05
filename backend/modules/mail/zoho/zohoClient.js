@@ -150,9 +150,20 @@ async function refreshAccessToken(dc, refreshToken, cfg = clientConfig()) {
  * (pm2 logs). Only ids, codes, statuses and Zoho's message: never tokens, addresses or content.
  */
 const LOGGED = new Set(['createCampaign', 'sendcampaign', 'reviewandlaunch']);
+/** The request as sent, for the log: email addresses and the content link's secret token are hidden. */
+const EMAIL_RE = /[\w.+-]+@[\w-]+(\.[\w-]+)+/g;
+function requestForLog(method, url, params = {}) {
+  const shown = Object.fromEntries(Object.entries(params).map(([k, v]) => {
+    let t = String(v ?? '');
+    if (k === 'content_url') t = t.replace(/\/content\/[^/?#]+/, '/content/[token]');
+    return [k, t.replace(EMAIL_RE, '[email]').slice(0, 300)];
+  }));
+  return { request: `${method} ${String(url).split('?')[0]}`, params: JSON.stringify(shown) };
+}
+
 function logZoho(endpoint, info) {
   if (!LOGGED.has(endpoint) || process.env.ZOHO_LOG === 'off') return;
-  const pick = Object.entries(info).filter(([, v]) => v !== undefined && v !== null && v !== '').map(([k, v]) => `${k}=${JSON.stringify(String(v).slice(0, k === 'reply' ? 600 : 200))}`);
+  const pick = Object.entries(info).filter(([, v]) => v !== undefined && v !== null && v !== '').map(([k, v]) => `${k}=${JSON.stringify(String(v).slice(0, ['reply', 'params'].includes(k) ? 1200 : 200))}`);
   console.log(`[zoho] ${new Date().toISOString()} ${endpoint} ${pick.join(' ')}`);
 }
 
@@ -179,12 +190,13 @@ async function call(dc, accessToken, endpoint, params = {}) {
     });
   } catch (err) {
     const code = err?.cause?.code || err?.code;
-    logZoho(endpoint, { result: 'no-reply', error: code || err?.name, campaignkey: params.campaignkey });
+    logZoho(endpoint, { ...requestForLog(usePost ? 'POST' : 'GET', url, query.size ? Object.fromEntries(query) : params), result: 'no-reply', error: code || err?.name });
     if (!isSend || NOT_CONNECTED_CODES.has(code)) throw zohoError('Zoho Campaigns could not be reached. Try again later.', { code: 'ZOHO_UNREACHABLE' });
     throw zohoError(`Zoho did not confirm the ${endpoint} request (timeout or dropped connection). It may or may not have been carried out.`, { code: 'ZOHO_OUTCOME_UNKNOWN', outcomeUnknown: true });
   }
   const data = await res.json().catch(() => null);
   logZoho(endpoint, {
+    ...requestForLog(usePost ? 'POST' : 'GET', url, Object.fromEntries(query)),
     http: res.status, ok: isSuccess(data), code: data?.code, message: data?.message || data?.error,
     campaignkey: params.campaignkey || data?.campaignKey, campaignId: data?.campaignId || data?.campaign_id, status: data?.campaign_status
   });
@@ -213,24 +225,25 @@ const LAUNCHED_STATUSES = new Set(['contenttobereviewed', 'underreview', 'schedu
 async function reviewAndLaunch(dc, accessToken, campaignId) {
   if (!/^\d{5,25}$/.test(String(campaignId || ''))) throw zohoError('No Zoho campaign id to hand over for review.', { status: 400, code: 'ZOHO_NO_CAMPAIGN_ID' });
   if (!dc.ma) throw zohoError('Zoho review is not available in this region.', { status: 400, code: 'ZOHO_NO_REVIEW_API' });
+  const reviewUrl = `${dc.ma}/api/v2.1/campaigns/${campaignId}/reviewandlaunch?send_mode=sendnow&schedule_type=sendnow`;
   let res;
   try {
-    res = await fetch(`${dc.ma}/api/v2.1/campaigns/${campaignId}/reviewandlaunch?send_mode=sendnow&schedule_type=sendnow`, {
+    res = await fetch(reviewUrl, {
       method: 'PUT',
       headers: { Authorization: `Zoho-oauthtoken ${accessToken}` },
       signal: AbortSignal.timeout(TIMEOUT_MS)
     });
   } catch (err) {
-    logZoho('reviewandlaunch', { result: 'no-reply', error: err?.cause?.code || err?.name, campaignId });
+    logZoho('reviewandlaunch', { ...requestForLog('PUT', reviewUrl, { send_mode: 'sendnow', schedule_type: 'sendnow' }), result: 'no-reply', error: err?.cause?.code || err?.name, campaignId });
     throw zohoError('Zoho did not confirm handing the campaign over for review.', { code: 'ZOHO_OUTCOME_UNKNOWN', outcomeUnknown: true });
   }
   // Read as text first: this API is undocumented, so its exact reply is logged (ids and statuses only).
   const text = await res.text().catch(() => '');
   let data = null;
   try { data = text ? JSON.parse(text) : null; } catch { data = null; }
-  logZoho('reviewandlaunch', { http: res.status, campaignId, status_code: data?.status_code, code: data?.code, message: data?.message || data?.error, status: data?.campaign_details?.status || data?.campaign_status,
+  logZoho('reviewandlaunch', { ...requestForLog('PUT', reviewUrl, { send_mode: 'sendnow', schedule_type: 'sendnow' }), http: res.status, campaignId, status_code: data?.status_code, code: data?.code, message: data?.message || data?.error, status: data?.campaign_details?.status || data?.campaign_status,
     redirected: res.redirected ? new URL(res.url).host : undefined,
-    reply: text ? text.replace(/[\w.+-]+@[\w-]+(\.[\w-]+)+/g, '[email]').replace(/\s+/g, ' ') : '(empty)' });
+    reply: text ? text.replace(EMAIL_RE, '[email]').replace(/\s+/g, ' ') : '(empty)' });
   if (res.status === 401) throw zohoError('Zoho rejected the access token.', { status: 409, code: 'ZOHO_UNAUTHORIZED', providerCode: '401' });
   const status = String(data?.campaign_details?.status || data?.campaign_status || '');
   const norm = status.toLowerCase().replace(/[^a-z]/g, '');
