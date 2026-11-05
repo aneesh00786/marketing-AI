@@ -729,8 +729,10 @@ const pressSendInZoho = row => `Waiting for Zoho: it reviews the first campaign 
 async function launchForReview(ctx, row, sendErr, { throwIfWaiting = false } = {}) {
   let launched = null;
   let reason = null;
-  if (!row.zoho_campaign_id && process.env.ZOHO_LOG !== 'off') console.log(`[zoho] ${new Date().toISOString()} reviewandlaunch skipped: no Zoho campaign id for campaign ${row.id} (Zoho did not return one when it was created)`);
-  if (row.zoho_campaign_id) {
+  // Tried once, from the Send button: repeating it on every check only spends the Zoho API allowance.
+  const tryReview = throwIfWaiting;
+  if (tryReview && !row.zoho_campaign_id && process.env.ZOHO_LOG !== 'off') console.log(`[zoho] ${new Date().toISOString()} reviewandlaunch skipped: no Zoho campaign id for campaign ${row.id} (Zoho did not return one when it was created)`);
+  if (tryReview && row.zoho_campaign_id) {
     try {
       launched = await zoho.reviewAndLaunch(ws(ctx), row.zoho_campaign_id);
       if (launched.unconfirmed) {

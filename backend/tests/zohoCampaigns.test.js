@@ -1575,14 +1575,14 @@ test('Zoho holds the send ("No lists selected") and sends it later by itself: it
   // Still held in Zoho: the worker asks again, and it keeps waiting.
   const worker = require('../workers/socialWorker');
   Z.sendResponder = () => h.json(200, { status: 'error', code: '2001', message: 'No lists selected for this campaign' });
-  await db().run('UPDATE mail_campaigns SET last_checked_at = UTC_TIMESTAMP() - INTERVAL 5 MINUTE WHERE id = ?', [c.id]);
+  await db().run('UPDATE mail_campaigns SET last_checked_at = UTC_TIMESTAMP() - INTERVAL 15 MINUTE WHERE id = ?', [c.id]);
   const asks = () => apiCalls('sendcampaign').filter(x => x.params.campaignkey === held.zoho_campaign_key).length;
   try { for (let i = 0; i < 40 && asks() < 2; i++) await worker.processZohoCleanup(); } finally { Z.sendResponder = null; }
   assert.equal((await row(c.id)).status, 'needs_review');
   assert.equal(apiCalls('sendcampaign').filter(x => x.params.campaignkey === held.zoho_campaign_key).length, 2, 'asked again');
   // Zoho approves the contacts and sends it on its own.
   acct.campaigns[held.zoho_campaign_key].status = 'Sent';
-  await db().run('UPDATE mail_campaigns SET last_checked_at = UTC_TIMESTAMP() - INTERVAL 5 MINUTE WHERE id = ?', [c.id]);
+  await db().run('UPDATE mail_campaigns SET last_checked_at = UTC_TIMESTAMP() - INTERVAL 15 MINUTE WHERE id = ?', [c.id]);
   // Waiting campaigns are checked a few at a time (others from earlier tests may come first).
   for (let i = 0; i < 40 && (await row(c.id)).status !== 'submitted'; i++) await worker.processZohoCleanup();
   const sent = await row(c.id);
@@ -1604,7 +1604,7 @@ test('Zoho approves a held campaign but leaves it a draft: the worker sends that
   try { await capi(ws, 'POST', `/${c.id}/send`, { confirm: true }); } finally { Z.sendResponder = null; }
   const held = await row(c.id);
   assert.equal(acct.campaigns[held.zoho_campaign_key].status, 'Draft');
-  await db().run('UPDATE mail_campaigns SET last_checked_at = UTC_TIMESTAMP() - INTERVAL 5 MINUTE WHERE id = ?', [c.id]);
+  await db().run('UPDATE mail_campaigns SET last_checked_at = UTC_TIMESTAMP() - INTERVAL 15 MINUTE WHERE id = ?', [c.id]);
   for (let i = 0; i < 40 && (await row(c.id)).status !== 'submitted'; i++) await require('../workers/socialWorker').processZohoCleanup();
   const sent = await row(c.id);
   assert.equal(sent.status, 'submitted');
@@ -1613,7 +1613,7 @@ test('Zoho approves a held campaign but leaves it a draft: the worker sends that
   const sends = apiCalls('sendcampaign').filter(x => x.params.campaignkey === held.zoho_campaign_key).length;
   assert.equal(sends, 2, 'the first (held) request and one more');
   // A later check does not send it again.
-  await db().run('UPDATE mail_campaigns SET last_checked_at = UTC_TIMESTAMP() - INTERVAL 5 MINUTE WHERE id = ?', [c.id]);
+  await db().run('UPDATE mail_campaigns SET last_checked_at = UTC_TIMESTAMP() - INTERVAL 15 MINUTE WHERE id = ?', [c.id]);
   await capi(ws, 'POST', `/${c.id}/refresh`, {});
   assert.equal(apiCalls('sendcampaign').filter(x => x.params.campaignkey === held.zoho_campaign_key).length, sends);
   } finally { Z.reviewResponder = null; }
@@ -1686,12 +1686,13 @@ test('"Content not reviewed" and Zoho refuses the review request: it waits and s
   assert.ok(r.provider_message.includes('Marketech'), 'names the Zoho campaign');
   // The worker asks again (still refused): it keeps waiting, and nothing is sent twice.
   Z.sendResponder = () => h.json(200, { status: 'error', code: '6611', message: 'Content not reviewed' });
-  await db().run('UPDATE mail_campaigns SET last_checked_at = UTC_TIMESTAMP() - INTERVAL 5 MINUTE WHERE id = ?', [c.id]);
+  await db().run('UPDATE mail_campaigns SET last_checked_at = UTC_TIMESTAMP() - INTERVAL 15 MINUTE WHERE id = ?', [c.id]);
   try { await require('../workers/socialWorker').processZohoCleanup(); } finally { Z.sendResponder = null; Z.reviewResponder = null; }
   assert.equal((await row(c.id)).status, 'needs_review');
+  assert.equal(Z.calls.filter(x => x.kind === 'review' && x.id === r.zoho_campaign_id).length, 1, 'the review hand-over is tried once, from Send, not on every check');
   // Sent from Zoho: picked up.
   acct.campaigns[r.zoho_campaign_key].status = 'Sent';
-  await db().run('UPDATE mail_campaigns SET last_checked_at = UTC_TIMESTAMP() - INTERVAL 5 MINUTE WHERE id = ?', [c.id]);
+  await db().run('UPDATE mail_campaigns SET last_checked_at = UTC_TIMESTAMP() - INTERVAL 15 MINUTE WHERE id = ?', [c.id]);
   for (let i = 0; i < 40 && (await row(c.id)).status !== 'submitted'; i++) await require('../workers/socialWorker').processZohoCleanup();
   r = await row(c.id);
   assert.equal(r.status, 'submitted');
