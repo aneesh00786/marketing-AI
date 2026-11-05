@@ -2,6 +2,8 @@ import { Component, EventEmitter, HostListener, Input, OnChanges, Output, Simple
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../services/api.service';
+import { CallButtonComponent } from '../../shared/calling/call-button.component';
+import { ComposeRequestService } from '../../core/compose-request.service';
 
 export interface Metric { label: string; value: string; hint?: string; unavailable?: boolean; activity?: string }
 export interface SummaryItem { label: string; value: string; sub: string | null; activity?: string; unavailable: boolean }
@@ -49,7 +51,7 @@ function bars(rows: { label: string; value: number | null; activity?: string }[]
 @Component({
   selector: 'app-campaign-metrics',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, CallButtonComponent],
   templateUrl: './campaign-metrics.component.html',
   styleUrls: ['../command/command-center.component.css', './mail-ui.css', './campaign-metrics.component.css']
 })
@@ -63,6 +65,8 @@ export class CampaignMetricsComponent implements OnChanges {
   @Input() canViewRecipients = false;
   /** Fetching the latest figures from Zoho right now (the parent does the request). */
   @Input() refreshing = false;
+  /** The campaign's subject, for the follow-up email's subject. */
+  @Input() campaignSubject: string | null = null;
   @Output() refresh = new EventEmitter<void>();
 
   readonly popupActivities = ACTIVITIES;
@@ -77,7 +81,7 @@ export class CampaignMetricsComponent implements OnChanges {
   showRecipients = false;
   private seq = 0;
 
-  constructor(private api: ApiService) {}
+  constructor(private api: ApiService, private compose: ComposeRequestService) {}
 
   ngOnChanges(ch: SimpleChanges): void {
     if (ch['campaignId'] && !ch['campaignId'].firstChange) { this.showRecipients = false; this.recipients = []; this.error = null; this.page = 1; }
@@ -229,6 +233,17 @@ export class CampaignMetricsComponent implements OnChanges {
         this.recipients = [];
         this.error = e?.status === 403 ? 'Your role cannot see recipient activity.' : (e?.error?.error || 'Recipient activity could not be loaded from Zoho.');
       }
+    });
+  }
+
+  /** Follow up one recipient by email: Compose opens with them and a subject filled in (nothing is sent yet). */
+  emailRecipient(r: any): void {
+    const subject = String(this.campaignSubject || '').replace(/\$\[[^\]]*\]\$|\{\{[^}]*\}\}/g, '').replace(/\s+/g, ' ').trim();
+    const first = String(r.name || r.contactName || '').trim().split(/\s+/)[0] || '';
+    this.compose.open({
+      email: r.email, name: r.name || r.contactName || null,
+      subject: subject ? `Following up: ${subject}`.slice(0, 200) : 'Following up',
+      body: `Hi ${first || 'there'},\n\n`
     });
   }
 

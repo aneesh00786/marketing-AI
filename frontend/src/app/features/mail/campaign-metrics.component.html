@@ -129,7 +129,7 @@
     <p class="cm-muted" *ngIf="!loading && !error && !noList(activity) && !notSent && !recipients.length">No one in this group{{ page > 1 ? ' on this page' : '' }}.</p>
     <div class="cm-table" *ngIf="!loading && recipients.length">
       <table aria-label="Recipients">
-        <thead><tr><th>#</th><th>Contact</th><th>Business</th><th>Email</th><th>Phone</th><th>Location</th><th>Opens</th><th>Last opened</th><th>Clicks</th><th>Lead status</th></tr></thead>
+        <thead><tr><th>#</th><th>Contact</th><th>Business</th><th>Email</th><th>Phone</th><th>Location</th><th>Opens</th><th>Last opened</th><th>Clicks</th><th>Lead status</th><th>Follow up</th></tr></thead>
         <tbody>
           <tr *ngFor="let r of recipients; let i = index">
             <td class="cm-n">{{ (page - 1) * pageSize + i + 1 }}</td>
@@ -142,6 +142,10 @@
             <td class="cm-nw">{{ r.lastOpenedAt || '—' }}</td>
             <td class="cm-n">{{ r.clicks ?? '—' }}</td>
             <td><span class="cm-status" *ngIf="r.leadStatus; else noLead">{{ r.leadStatus }}</span><ng-template #noLead><small class="cm-muted">Not in Leads</small></ng-template></td>
+            <td class="cm-nw cm-follow">
+              <button type="button" class="cm-act" (click)="emailRecipient(r)" [title]="'Email ' + (r.name || r.email)" [attr.aria-label]="'Email ' + (r.name || r.email)">✉</button>
+              <app-call-button [phone]="r.phone" [name]="r.name || r.company || r.email"></app-call-button>
+            </td>
           </tr>
         </tbody>
       </table>
@@ -155,6 +159,6 @@
         <button type="button" class="btn btn-secondary btn-sm" (click)="loadRecipients(page + 1)" [disabled]="!hasMore || loading">Next →</button>
       </ng-container>
     </footer>
-    <p class="cm-note">Read from Zoho when you open this list; not stored in Marketech.ai. Business, phone and lead status come from your Leads when the email matches.</p>
+    <p class="cm-note">Read from Zoho when you open this list; not stored in Marketech.ai. Business, phone and lead status come from your Leads when the email matches. Follow up with ✉ (opens Compose) or 📞 (calls through your phone line; shown when a number is known).</p>
   </div>
 </div>

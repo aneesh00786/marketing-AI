@@ -158,7 +158,7 @@
       <p class="muted small ec-temp-note" *ngIf="selected.status === 'submitted' && selected.tempListsPending">The temporary Zoho list(s) for this send are removed once Zoho reports it sent{{ zoho?.connection?.canDeleteLists === false ? ' (reconnect Zoho to allow this)' : '' }}.</p>
 
       <!-- Results exist only once Zoho has the campaign -->
-      <app-campaign-metrics *ngIf="!['draft', 'approved'].includes(selected.status)" [campaignId]="selected.id" [report]="selected.report" [zohoStatus]="selected.zohoStatus" [lastCheckedAt]="selected.lastCheckedAt" [status]="selected.status" [canViewRecipients]="canSend" [refreshing]="busy === 'refresh'" (refresh)="refresh()"></app-campaign-metrics>
+      <app-campaign-metrics *ngIf="!['draft', 'approved'].includes(selected.status)" [campaignId]="selected.id" [report]="selected.report" [zohoStatus]="selected.zohoStatus" [lastCheckedAt]="selected.lastCheckedAt" [status]="selected.status" [canViewRecipients]="canSend" [refreshing]="busy === 'refresh'" (refresh)="refresh()" [campaignSubject]="selected.subject"></app-campaign-metrics>
 
       <!-- Once sent: what went out, in one line; the results above are the page -->
       <div class="ec-sentinfo" *ngIf="isSent">

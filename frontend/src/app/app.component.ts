@@ -10,6 +10,7 @@ import { ApiService } from './services/api.service';
 import { SpeechService } from './services/speech.service';
 import { AuthStateService, SessionChangeKind } from './core/auth-state.service';
 import { ThemeService } from './core/theme.service';
+import { ComposeRequestService } from './core/compose-request.service';
 import { LoginComponent } from './core/login.component';
 import { SocialHubComponent } from './features/social/social-hub.component';
 import { CommandCenterComponent } from './features/command/command-center.component';
@@ -558,7 +559,8 @@ export class AppComponent implements OnInit, OnDestroy {
     public apiService: ApiService,
     public speechService: SpeechService,
     public auth: AuthStateService,
-    public theme: ThemeService
+    public theme: ThemeService,
+    private composeRequests: ComposeRequestService = new ComposeRequestService()
   ) {}
 
   ngOnInit(): void {
@@ -566,6 +568,8 @@ export class AppComponent implements OnInit, OnDestroy {
     this.readDeepLink();
     this.sessionSub = this.auth.sessionExpired$.subscribe(() => this.showToast('Session ended — please sign in again.'));
     this.sessionChangeSub = this.auth.sessionChanged$.subscribe(kind => this.onSessionChanged(kind));
+    // Other screens (e.g. campaign results) open Compose prefilled.
+    this.composeRequestSub = this.composeRequests.requests$.subscribe(r => this.openComposeFor(r));
     this.auth.checkSession();
     if (this.auth.isLoggedIn) {
       this.checkInvitations();
@@ -716,6 +720,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.speechService.stopElevenLabsSession();
     this.sessionSub?.unsubscribe();
     this.sessionChangeSub?.unsubscribe();
+    this.composeRequestSub?.unsubscribe();
   }
 
   showToast(msg: string): void {
@@ -1630,6 +1635,21 @@ export class AppComponent implements OnInit, OnDestroy {
     this.composeTemplate = null;
     this.composeSend = null;
     this.composeTab = html ? 'visual' : 'write';
+    this.showComposeModal = true;
+  }
+
+  private composeRequestSub: any = null;
+
+  /** Compose prefilled for one person (campaign follow-up). The sender still chooses the purpose and sends. */
+  openComposeFor(r: { email: string; name?: string | null; subject?: string; body?: string }): void {
+    if (this.showComposeModal && !confirm('Replace the email you are writing?')) return;
+    this.composeEmail = { recipient_email: r.email || '', recipient_name: r.name || '', subject: r.subject || '', body: r.body || '', html_body: '', is_html: false };
+    this.composePurpose = null;
+    this.composeTemplate = null;
+    this.composeTemplateName = '';
+    this.composeSend = null;
+    this.composeTouched = false;
+    this.composeTab = 'write';
     this.showComposeModal = true;
   }
 

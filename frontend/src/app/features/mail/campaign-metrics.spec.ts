@@ -2,6 +2,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { CampaignMetricsComponent, num, rate } from './campaign-metrics.component';
+import { ComposeRequestService } from '../../core/compose-request.service';
 
 describe('CampaignMetricsComponent', () => {
   let fixture: ComponentFixture<CampaignMetricsComponent>;
@@ -70,7 +71,14 @@ describe('CampaignMetricsComponent', () => {
     const pop = () => el().querySelector('.cm-pop') as HTMLElement;
     expect(pop().querySelector('h3')!.textContent).toContain('Sent');
     const cells = Array.from(pop().querySelectorAll('tbody tr:first-child td')).map(td => td.textContent!.trim());
-    expect(cells).toEqual(['1', 'Ann Lee', 'Acme', 'ann@acme.io', '0400', 'Sydney', '2', 'Nov 05, 2026 09:10 AM', '—', 'Contacted']);
+    expect(cells.slice(0, 10)).toEqual(['1', 'Ann Lee', 'Acme', 'ann@acme.io', '0400', 'Sydney', '2', 'Nov 05, 2026 09:10 AM', '—', 'Contacted']);
+    // Follow up by email: Compose opens with the person and a follow-up subject (nothing is sent).
+    let asked: any = null;
+    TestBed.inject(ComposeRequestService).requests$.subscribe(x => asked = x);
+    comp.campaignSubject = 'A quick idea for $[FNAME|you]$';
+    (pop().querySelector('.cm-follow .cm-act') as HTMLButtonElement).click();
+    expect(asked).toEqual({ email: 'ann@acme.io', name: 'Ann Lee', subject: 'Following up: A quick idea for', body: 'Hi Ann,\n\n' });
+    expect(pop().querySelector('.cm-follow app-call-button')).withContext('the call button sits beside it').toBeTruthy();
     (Array.from(pop().querySelectorAll('.cm-pop-foot button')).find(b => b.textContent!.includes('Next')) as HTMLButtonElement).click();
     req = http.expectOne(r => r.url.endsWith('/mail/campaigns/7/recipients'));
     expect(req.request.params.get('page')).toBe('2');

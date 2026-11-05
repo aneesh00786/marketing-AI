@@ -17,6 +17,15 @@ describe('App shell: Compose email purpose', () => {
     app.composeEmail = { recipient_email: 'kim@client.io', recipient_name: 'Kim', subject: 'Hello', body: 'Hi', html_body: '', is_html: false };
   });
 
+  it('a campaign follow-up opens Compose prefilled; the purpose is still chosen by the sender and nothing is sent', () => {
+    app.showComposeModal = false;
+    app.openComposeFor({ email: 'ann@acme.io', name: 'Ann Lee', subject: 'Following up: Spring offer', body: 'Hi Ann,\n\n' });
+    expect(app.showComposeModal).toBeTrue();
+    expect(app.composeEmail).toEqual(jasmine.objectContaining({ recipient_email: 'ann@acme.io', recipient_name: 'Ann Lee', subject: 'Following up: Spring offer', body: 'Hi Ann,\n\n' }));
+    expect(app.composePurpose).toBeNull();
+    expect(api.sendEmail).not.toHaveBeenCalled();
+  });
+
   it('nothing is sent until a purpose is chosen', () => {
     app.composePurpose = null;
     app.sendOutboundEmail();
