@@ -140,6 +140,8 @@ function presentConnection(row) {
     connected: row.status === 'connected',
     status: row.status,
     location: row.location,
+    // Zoho Campaigns' web address for this account's region (links that open a campaign in Zoho).
+    webUrl: zoho.resolveDataCenter(row.location, row.accounts_server)?.campaigns || null,
     scopes: parseScopes(row.scopes),
     // Connections made before campaign delivery was added lack some scopes: reconnect to grant them.
     missingScopes: missingScopes(row),

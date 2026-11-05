@@ -144,6 +144,8 @@
       <div class="review" *ngIf="waitingForZoho(selected)" role="status">
         <b>Waiting for Zoho — please don't send it again.</b> {{ selected.providerMessage?.startsWith('Waiting for Zoho: ') ? selected.providerMessage.slice(18) : "Zoho has this campaign but wouldn't send it yet, usually because it is still reviewing the campaign or contacts new to it (this can take a few hours). Marketech.ai asks Zoho again every few minutes and sends this same campaign as soon as Zoho allows it, so nobody gets it twice. Sending again here is not needed." }}
         <div class="ec-inline-actions">
+          <a class="btn btn-primary btn-sm ec-open-zoho" [href]="zohoCampaignUrl(selected)" target="_blank" rel="noopener noreferrer" (click)="openedInZoho = selected.id"
+             [title]="selected.zohoCampaignId ? 'Opens this campaign in Zoho Campaigns: press Send there' : 'Opens Zoho Campaigns: find the campaign by its name and press Send'">{{ selected.zohoCampaignId ? 'Open in Zoho to send' : 'Open Zoho Campaigns' }} ↗</a>
           <button class="btn btn-secondary btn-sm" (click)="refresh()" [disabled]="busy === 'refresh'"><app-icon name="refresh" [size]="15"></app-icon>{{ busy === 'refresh' ? 'Checking…' : 'Check Zoho now' }}</button>
           <button *ngIf="canSend" class="btn btn-secondary btn-sm" (click)="resolve()" title="Only if Zoho shows it was never sent: lets you change it and send again">Zoho won't send it — stop waiting</button>
         </div>

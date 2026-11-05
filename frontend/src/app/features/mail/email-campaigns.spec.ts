@@ -567,6 +567,23 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     expect(el().textContent).not.toContain('Outcome unknown.');
     expect(el().querySelector('.note.error')).toBeNull();
     expect(button('Send through Zoho')).toBeUndefined();
+    // Open in Zoho: this campaign's page in the account's Zoho region, in a new tab.
+    expect(el().textContent).toContain('Open Zoho Campaigns ↗');
+    comp.zoho = { canCompose: true, canSend: true, connection: { connected: true, webUrl: 'https://campaigns.zoho.in' } };
+    (comp as any).setSelected({ ...held, zohoCampaignId: '1178368000002566702' });
+    fixture.detectChanges();
+    const link = el().querySelector('a.ec-open-zoho') as HTMLAnchorElement;
+    expect(link.textContent).toContain('Open in Zoho to send');
+    expect(link.getAttribute('href')).toBe('https://campaigns.zoho.in/campaigns/home.do#emailcampaign/1178368000002566702/cmpdetails');
+    expect(link.target).toBe('_blank');
+    link.addEventListener('click', ev => ev.preventDefault());
+    link.click();
+    expect(comp.openedInZoho).toBe(6);
+    // Coming back to Marketech.ai checks Zoho at once.
+    window.dispatchEvent(new Event('focus'));
+    http.expectOne(r => r.method === 'POST' && r.url.endsWith('/campaigns/6/refresh')).flush({ campaign: { ...held, zohoCampaignId: '1178368000002566702' } });
+    http.match(r => /\/mail\/campaigns$/.test(r.url)).forEach(r => r.flush({ campaigns: [] }));
+    expect(comp.zohoCampaignUrl({ zohoCampaignId: 'x/../evil' })).toBe('https://campaigns.zoho.in/campaigns/home.do');
     button('Check Zoho now').click();
     http.expectOne(r => r.method === 'POST' && r.url.endsWith('/campaigns/6/refresh')).flush({ campaign: { ...held, status: 'submitted', providerCode: null } });
     http.match(r => /\/mail\/campaigns$/.test(r.url)).forEach(r => r.flush({ campaigns: [] }));

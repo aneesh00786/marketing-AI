@@ -616,10 +616,32 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
     });
   }
 
+  /** The campaign opened in Zoho to send it there by hand (the first send to newly uploaded contacts). */
+  openedInZoho: number | null = null;
+
+  /** This campaign's page in Zoho Campaigns (or Zoho Campaigns itself when its Zoho id is not known). */
+  zohoCampaignUrl(c: any): string {
+    const base = String(this.zoho?.connection?.webUrl || 'https://campaigns.zoho.com').replace(/\/$/, '');
+    const id = /^\d{5,25}$/.test(String(c?.zohoCampaignId || '')) ? c.zohoCampaignId : null;
+    return id ? `${base}/campaigns/home.do#emailcampaign/${id}/cmpdetails` : `${base}/campaigns/home.do`;
+  }
+
+  /** Back from Zoho after sending it there: check Zoho right away, so it shows as sent without another click. */
+  @HostListener('window:focus')
+  onReturnFromZoho(): void {
+    if (!this.openedInZoho || this.selected?.id !== this.openedInZoho || !this.waitingForZoho(this.selected) || this.busy) return;
+    this.refresh();
+  }
+
   refresh(): void {
     this.busy = 'refresh';
     this.http.post<any>(`${this.base}/${this.selected.id}/refresh`, {}).subscribe({
-      next: r => { this.busy = ''; this.setSelected(r.campaign); this.load(); },
+      next: r => {
+        this.busy = '';
+        const wasWaiting = this.openedInZoho === r.campaign?.id;
+        this.setSelected(r.campaign); this.load();
+        if (wasWaiting && r.campaign.status === 'submitted') { this.openedInZoho = null; this.toast.emit('Zoho has sent it. It now shows as submitted.'); }
+      },
       error: e => { this.busy = ''; this.toast.emit(this.err(e)); }
     });
   }
