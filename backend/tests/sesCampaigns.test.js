@@ -324,3 +324,71 @@ test('merge tags: a tag that cannot be filled in (e.g. from an old template) is 
   assert.ok(v.problems.some(p => /These merge tags cannot be filled in: \$\[LI:UPDATEPROFILE\]\$/.test(p)), JSON.stringify(v.problems));
   assert.ok(!v.problems.some(p => /VIEWINBROWSER|ORGADDRESS/.test(p)), 'the supported tags are fine');
 });
+
+test('sender: SES gets the campaign\'s From (support@thrivewoo.com), never the signed-in user\'s address; no Reply-To; the log names the sender and no secret', async () => {
+  const ws = await sesWorkspace('SES sender');
+  // The signed-in user's own address is a (verified) Gmail address: it must never become the sender.
+  await db().run('UPDATE users SET email = ? WHERE id = ?', [`aneesh00786+${ws.userId}@gmail.com`, ws.userId]);
+  S.verified.add('thrivewoo.com');
+  const listId = await consentedList(ws, [{ name: 'Priya Nair', email: 'priya@shop.io' }]);
+  const c = (await capi(ws, 'POST', '', { ...CAMPAIGN, fromName: 'ThriveWoo', fromEmail: 'support@thrivewoo.com', mailListIds: [listId] })).data.campaign;
+  assert.equal((await capi(ws, 'POST', `/${c.id}/approve`, {})).status, 200);
+  assert.equal((await capi(ws, 'POST', `/${c.id}/send`, { confirm: true })).status, 200);
+  const logs = [];
+  const info = console.info;
+  console.info = (...a) => logs.push(a.join(' '));
+  try { await runJobs(ws); } finally { console.info = info; }
+  assert.equal(S.sent.length, 1);
+  assert.equal(S.sent[0].from, 'support@thrivewoo.com', 'FromEmailAddress sent to SES');
+  assert.match(S.sent[0].raw, /^From: ThriveWoo <support@thrivewoo\.com>$/m, 'the From header');
+  assert.doesNotMatch(S.sent[0].raw, /^Reply-To:/mi, 'no Reply-To is set');
+  assert.doesNotMatch(S.sent[0].raw, /aneesh00786/i, 'the signed-in user\'s address appears nowhere');
+  const line = logs.find(l => l.startsWith('[ses] ') && l.includes('"send_part"'));
+  assert.ok(line, 'one log line per part');
+  const logged = JSON.parse(line.slice(6));
+  assert.deepEqual([logged.workspaceId, logged.campaignId, logged.configuredFrom, logged.sesFrom, logged.replyTo], [ws.workspaceId, c.id, 'support@thrivewoo.com', 'support@thrivewoo.com', null]);
+  assert.match(logged.operation, /outbound-emails/);
+  assert.ok(!logs.join('\n').includes(KEYS.secretAccessKey) && !logs.join('\n').includes(KEYS.accessKeyId), 'no AWS keys in the logs');
+});
+
+test('SES sandbox: the recipient SES refuses as "not verified" is named as the recipient; once verified, Send again emails them', async () => {
+  const ws = await sesWorkspace('SES sandbox');
+  S.verified.add('thrivewoo.com');
+  const listId = await consentedList(ws, [{ name: 'Aneesh', email: 'aneesh00786@gmail.com' }]);
+  const c = (await capi(ws, 'POST', '', { ...CAMPAIGN, fromEmail: 'support@thrivewoo.com', mailListIds: [listId] })).data.campaign;
+  assert.equal((await capi(ws, 'POST', `/${c.id}/approve`, {})).status, 200);
+  assert.equal((await capi(ws, 'POST', `/${c.id}/send`, { confirm: true })).status, 200);
+  S.sendResponder = body => h.json(400, { message: `Email address is not verified. The following identities failed the check in region AP-SOUTHEAST-4: ${body.Destination.ToAddresses[0]}` }, { 'x-amzn-ErrorType': 'MessageRejected' });
+  await runJobs(ws);
+  let r = await row(c.id);
+  assert.equal(r.status, 'failed', 'nobody accepted: not sent');
+  assert.match(r.provider_message, /aneesh00786@gmail\.com is the recipient, not the sender support@thrivewoo\.com: the SES account is in the sandbox in ap-southeast-4/);
+  // The address is verified in SES now: Send again tries the refused person again.
+  S.sendResponder = null;
+  assert.equal((await capi(ws, 'POST', `/${c.id}/send`, { confirm: true })).status, 200);
+  await runJobs(ws);
+  r = await row(c.id);
+  assert.equal(r.status, 'submitted');
+  assert.deepEqual(S.sent.map(x => [x.to, x.from]), [['aneesh00786@gmail.com', 'support@thrivewoo.com']]);
+  assert.equal(sesCampaigns().explainNotVerified('Amazon SES: Email address is not verified. The following identities failed the check in region US-EAST-1: support@thrivewoo.com', 'support@thrivewoo.com'),
+    'Amazon SES: Email address is not verified. The following identities failed the check in region US-EAST-1: support@thrivewoo.com', 'a sender refusal is left as SES said it');
+});
+
+test('Send again: refused people are tried again; anyone sent or with an unclear outcome is never emailed twice', async () => {
+  const ws = await sesWorkspace('SES retry');
+  const people = ['a', 'b', 'c'].map(k => ({ name: k.toUpperCase(), email: `${k}@shop.io` }));
+  const c = await sentCampaign(ws, people);
+  S.sendResponder = () => h.json(400, { message: 'Email address is not verified.' }, { 'x-amzn-ErrorType': 'MessageRejected' });
+  await runJobs(ws);
+  assert.equal((await row(c.id)).status, 'failed');
+  // Earlier outcomes kept from before: b was sent, c's outcome was unclear.
+  await db().run("UPDATE mail_campaign_recipients SET status = 'sent' WHERE campaign_id = ? AND email = 'b@shop.io'", [c.id]);
+  await db().run("UPDATE mail_campaign_recipients SET status = 'unknown' WHERE campaign_id = ? AND email = 'c@shop.io'", [c.id]);
+  S.sendResponder = null;
+  assert.equal((await capi(ws, 'POST', `/${c.id}/send`, { confirm: true })).status, 200);
+  await runJobs(ws);
+  assert.deepEqual(S.sent.map(x => x.to), ['a@shop.io'], 'only the refused person');
+  const rec = await db().all('SELECT email, status FROM mail_campaign_recipients WHERE campaign_id = ? ORDER BY email', [c.id]);
+  assert.deepEqual(rec.map(x => [x.email, x.status]), [['a@shop.io', 'sent'], ['b@shop.io', 'sent'], ['c@shop.io', 'unknown']]);
+  assert.equal((await row(c.id)).status, 'submitted');
+});

@@ -126,6 +126,10 @@ async function prepare(ctx, row) {
 
 /** Starts (or continues) sending: recipients fixed, then the worker job. */
 async function start(ctx, row) {
+  // Send again: people SES refused outright (nothing was sent to them) are tried again. Anyone
+  // already sent, with an unclear outcome ("unknown") or mid-send is never emailed again.
+  await run(`UPDATE mail_campaign_recipients SET status = 'queued', error_code = NULL, error = NULL, updated_at = UTC_TIMESTAMP()
+    WHERE campaign_id = ? AND version = ? AND status = 'failed'`, [row.id, row.version]);
   const total = await prepare(ctx, row);
   if (!total) {
     const err = Object.assign(new Error('Nobody in this campaign can get marketing email (no consent, unsubscribed or bounced), so nothing was sent. Choose other recipients.'), { status: 400, code: 'NO_RECIPIENTS' });
@@ -163,6 +167,34 @@ function publicBase() {
   return (process.env.APP_BASE_URL || '').replace(/\/$/, '');
 }
 
+/**
+ * The sender of a campaign email: only the campaign's own From address (checked as verified in SES at
+ * approval). Never the signed-in user's address, never a Reply-To. No Reply-To is set: replies go to From.
+ */
+function senderOf(row) {
+  const email = String(row.from_email || '').trim();
+  const name = String(row.from_name || '').replace(/["\\\r\n]/g, '').trim();
+  return { email, header: name ? `"${name}" <${email}>` : email, replyTo: null };
+}
+
+/** One log line about what is sent to SES (no keys, no secrets, no recipient lists). */
+function logSend(event, row, sender, extra = {}) {
+  console.info(`[ses] ${JSON.stringify({ event, workspaceId: row.workspace_id, campaignId: row.id, configuredFrom: row.from_email || null,
+    sesFrom: sender.email, replyTo: sender.replyTo, operation: 'SESv2 SendEmail (Raw, POST /v2/email/outbound-emails)', ...extra })}`);
+}
+
+/** SES's "not verified" refusal, said plainly: a listed address that is not the sender is a recipient (SES sandbox). */
+function explainNotVerified(message, senderEmail) {
+  const m = /identities failed the check in region ([A-Z0-9-]+):\s*(.+)$/i.exec(String(message || ''));
+  if (!m) return message;
+  const sender = senderEmail.toLowerCase();
+  const domain = sender.split('@')[1] || '';
+  const ids = m[2].split(/[,\s]+/).map(x => x.trim().toLowerCase()).filter(Boolean);
+  const recipients = ids.filter(id => id !== sender && id !== domain);
+  if (!recipients.length) return message;
+  return `${message} (${recipients.join(', ')} is the recipient, not the sender ${senderEmail}: the SES account is in the sandbox in ${m[1].toLowerCase()}, so every recipient must be verified there too. Request production access in the SES console to email anyone.)`;
+}
+
 /** One email: personalized, own unsubscribe link, tracking, sent through SES. */
 const unsubscribeUrlOf = (unsubToken, email) => (publicBase() ? `${publicBase()}/api/v1/mail/unsubscribe/c/${unsubToken}?e=${encodeURIComponent(email)}` : null);
 
@@ -188,15 +220,16 @@ async function sendOne(cfg, row, r, unsubToken, orgAddress) {
     await run('UPDATE mail_campaign_recipients SET tracking_id = ? WHERE id = ?', [t.id, r.id]);
     html = await t.instrumentSmtp(html);
   }
-  const from = row.from_name ? `"${String(row.from_name).replace(/["\\\r\n]/g, '')}" <${row.from_email}>` : row.from_email;
-  const raw = await buildRaw({ from, to: r.email, subject, html, unsubscribeUrl });
+  const sender = senderOf(row);
+  const raw = await buildRaw({ from: sender.header, to: r.email, subject, html, unsubscribeUrl });
   try {
-    const res = await ses.sendRaw(cfg, { from: row.from_email, to: r.email, raw, configurationSet: cfg.configurationSet,
+    const res = await ses.sendRaw(cfg, { from: sender.email, to: r.email, raw, configurationSet: cfg.configurationSet,
       tags: { marketech_workspace: row.workspace_id, marketech_campaign: row.id, marketech_recipient: r.id } });
     await run("UPDATE mail_campaign_recipients SET status = 'sent', provider_message_id = ?, sent_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP() WHERE id = ?", [res.messageId, r.id]);
     if (t) await t.accepted({ provider: 'ses', messageId: res.messageId });
     return { ok: true };
   } catch (err) {
+    logSend('send_failed', row, sender, { recipientId: r.id, providerCode: err.providerCode || err.code || null, error: String(err.message || '').slice(0, 300) });
     const status = err.outcomeUnknown ? 'unknown' : 'failed';
     await run('UPDATE mail_campaign_recipients SET status = ?, error_code = ?, error = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?',
       [status, String(err.providerCode || err.code || 'ERROR').slice(0, 64), String(err.message || '').slice(0, 255), r.id]);
@@ -217,6 +250,7 @@ async function runSendJob(job) {
   const gap = Math.ceil(1000 / perSecond);
   const unsubToken = svc.unsubscribeTokenOf(row);
   const orgAddress = await orgAddressOf(row.workspace_id);
+  logSend('send_part', row, senderOf(row), { part, region: cfg.region, configurationSet: cfg.configurationSet || null });
   const started = Date.now();
   let sent = 0;
   while (sent < PART && Date.now() - started < PART_MS) {
@@ -268,7 +302,7 @@ async function finish(row) {
   // Sent only when SES accepted at least one email; otherwise not sent, with the reason.
   if (!c.sent && !c.unknown) {
     const first = await get("SELECT error FROM mail_campaign_recipients WHERE campaign_id = ? AND version = ? AND status = 'failed' ORDER BY id LIMIT 1", [row.id, row.version]);
-    return stop(row, 'SES_NONE_SENT', `Amazon SES did not accept any of the emails${first?.error ? `: ${first.error}` : '.'}`);
+    return stop(row, 'SES_NONE_SENT', `Amazon SES did not accept any of the emails${first?.error ? `: ${explainNotVerified(first.error, senderOf(row).email)}` : '.'}`);
   }
   await run(`UPDATE mail_campaigns SET status = 'submitted', submit_stage = NULL, zoho_status = 'Sent', submitted_at = COALESCE(submitted_at, UTC_TIMESTAMP()),
     provider_code = NULL, provider_message = ?, report_json = ?, last_checked_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP() WHERE id = ?`,
@@ -372,4 +406,4 @@ async function viewPage(token) {
   return { html: rendered.html, subject: rendered.subject };
 }
 
-module.exports = { prepare, start, runSendJob, kick, report, activity, counts, personalize, renderFor, orgAddressOf, viewPage, leftoverTags, buildRaw, ACTIVITY_SQL };
+module.exports = { senderOf, explainNotVerified, prepare, start, runSendJob, kick, report, activity, counts, personalize, renderFor, orgAddressOf, viewPage, leftoverTags, buildRaw, ACTIVITY_SQL };
