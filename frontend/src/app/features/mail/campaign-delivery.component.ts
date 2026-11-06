@@ -5,7 +5,7 @@ import { HttpClient } from '@angular/common/http';
 import { apiRoot } from '../../core/api-base';
 
 /**
- * Mail Settings → Campaign sending: which service sends this workspace's campaigns (Zoho Campaigns
+ * Mail Settings → Campaigns: which service sends this workspace's campaigns (Zoho Campaigns
  * or Amazon SES) and the Amazon SES connection. The secret key can be written but never read back.
  * Owners/Admins (mail.configure) change it; others see it read-only.
  */
@@ -49,9 +49,10 @@ import { apiRoot } from '../../core/api-base';
     </form>
     <p class="cd-result" *ngIf="testResult" [class.ok]="testResult.ok" role="status">{{ testResult.message }}</p>
     <p class="cd-result" *ngIf="!testResult && s.ses.lastError" role="status">Last test: {{ s.ses.lastError }}</p>
+    <p class="cd-result" *ngIf="!s.ses.configured && s.canConfigure" role="status">Not set up yet: {{ missing.join(', ') }} {{ missing.length === 1 ? 'is' : 'are' }} missing. Save them, then test the connection.</p>
   </div>
 
-  <div class="cd-card" *ngIf="s.ses.configured || s.provider === 'ses'">
+  <div class="cd-card" *ngIf="s.canConfigure || s.provider === 'ses'">
     <h3>Delivery reports (Amazon SNS)</h3>
     <p class="mx-desc">Opens and clicks are tracked by Marketech.ai. Delivered, bounced and complaint reports come from SES through Amazon SNS:</p>
     <ol class="cd-steps">
@@ -59,6 +60,7 @@ import { apiRoot } from '../../core/api-base';
       <li>Add an HTTPS subscription to that topic with this endpoint:
         <span class="cd-url" *ngIf="s.ses.notificationUrl"><code>{{ s.ses.notificationUrl }}</code> <button type="button" class="btn btn-secondary btn-sm" (click)="copy(s.ses.notificationUrl)">Copy</button></span>
         <span class="muted small" *ngIf="!s.ses.notificationUrl">(shown to Owners and Admins; the server needs a public APP_BASE_URL)</span>
+        <span class="cd-result" *ngIf="s.ses.notificationUrl && !publicUrl" role="status">This address is not reachable by Amazon SNS (it must be a public https address). Set up the subscription from your live site, e.g. https://your-domain/…, not from localhost.</span>
         Marketech.ai confirms the subscription by itself.</li>
       <li>In Amazon SES, create a configuration set with an event destination to that SNS topic, publishing <b>Delivery, Bounce, Complaint, Reject and Delivery delay</b> (open and click tracking can stay off), and enter its name above.</li>
     </ol>
@@ -134,6 +136,20 @@ export class CampaignDeliveryComponent implements OnInit {
 
   copy(text: string): void {
     navigator.clipboard?.writeText(text).then(() => this.toast.emit('Copied.'), () => this.toast.emit(text));
+  }
+
+  /** What the SES connection still needs (region, access key ID, secret). */
+  get missing(): string[] {
+    const s = this.s?.ses || {};
+    return [!s.region && 'region', !s.accessKeyId && 'access key ID', !s.hasSecret && 'secret access key'].filter(Boolean) as string[];
+  }
+
+  /** SNS can only deliver to a public https address (not localhost or a private network). */
+  get publicUrl(): boolean {
+    try {
+      const u = new URL(this.s?.ses?.notificationUrl || '');
+      return u.protocol === 'https:' && !/^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)|\.local$/i.test(u.hostname);
+    } catch { return false; }
   }
 
   private err(e: any): string { return e?.error?.error || e?.message || 'Request failed.'; }

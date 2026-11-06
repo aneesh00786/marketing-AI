@@ -44,7 +44,7 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
     if (t && t.id) this.newFromTemplate(t);
   }
   @Output() toast = new EventEmitter<string>();
-  /** Open Settings → Zoho Campaigns (where the Zoho API credentials are entered). */
+  /** Open Settings → Campaigns (where the Zoho API credentials are entered). */
   @Output() openSettings = new EventEmitter<void>();
   /** Open Email Templates with a new blank template ("New Campaign" menu → New email template). */
   @Output() createTemplate = new EventEmitter<void>();
@@ -91,7 +91,7 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
   get canCompose(): boolean { return !!this.zoho?.canCompose; }
   get canSend(): boolean { return !!this.zoho?.canSend; }
   get zohoReady(): boolean { return !!this.zoho?.connection?.connected && !(this.zoho?.connection?.missingScopes || []).length; }
-  /** Which service sends this workspace's campaigns (Mail Settings → Campaign sending). */
+  /** Which service sends this workspace's campaigns (Mail Settings → Campaigns). */
   delivery: any = null;
   get viaSes(): boolean { return this.delivery?.provider === 'ses'; }
   /** A campaign sent (partly) with one service stays with it; otherwise the workspace's choice. */

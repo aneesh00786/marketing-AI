@@ -8,7 +8,9 @@ import { MailTrackingSettingsComponent } from './mail-tracking-settings.componen
 import { ZohoAppSettingsComponent } from './zoho-app-settings.component';
 import { ZohoCampaignsComponent } from './zoho-campaigns.component';
 
-export type SettingsTab = 'sending' | 'replies' | 'marketing' | 'tracking' | 'campaign-sending' | 'zoho';
+export type SettingsTab = 'sending' | 'replies' | 'marketing' | 'tracking' | 'campaigns';
+/** Older links (Campaigns "Set up in Settings", the Zoho sign-in return) still name 'zoho'. */
+const TAB_ALIASES: Record<string, SettingsTab> = { zoho: 'campaigns', 'campaign-sending': 'campaigns' };
 
 const BLANK = {
   provider: 'custom_smtp', smtp_host: '', smtp_port: 587, smtp_secure: false, smtp_user: '', smtp_pass: '',
@@ -39,16 +41,15 @@ export class MailSettingsComponent implements OnInit {
   @Output() changed = new EventEmitter<void>();
   /** Ask Mail Center to open another section (e.g. Campaigns for the Zoho connection). */
   @Output() openSection = new EventEmitter<string>();
-  /** Open on a given tab (e.g. 'zoho' from the Campaigns "Set up in Settings" link). */
-  @Input() initialTab: SettingsTab | null = null;
+  /** Open on a given tab (e.g. 'campaigns' from the Campaigns "Set up in Settings" link; 'zoho' still works). */
+  @Input() initialTab: SettingsTab | 'zoho' | null = null;
 
   readonly tabs: { id: SettingsTab; label: string }[] = [
     { id: 'sending', label: 'Sending' },
     { id: 'replies', label: 'Replies (IMAP)' },
     { id: 'marketing', label: 'Marketing email' },
     { id: 'tracking', label: 'Tracking & privacy' },
-    { id: 'campaign-sending', label: 'Campaign sending' },
-    { id: 'zoho', label: 'Zoho Campaigns' }
+    { id: 'campaigns', label: 'Campaigns' }
   ];
   tab: SettingsTab = 'sending';
 
@@ -67,7 +68,8 @@ export class MailSettingsComponent implements OnInit {
   constructor(private api: ApiService, private host: ElementRef<HTMLElement>) {}
 
   ngOnInit(): void {
-    if (this.initialTab && this.tabs.some(t => t.id === this.initialTab)) this.tab = this.initialTab;
+    const wanted = this.initialTab ? (TAB_ALIASES[this.initialTab] || this.initialTab) : null;
+    if (wanted && this.tabs.some(t => t.id === wanted)) this.tab = wanted as SettingsTab;
     this.load();
   }
 

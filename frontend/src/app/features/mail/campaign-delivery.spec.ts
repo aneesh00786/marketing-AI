@@ -9,7 +9,7 @@ const SETTINGS = (over: any = {}) => ({
   ...over, ...(over.ses ? { ses: { configured: false, source: null, region: null, accessKeyId: null, hasSecret: false, configurationSet: null, maxPerSecond: null, notificationUrl: 'https://app.test/api/v1/mail/t/webhooks/ses/abc', snsTopicArn: null, ...over.ses } } : {})
 });
 
-describe('CampaignDeliveryComponent (Mail Settings → Campaign sending)', () => {
+describe('CampaignDeliveryComponent (Mail Settings → Campaigns)', () => {
   let fixture: ComponentFixture<CampaignDeliveryComponent>;
   let comp: CampaignDeliveryComponent;
   let http: HttpTestingController;
@@ -32,6 +32,12 @@ describe('CampaignDeliveryComponent (Mail Settings → Campaign sending)', () =>
     expect(radios.map(r => r.checked)).toEqual([true, false]);
     expect(radios[1].disabled).withContext('SES not set up').toBeTrue();
     expect(el().textContent).toContain('Set up the connection below first.');
+    expect(el().textContent).toContain('Not set up yet: region, access key ID, secret access key are missing.');
+    expect(el().textContent).withContext('the SNS steps show even before the connection is complete').toContain('Delivery reports (Amazon SNS)');
+    comp.s = { ...comp.s, ses: { ...comp.s.ses, notificationUrl: 'http://localhost:8000/api/v1/mail/t/webhooks/ses/abc' } };
+    fixture.detectChanges();
+    expect(el().textContent).toContain('not reachable by Amazon SNS');
+    expect(comp.publicUrl).toBeFalse();
   });
 
   it('saves the connection without ever sending an empty secret; the secret is never shown back', () => {

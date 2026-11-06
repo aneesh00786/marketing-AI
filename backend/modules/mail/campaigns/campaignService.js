@@ -402,7 +402,7 @@ async function validateRow(ctx, row, { checkZoho = true } = {}) {
   if (viaSes) {
     if (keys.length) problems.push('Zoho lists cannot be used with Amazon SES. Untick them (Recipients) and use contact lists instead.');
     const cfg = await sesSettings.sesConfig(ws(ctx)).catch(() => null);
-    if (!cfg) problems.push('Amazon SES is not set up: add the region and access keys in Mail Settings → Campaign sending.');
+    if (!cfg) problems.push('Amazon SES is not set up: add the region and access keys in Mail Settings → Campaigns.');
     else if (checkZoho && row.from_email && !PUBLIC_DOMAINS.test(row.from_email)) {
       try {
         const v = await require('../ses/sesClient').identityVerified(cfg, row.from_email);

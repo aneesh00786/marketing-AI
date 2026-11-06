@@ -55,7 +55,7 @@ test('without credentials anywhere, Settings says so and Connect is refused with
   assert.equal((await zapi(A, 'GET', '/status')).data.serverConfigured, false);
   const c = await zapi(A, 'POST', '/connect', {});
   assert.equal(c.status, 409);
-  assert.match(c.data.error, /Settings → Zoho Campaigns/);
+  assert.match(c.data.error, /Settings → Campaigns/);
 });
 
 test('only Owners/Admins (mail.configure) can read or change the credentials', async () => {

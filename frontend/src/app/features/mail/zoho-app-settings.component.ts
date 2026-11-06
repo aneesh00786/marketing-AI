@@ -5,7 +5,7 @@ import { ApiService } from '../../services/api.service';
 import { IconComponent } from '../../shared/icon.component';
 
 /**
- * Settings → Zoho Campaigns: the Zoho API client (Client ID and Client Secret from the Zoho API
+ * Settings → Campaigns: the Zoho API client (Client ID and Client Secret from the Zoho API
  * Console) this workspace connects with. Owners/Admins only (the server enforces mail.configure).
  * The secret is write-only: it is sent when saved, stored encrypted, and never shown again.
  */

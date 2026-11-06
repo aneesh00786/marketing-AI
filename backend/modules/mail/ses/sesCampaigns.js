@@ -170,7 +170,7 @@ async function runSendJob(job) {
   if (!row || row.status !== 'submitting' || row.submit_stage !== 'ses_send' || row.version !== version) return { skipped: true };
   const svc = require('../campaigns/campaignService');
   const cfg = await settings.sesConfig(row.workspace_id);
-  if (!cfg) return stop(row, 'SES_NOT_CONFIGURED', 'Amazon SES is not set up (Mail Settings → Campaign sending). Nothing more was sent.');
+  if (!cfg) return stop(row, 'SES_NOT_CONFIGURED', 'Amazon SES is not set up (Mail Settings → Campaigns). Nothing more was sent.');
   const perSecond = Math.max(1, Math.min(500, cfg.maxPerSecond || 1));
   const gap = Math.ceil(1000 / perSecond);
   const unsubToken = svc.unsubscribeTokenOf(row);

@@ -189,7 +189,7 @@ async function setWebOrg(ctx, input) {
 
 async function startConnect(ctx) {
   const cfg = await appConfig(ws(ctx));
-  if (!cfg) throw httpError(409, 'Zoho Campaigns is not set up yet: enter the Zoho Client ID and Client Secret in Mail Center → Settings → Zoho Campaigns.', 'SETUP_REQUIRED');
+  if (!cfg) throw httpError(409, 'Zoho Campaigns is not set up yet: enter the Zoho Client ID and Client Secret in Mail Center → Settings → Campaigns.', 'SETUP_REQUIRED');
   if (!secretBox.isConfigured()) throw httpError(409, 'Credential encryption is not configured on the server.', 'SETUP_REQUIRED');
   const state = crypto.randomBytes(32).toString('base64url');
   await run(

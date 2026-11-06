@@ -99,15 +99,16 @@
 
     <app-marketing-delivery *ngSwitchCase="'marketing'" [refreshKey]="version" (toast)="toast.emit($event)"></app-marketing-delivery>
 
-    <app-campaign-delivery *ngSwitchCase="'campaign-sending'" (toast)="toast.emit($event)"></app-campaign-delivery>
 
     <app-mail-tracking-settings *ngSwitchCase="'tracking'" [startOpen]="true" (toast)="toast.emit($event)"></app-mail-tracking-settings>
 
-    <!-- Zoho Campaigns: the API credentials first, then the connection they are used for -->
-    <div *ngSwitchCase="'zoho'" class="ms-zoho">
+    <!-- Campaigns: which service sends them (Zoho Campaigns or Amazon SES), then each service's connection -->
+    <div *ngSwitchCase="'campaigns'" class="ms-zoho">
+      <app-campaign-delivery (toast)="toast.emit($event)"></app-campaign-delivery>
+      <h3 class="mx-subhead ms-campaign-zoho">Zoho Campaigns connection</h3>
       <app-zoho-app-settings (toast)="toast.emit($event)" (changed)="zohoConn.loadStatus()"></app-zoho-app-settings>
       <app-zoho-campaigns #zohoConn [inSettings]="true" (toast)="toast.emit($event)"></app-zoho-campaigns>
-      <p class="mx-desc">Campaigns themselves are written and approved in <button type="button" class="link-btn" (click)="openSection.emit('campaigns')">Zoho Campaigns</button>.</p>
+      <p class="mx-desc">Campaigns themselves are written and approved in <button type="button" class="link-btn" (click)="openSection.emit('campaigns')">Campaigns</button>.</p>
     </div>
   </div>
 </section>

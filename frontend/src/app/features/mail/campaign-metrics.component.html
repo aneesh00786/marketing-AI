@@ -70,7 +70,7 @@
     <b>{{ m.value }}</b>
     <small *ngIf="m.hint">{{ m.hint }}</small>
   </ng-template>
-  <p class="cm-note" *ngIf="report && !pending">Totals as reported by Zoho Campaigns when last refreshed. Opens are an estimate: image blocking, caching and privacy features distort them.</p>
+  <p class="cm-note" *ngIf="report && !pending">Totals as reported by {{ provider === 'ses' ? 'Amazon SES and Marketech.ai tracking' : 'Zoho Campaigns' }} when last refreshed. Opens are an estimate: image blocking, caching and privacy features distort them.</p>
 
   <ng-container *ngIf="sent">
     <div class="cm-recips-open" *ngIf="canViewRecipients">

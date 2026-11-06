@@ -1,12 +1,12 @@
 <section class="ec">
   <header class="mx-head ec-page-head">
     <div>
-      <h2>Zoho Campaigns</h2>
-      <p class="mx-desc">{{ view === 'lists' ? 'Manage the mailing lists your campaigns are sent to.' : 'Write an email, choose who gets it, approve it, then send it through Zoho Campaigns.' }}</p>
+      <h2>Campaigns</h2>
+      <p class="mx-desc">{{ view === 'lists' ? 'Manage the mailing lists your campaigns are sent to.' : 'Write an email, choose who gets it, approve it, then send it' + (viaSes ? ' with Amazon SES.' : ' through Zoho Campaigns.') }}</p>
     </div>
     <div class="mx-actions">
       <!-- Zoho connection: a small status chip; the details and setup open in a popup -->
-      <span class="ec-zoho-chip ok" *ngIf="viaSes" [class.ok]="sendReady" [class.warn]="!sendReady" title="Campaigns are sent with Amazon SES (Mail Settings → Campaign sending)"><span class="ec-zoho-dot" aria-hidden="true"></span>{{ sendReady ? 'Amazon SES' : 'Amazon SES not set up' }}</span>
+      <span class="ec-zoho-chip ok" *ngIf="viaSes" [class.ok]="sendReady" [class.warn]="!sendReady" title="Campaigns are sent with Amazon SES (Mail Settings → Campaigns)"><span class="ec-zoho-dot" aria-hidden="true"></span>{{ sendReady ? 'Amazon SES' : 'Amazon SES not set up' }}</span>
       <button type="button" class="ec-zoho-chip" *ngIf="!viaSes" (click)="zohoOpen = true" [class.ok]="zohoReady" [class.warn]="zoho && !zohoReady"
               [title]="zohoReady ? 'Zoho Campaigns is connected. Click to manage the connection.' : 'Zoho Campaigns must be connected before a campaign can be sent.'">
         <span class="ec-zoho-dot" aria-hidden="true"></span>{{ !zoho ? 'Checking Zoho…' : zohoReady ? 'Zoho connected' : 'Zoho not connected' }}
@@ -29,7 +29,7 @@
 
   <div class="mx-callout warn ec-zoho-callout" *ngIf="viaSes && delivery && !delivery.ses?.configured" role="status">
     <app-icon name="info" [size]="16"></app-icon>
-    <span>Campaigns are sent with Amazon SES, which is not set up yet{{ zoho?.canConfigure ? ': add it in Mail Settings → Campaign sending' : '. Ask an Owner or Admin to set it up' }}.</span>
+    <span>Campaigns are sent with Amazon SES, which is not set up yet{{ zoho?.canConfigure ? ': add it in Mail Settings → Campaigns' : '. Ask an Owner or Admin to set it up' }}.</span>
   </div>
   <div class="mx-callout warn ec-zoho-callout" *ngIf="!viaSes && zoho && !zohoReady" role="status">
     <app-icon name="info" [size]="16"></app-icon>
@@ -125,7 +125,7 @@
     <div class="ec-detail" *ngIf="selected && form">
       <div class="ec-detail-head">
         <div class="ec-detail-status">
-          <button type="button" class="btn btn-secondary btn-sm ec-back" (click)="close()">← Zoho Campaigns</button>
+          <button type="button" class="btn btn-secondary btn-sm ec-back" (click)="close()">← Campaigns</button>
           <h3>{{ form.name || 'Untitled campaign' }}</h3>
           <span class="mx-tag" [ngClass]="tone(selected.status, selected)">{{ statusLabel(selected.status, selected) }}</span>
           <span class="mx-tag warn" *ngIf="dirty">Unsaved changes</span>

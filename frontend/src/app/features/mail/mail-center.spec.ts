@@ -104,7 +104,7 @@ describe('MailCenterComponent', () => {
 
   it('shows one set of sections; Product Emails only while its feature is on', () => {
     init();
-    expect(tabs().map(t => t.textContent!.trim().replace(/\s*\d+$/, ''))).toEqual(['Overview', 'Inbox', 'Sent Mail', 'Drafts', 'Approvals', 'Zoho Campaigns', 'Email Templates', 'Logs', 'Settings']);
+    expect(tabs().map(t => t.textContent!.trim().replace(/\s*\d+$/, ''))).toEqual(['Overview', 'Inbox', 'Sent Mail', 'Drafts', 'Approvals', 'Campaigns', 'Email Templates', 'Logs', 'Settings']);
     fixture.destroy();
     init({ productEmails: true });
     expect(tab('Product Emails')).toBeTruthy();
@@ -120,7 +120,7 @@ describe('MailCenterComponent', () => {
     tab('Approvals').click();
     fixture.detectChanges();
     expect(el().querySelector('.stub-drafts')!.textContent).toBe('approvals', 'Approvals reuses the drafts component in its approvals view');
-    tab('Zoho Campaigns').click();
+    tab('Campaigns').click();
     fixture.detectChanges();
     expect(el().querySelector('.stub-campaigns')).toBeTruthy();
     tab('Email Templates').click();
@@ -130,7 +130,7 @@ describe('MailCenterComponent', () => {
 
   it('Campaigns → "New email template" opens Email Templates on a new template, once', () => {
     init();
-    tab('Zoho Campaigns').click();
+    tab('Campaigns').click();
     fixture.detectChanges();
     fixture.debugElement.query(By.directive(CampaignsStub)).componentInstance.createTemplate.emit();
     fixture.detectChanges();

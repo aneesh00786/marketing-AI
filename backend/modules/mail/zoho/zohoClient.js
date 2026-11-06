@@ -132,7 +132,7 @@ async function exchangeCode(dc, code, cfg = clientConfig()) {
 
 /** New access token from a refresh token. invalid grants mean the user must reconnect. */
 async function refreshAccessToken(dc, refreshToken, cfg = clientConfig()) {
-  if (!cfg) throw zohoError('Zoho Campaigns is not set up: enter the Zoho Client ID and Client Secret in Mail Center → Settings → Zoho Campaigns.', { status: 503, code: 'ZOHO_NOT_CONFIGURED' });
+  if (!cfg) throw zohoError('Zoho Campaigns is not set up: enter the Zoho Client ID and Client Secret in Mail Center → Settings → Campaigns.', { status: 503, code: 'ZOHO_NOT_CONFIGURED' });
   const { data } = await postForm(`${dc.accounts}/oauth/v2/token`, {
     grant_type: 'refresh_token',
     client_id: cfg.clientId,

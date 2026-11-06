@@ -14,7 +14,7 @@ export const MAIL_SECTIONS: { key: MailSection; label: string; hint: string; gro
   { key: 'drafts', label: 'Drafts', hint: 'AI drafts: create, edit and review', group: 'mail', icon: 'drafts' },
   { key: 'approvals', label: 'Approvals', hint: 'Drafts waiting for approval, ready to send, or with unknown delivery', group: 'mail', icon: 'check' },
   { key: 'product-emails', label: 'Product Emails', hint: 'Personalised emails to a product\'s leads', group: 'campaigns', icon: 'products' },
-  { key: 'campaigns', label: 'Zoho Campaigns', hint: 'Email campaigns and contact lists in Zoho Campaigns', group: 'campaigns', icon: 'campaigns' },
+  { key: 'campaigns', label: 'Campaigns', hint: 'Email campaigns and contact lists, sent with Zoho Campaigns or Amazon SES', group: 'campaigns', icon: 'campaigns' },
   { key: 'templates', label: 'Email Templates', hint: 'Reusable HTML email templates', group: 'campaigns', icon: 'template' },
   { key: 'logs', label: 'Logs', hint: 'What was sent: sent campaigns and sent emails, by date', group: 'admin', icon: 'logs' },
   { key: 'settings', label: 'Settings', hint: 'Mailbox, marketing approval, tracking and Zoho: all mail settings in one place', group: 'admin', icon: 'settings' }

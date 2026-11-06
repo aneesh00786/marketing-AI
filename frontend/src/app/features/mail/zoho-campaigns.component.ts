@@ -21,9 +21,9 @@ export class ZohoCampaignsComponent implements OnInit {
   @Input() oauthResult: { zoho?: string; reason?: string } | null = null;
   @Output() toast = new EventEmitter<string>();
   @Output() statusChange = new EventEmitter<any>();
-  /** Shown inside Settings → Zoho Campaigns (no "Set up in Settings" link there). */
+  /** Shown inside Settings → Campaigns (no "Set up in Settings" link there). */
   @Input() inSettings = false;
-  /** Ask to open Settings → Zoho Campaigns, where the API credentials are entered. */
+  /** Ask to open Settings → Campaigns, where the API credentials are entered. */
   @Output() openSettings = new EventEmitter<void>();
 
   private base = `${apiRoot()}/api/v1/mail/zoho`;

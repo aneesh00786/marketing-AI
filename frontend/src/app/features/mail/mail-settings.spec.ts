@@ -7,6 +7,7 @@ import { MarketingDeliveryComponent } from './marketing-delivery.component';
 import { MailTrackingSettingsComponent } from './mail-tracking-settings.component';
 import { ZohoAppSettingsComponent } from './zoho-app-settings.component';
 import { ZohoCampaignsComponent } from './zoho-campaigns.component';
+import { CampaignDeliveryComponent } from './campaign-delivery.component';
 
 // The marketing and tracking panels are tested in their own specs.
 @Component({ selector: 'app-marketing-delivery', standalone: true, template: '<p class="stub-marketing">marketing</p>' })
@@ -16,6 +17,9 @@ class TrackingStub { static last: TrackingStub | null = null; @Input() startOpen
 
 @Component({ selector: 'app-zoho-app-settings', standalone: true, template: '<p class="stub-zoho-app">zoho app</p>' })
 class ZohoAppStub { static last: ZohoAppStub | null = null; @Output() toast = new EventEmitter<string>(); @Output() changed = new EventEmitter<void>(); constructor() { ZohoAppStub.last = this; } }
+// Campaign sending service (Zoho / Amazon SES): tested in campaign-delivery.spec.ts.
+@Component({ selector: 'app-campaign-delivery', standalone: true, template: '<p class="stub-delivery">campaign sending</p>' })
+class DeliveryStub { @Output() toast = new EventEmitter<string>(); }
 @Component({ selector: 'app-zoho-campaigns', standalone: true, template: '<p class="stub-zoho">zoho connection</p>' })
 class ZohoStub { static last: ZohoStub | null = null; @Input() inSettings = false; @Output() toast = new EventEmitter<string>(); reloads = 0; loadStatus() { this.reloads++; } constructor() { ZohoStub.last = this; } }
 
@@ -39,8 +43,8 @@ describe('MailSettingsComponent', () => {
   beforeEach(() => {
     TestBed.configureTestingModule({ imports: [MailSettingsComponent], providers: [provideHttpClient(), provideHttpClientTesting()] });
     TestBed.overrideComponent(MailSettingsComponent, {
-      remove: { imports: [MarketingDeliveryComponent, MailTrackingSettingsComponent, ZohoAppSettingsComponent, ZohoCampaignsComponent] },
-      add: { imports: [MarketingStub, TrackingStub, ZohoAppStub, ZohoStub] }
+      remove: { imports: [MarketingDeliveryComponent, MailTrackingSettingsComponent, ZohoAppSettingsComponent, ZohoCampaignsComponent, CampaignDeliveryComponent] },
+      add: { imports: [MarketingStub, TrackingStub, ZohoAppStub, ZohoStub, DeliveryStub] }
     });
     http = TestBed.inject(HttpTestingController);
   });
@@ -55,7 +59,7 @@ describe('MailSettingsComponent', () => {
 
   it('each setting has its own tab: Sending, Replies, Marketing, Tracking, Zoho; only the open one is shown', async () => {
     init(r => r.flush({ config: CONFIG }));
-    expect(tabs().map(t => t.textContent!.trim())).toEqual(['Sending', 'Replies (IMAP)', 'Marketing email', 'Tracking & privacy', 'Campaign sending', 'Zoho Campaigns']);
+    expect(tabs().map(t => t.textContent!.trim())).toEqual(['Sending', 'Replies (IMAP)', 'Marketing email', 'Tracking & privacy', 'Campaigns']);
     expect(tabs()[0].getAttribute('aria-selected')).toBe('true');
     await fixture.whenStable();
     expect((el().querySelector('input[name=smtp_host]') as HTMLInputElement).value).toBe('smtp.acme.io');
@@ -81,8 +85,8 @@ describe('MailSettingsComponent', () => {
     tabs()[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
     fixture.detectChanges();
     tick();
-    expect(comp.tab).toBe('zoho');
-    expect(tabs().map(t => t.tabIndex)).toEqual([-1, -1, -1, -1, -1, 0]);
+    expect(comp.tab).toBe('campaigns');
+    expect(tabs().map(t => t.tabIndex)).toEqual([-1, -1, -1, -1, 0]);
   }));
 
   it('saving the mailbox tells the shell and reloads the marketing approval (a new account clears it)', () => {
@@ -127,7 +131,7 @@ describe('MailSettingsComponent', () => {
 
   it('the Zoho tab holds the API credentials and the connection; saving credentials refreshes the connection', () => {
     init(r => r.flush({ config: CONFIG }));
-    openTab('Zoho Campaigns');
+    openTab('Campaigns');
     expect(el().querySelector('.stub-zoho-app')).toBeTruthy();
     expect(el().querySelector('.stub-zoho')).toBeTruthy();
     expect(ZohoStub.last!.inSettings).toBeTrue();
@@ -146,7 +150,7 @@ describe('MailSettingsComponent', () => {
     fixture.detectChanges();
     http.expectOne(r => r.url.endsWith('/mail/config')).flush({ config: CONFIG });
     fixture.detectChanges();
-    expect(comp.tab).toBe('zoho');
+    expect(comp.tab).withContext("the old 'zoho' link opens the Campaigns tab").toBe('campaigns');
     expect(el().querySelector('.stub-zoho-app')).toBeTruthy();
   });
 });
