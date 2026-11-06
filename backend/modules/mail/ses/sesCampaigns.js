@@ -105,7 +105,8 @@ async function prepare(ctx, row) {
   const people = new Map();
   const add = (p) => {
     const email = String(p.email || '').trim().toLowerCase();
-    if (!email || people.has(email)) return;
+    // Only well-formed addresses (a malformed one can only bounce and hurt the sender's reputation).
+    if (!email || people.has(email) || !/^[^\s@"<>,;]+@[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$/i.test(email)) return;
     const n = contactsSvc.greetingName({ name: p.name || [p.first_name, p.last_name].filter(Boolean).join(' '), company: p.company }) || {};
     people.set(email, { email, first_name: (n.first || '').slice(0, 100) || null, last_name: (n.last || '').slice(0, 100) || null, contact_id: p.contact_id || null, lead_id: p.lead_id || null });
   };
@@ -251,9 +252,23 @@ async function runSendJob(job) {
   const unsubToken = svc.unsubscribeTokenOf(row);
   const orgAddress = await orgAddressOf(row.workspace_id);
   logSend('send_part', row, senderOf(row), { part, region: cfg.region, configurationSet: cfg.configurationSet || null });
+  // Deliverability: paused while bounces or complaints are at the level where SES pauses accounts;
+  // a new sender domain sends only today's warm-up allowance and continues by itself later.
+  const allow = await require('./deliverability').allowance(row);
+  if (allow.blocked) return stop(row, 'HEALTH_PAUSE', `${allow.health.message} Send again continues with the people not yet emailed.`);
+  if (allow.remaining === 0) {
+    const at = allow.warmup.resumeAt;
+    await run("UPDATE mail_campaigns SET zoho_status = 'Paused (warm-up)', provider_message = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?",
+      [`Warm-up: ${allow.warmup.domain} may send ${allow.warmup.cap} emails a day on day ${allow.warmup.day}, and ${allow.warmup.sentLast24h} went out in the last 24 hours. The rest are sent automatically from ${at.toISOString().slice(0, 16).replace('T', ' ')} UTC.`.slice(0, 500), row.id]);
+    await progress(row);
+    await enqueue(row, part + 1, at);
+    return { warmup: true, resumeAt: at.toISOString() };
+  }
+  if (row.zoho_status !== 'Sending') await run("UPDATE mail_campaigns SET zoho_status = 'Sending', provider_message = NULL WHERE id = ?", [row.id]);
+  const limit = allow.remaining === null ? PART : Math.min(PART, allow.remaining);
   const started = Date.now();
   let sent = 0;
-  while (sent < PART && Date.now() - started < PART_MS) {
+  while (sent < limit && Date.now() - started < PART_MS) {
     const r = await get("SELECT * FROM mail_campaign_recipients WHERE campaign_id = ? AND version = ? AND status = 'queued' ORDER BY id LIMIT 1", [row.id, row.version]);
     if (!r) break;
     // Claimed first: whatever happens next, this person is never emailed twice.

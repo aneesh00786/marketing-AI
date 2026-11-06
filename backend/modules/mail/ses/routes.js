@@ -16,6 +16,7 @@ const wrap = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch
 
 router.get('/settings', requireCapability('mail.view'), wrap(async (req, res) => res.json({ success: true, ...(await settings.getSettings(req)) })));
 router.put('/settings', requireCapability('mail.configure'), wrap(async (req, res) => res.json({ success: true, ...(await settings.saveSettings(req, req.body || {})) })));
+router.get('/deliverability', requireCapability('mail.view'), wrap(async (req, res) => res.json({ success: true, ...(await require('./deliverability').dashboard(req.auth.workspaceId, { days: req.query.days })) })));
 router.post('/test', requireCapability('mail.configure'), wrap(async (req, res) => res.json({ success: true, ...(await settings.testConnection(req)) })));
 
 /** Public: Amazon SNS posts SES events here (text/plain JSON), verified by SNS signature. */

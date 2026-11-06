@@ -125,6 +125,8 @@
 
       <app-email-campaigns *ngSwitchCase="'campaigns'" (openSettings)="settingsTab = 'campaigns'; go('settings')" (createTemplate)="templateStartNew = true; go('templates')" [startTemplate]="campaignStartTemplate" (toast)="toast.emit($event)"></app-email-campaigns>
 
+      <app-deliverability *ngSwitchCase="'deliverability'" (openSettings)="settingsTab = 'campaigns'; go('settings')"></app-deliverability>
+
       <app-email-templates *ngSwitchCase="'templates'" [startNew]="templateStartNew" (toast)="toast.emit($event)" (use)="templateUse.emit($event)"></app-email-templates>
 
       <!-- Email log, campaign log and (Owners/Admins) the Compose audit -->

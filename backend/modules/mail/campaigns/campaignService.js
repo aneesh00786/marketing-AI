@@ -311,6 +311,18 @@ async function validateRow(ctx, row, { checkSes = true } = {}) {
   if (!publicBaseUrl()) problems.push('The server needs a public https APP_BASE_URL: unsubscribe links and open/click tracking point to Marketech.ai.');
   warnings.push('Sent with Amazon SES at your account\'s sending rate. The sender address (or its domain) must be verified in Amazon SES, and the account must be out of the SES sandbox to email anyone.');
 
+  // Deliverability: content that looks like spam, the bounce/complaint brake and the warm-up allowance.
+  const dl = require('../ses/deliverability');
+  for (const i of dl.contentReport({ subject: row.subject, html }).issues) warnings.push(`Deliverability: ${i.message}`);
+  const hl = await dl.health(ws(ctx));
+  if (hl.stopped) problems.push(hl.message);
+  else if (hl.message) warnings.push(hl.message);
+  if (row.from_email && (eligible || listPeople)) {
+    const w = await dl.warmup(ws(ctx), dl.domainOf(row.from_email));
+    const people = eligible + listPeople;
+    if (w.cap !== null && people > (w.remaining || 0)) warnings.push(`Warm-up: ${w.domain} is on day ${w.day} of warm-up and may send ${w.cap} emails in 24 hours (${w.remaining} left now). This campaign sends ${w.remaining} now and the rest over the next days, automatically.`);
+  }
+
   const cfg = await sesSettings.sesConfig(ws(ctx)).catch(() => null);
   if (!cfg) problems.push('Amazon SES is not set up: add the region and access keys in Mail Settings → Campaigns.');
   else if (checkSes && row.from_email && !PUBLIC_DOMAINS.test(row.from_email)) {
@@ -380,6 +392,13 @@ async function send(ctx, id, { confirm } = {}) {
 }
 
 /** Figures from Marketech.ai's own records (SES events arrive through SNS); a waiting part is started. */
+/** Whether each link in the campaign email works (on request; SSRF-safe). */
+async function checkLinks(ctx, id) {
+  const row = await requireRow(ctx, id);
+  const links = await require('../ses/deliverability').checkLinks(row.html_content || '');
+  return { links, broken: links.filter(l => !l.ok).length };
+}
+
 async function refresh(ctx, id) {
   const row = await requireRow(ctx, id);
   if (row.provider !== 'ses') return getOne(ctx, row.id);
@@ -504,7 +523,7 @@ async function withLeadDetails(workspaceId, contacts) {
   });
 }
 
-module.exports = {
+module.exports = { checkLinks,
   unsubscribeTokenOf: row => unsubToken(row), recipientHistory, unsubscribeFromCampaign, list, getOne, create, update, duplicate, remove,
   getContacts, setContactLeads, removeContacts, leadOptions, audiences, validate, approve, send, refresh, recipientActivity
 };

@@ -11,8 +11,8 @@ export interface BarRow { label: string; value: number; pct: number; activity?: 
 
 /** Popup tabs: each opens the list of those recipients. */
 const ACTIVITIES = [
-  { key: 'sent', label: 'Sent', api: 'sent', help: 'Everyone this campaign was sent to.' },
-  { key: 'delivered', label: 'Delivered', api: 'delivered', help: 'Accepted by the recipient\'s mail server.' },
+  { key: 'sent', label: 'Sent', api: 'sent', help: 'Accepted by Amazon SES for sending. Not proof that it arrived.' },
+  { key: 'delivered', label: 'Delivered', api: 'delivered', help: 'Accepted by the recipient\'s mail server. It may be in the inbox or the spam folder: no provider reports which.' },
   { key: 'opened', label: 'Opened', api: 'opened', help: 'Opened the email at least once (an estimate: image blocking and privacy features affect it).' },
   { key: 'unopened', label: 'Unopened', api: 'unopened', help: 'Delivered, but no open recorded yet. Good candidates for a follow-up.' },
   { key: 'clicked', label: 'Clicked', api: 'clicked', help: 'Clicked a link in the email: your most interested contacts.' },

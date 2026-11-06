@@ -50,6 +50,7 @@ router.delete('/:id', requireCapability('mail.compose'), wrap(async (req, res) =
 router.get('/:id/contacts', requireCapability('mail.view', 'leads.view'), wrap(async (req, res) => res.json({ success: true, ...(await svc.getContacts(req, req.params.id)) })));
 router.put('/:id/contacts/leads', requireCapability('mail.compose', 'leads.view'), wrap(async (req, res) => res.json({ success: true, ...(await svc.setContactLeads(req, req.params.id, req.body)) })));
 router.post('/:id/contacts/remove', requireCapability('mail.compose'), wrap(async (req, res) => res.json({ success: true, ...(await svc.removeContacts(req, req.params.id, req.body)) })));
+router.post('/:id/check-links', requireCapability('mail.view'), wrap(async (req, res) => res.json({ success: true, ...(await svc.checkLinks(req, req.params.id)) })));
 router.post('/:id/validate', requireCapability('mail.view'), wrap(async (req, res) => res.json({ success: true, validation: await svc.validate(req, req.params.id) })));
 router.post('/:id/approve', requireCapability('mail.send'), wrap(async (req, res) => res.json({ success: true, campaign: await svc.approve(req, req.params.id) })));
 router.post('/:id/send', requireCapability('mail.send'), wrap(async (req, res) => res.json({ success: true, campaign: await svc.send(req, req.params.id, req.body || {}) })));

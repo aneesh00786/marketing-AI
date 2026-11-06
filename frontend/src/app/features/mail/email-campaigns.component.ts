@@ -453,6 +453,7 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
     if (fresh) { this.viewEmail = false; this.onContacts(null); this.loadContacts(c.id); this.subjectCaret = -1; this.subjectAsk = null; this.senderAdding = false; this.senderError = ''; }
     this.selected = c;
     this.validation = null;
+    this.linkCheck = null;
     this.form = {
       name: c.name, subject: c.subject || '', fromName: c.fromName || '', fromEmail: c.fromEmail || '', html: c.html || '',
       mailListIds: new Set<number>(c.mailListIds || [])
@@ -496,6 +497,7 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
   onCampaignChanged(c: any): void {
     this.selected = c;
     this.validation = null;
+    this.linkCheck = null;
     this.load();
   }
 
@@ -530,6 +532,18 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
     this.busy = 'save';
     this.http.patch<any>(`${this.base}/${this.selected.id}`, body).subscribe({
       next: r => { this.busy = ''; this.setSelected(r.campaign); this.load(); if (then) then(); else this.toast.emit('Saved. Approve it again before sending.'); },
+      error: e => { this.busy = ''; this.toast.emit(this.err(e)); }
+    });
+  }
+
+  /** Whether each web link in the email works (asked of each page by the server). */
+  linkCheck: { links: { url: string; ok: boolean; error: string | null }[]; broken: number } | null = null;
+  get brokenLinks() { return (this.linkCheck?.links || []).filter(l => !l.ok); }
+  checkLinks(): void {
+    this.busy = 'links';
+    this.linkCheck = null;
+    this.http.post<any>(`${this.base}/${this.selected.id}/check-links`, {}).subscribe({
+      next: r => { this.busy = ''; this.linkCheck = { links: r.links || [], broken: r.broken || 0 }; },
       error: e => { this.busy = ''; this.toast.emit(this.err(e)); }
     });
   }

@@ -136,6 +136,7 @@
         </div>
       </div>
       <div class="note error" *ngIf="selected.status === 'failed' && selected.providerMessage">{{ selected.providerMessage }}</div>
+      <div class="note" *ngIf="selected.status === 'submitting' && selected.providerMessage" role="status">⏸ {{ selected.providerMessage }}</div>
 
       <!-- Sending: the worker emails each person with Amazon SES -->
       <div class="ec-upload" *ngIf="selected.status === 'submitting'" role="status">
@@ -263,6 +264,11 @@
               <div *ngIf="validation.warnings.length" class="mx-callout warn ec-checks"><b>Worth a look:</b><ul class="warnings"><li *ngFor="let w of validation.warnings">{{ w }}</li></ul></div>
             </ng-container>
             <button type="button" class="link-btn" (click)="validate()" [disabled]="busy === 'validate'" *ngIf="busy !== 'validate'">{{ validation ? 'Check again' : 'Check for problems' }}</button>
+            <button type="button" class="link-btn ec-links-btn" (click)="checkLinks()" [disabled]="busy === 'links'">{{ busy === 'links' ? 'Checking links…' : 'Check links' }}</button>
+            <div *ngIf="linkCheck" class="mx-callout ec-checks" [class.ok]="!linkCheck.broken" [class.error]="linkCheck.broken" role="status">
+              <b>{{ !linkCheck.links.length ? 'No web links to check.' : linkCheck.broken ? linkCheck.broken + ' broken link(s):' : 'All ' + linkCheck.links.length + ' links work.' }}</b>
+              <ul *ngIf="linkCheck.broken"><li *ngFor="let l of brokenLinks">{{ l.url }}: {{ l.error }}</li></ul>
+            </div>
           </div>
 
           <p class="muted small" *ngIf="!canSend && editable">An Owner or Admin approves and sends campaigns.</p>

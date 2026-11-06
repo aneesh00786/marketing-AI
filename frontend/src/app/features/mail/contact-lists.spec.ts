@@ -92,7 +92,7 @@ describe('ContactListsComponent (lists kept in Marketech.ai)', () => {
     fixture.detectChanges();
     const cells = Array.from(el().querySelectorAll('.zl-ctable tbody td')).map(td => td.textContent!.trim());
     expect(cells.slice(0, 9)).toEqual(['1', 'Kim Lee', 'Shop', 'kim@shop.io', '0400', 'Sydney', 'Unsubscribed', 'Not recorded', 'Contacted']);
-    expect(['granted', 'imported', 'withdrawn', 'none'].map(x => comp.consentLabel(x))).toEqual(['Given', 'Subscriber (imported)', 'Withdrawn', 'Not recorded']);
+    expect(['granted', 'withdrawn', 'none'].map(x => comp.consentLabel(x))).toEqual(['Given', 'Withdrawn', 'Not recorded']);
     comp.viewing!.q = 'kim';
     comp.view(comp.viewing!.list, 'subscribed', 1, 'kim');
     req = http.expectOne(r => r.url.endsWith('/contact-lists/1/contacts') && r.params.get('status') === 'subscribed' && r.params.get('q') === 'kim');

@@ -114,7 +114,7 @@ async function runJobs(ws) {
     const job = await nextJob(ws);
     if (!job) return;
     await db().run("UPDATE background_jobs SET status = 'running' WHERE id = ?", [job.id]);
-    await sesCampaigns().runSendJob(job);
+    const out = await sesCampaigns().runSendJob(job); if (process.env.DEBUG_JOBS) console.log('JOB', JSON.stringify(out));
     await db().run("UPDATE background_jobs SET status = 'succeeded' WHERE id = ?", [job.id]);
   }
 }
@@ -420,4 +420,129 @@ test('SNS topic: a topic in another region than SES is flagged; "Use a new topic
   assert.ok(s.lastEventAt);
   // Changing the SES region forgets the topic too (it has to be in the new region).
   assert.equal((await sapi(ws, 'PUT', '/settings', { region: 'eu-west-1' })).data.ses.snsTopicArn, null);
+});
+
+// ------------------------------------------------------------------ deliverability
+
+const dl = () => require('../modules/mail/ses/deliverability');
+
+test('deliverability: the content check flags spam signals; a clean email passes', () => {
+  const bad = dl().contentReport({
+    subject: 'RE: FREE MONEY NOW!!!',
+    html: '<img src="https://x.io/banner.png"><p>Click here</p><a href="https://bit.ly/abc">go</a> <a href="http://acme-co.io">acme</a> <a href="https://evil.example.net/login">www.mybank.com</a>'
+  });
+  const codes = bad.issues.map(i => i.code);
+  for (const c of ['IMAGE_HEAVY', 'IMAGE_ALT', 'SHORTENER', 'HTTP_LINK', 'MISLEADING_LINK', 'SPAM_WORDS', 'SUBJECT_CAPS', 'SUBJECT_PUNCT', 'SUBJECT_FAKE_REPLY', 'NO_ADDRESS']) assert.ok(codes.includes(c), `${c} in ${codes}`);
+  const words = Array.from({ length: 120 }, (_, i) => `word${i}`).join(' ');
+  const good = dl().contentReport({ subject: 'Your November catalogue', html: `<p>${words}</p><img src="https://acme-co.io/a.png" alt="Product"><a href="https://www.acme-co.io/offer">acme-co.io/offer</a><p>$[HF:ORGADDRESS]$ <a href="$[LI:UNSUBSCRIBE]$">Unsubscribe</a></p>` });
+  assert.deepEqual(good.issues, []);
+});
+
+test('deliverability: every email has one-click List-Unsubscribe headers, and the one-click POST unsubscribes', async () => {
+  const ws = await sesWorkspace('SES headers');
+  const c = await sentCampaign(ws, [{ name: 'Una', email: 'una@shop.io' }]);
+  await runJobs(ws);
+  const raw = S.sent[0].raw;
+  const lu = /^List-Unsubscribe:\s*<([^>]+)>/m.exec(raw.replace(/\r?\n\s+/g, ' '));
+  assert.ok(lu, 'List-Unsubscribe header');
+  assert.match(raw, /^List-Unsubscribe-Post: List-Unsubscribe=One-Click$/m);
+  assert.match(raw, /^From: Acme <news@acme-co\.io>$/m);
+  const u = new URL(lu[1]);
+  const res = await h.api('POST', u.pathname + u.search, { rawBody: 'List-Unsubscribe=One-Click', headers: { 'content-type': 'application/x-www-form-urlencoded' } });
+  assert.equal(res.status, 200);
+  assert.ok(await db().get("SELECT 1 FROM email_suppressions WHERE workspace_id = ? AND email = 'una@shop.io' AND reason = 'unsubscribed'", [ws.workspaceId]));
+  assert.ok(c.id);
+});
+
+test('deliverability: warm-up sends only today\'s allowance and continues by itself; it can be turned off', async () => {
+  process.env.SES_WARMUP_START = '2';
+  try {
+    const ws = await sesWorkspace('SES warmup');
+    const c = await sentCampaign(ws, ['a', 'b', 'c', 'd'].map(k => ({ name: k, email: `${k}@shop.io` })));
+    await runJobs(ws);
+    assert.equal(S.sent.length, 2, 'day 1 allowance');
+    let r = await row(c.id);
+    assert.deepEqual([r.status, r.zoho_status], ['submitting', 'Paused (warm-up)']);
+    assert.match(r.provider_message, /Warm-up: acme-co\.io may send 2 emails a day on day 1.*sent automatically from/);
+    const job = await db().get("SELECT run_at FROM background_jobs WHERE workspace_id = ? AND job_type = 'ses_campaign_send' AND status = 'queued'", [ws.workspaceId]);
+    assert.ok(new Date(`${String(job.run_at instanceof Date ? job.run_at.toISOString() : job.run_at)}`).getTime() > Date.now() + 10 * 60000, 'continues later');
+    const s = (await sapi(ws, 'GET', '/settings')).data.ses;
+    assert.equal(s.warmupEnabled, true);
+    // Turned off (a domain already warmed up elsewhere): the rest go out.
+    assert.equal((await sapi(ws, 'PUT', '/settings', { warmupEnabled: false })).data.ses.warmupEnabled, false);
+    await db().run("UPDATE background_jobs SET run_at = UTC_TIMESTAMP() WHERE workspace_id = ? AND status = 'queued'", [ws.workspaceId]);
+    await runJobs(ws);
+    r = await row(c.id);
+    assert.equal(r.status, 'submitted');
+    assert.equal(S.sent.length, 4, 'everyone exactly once');
+  } finally { delete process.env.SES_WARMUP_START; }
+});
+
+test('deliverability: at SES\'s pause levels of bounces, sending is paused and new campaigns cannot be approved', async () => {
+  process.env.SES_HEALTH_MIN_SENT = '3';
+  try {
+    const ws = await sesWorkspace('SES health');
+    const people = ['a', 'b', 'c', 'd'].map(k => ({ name: k, email: `${k}@shop.io` }));
+    const c = await sentCampaign(ws, people);
+    await runJobs(ws);
+    await db().run("UPDATE mail_message_tracking SET bounced_at = UTC_TIMESTAMP() WHERE campaign_id = ? LIMIT 1", [c.id]);
+    const hl = await dl().health(ws.workspaceId);
+    assert.deepEqual([hl.sent, hl.bounceRate, hl.level, hl.stopped], [4, 25, 'critical', true]);
+    const listId = await consentedList(ws, [{ name: 'E', email: 'e@shop.io' }], 'More');
+    const c2 = (await capi(ws, 'POST', '', { ...CAMPAIGN, mailListIds: [listId] })).data.campaign;
+    const v = (await capi(ws, 'POST', `/${c2.id}/validate`, {})).data.validation;
+    assert.equal(v.ready, false);
+    assert.ok(v.problems.some(p => /Sending is paused: .*bounce rate 25%/.test(p)), JSON.stringify(v.problems));
+    // A campaign already sending stops before emailing anyone else.
+    await db().run("UPDATE mail_campaigns SET status = 'approved', approved_version = version, approved_by = ? WHERE id = ?", [ws.userId, c2.id]);
+    await db().run("UPDATE mail_campaigns SET status = 'submitting', submit_stage = 'ses_send', provider = 'ses' WHERE id = ?", [c2.id]);
+    await sesCampaigns().prepare(ws.ctx, await row(c2.id));
+    const out = await sesCampaigns().runSendJob({ workspace_id: ws.workspaceId, payload_json: JSON.stringify({ campaignId: c2.id, version: (await row(c2.id)).version, part: 0 }) });
+    assert.deepEqual(out, { stopped: true, code: 'HEALTH_PAUSE' });
+    assert.equal(S.sent.length, 4, 'nobody else emailed');
+  } finally { delete process.env.SES_HEALTH_MIN_SENT; }
+});
+
+test('deliverability dashboard: rates from the workspace\'s own records only; delivered is never called inbox', async () => {
+  const ws = await sesWorkspace('SES dash');
+  const c = await sentCampaign(ws, [{ name: 'G', email: 'g1@gmail.com' }, { name: 'G2', email: 'g2@gmail.com' }, { name: 'B', email: 'b@shop.io' }, { name: 'X', email: 'x@shop.io' }]);
+  S.sendResponder = body => (body.Destination.ToAddresses[0] === 'x@shop.io' ? h.json(400, { message: 'Rejected' }, { 'x-amzn-ErrorType': 'MessageRejected' }) : null);
+  await runJobs(ws);
+  await db().run("UPDATE mail_message_tracking SET delivered_at = UTC_TIMESTAMP() WHERE campaign_id = ?", [c.id]);
+  await db().run("UPDATE mail_message_tracking t JOIN mail_campaign_recipients r ON r.id = t.campaign_recipient_id SET t.complained_at = UTC_TIMESTAMP() WHERE r.email = 'g1@gmail.com' AND r.campaign_id = ?", [c.id]);
+  await db().run("INSERT INTO email_suppressions (workspace_id, email, reason, source, created_at) VALUES (?, 'b@shop.io', 'unsubscribed', 'campaign_link', UTC_TIMESTAMP() + INTERVAL 1 SECOND)", [ws.workspaceId]);
+  const d = (await sapi(ws, 'GET', '/deliverability?days=30')).data;
+  assert.deepEqual([d.totals.attempted, d.totals.sent, d.totals.delivered, d.totals.rejected, d.totals.complaints, d.totals.unsubscribes], [4, 3, 3, 1, 1, 1]);
+  assert.deepEqual([d.rates.delivery, d.rates.rejection, d.rates.complaint, d.rates.unsubscribe], [100, 25, 33.33, 33.33]);
+  assert.equal(d.receivers[0].receiver, 'Gmail');
+  assert.equal(d.daily.length, 30);
+  assert.equal(d.gmailReputation.available, false);
+  assert.match(d.note, /may still be in the spam folder/);
+  assert.equal(d.warmups[0].domain, 'acme-co.io');
+  const other = await sesWorkspace('SES dash other');
+  assert.equal((await sapi(other, 'GET', '/deliverability')).data.totals.sent, 0, 'another workspace sees nothing');
+});
+
+test('deliverability: links are checked on request (broken ones reported); campaign approval stays offline', async () => {
+  const ws = await sesWorkspace('SES links');
+  const listId = await consentedList(ws, [{ name: 'L', email: 'l@shop.io' }]);
+  const c = (await capi(ws, 'POST', '', { ...CAMPAIGN, html: '<p>Hi</p><a href="https://acme-co.io/ok">ok</a> <a href="https://acme-co.io/gone">gone</a> <a href="$[LI:UNSUBSCRIBE]$">Unsubscribe</a>', mailListIds: [listId] })).data.campaign;
+  dl().setLinkFetcherForTests(async url => ({ status: url.endsWith('/gone') ? 404 : 200 }));
+  try {
+    const r = await capi(ws, 'POST', `/${c.id}/check-links`, {});
+    assert.equal(r.status, 200, JSON.stringify(r.data));
+    assert.equal(r.data.broken, 1);
+    assert.deepEqual(r.data.links.map(l => [l.url, l.ok]), [['https://acme-co.io/ok', true], ['https://acme-co.io/gone', false]]);
+  } finally { dl().setLinkFetcherForTests(null); }
+});
+
+test('consent: a contact imported from the former Zoho lists is not consented by that alone; only a lead\'s recorded consent counts', async () => {
+  const ws = await sesWorkspace('SES no zoho consent');
+  const list = (await capi(ws, 'POST', '/contact-lists', { name: 'Old Zoho list', contacts: [{ name: 'Zed', email: 'zed@shop.io' }, { name: 'Con', email: 'con@shop.io' }] })).data.list;
+  await db().run("UPDATE mail_contacts SET source = 'zoho' WHERE workspace_id = ?", [ws.workspaceId]);
+  await db().run(`INSERT INTO leads (workspace_id, name, email, status, marketing_consent, marketing_consent_method, marketing_consent_evidence, marketing_consent_obtained_at, created_at, updated_at)
+    VALUES (?, 'Con', 'con@shop.io', 'New', 'granted', 'web_form', 'Signed up on the website', '2026-10-01', UTC_TIMESTAMP(), UTC_TIMESTAMP())`, [ws.workspaceId]);
+  const reachable = await require('../modules/mail/contacts/recipients').reachable(ws.workspaceId, list.id);
+  assert.deepEqual(reachable.map(r => r.email), ['con@shop.io']);
+  assert.equal(await require('../modules/mail/contacts/recipients').withoutConsent(ws.workspaceId, list.id), 1);
 });

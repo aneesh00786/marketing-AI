@@ -1,4 +1,5 @@
 import { Component, ElementRef, EventEmitter, HostListener, Input, OnInit, Output, ViewChild } from '@angular/core';
+import { DeliverabilityComponent } from './deliverability.component';
 import { CommonModule } from '@angular/common';
 import { IconComponent } from '../../shared/icon.component';
 import { ApiService } from '../../services/api.service';
@@ -24,7 +25,7 @@ import { MailSentComponent } from './mail-sent.component';
 @Component({
   selector: 'app-mail-center',
   standalone: true,
-  imports: [CommonModule, IconComponent, MailDraftsComponent, ProductEmailsComponent, EmailCampaignsComponent, EmailTemplatesComponent, MailSettingsComponent, MailActivityChartsComponent, MailLogsComponent, MailInboxComponent, MailSentComponent],
+  imports: [CommonModule, IconComponent, MailDraftsComponent, ProductEmailsComponent, EmailCampaignsComponent, EmailTemplatesComponent, MailSettingsComponent, MailActivityChartsComponent, MailLogsComponent, MailInboxComponent, MailSentComponent, DeliverabilityComponent],
   templateUrl: './mail-center.component.html',
   styleUrls: ['../command/command-center.component.css', './mail-ui.css', './mail-center.component.css']
 })

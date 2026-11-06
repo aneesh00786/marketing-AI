@@ -22,7 +22,7 @@ describe('Mail Center navigation links', () => {
   });
 
   it('Product Emails is listed only while its feature is enabled', () => {
-    expect(visibleMailSections({ productEmails: false })).toEqual(['overview', 'inbox', 'sent', 'drafts', 'approvals', 'campaigns', 'templates', 'logs', 'settings']);
+    expect(visibleMailSections({ productEmails: false })).toEqual(['overview', 'inbox', 'sent', 'drafts', 'approvals', 'campaigns', 'deliverability', 'templates', 'logs', 'settings']);
     expect(visibleMailSections({ productEmails: true })).toContain('product-emails');
   });
 });

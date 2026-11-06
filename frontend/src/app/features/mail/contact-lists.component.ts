@@ -176,7 +176,7 @@ export class ContactListsComponent implements OnInit, OnDestroy {
   }
 
   /** Marketing consent as campaigns use it (see backend contacts/consent.js). */
-  consentLabel(s: string): string { return ({ granted: 'Given', imported: 'Subscriber (imported)', withdrawn: 'Withdrawn', none: 'Not recorded' } as any)[s] || '—'; }
+  consentLabel(s: string): string { return ({ granted: 'Given', withdrawn: 'Withdrawn', none: 'Not recorded' } as any)[s] || '—'; }
   statusLabel(s: string): string { return ({ subscribed: 'Subscribed', unsubscribed: 'Unsubscribed', bounced: 'Bounced' } as any)[s] || s; }
 
   remove(c: any): void {

@@ -191,7 +191,7 @@ async function listContacts(ctx, id, { status = 'all', q = '', page = 1 } = {}) 
   // Marketing consent, by the same rule as campaign uploads (contacts/consent.js): withdrawn on any lead wins.
   const withdrawn = new Set(leads.filter(l => l.marketing_consent === 'withdrawn').map(l => l.email));
   const granted = new Set(leads.filter(l => l.marketing_consent === 'granted' && l.marketing_consent_method && l.marketing_consent_evidence).map(l => l.email));
-  const consentOf = r => (withdrawn.has(r.email) ? 'withdrawn' : r.source === 'zoho' ? 'imported' : granted.has(r.email) ? 'granted' : 'none');
+  const consentOf = r => (withdrawn.has(r.email) ? 'withdrawn' : granted.has(r.email) ? 'granted' : 'none');
   return {
     contacts: pageRows.map(r => ({
       id: r.id, email: r.email,

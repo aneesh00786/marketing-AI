@@ -91,6 +91,7 @@ async function getSettings(ctx) {
       snsRegionMismatch: !!(r?.ses_sns_topic_arn && topicRegion(r.ses_sns_topic_arn) && (r?.ses_region || cfg?.region) && topicRegion(r.ses_sns_topic_arn) !== (r?.ses_region || cfg?.region)),
       lastEventAt: last?.at || null,
       eventsReceived: Number(last?.n) || 0,
+      warmupEnabled: r?.ses_warmup_enabled === undefined || r?.ses_warmup_enabled === null ? true : !!Number(r.ses_warmup_enabled),
       lastCheckedAt: r?.ses_last_checked_at || null,
       lastError: r?.ses_last_error || null
     }
@@ -104,7 +105,8 @@ const saveSchema = z.object({
   configurationSet: z.string().trim().regex(/^[A-Za-z0-9_-]{1,64}$/, 'Configuration set names use letters, digits, - and _.').or(z.literal('')).optional(),
   maxPerSecond: z.number().int().min(1).max(500).nullable().optional(),
   clearKeys: z.literal(true).optional(),
-  forgetSnsTopic: z.literal(true).optional()
+  forgetSnsTopic: z.literal(true).optional(),
+  warmupEnabled: z.boolean().optional()
 }).strict();
 
 async function saveSettings(ctx, input) {
@@ -122,6 +124,7 @@ async function saveSettings(ctx, input) {
   if (v.secretAccessKey !== undefined) set('ses_secret_ciphertext', secretBox.encrypt(v.secretAccessKey));
   if (v.configurationSet !== undefined) set('ses_configuration_set', v.configurationSet || null);
   if (v.maxPerSecond !== undefined) set('ses_max_per_second', v.maxPerSecond);
+  if (v.warmupEnabled !== undefined) set('ses_warmup_enabled', v.warmupEnabled ? 1 : 0);
   if (v.clearKeys) { set('ses_access_key_id', null); set('ses_secret_ciphertext', null); set('ses_region', null); }
   if (sets.length) {
     set('updated_by', ctx.auth.userId || null);

@@ -70,7 +70,7 @@
     <b>{{ m.value }}</b>
     <small *ngIf="m.hint">{{ m.hint }}</small>
   </ng-template>
-  <p class="cm-note" *ngIf="report && !pending">Totals from Amazon SES delivery reports and Marketech.ai's open and click tracking, when last refreshed. Opens are an estimate: image blocking, caching and privacy features distort them.</p>
+  <p class="cm-note" *ngIf="report && !pending">Totals from Amazon SES delivery reports and Marketech.ai's open and click tracking, when last refreshed. Sent means Amazon SES accepted the email; Delivered means the recipient's mail server accepted it (inbox or spam folder). Opens are an estimate: image blocking, caching and privacy features distort them.</p>
 
   <ng-container *ngIf="sent">
     <div class="cm-recips-open" *ngIf="canViewRecipients">

@@ -104,7 +104,7 @@ describe('MailCenterComponent', () => {
 
   it('shows one set of sections; Product Emails only while its feature is on', () => {
     init();
-    expect(tabs().map(t => t.textContent!.trim().replace(/\s*\d+$/, ''))).toEqual(['Overview', 'Inbox', 'Sent Mail', 'Drafts', 'Approvals', 'Campaigns', 'Email Templates', 'Logs', 'Settings']);
+    expect(tabs().map(t => t.textContent!.trim().replace(/\s*\d+$/, ''))).toEqual(['Overview', 'Inbox', 'Sent Mail', 'Drafts', 'Approvals', 'Campaigns', 'Deliverability', 'Email Templates', 'Logs', 'Settings']);
     fixture.destroy();
     init({ productEmails: true });
     expect(tab('Product Emails')).toBeTruthy();
@@ -146,7 +146,7 @@ describe('MailCenterComponent', () => {
 
   it('tabs follow the keyboard pattern: arrows, Home and End move and open; only the active tab is in the tab order', fakeAsync(() => {
     init();
-    expect(tabs().map(t => t.tabIndex)).toEqual([0, -1, -1, -1, -1, -1, -1, -1, -1]);
+    expect(tabs().map(t => t.tabIndex)).toEqual([0, -1, -1, -1, -1, -1, -1, -1, -1, -1]);
     tab('Overview').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
     fixture.detectChanges();
     tick();
@@ -339,7 +339,7 @@ describe('MailCenterComponent', () => {
   it('tabs are grouped with icons, and the breadcrumb names the open section', () => {
     init({ drafts: [d(1, 'Draft'), d(2, 'Approved')], unread: 4 });
     expect(el().querySelectorAll('.mc-divider').length).toBe(2);
-    expect(el().querySelectorAll('.mc-tabs [role=tab] app-icon').length).toBe(9);
+    expect(el().querySelectorAll('.mc-tabs [role=tab] app-icon').length).toBe(10);
     expect(el().querySelector('.mc-crumbs')!.textContent!.trim()).toBe('Mail Center');
     tab('Sent Mail').click();
     fixture.detectChanges();

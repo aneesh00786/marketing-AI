@@ -48,6 +48,14 @@ import { apiRoot } from '../../core/api-base';
   </div>
 
   <div class="cd-card">
+    <h3>Sender warm-up</h3>
+    <label class="cd-option" [class.on]="s.ses.warmupEnabled">
+      <input type="checkbox" name="warmup" [checked]="s.ses.warmupEnabled" (change)="setWarmup($any($event.target).checked)" [disabled]="busy || !s.canConfigure" />
+      <span><b>Warm up new sender domains (recommended)</b><br /><small>A new domain sends up to 50 emails on its first day, then double each day for 10 days, so Gmail and others build trust in it. Campaigns over the day's limit continue by themselves. Turn off only for a domain that already sends a lot of email elsewhere.</small></span>
+    </label>
+  </div>
+
+  <div class="cd-card">
     <h3>Delivery reports (Amazon SNS)</h3>
     <p class="mx-desc">Opens and clicks are tracked by Marketech.ai. Delivered, bounced and complaint reports come from SES through Amazon SNS:</p>
     <ol class="cd-steps">
@@ -139,6 +147,11 @@ export class CampaignDeliveryComponent implements OnInit {
   clearKeys(): void {
     if (!confirm('Remove this workspace\'s Amazon SES keys?')) return;
     this.put({ clearKeys: true }, 'Amazon SES keys removed.');
+  }
+
+  setWarmup(on: boolean): void {
+    if (!on && !confirm('Turn off warm-up? A new domain sending many emails at once is likely to land in spam.')) { this.load(); return; }
+    this.put({ warmupEnabled: on }, on ? 'Warm-up turned on.' : 'Warm-up turned off.');
   }
 
   /** Forgets the confirmed SNS topic, so a new topic's subscription can be confirmed. */

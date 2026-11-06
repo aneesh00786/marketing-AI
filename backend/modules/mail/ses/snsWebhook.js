@@ -107,6 +107,14 @@ async function applySesEvent(workspaceId, ev, snsMessageId) {
   });
   // The approved safeguard: a hard bounce or a complaint stops further marketing email to the address.
   if (r.applied && (type === 'hard_bounce' || type === 'complaint')) await suppress(workspaceId, t.id, type === 'complaint' ? 'complaint' : 'bounced');
+  // An address that keeps soft-bouncing (3 times in 30 days, never delivered since) is stopped too.
+  if (r.applied && type === 'soft_bounce' && kind === 'Bounce') {
+    const rec = await get('SELECT r.email FROM mail_campaign_recipients r JOIN mail_message_tracking t ON t.campaign_recipient_id = r.id WHERE t.id = ? AND r.workspace_id = ?', [t.id, workspaceId]);
+    const n = rec ? await get(`SELECT SUM(e.event_type = 'soft_bounce') AS soft, SUM(t2.delivered_at IS NOT NULL AND t2.delivered_at > e.occurred_at) AS later
+      FROM mail_campaign_recipients r JOIN mail_message_tracking t2 ON t2.campaign_recipient_id = r.id JOIN mail_events e ON e.tracking_id = t2.id AND e.source = 'ses'
+      WHERE r.workspace_id = ? AND r.email = ? AND e.event_type = 'soft_bounce' AND e.detail_code LIKE 'Transient%' AND e.occurred_at >= UTC_TIMESTAMP() - INTERVAL 30 DAY`, [workspaceId, rec.email]) : null;
+    if (Number(n?.soft) >= 3 && !Number(n?.later)) await suppress(workspaceId, t.id, 'soft_bounced');
+  }
   return { applied: !!r.applied, type };
 }
 

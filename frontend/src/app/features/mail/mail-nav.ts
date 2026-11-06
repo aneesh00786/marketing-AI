@@ -2,7 +2,7 @@
 export type DataState = 'loading' | 'ready' | 'error';
 
 /** Sections of the Mail Center. Each maps to existing functionality; none adds new sending paths. */
-export type MailSection = 'overview' | 'inbox' | 'sent' | 'drafts' | 'approvals' | 'product-emails' | 'campaigns' | 'templates' | 'logs' | 'settings';
+export type MailSection = 'overview' | 'inbox' | 'sent' | 'drafts' | 'approvals' | 'product-emails' | 'campaigns' | 'deliverability' | 'templates' | 'logs' | 'settings';
 
 /** Tab groups, shown with a divider between them: day-to-day mail, campaigns & content, records & setup. */
 export type MailGroup = 'mail' | 'campaigns' | 'admin';
@@ -15,6 +15,7 @@ export const MAIL_SECTIONS: { key: MailSection; label: string; hint: string; gro
   { key: 'approvals', label: 'Approvals', hint: 'Drafts waiting for approval, ready to send, or with unknown delivery', group: 'mail', icon: 'check' },
   { key: 'product-emails', label: 'Product Emails', hint: 'Personalised emails to a product\'s leads', group: 'campaigns', icon: 'products' },
   { key: 'campaigns', label: 'Campaigns', hint: 'Email campaigns and contact lists, sent with Amazon SES', group: 'campaigns', icon: 'campaigns' },
+  { key: 'deliverability', label: 'Deliverability', hint: 'Delivery, bounce, complaint and unsubscribe rates of campaigns, and sender warm-up', group: 'campaigns', icon: 'shield' },
   { key: 'templates', label: 'Email Templates', hint: 'Reusable HTML email templates', group: 'campaigns', icon: 'template' },
   { key: 'logs', label: 'Logs', hint: 'What was sent: sent campaigns and sent emails, by date', group: 'admin', icon: 'logs' },
   { key: 'settings', label: 'Settings', hint: 'Mailbox, marketing approval, tracking and Amazon SES: all mail settings in one place', group: 'admin', icon: 'settings' }
