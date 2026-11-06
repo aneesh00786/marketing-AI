@@ -3,7 +3,7 @@ const consent = require('./consent');
 
 /**
  * Who in a contact list may get a campaign, once each: subscribed in the list, not on the
- * stop-list (unsubscribed, bounced, complaint), and with marketing consent (consent.js).
+ * stop-list (unsubscribed, bounced, complaint), and not withdrawn from marketing (consent.js).
  */
 async function reachable(workspaceId, listId) {
   return all(
@@ -14,7 +14,7 @@ async function reachable(workspaceId, listId) {
      ORDER BY c.id`, [listId, workspaceId]);
 }
 
-/** How many subscribed, not stopped people in a list are left out for lack of marketing consent. */
+/** How many subscribed, not stopped people in a list are left out because they withdrew marketing consent. */
 async function withoutConsent(workspaceId, listId) {
   const r = await get(
     `SELECT COUNT(DISTINCT c.id) AS n FROM mail_list_members m JOIN mail_contacts c ON c.id = m.contact_id

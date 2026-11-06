@@ -27,7 +27,7 @@ test('contact lists: create, add people, view with status and consent, remove, d
   const again = await capi(ws, 'POST', `/contact-lists/${id}/contacts`, { emails: ['kim@shop.com.au', 'new@x.io'] });
   assert.deepEqual([again.data.added, again.data.alreadyIn], [1, 1]);
   const l = (await capi(ws, 'GET', '/contact-lists')).data.lists.find(x => x.id === id);
-  assert.deepEqual([l.total, l.reachable, l.noConsent], [3, 1, 1], 'Kim has consent; new@x.io has none; the stop-list wins for stop@x.io');
+  assert.deepEqual([l.total, l.reachable, l.noConsent], [3, 2, 0], 'consent is not required for campaigns; the stop-list wins for stop@x.io');
   const view = (await capi(ws, 'GET', `/contact-lists/${id}/contacts?status=all`)).data.contacts;
   const kim = view.find(c => c.email === 'kim@shop.com.au');
   assert.deepEqual([kim.name, kim.company, kim.phone, kim.status, kim.consent], ['Kim Lee', 'Shop', '0400', 'subscribed', 'granted']);
@@ -42,24 +42,24 @@ test('contact lists: create, add people, view with status and consent, remove, d
   assert.ok(await db().get('SELECT 1 AS x FROM mail_contacts WHERE workspace_id = ? AND email = ?', [ws.workspaceId, 'kim@shop.com.au']), 'people stay in contacts');
 });
 
-test('consent: no evidence, unknown and withdrawn are left out; picked leads need consent and the picker says why', async () => {
+test('consent: campaigns do not require recorded consent; only withdrawn consent (and the stop-list) leaves people out', async () => {
   const ws = await h.createWorkspace({ name: `Consent ${Date.now()}` });
   for (const [email, consent, method, evidence] of [['granted@shop.io', 'granted', 'web_form', 'Form #1'], ['noevidence@shop.io', 'granted', null, null], ['unknown@shop.io', 'unknown'], ['withdrawn@shop.io', 'withdrawn', 'web_form', 'Form #2']]) {
     await lead(ws, email, consent, method, evidence);
   }
   const listId = (await capi(ws, 'POST', '/contact-lists', { name: 'Mixed', emails: ['granted@shop.io', 'noevidence@shop.io', 'unknown@shop.io', 'withdrawn@shop.io'] })).data.list.id;
   const l = (await capi(ws, 'GET', '/contact-lists')).data.lists.find(x => x.id === listId);
-  assert.deepEqual([l.reachable, l.noConsent], [1, 3]);
+  assert.deepEqual([l.reachable, l.noConsent], [3, 1], 'only the withdrawn one is left out');
   const opts = (await capi(ws, 'GET', '/lead-options?q=shop.io')).data.leads;
-  assert.equal(opts.find(x => x.email === 'granted@shop.io').eligible, true);
-  const cold = opts.find(x => x.email === 'unknown@shop.io');
-  assert.equal(cold.eligible, false);
-  assert.ok(cold.reasons.some(r => /consent/i.test(r)), JSON.stringify(cold.reasons));
-  // A campaign whose list has nobody with consent cannot be approved, with the reason.
-  const cold2 = (await capi(ws, 'POST', '/contact-lists', { name: 'Cold', emails: ['unknown@shop.io'] })).data.list.id;
-  const c = (await capi(ws, 'POST', '', { name: 'Cold send', subject: 'Hi', fromEmail: 'news@acme-co.io', html: '<p>Hi</p><a href="$[LI:UNSUBSCRIBE]$">Unsubscribe</a>', mailListIds: [cold2] })).data.campaign;
+  assert.equal(opts.find(x => x.email === 'unknown@shop.io').eligible, true, 'no consent recorded: can still be picked');
+  const gone = opts.find(x => x.email === 'withdrawn@shop.io');
+  assert.equal(gone.eligible, false);
+  assert.ok(gone.reasons.some(r => /withdrawn/i.test(r)), JSON.stringify(gone.reasons));
+  // A list where everyone withdrew cannot be sent, with the reason.
+  const out = (await capi(ws, 'POST', '/contact-lists', { name: 'Out', emails: ['withdrawn@shop.io'] })).data.list.id;
+  const c = (await capi(ws, 'POST', '', { name: 'Out send', subject: 'Hi', fromEmail: 'news@acme-co.io', html: '<p>Hi</p><a href="$[LI:UNSUBSCRIBE]$">Unsubscribe</a>', mailListIds: [out] })).data.campaign;
   const v = (await capi(ws, 'POST', `/${c.id}/validate`, {})).data.validation;
-  assert.ok(v.problems.some(p => /no recorded marketing consent/.test(p)), JSON.stringify(v.problems));
+  assert.ok(v.problems.some(p => /withdrew marketing consent/.test(p)), JSON.stringify(v.problems));
 });
 
 test('campaign unsubscribe link: asks first, then stops the address in every list; a forged link is refused', async () => {

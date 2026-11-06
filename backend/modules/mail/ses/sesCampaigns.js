@@ -5,7 +5,7 @@ const crypto = require('crypto');
  *
  * 1. prepare: the recipients are fixed for this campaign version, one row each in
  *    mail_campaign_recipients (unique per address): people in the chosen contact lists who may get
- *    marketing email (subscribed, not stopped, with marketing consent: contacts/consent.js) and the
+ *    marketing email (subscribed, not stopped, consent not withdrawn: contacts/consent.js) and the
  *    eligible picked contacts.
  * 2. the worker (job "ses_campaign_send") sends to them in parts, at the account's sending rate:
  *    each row is claimed (queued → sending) before the SES call, so a retried job never emails anyone

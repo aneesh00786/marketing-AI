@@ -239,14 +239,16 @@ test('SES stops on a hard refusal with SES\'s reason; Send again continues with 
   assert.deepEqual(S.sent.map(x => x.to).sort(), ['p1@shop.io', 'p2@shop.io', 'p3@shop.io'], 'each person exactly once');
 });
 
-test('SES checks before approval: an unverified sender, no unsubscribe link and no consent are refused', async () => {
+test('SES checks before approval: an unverified sender, no unsubscribe link and withdrawn consent are refused', async () => {
   const ws = await sesWorkspace('SES checks');
   const listId = await consentedList(ws, [{ name: 'Ann', email: 'ann@shop.io' }]);
   const check = async body => (await capi(ws, 'POST', `/${(await capi(ws, 'POST', '', { ...CAMPAIGN, mailListIds: [listId], ...body })).data.campaign.id}/validate`, {})).data.validation;
   assert.ok((await check({ fromEmail: 'news@not-verified.io' })).problems.some(p => /not verified in Amazon SES/.test(p)));
   assert.ok((await check({ html: '<p>Hello</p>' })).problems.some(p => /unsubscribe link/.test(p)));
   const cold = (await capi(ws, 'POST', '/contact-lists', { name: 'Cold', contacts: [{ name: 'X', email: 'x@cold.io' }] })).data.list.id;
-  assert.ok((await check({ mailListIds: [cold] })).problems.some(p => /no recorded marketing consent/.test(p)));
+  assert.ok(!(await check({ mailListIds: [cold] })).problems.some(p => /consent/.test(p)), 'no recorded consent is not required');
+  await db().run("INSERT INTO leads (workspace_id, name, email, status, marketing_consent, created_at, updated_at) VALUES (?, 'X', 'x@cold.io', 'New', 'withdrawn', UTC_TIMESTAMP(), UTC_TIMESTAMP())", [ws.workspaceId]);
+  assert.ok((await check({ mailListIds: [cold] })).problems.some(p => /withdrew marketing consent/.test(p)));
   const aud = await capi(ws, 'GET', '/audiences');
   assert.equal(aud.status, 200);
   assert.ok(aud.data.mailLists.some(l => l.id === listId));
@@ -536,13 +538,12 @@ test('deliverability: links are checked on request (broken ones reported); campa
   } finally { dl().setLinkFetcherForTests(null); }
 });
 
-test('consent: a contact imported from the former Zoho lists is not consented by that alone; only a lead\'s recorded consent counts', async () => {
-  const ws = await sesWorkspace('SES no zoho consent');
-  const list = (await capi(ws, 'POST', '/contact-lists', { name: 'Old Zoho list', contacts: [{ name: 'Zed', email: 'zed@shop.io' }, { name: 'Con', email: 'con@shop.io' }] })).data.list;
-  await db().run("UPDATE mail_contacts SET source = 'zoho' WHERE workspace_id = ?", [ws.workspaceId]);
-  await db().run(`INSERT INTO leads (workspace_id, name, email, status, marketing_consent, marketing_consent_method, marketing_consent_evidence, marketing_consent_obtained_at, created_at, updated_at)
-    VALUES (?, 'Con', 'con@shop.io', 'New', 'granted', 'web_form', 'Signed up on the website', '2026-10-01', UTC_TIMESTAMP(), UTC_TIMESTAMP())`, [ws.workspaceId]);
-  const reachable = await require('../modules/mail/contacts/recipients').reachable(ws.workspaceId, list.id);
-  assert.deepEqual(reachable.map(r => r.email), ['con@shop.io']);
-  assert.equal(await require('../modules/mail/contacts/recipients').withoutConsent(ws.workspaceId, list.id), 1);
+test('consent: contacts need no recorded consent (Zoho-imported or not); a lead who withdrew is left out', async () => {
+  const ws = await sesWorkspace('SES no consent needed');
+  const list = (await capi(ws, 'POST', '/contact-lists', { name: 'List', contacts: [{ name: 'Zed', email: 'zed@shop.io' }, { name: 'Con', email: 'con@shop.io' }, { name: 'Wit', email: 'wit@shop.io' }] })).data.list;
+  await db().run("UPDATE mail_contacts SET source = 'zoho' WHERE workspace_id = ? AND email = 'zed@shop.io'", [ws.workspaceId]);
+  await db().run("INSERT INTO leads (workspace_id, name, email, status, marketing_consent, created_at, updated_at) VALUES (?, 'Wit', 'wit@shop.io', 'New', 'withdrawn', UTC_TIMESTAMP(), UTC_TIMESTAMP())", [ws.workspaceId]);
+  const recipients = require('../modules/mail/contacts/recipients');
+  assert.deepEqual((await recipients.reachable(ws.workspaceId, list.id)).map(r => r.email).sort(), ['con@shop.io', 'zed@shop.io']);
+  assert.equal(await recipients.withoutConsent(ws.workspaceId, list.id), 1);
 });

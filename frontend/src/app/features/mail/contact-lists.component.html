@@ -30,7 +30,7 @@
     <div class="zl-row cl-row" role="row" *ngFor="let l of visibleLists">
       <span role="cell" class="zl-name"><b>{{ l.name }}</b></span>
       <span role="cell" class="zl-count">{{ l.total | number }}</span>
-      <span role="cell" class="zl-count">{{ l.reachable | number }}<small class="muted cl-noconsent" *ngIf="l.noConsent" [title]="l.noConsent + ' contact(s) have no recorded marketing consent and are left out of campaigns'"> · {{ l.noConsent | number }} no consent</small></span>
+      <span role="cell" class="zl-count">{{ l.reachable | number }}<small class="muted cl-noconsent" *ngIf="l.noConsent" [title]="l.noConsent + ' contact(s) withdrew marketing consent and are left out of campaigns'"> · {{ l.noConsent | number }} withdrew consent</small></span>
       <span role="cell" class="zl-actions">
         <button type="button" class="btn btn-secondary btn-sm" (click)="view(l)">View contacts</button>
         <button *ngIf="canManage" type="button" class="btn btn-secondary btn-sm" (click)="openForm('add', l)">Add contacts</button>
@@ -38,7 +38,7 @@
       </span>
     </div>
   </div>
-  <p class="muted small zl-foot">"Can be emailed" counts people with recorded marketing consent who have not unsubscribed or bounced. Others are never sent campaigns: record consent on their lead (Leads → Consent…: how and when it was given) to include them.</p>
+  <p class="muted small zl-foot">"Can be emailed" counts people who have not unsubscribed, bounced, marked an email as spam or withdrawn marketing consent. Those are never sent campaigns.</p>
 </section>
 
 <!-- New list / add contacts -->

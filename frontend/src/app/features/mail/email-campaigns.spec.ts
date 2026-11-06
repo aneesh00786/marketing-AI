@@ -477,7 +477,7 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     expect(comp.listsWithoutConsent).toBe(false);
     comp.audiences = { ...comp.audiences, mailLists: [{ id: 9, name: 'Cold', reachable: 0, total: 76, noConsent: 76 }] };
     fixture.detectChanges();
-    expect(el().textContent).toContain('0 can be emailed of 76 · 76 without marketing consent');
+    expect(el().textContent).toContain('0 can be emailed of 76 · 76 withdrew consent');
     expect(el().querySelector('.ec-consent-note')!.textContent).toContain('Leads → Consent…');
     comp.audiences = { mailLists: [{ id: 3, name: 'Trade show', reachable: 24, total: 25 }, { id: 4, name: 'All gone', reachable: 0, total: 2 }] };
     fixture.detectChanges();

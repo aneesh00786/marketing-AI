@@ -4,7 +4,7 @@
       <div>
         <h3 id="cp-title">{{ mode === 'create' ? 'Add new contact' : (mode === 'manual' ? 'Use an address that is not a contact' : title) }}</h3>
         <p class="cp-sub" *ngIf="mode === 'search'">Contacts come from Leads.</p>
-        <p class="cp-sub" *ngIf="mode === 'create'">Saved to Leads. Adding a contact does not record marketing consent.</p>
+        <p class="cp-sub" *ngIf="mode === 'create'">Saved to Leads.</p>
         <p class="cp-sub" *ngIf="mode === 'manual'">The draft is not linked to a contact in Leads. Use this only for one-off emails.</p>
       </div>
       <button type="button" class="cp-x" (click)="closed.emit()" aria-label="Close">✕</button>

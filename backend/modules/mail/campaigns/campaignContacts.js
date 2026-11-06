@@ -7,7 +7,7 @@ const { withEligibility, LEAD_COLUMNS } = require('../productEmails/service');
 /**
  * Contacts chosen one by one (from Leads) for a campaign, next to its contact lists.
  *
- * Nobody is emailed on the browser's word. A lead needs recorded marketing consent and must not have
+ * Nobody is emailed on the browser's word. A lead must not have
  * opted out (unsubscribed, bounced, spam complaint, consent withdrawn), with a valid address, when
  * chosen and again when the campaign is sent (sesCampaigns.prepare).
  */
@@ -38,7 +38,7 @@ async function assess(workspaceId, campaignId) {
   const leadIds = rows.filter(r => r.lead_id).map(r => r.lead_id);
   const leads = leadIds.length ? await all(`SELECT ${LEAD_COLUMNS} FROM leads WHERE workspace_id = ? AND id IN (${placeholders(leadIds.length)})`, [workspaceId, ...leadIds]) : [];
   // Campaigns are marketing email: a picked lead needs recorded consent (see contacts/consent.js).
-  const byLead = new Map((await withEligibility(workspaceId, leads, { requireConsent: true })).map(l => [l.id, l]));
+  const byLead = new Map((await withEligibility(workspaceId, leads, { requireConsent: false })).map(l => [l.id, l]));
   const blocked = rows.some(r => !r.lead_id) ? await blockedAddresses(workspaceId) : new Set();
   return rows.map(r => {
     const lead = r.lead_id ? byLead.get(r.lead_id) : null;
@@ -96,7 +96,7 @@ async function setLeads(ctx, row, input, touch) {
   const { leadIds } = leadsSchema.parse(input || {});
   const ids = [...new Set(leadIds)];
   const leads = ids.length ? await all(`SELECT ${LEAD_COLUMNS} FROM leads WHERE workspace_id = ? AND id IN (${placeholders(ids.length)})`, [ws(ctx), ...ids]) : [];
-  const assessed = await withEligibility(ws(ctx), leads, { requireConsent: true });
+  const assessed = await withEligibility(ws(ctx), leads, { requireConsent: false });
   const seen = new Set();
   const rows = [];
   for (const l of assessed) {

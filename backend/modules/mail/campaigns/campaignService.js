@@ -105,7 +105,7 @@ async function getOne(ctx, id) {
 
 /**
  * The chosen contact lists with their counts: everyone who may get the campaign (subscribed, not on
- * the stop-list, with marketing consent) and how many are left out for lack of consent.
+ * the stop-list, consent not withdrawn) and how many are left out because they withdrew consent.
  */
 const ELIGIBLE_SQL = require('../contacts/consent').eligibleSql('c');
 async function mailListsOf(workspaceId, ids) {
@@ -246,7 +246,7 @@ const setContactLeads = (ctx, id, input) => changeContacts(ctx, id, input, conta
 const removeContacts = (ctx, id, input) => changeContacts(ctx, id, input, contactsSvc.removeContacts);
 
 /** Leads to choose from, with why each one can or cannot be emailed (marketing: consent required). */
-const leadOptions = (ctx, query) => require('../productEmails/service').listRecipients(ctx, query, { maxSelect: contactsSvc.MAX_CONTACTS, maxPageSize: 2000, requireConsent: true });
+const leadOptions = (ctx, query) => require('../productEmails/service').listRecipients(ctx, query, { maxSelect: contactsSvc.MAX_CONTACTS, maxPageSize: 2000, requireConsent: false });
 
 /** The contact lists a campaign can go to, with their counts. */
 async function audiences(ctx) {
@@ -290,10 +290,10 @@ async function validateRow(ctx, row, { checkSes = true } = {}) {
   const noConsent = mailLists.reduce((n, l) => n + l.noConsent, 0);
   if (!eligible && !listPeople) {
     problems.push(mailLists.length ? (noConsent
-      ? `Nobody in the chosen lists can get marketing email: ${noConsent.toLocaleString('en-US')} contact(s) have no recorded marketing consent, and the others are unsubscribed or bounced. Record consent on their leads, or choose other lists.`
+      ? `Nobody in the chosen lists can be emailed: ${noConsent.toLocaleString('en-US')} contact(s) withdrew marketing consent, and the others are unsubscribed or bounced. Choose other lists.`
       : 'Nobody in the chosen lists can be emailed (all unsubscribed or bounced). Choose other lists.') : contacts.length ? 'None of the selected contacts can be emailed. Choose others or a list.' : 'Choose at least one contact list.');
   }
-  if (noConsent && (listPeople || eligible)) warnings.push(`${noConsent.toLocaleString('en-US')} contact(s) in the chosen lists have no recorded marketing consent and are left out of this campaign. Record consent on their leads (how and when it was given) to include them.`);
+  if (noConsent && (listPeople || eligible)) warnings.push(`${noConsent.toLocaleString('en-US')} contact(s) in the chosen lists withdrew marketing consent and are left out of this campaign.`);
   if (listPeople) warnings.push(`${listPeople.toLocaleString('en-US')} contact(s) from ${mailLists.map(l => `"${l.name}"`).join(', ')} will be emailed one by one with Amazon SES.`);
   if (eligible) warnings.push(`${eligible} selected contact(s) will be emailed with Amazon SES.`);
   if (usesNames(row.subject, html)) warnings.push('Personalized with merge tags: each person sees their own name, and leads without a contact person see their business name (e.g. "Big Red Packaging team"). Anyone without a name sees the tag\'s default value.');

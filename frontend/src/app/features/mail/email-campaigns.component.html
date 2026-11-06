@@ -225,10 +225,10 @@
             <div class="ec-list-row" *ngFor="let l of mailListOptions">
               <label class="check">
                 <input type="checkbox" [checked]="form.mailListIds.has(l.id)" (change)="toggleMailList(l.id)" [disabled]="!editable || (!l.reachable && !form.mailListIds.has(l.id))" />
-                {{ l.name }} <span class="muted small">({{ l.reachable | number }} can be emailed{{ l.total !== l.reachable ? ' of ' + (l.total | number) : '' }}{{ l.noConsent ? ' · ' + (l.noConsent | number) + ' without marketing consent' : '' }})</span>
+                {{ l.name }} <span class="muted small">({{ l.reachable | number }} can be emailed{{ l.total !== l.reachable ? ' of ' + (l.total | number) : '' }}{{ l.noConsent ? ' · ' + (l.noConsent | number) + ' withdrew consent' : '' }})</span>
               </label>
             </div>
-            <p class="muted small ec-consent-note" *ngIf="listsWithoutConsent">Campaigns go only to people with recorded marketing consent. To include someone, record how and when they agreed on their lead: Leads → Consent… in their row. Lists where nobody has consent cannot be chosen.</p>
+            <p class="muted small ec-consent-note" *ngIf="listsWithoutConsent">People who withdrew marketing consent on their lead (Leads → Consent…) are never emailed.</p>
           </fieldset>
 
 
