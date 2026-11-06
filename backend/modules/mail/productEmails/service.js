@@ -54,7 +54,7 @@ async function hasTable(name) {
 
 /**
  * Marks each lead eligible or not, with the reasons (only from information actually stored).
- * requireConsent=false (Zoho Campaigns, which handles consent and unsubscribes itself): only
+ * requireConsent=false (non-marketing uses): only
  * opt-outs block a lead (unsubscribed, bounced, spam complaint, consent withdrawn), not missing consent.
  */
 async function withEligibility(workspaceId, leads, { requireConsent = true } = {}) {

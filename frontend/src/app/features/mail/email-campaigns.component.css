@@ -108,17 +108,17 @@
 .ec-list-row label.check { flex: 1 1 200px; min-width: 0; }
 .ec-view-contacts { font-size: 0.82rem; white-space: nowrap; }
 
-/* ---------- Simplified flow: Zoho chip, steps, review and popups ---------- */
+/* ---------- Simplified flow: status chip, steps, review and popups ---------- */
 .ec-page-head .mx-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.ec-zoho-chip { display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--border); background: var(--surface); color: var(--text-muted); border-radius: 999px; padding: 5px 12px; font: inherit; font-size: 0.8rem; font-weight: 600; cursor: pointer; }
-.ec-zoho-chip:hover { background: var(--surface-2); color: var(--text); }
-.ec-zoho-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.ec-zoho-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-subtle, var(--text-muted)); }
-.ec-zoho-chip.ok { color: var(--success-text); border-color: rgba(34, 197, 94, 0.35); }
-.ec-zoho-chip.ok .ec-zoho-dot { background: var(--success-text); }
-.ec-zoho-chip.warn { color: var(--warning-text); border-color: rgba(245, 158, 11, 0.4); background: var(--warning-soft); }
-.ec-zoho-chip.warn .ec-zoho-dot { background: var(--warning-text); }
-.ec-zoho-callout span { flex: 1 1 260px; }
+.ec-status-chip { display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--border); background: var(--surface); color: var(--text-muted); border-radius: 999px; padding: 5px 12px; font: inherit; font-size: 0.8rem; font-weight: 600; cursor: pointer; }
+.ec-status-chip:hover { background: var(--surface-2); color: var(--text); }
+.ec-status-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ec-status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-subtle, var(--text-muted)); }
+.ec-status-chip.ok { color: var(--success-text); border-color: rgba(34, 197, 94, 0.35); }
+.ec-status-chip.ok .ec-status-dot { background: var(--success-text); }
+.ec-status-chip.warn { color: var(--warning-text); border-color: rgba(245, 158, 11, 0.4); background: var(--warning-soft); }
+.ec-status-chip.warn .ec-status-dot { background: var(--warning-text); }
+.ec-setup-callout span { flex: 1 1 260px; }
 
 .ec-empty p { margin: 0 0 10px; }
 .ec-howto { max-width: 460px; text-align: left; color: var(--text); }
@@ -193,7 +193,7 @@
 .ec-merge-ask .ec-ask-q { font-weight: 600; color: inherit; }
 .ec-merge-ask .ec-ask-eg { flex-basis: 100%; }
 
-/* Sender address picker (like Zoho's From dropdown) */
+/* Sender address picker */
 .ec-sender { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .ec-sender { font-size: 13px; color: var(--text-muted); }
 .ec-sender-add { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
@@ -238,8 +238,6 @@
 .ec-upload-bar i { display: block; height: 100%; background: #2a78d6; }
 .ec-legacy { margin: 10px 0 2px; }
 .ec-temp-note { margin: 4px 0; }
-.ec-zoho-org { display: flex; flex-direction: column; gap: 6px; width: 100%; font-size: 12.5px; }
-.ec-zoho-org .hud-input { flex: 1 1 260px; min-width: 0; }
 .ec-ready { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 0; font-size: 12.5px; }
 .ec-ready div { display: flex; gap: 6px; align-items: baseline; }
 .ec-ready dt { font-weight: 400; }

@@ -1,7 +1,7 @@
 import { cleanFallback, contactTag, fallbackExample, fallbackQuestion } from './merge-tags';
 
-describe('Zoho merge tags', () => {
-  it('builds Zoho contact tags with the default value for email and social', () => {
+describe('Campaign merge tags', () => {
+  it('builds contact tags with the default value for email and social', () => {
     expect(contactTag('first', 'there')).toBe('$[FNAME|there]$');
     expect(contactTag('last', '')).toBe('$[LNAME||]$');
     expect(contactTag('last', 'Customer')).toBe('$[LNAME|Customer]$');

@@ -1,6 +1,6 @@
 /**
  * Read-only check that every encrypted credential in the database (social OAuth tokens, provider app
- * secrets, OAuth state, Zoho tokens, mailbox passwords — any "enc:v1:" value) can be decrypted with
+ * secrets, OAuth state, provider keys, mailbox passwords — any "enc:v1:" value) can be decrypted with
  * the configured SOCIAL_TOKEN_ENCRYPTION_KEY. Run after a restore or before a deployment:
  *
  *   node scripts/verifyEncryptedSecrets.js       (from backend/)

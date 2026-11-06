@@ -22,7 +22,7 @@ describe('ProductEmailsComponent', () => {
     fixture = TestBed.createComponent(ProductEmailsComponent);
     comp = fixture.componentInstance;
     fixture.detectChanges();
-    http.expectOne(`${apiRoot()}/api/v1/mail/zoho/status`).flush({ canCompose: true, canSend: true, canConfigure: true });
+    http.expectOne(`${apiRoot()}/api/v1/mail/ses/settings`).flush({ canCompose: true, canSend: true, canConfigure: true });
     http.expectOne(`${apiRoot()}/api/v1/mail/marketing`).flush({ marketing: { allowed: true, code: null, reason: null, provider: 'custom_smtp' } });
     http.expectOne(`${apiRoot()}/api/v1/products`).flush({ products: [{ id: 5, name: 'RouteKit' }] });
     comp.productId = 5;

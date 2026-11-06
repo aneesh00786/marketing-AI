@@ -25,7 +25,7 @@
       <span class="muted small">{{ fillOpen ? 'Hide' : 'Show' }}</span>
     </button>
     <form *ngIf="fillOpen" class="ec-fill-body" (ngSubmit)="applyFills()">
-      <p class="muted small ec-fill-help">Type your own text for each part. It is the same for every recipient; the contact's name is filled in by Zoho on its own.</p>
+      <p class="muted small ec-fill-help">Type your own text for each part. It is the same for every recipient; the contact's name is filled in for each recipient on its own.</p>
       <div class="ec-fill-grid">
         <label *ngFor="let p of placeholders" class="ec-fill-field">
           <span>{{ p.label }}</span>
@@ -72,9 +72,9 @@
           <span class="ec-tb-sep" aria-hidden="true"></span>
           <span class="ec-personalize">
             <button type="button" class="btn btn-secondary btn-sm ec-personalize-btn" aria-haspopup="true" [attr.aria-expanded]="personalizeOpen"
-                    title="Add the contact's name or a Zoho link; Zoho fills it in for each recipient" (click)="personalizeOpen = !personalizeOpen">👤 Personalize</button>
+                    title="Add the contact's name; it is filled in for each recipient" (click)="personalizeOpen = !personalizeOpen">👤 Personalize</button>
             <div class="ec-personalize-panel" *ngIf="personalizeOpen" role="menu" aria-label="Personalize">
-              <p class="ec-pp-head">Zoho fills these in for each recipient.</p>
+              <p class="ec-pp-head">Filled in for each recipient.</p>
               <button type="button" role="menuitem" *ngFor="let f of contactFields" (click)="personalizeOpen = false; pickMergeTag(f.key)"><b>{{ f.label }}</b><small>{{ f.help }}</small></button>
               <div class="ec-pp-sep" role="separator"></div>
               <button type="button" role="menuitem" *ngFor="let l of linkTags" (click)="personalizeOpen = false; pickMergeTag(l.key)"><b>{{ l.label }}</b><small>{{ l.help }}</small></button>
@@ -103,8 +103,8 @@
       <ul class="ec-hints" *ngIf="editable && contentHints.length" aria-live="polite">
         <li *ngFor="let h of contentHints">{{ h }}</li>
       </ul>
-      <p class="ec-guide" *ngIf="purpose === 'campaign'"><app-icon name="info" [size]="16"></app-icon><span>Use <b>👤 Personalize</b> to add the contact&rsquo;s name or Zoho links; Zoho fills them in for each recipient. They are not filled in test emails: to check, send to a Zoho list named &ldquo;Test List&rdquo;. Include <code>$[LI:UNSUBSCRIBE]$</code> for the unsubscribe link (Zoho requires one). Use https:// image URLs.</span></p>
-      <p class="ec-guide" *ngIf="purpose === 'template'"><app-icon name="info" [size]="16"></app-icon><span>Placeholders such as <code ngNonBindable>{{first_name}}</code> are filled for each email. For Zoho campaigns include <code>$[LI:UNSUBSCRIBE]$</code> (other marketing emails get an unsubscribe link added automatically). Use https:// image URLs.</span></p>
+      <p class="ec-guide" *ngIf="purpose === 'campaign'"><app-icon name="info" [size]="16"></app-icon><span>Use <b>👤 Personalize</b> to add the contact&rsquo;s name; Marketech.ai fills them in for each recipient. They are not filled in test emails: to check, send to a Marketech.ai list named &ldquo;Test List&rdquo;. Include <code>$[LI:UNSUBSCRIBE]$</code> for the unsubscribe link (Marketech.ai requires one). Use https:// image URLs.</span></p>
+      <p class="ec-guide" *ngIf="purpose === 'template'"><app-icon name="info" [size]="16"></app-icon><span>Placeholders such as <code ngNonBindable>{{first_name}}</code> are filled for each email. For campaigns include <code>$[LI:UNSUBSCRIBE]$</code> (other marketing emails get an unsubscribe link added automatically). Use https:// image URLs.</span></p>
     </ng-container>
 
     <label class="ec-unsub" *ngIf="contentMode === 'edit' && editable">
@@ -115,7 +115,7 @@
     <div class="ec-canvas" *ngIf="contentMode === 'preview'">
       <app-email-preview class="ec-preview" [html]="html" [contentKey]="contentKey" [viewport]="previewWidth" [title]="'Preview of ' + (name || purposeNoun)"
         emptyText="No HTML content yet. Switch to Edit to write HTML, or choose a template."></app-email-preview>
-      <p class="muted small">Preview of the current, unsaved content. {{ purpose === 'campaign' ? 'Zoho fills in merge tags such as $[LI:UNSUBSCRIBE]$ when it sends.' : 'Placeholders are filled when the template is used.' }}</p>
+      <p class="muted small">Preview of the current, unsaved content. {{ purpose === 'campaign' ? 'Merge tags such as $[LI:UNSUBSCRIBE]$ are filled in for each recipient when it is sent.' : 'Placeholders are filled when the template is used.' }}</p>
     </div>
   </div>
 </section>

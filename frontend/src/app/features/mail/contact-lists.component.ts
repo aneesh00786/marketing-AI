@@ -7,19 +7,15 @@ import { IconComponent } from '../../shared/icon.component';
 import { CountryFilterComponent, LeadCountry } from '../../shared/leads/country-filter.component';
 import { parseLeadSheet, LeadSheetRow } from '../leads/lead-sheet';
 
-export interface MList { id: number; name: string; source: string; inZoho: boolean; total: number; reachable: number; noConsent?: number; updatedAt?: string; }
+export interface MList { id: number; name: string; source: string; total: number; reachable: number; noConsent?: number; updatedAt?: string; }
 interface ManualContact { name: string; company: string; email: string; phone: string; }
 interface LeadOpt { id: number; name: string; email: string; company?: string | null; country?: string | null; address?: string | null; eligible?: boolean; reasons?: string[]; }
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const SYNC_POLL_MS = 3000;
 const emptyContact = (): ManualContact => ({ name: '', company: '', email: '', phone: '' });
 type Status = 'all' | 'subscribed' | 'unsubscribed' | 'bounced';
 
 /**
- * Zoho Campaigns → Contact lists, kept in Marketech.ai. Lists are made and changed here; Zoho gets
- * a list only when a campaign is sent to it. When Zoho is connected, its lists and contacts are
- * copied here once (status line at the top). Deleting a list copied from Zoho asks where: here,
- * in Zoho only, or both.
+ * Contact lists kept in Marketech.ai: made and changed here, and chosen as a campaign's recipients.
  */
 @Component({
   selector: 'app-contact-lists',
@@ -29,67 +25,27 @@ type Status = 'all' | 'subscribed' | 'unsubscribed' | 'bounced';
   styleUrls: ['../command/command-center.component.css', './mail-ui.css', './contact-lists-shared.css', './contact-lists.component.css']
 })
 export class ContactListsComponent implements OnInit, OnDestroy {
-  @Input() zohoReady = false;
   /** May change lists (mail.send). */
   @Input() canManage = false;
-  /** Owner / Admin (mail.configure): may delete lists in Zoho. */
-  @Input() canConfigure = false;
   @Output() toast = new EventEmitter<string>();
-  @Output() openZoho = new EventEmitter<void>();
 
   private base = `${apiRoot()}/api/v1/mail/campaigns`;
   lists: MList[] = [];
   totalContacts = 0;
-  sync: any = null;
   loading = false;
   error = '';
   query = '';
 
   constructor(private http: HttpClient) {}
 
-  private syncPoll: any = null;
-  ngOnInit(): void { this.load(); this.loadPlan(); }
-  ngOnDestroy(): void { clearTimeout(this.syncPoll); }
-
-  // ---------- Zoho plan: contacts in Zoho against the plan's limit ----------
-  plan: { contactLimit: number | null; usage: { upTo: number; atLeast: number } } | null = null;
-  limitEdit: string | null = null;
-  limitSaving = false;
-
-  /** Read from Zoho (its lists' counts); quietly absent when Zoho is not connected. */
-  loadPlan(): void {
-    if (!this.zohoReady) return;
-    this.http.get<any>(`${this.base}/zoho-lists`).subscribe({ next: r => this.plan = r.plan || null, error: () => this.plan = null });
-  }
-
-  get usagePct(): number {
-    const p = this.plan;
-    return p?.contactLimit ? Math.min(100, Math.round((p.usage.upTo / p.contactLimit) * 100)) : 0;
-  }
-
-  editLimit(): void { this.limitEdit = this.plan?.contactLimit ? String(this.plan.contactLimit) : ''; }
-
-  saveLimit(): void {
-    if (this.limitEdit === null || this.limitSaving) return;
-    const t = this.limitEdit.replace(/[,\s]/g, '');
-    if (t && !/^\d{1,8}$/.test(t)) { this.toast.emit('Enter the number of contacts your plan allows, e.g. 10000.'); return; }
-    const value = t ? Number(t) : null;
-    if (value === 0) { this.toast.emit('Enter a number above 0, or leave it empty.'); return; }
-    this.limitSaving = true;
-    this.http.put<any>(`${this.base}/zoho-plan`, { contactLimit: value }).subscribe({
-      next: r => { this.limitSaving = false; this.limitEdit = null; if (this.plan) this.plan.contactLimit = r.contactLimit; this.toast.emit(r.contactLimit ? 'Contact limit saved.' : 'Contact limit removed.'); },
-      error: e => { this.limitSaving = false; this.toast.emit(this.err(e)); }
-    });
-  }
+  ngOnInit(): void { this.load(); }
+  ngOnDestroy(): void { /* nothing to stop */ }
 
   load(): void {
     this.loading = true; this.error = '';
     this.http.get<any>(`${this.base}/contact-lists`).subscribe({
       next: r => {
-        this.loading = false; this.lists = r.lists || []; this.totalContacts = r.contacts || 0; this.sync = r.sync || null;
-        // While the copy from Zoho runs (after connecting), check again until it is done.
-        clearTimeout(this.syncPoll);
-        if (this.sync && ['queued', 'running'].includes(this.sync.status)) this.syncPoll = setTimeout(() => this.load(), SYNC_POLL_MS);
+        this.loading = false; this.lists = r.lists || []; this.totalContacts = r.contacts || 0;
       },
       error: e => { this.loading = false; this.error = this.err(e); }
     });
@@ -98,16 +54,6 @@ export class ContactListsComponent implements OnInit, OnDestroy {
   get visibleLists(): MList[] {
     const q = this.query.trim().toLowerCase();
     return this.lists.filter(l => !q || l.name.toLowerCase().includes(q));
-  }
-
-  /** "Copied 7,387 contacts from 4 Zoho lists on …", or what is happening now. */
-  get syncText(): string {
-    const s = this.sync;
-    if (!s || s.status === 'never') return this.zohoReady ? 'Zoho lists were not copied yet. Reconnect Zoho (Settings) to copy them.' : 'Connect Zoho to copy your Zoho lists and contacts here once.';
-    if (s.status === 'queued' || s.status === 'running') return 'Copying your Zoho lists and contacts… This takes about a minute; they appear here when it is done.';
-    if (s.status === 'failed') return `Copying from Zoho failed: ${s.error || 'unknown error'}. Reconnect Zoho to try again.`;
-    const r = s.result || {};
-    return `Copied ${Number(r.contacts || 0).toLocaleString('en-US')} contacts from ${r.lists || 0} Zoho list(s) when Zoho was connected. Lists are managed here from then on.`;
   }
 
   // ---------- New list / add contacts ----------
@@ -230,7 +176,7 @@ export class ContactListsComponent implements OnInit, OnDestroy {
   }
 
   /** Marketing consent as campaigns use it (see backend contacts/consent.js). */
-  consentLabel(s: string): string { return ({ granted: 'Given', zoho: 'Zoho subscriber', withdrawn: 'Withdrawn', none: 'Not recorded' } as any)[s] || '—'; }
+  consentLabel(s: string): string { return ({ granted: 'Given', imported: 'Subscriber (imported)', withdrawn: 'Withdrawn', none: 'Not recorded' } as any)[s] || '—'; }
   statusLabel(s: string): string { return ({ subscribed: 'Subscribed', unsubscribed: 'Unsubscribed', bounced: 'Bounced' } as any)[s] || s; }
 
   remove(c: any): void {
@@ -286,21 +232,18 @@ export class ContactListsComponent implements OnInit, OnDestroy {
   }
 
   // ---------- Delete a list ----------
-  deleting: { list: MList; where: 'here' | 'zoho' | 'both'; busy: boolean } | null = null;
+  deleting: { list: MList; busy: boolean } | null = null;
 
-  openDelete(l: MList): void { this.deleting = { list: l, where: 'here', busy: false }; }
-
-  /** Why the Zoho options cannot be chosen ('' when they can). */
-  get zohoDeleteBlock(): string { return this.canConfigure ? '' : 'Only an Owner or Admin can delete lists in Zoho.'; }
+  openDelete(l: MList): void { this.deleting = { list: l, busy: false }; }
 
   confirmDelete(): void {
     const d = this.deleting;
-    if (!d || d.busy || (d.where !== 'here' && this.zohoDeleteBlock)) return;
+    if (!d || d.busy) return;
     d.busy = true;
-    this.http.delete<any>(`${this.base}/contact-lists/${d.list.id}`, { body: { where: d.where, confirm: true } }).subscribe({
+    this.http.delete<any>(`${this.base}/contact-lists/${d.list.id}`, { body: { confirm: true } }).subscribe({
       next: () => {
         this.deleting = null;
-        this.toast.emit({ here: `“${d.list.name}” deleted here.${d.list.inZoho ? ' It is still in Zoho.' : ''}`, zoho: `“${d.list.name}” deleted in Zoho. It is kept here.`, both: `“${d.list.name}” deleted here and in Zoho.` }[d.where]);
+        this.toast.emit(`“${d.list.name}” deleted.`);
         this.load();
       },
       error: e => { d.busy = false; this.toast.emit(this.err(e)); }

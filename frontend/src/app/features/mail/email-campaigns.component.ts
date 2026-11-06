@@ -1,14 +1,12 @@
-import { Component, EventEmitter, Input, OnDestroy, OnInit, Output, HostListener, ViewChild, ElementRef } from '@angular/core';
+import { Component, EventEmitter, Input, OnDestroy, OnInit, Output, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { IconComponent } from '../../shared/icon.component';
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { apiRoot } from '../../core/api-base';
-import { ZohoCampaignsComponent } from './zoho-campaigns.component';
 import { TemplatePickerComponent } from './template-picker.component';
 import { EmailPreviewComponent } from './email-preview.component';
 import { EmailContentEditorComponent } from './email-content-editor.component';
-import { ZohoListContactsComponent } from './zoho-list-contacts.component';
 import { EmailPreviewComponent as ThumbPreview } from './email-preview.component';
 import { CampaignMetricsComponent } from './campaign-metrics.component';
 import { ContactListsComponent } from './contact-lists.component';
@@ -18,43 +16,40 @@ const PUBLIC_MAIL_RE = /@(gmail|googlemail|yahoo|ymail|hotmail|outlook|live|msn|
 import { SAMPLE_SUBJECT, sampleCampaignHtml } from './sample-email';
 import { CONTACT_FIELDS, ContactField, contactTag, fallbackExample, fallbackQuestion } from './merge-tags';
 
-/** A sent campaign's figures are read from Zoho when it is opened, at most this often. */
+/** A sent campaign's figures are re-read when it is opened, at most this often. */
 const REPORT_MAX_AGE_MS = 5 * 60 * 1000;
 const UPLOAD_POLL_MS = 4000;
 /** After sending: check soon, then less often (seconds), about 15 minutes in all. */
 const REPORT_POLL_S = [10, 20, 30, 60, 60, 120, 120, 300, 300];
 
 /**
- * Email campaigns: written, validated, approved and sent from Marketech.ai; delivered by Zoho.
- * Recipients are Zoho mailing lists and contacts selected here; selected contacts are added to
- * Zoho by the server when the campaign is sent.
+ * Email campaigns: written, validated, approved and sent from Marketech.ai with Amazon SES.
+ * Recipients are contact lists kept here (and leads chosen directly, from earlier campaigns).
  * The server enforces permissions; controls are only hidden here.
  */
 @Component({
   selector: 'app-email-campaigns',
   standalone: true,
-  imports: [CommonModule, IconComponent, FormsModule, ZohoCampaignsComponent, TemplatePickerComponent, EmailContentEditorComponent, ThumbPreview, ZohoListContactsComponent, CampaignMetricsComponent, ContactListsComponent],
+  imports: [CommonModule, IconComponent, FormsModule, TemplatePickerComponent, EmailContentEditorComponent, ThumbPreview, CampaignMetricsComponent, ContactListsComponent],
   templateUrl: './email-campaigns.component.html',
   styleUrls: ['../command/command-center.component.css', './mail-ui.css', './email-campaigns.component.css']
 })
 export class EmailCampaignsComponent implements OnInit, OnDestroy {
-  @Input() oauthResult: { zoho?: string; reason?: string } | null = null;
   /** Set by Email Templates → "New campaign": creates a campaign from that template. */
   @Input() set startTemplate(t: { id: number; name: string } | null) {
     if (t && t.id) this.newFromTemplate(t);
   }
   @Output() toast = new EventEmitter<string>();
-  /** Open Settings → Campaigns (where the Zoho API credentials are entered). */
+  /** Open Settings → Campaigns (where the Amazon SES connection is set up). */
   @Output() openSettings = new EventEmitter<void>();
   /** Open Email Templates with a new blank template ("New Campaign" menu → New email template). */
   @Output() createTemplate = new EventEmitter<void>();
 
   private base = `${apiRoot()}/api/v1/mail/campaigns`;
-  zoho: any = null;
   campaigns: any[] = [];
   selected: any = null;      // the campaign being edited/viewed (full)
   form: any = null;          // editable copy
-  audiences: { lists: any[]; topics: any[]; mailLists?: any[] } | null = null;
+  audiences: { mailLists: any[] } | null = null;
   validation: any = null;
   busy = '';
   error = '';
@@ -66,54 +61,37 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
   listSort: 'newest' | 'oldest' | 'name' = 'newest';
   menuFor: number | null = null;
   showCreateMenu = false;
-  /** The open campaign's "More" menu, the Zoho connection popup and the send confirmation popup. */
+  /** The open campaign's "More" menu and the send confirmation popup. */
   moreOpen = false;
-  zohoOpen = false;
   sendConfirm: { name: string; subject: string; recipients: string } | null = null;
   /** Guided editing: 1 Details, 2 Recipients, 3 Email content, 4 Review & send. */
   readonly steps = [
     { n: 1, title: 'Details' }, { n: 2, title: 'Recipients' }, { n: 3, title: 'Email content' }, { n: 4, title: 'Review & send' }
   ];
   step = 1;
-  /** The Zoho mailing list whose contacts are being viewed. */
-  contactsList: any = null;
-  /** The saved selection once loaded, and the part picked from each Zoho list (shown on its row). */
+  /** The campaign's leads chosen directly, once loaded. */
   allContacts: any[] | null = null;
-  picksByList = new Map<string, any[]>();
   /** The saved values of the open campaign, to tell when the form has unsaved changes. */
   private original = '';
-  @ViewChild(ZohoCampaignsComponent) private zohoPanel?: ZohoCampaignsComponent;
 
   constructor(private http: HttpClient) {}
 
-  ngOnInit(): void { this.load(); }
+  ngOnInit(): void { this.load(); this.loadDelivery(); }
 
-  get canCompose(): boolean { return !!this.zoho?.canCompose; }
-  get canSend(): boolean { return !!this.zoho?.canSend; }
-  get zohoReady(): boolean { return !!this.zoho?.connection?.connected && !(this.zoho?.connection?.missingScopes || []).length; }
-  /** Which service sends this workspace's campaigns (Mail Settings → Campaigns). */
+  /** The Amazon SES connection and what this person may do (Mail Settings → Campaigns). */
   delivery: any = null;
-  get viaSes(): boolean { return this.delivery?.provider === 'ses'; }
-  /** A campaign sent (partly) with one service stays with it; otherwise the workspace's choice. */
-  sendsWithSes(c: any): boolean { return c?.provider ? c.provider === 'ses' : this.viaSes; }
-  /** Ready to send with the workspace's service: Amazon SES set up, or Zoho connected. */
-  get sendReady(): boolean { return this.viaSes ? !!this.delivery?.ses?.configured : this.zohoReady; }
-  loadDelivery(): void {
-    this.http.get<any>(`${apiRoot()}/api/v1/mail/ses/settings`).subscribe({
-      next: r => { this.delivery = r; if (this.sendReady && this.canCompose && !this.audiences) this.loadAudiences(); },
-      error: () => { this.delivery = { provider: 'zoho' }; }
-    });
-  }
-  get canSyncContacts(): boolean { return this.zoho?.connection?.canSyncContacts !== false; }
-  /** Contacts can be picked inside a Zoho list only while this campaign's recipients can change. */
-  get canPickFromZoho(): boolean { return this.editable && this.canSend && this.canSyncContacts; }
-  get selectedListNames(): string { return (this.selected?.lists || []).map((l: any) => l.name || l.key).join(', '); }
+  get canCompose(): boolean { return !!this.delivery?.canCompose; }
+  get canSend(): boolean { return !!this.delivery?.canSend; }
+  get canConfigure(): boolean { return !!this.delivery?.canConfigure; }
+  /** Campaigns can be sent once Amazon SES is set up. */
+  get sendReady(): boolean { return !!this.delivery?.ses?.configured; }
   get editable(): boolean { return !!this.selected && ['draft', 'approved', 'failed'].includes(this.selected.status) && this.canCompose; }
 
-  onZohoStatus(s: any): void {
-    this.zoho = s;
-    if (!this.delivery) this.loadDelivery();
-    if (this.sendReady && this.canCompose && !this.audiences) this.loadAudiences();
+  loadDelivery(): void {
+    this.http.get<any>(`${apiRoot()}/api/v1/mail/ses/settings`).subscribe({
+      next: r => { this.delivery = r; if (this.canCompose && !this.audiences) this.loadAudiences(); },
+      error: e => { this.delivery = { ses: { configured: false } }; this.error = this.err(e); }
+    });
   }
 
   load(): void {
@@ -127,12 +105,12 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
   /** Back from Contact lists: lists may have been created or changed there. */
   showCampaigns(): void {
     this.view = 'campaigns';
-    if (this.sendReady && this.canCompose) this.loadAudiences();
+    if (this.canCompose) this.loadAudiences();
   }
 
   loadAudiences(): void {
     this.http.get<any>(`${this.base}/audiences`).subscribe({
-      next: r => { this.audiences = { lists: r.lists || [], topics: r.topics || [], mailLists: r.mailLists || [] }; },
+      next: r => { this.audiences = { mailLists: r.mailLists || [] }; },
       error: e => { this.audiences = null; this.error = this.err(e); }
     });
   }
@@ -171,11 +149,10 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
   }
 
   /** Tag/dot tone for a campaign status (the label always says the status too). */
-  tone(s: string, c?: any): string {
-    if (this.waitingForZoho(c)) return 'warn';
+  tone(s: string): string {
     if (s === 'submitted') return 'good';
     if (s === 'approved') return 'info';
-    if (s === 'failed' || s === 'needs_review') return 'bad';
+    if (s === 'failed') return 'bad';
     if (s === 'submitting') return 'warn';
     return '';
   }
@@ -189,22 +166,20 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
   toggleMenu(id: number, ev: Event): void { ev.stopPropagation(); this.menuFor = this.menuFor === id ? null : id; }
 
   @HostListener('document:click') closeMenu(): void { this.menuFor = null; this.showCreateMenu = false; this.moreOpen = false; }
-  @HostListener('document:keydown.escape') escMenu(): void { this.menuFor = null; this.showCreateMenu = false; this.moreOpen = false; this.zohoOpen = false; this.sendConfirm = null; }
+  @HostListener('document:keydown.escape') escMenu(): void { this.menuFor = null; this.showCreateMenu = false; this.moreOpen = false; this.sendConfirm = null; }
 
   toggleMore(ev: Event): void { ev.stopPropagation(); this.moreOpen = !this.moreOpen; this.menuFor = null; this.showCreateMenu = false; }
 
   // ---------- Steps ----------
   get hasContent(): boolean { return !!String(this.form?.html || '').replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').trim(); }
-  /** Selected contacts that are not already covered by a ticked list. */
+  /** Leads chosen directly that can still be emailed. */
   get extraContacts(): number {
-    const keys = this.form ? this.form.listKeys as Set<string> : new Set<string>();
-    return this.allContacts ? this.allContacts.filter(c => c.eligible && !keys.has(c.sourceListKey)).length : (this.selected?.contactCount ?? 0);
+    return this.allContacts ? this.allContacts.filter(c => c.eligible).length : (this.selected?.contactCount ?? 0);
   }
   get recipientSummary(): string {
     const mine = this.form ? this.form.mailListIds.size : 0;
-    const lists = this.form ? this.form.listKeys.size : 0;
     const people = this.extraContacts;
-    return [mine && `${mine} list${mine === 1 ? '' : 's'}`, lists && `${lists} Zoho list${lists === 1 ? '' : 's'}`, people && `${people} contact${people === 1 ? '' : 's'}`].filter(Boolean).join(' + ');
+    return [mine && `${mine} list${mine === 1 ? '' : 's'}`, people && `${people} contact${people === 1 ? '' : 's'}`].filter(Boolean).join(' + ');
   }
 
   /** Marketech.ai lists to choose from (Recipients). */
@@ -222,7 +197,7 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
   toggleMailList(id: number): void { this.form.mailListIds.has(id) ? this.form.mailListIds.delete(id) : this.form.mailListIds.add(id); }
   get fromText(): string {
     const f = this.form || {};
-    if (!f.fromName && !f.fromEmail) return 'Zoho account default';
+    if (!f.fromName && !f.fromEmail) return 'Not set';
     return f.fromName && f.fromEmail ? `${f.fromName} <${f.fromEmail}>` : (f.fromName || f.fromEmail);
   }
   stepDone(n: number): boolean {
@@ -234,14 +209,14 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
   }
   stepHint(n: number): string {
     if (n === 1) return this.stepDone(1) ? 'Name and subject set' : 'Name and subject';
-    if (n === 2) return this.recipientSummary || 'Zoho lists';
+    if (n === 2) return this.recipientSummary || 'Contact lists';
     if (n === 3) return this.hasContent ? 'Content added' : 'Design the email';
     if (this.selected?.status === 'submitted') return 'Sent';
     if (this.selected?.approved) return 'Approved, ready to send';
     return 'Check and approve';
   }
-  /** Sent (or being settled with Zoho): the page shows results, not the steps. */
-  get isSent(): boolean { return this.selected?.status === 'submitted' || this.selected?.status === 'needs_review'; }
+  /** Sent: the page shows results, not the steps. */
+  get isSent(): boolean { return this.selected?.status === 'submitted'; }
   viewEmail = false;
 
   /** The check found [placeholders] or the sample link: step 3 has a box for each. */
@@ -254,21 +229,21 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
     this.step = n;
     // Arriving at Review runs the checks, so problems show without an extra click.
     if (n === 4 && this.selected && !this.validation && this.busy !== 'validate') this.validate();
-    if (n === 2 && this.sendReady && this.canCompose) this.loadAudiences();
+    if (n === 2 && this.canCompose) this.loadAudiences();
   }
-  /** Campaigns, or Zoho Campaigns → Contact lists. */
+  /** Campaigns, or Contact lists. */
   view: 'campaigns' | 'lists' = 'campaigns';
 
-  // ---------- Sender ("From"), picked like Zoho's sender address dropdown ----------
+  // ---------- Sender ("From"): addresses used before, grouped by domain ----------
   /** True while a new sender address is being typed. */
   senderAdding = false;
   newSender = '';
   senderError = '';
 
   /**
-   * Sender addresses grouped by domain, as in Zoho. Zoho's API cannot list verified senders, so
-   * these are the addresses used in this workspace's campaigns: each with the last sender name
-   * used with it and whether Zoho has accepted a campaign from it (which shows it is verified).
+   * Sender addresses grouped by domain: the addresses used in this workspace's campaigns, each with
+   * the last sender name used with it and whether a campaign was sent from it. Whether SES may send
+   * from an address is checked by "Check for problems" (verified address or domain).
    */
   get senderGroups(): { domain: string; items: { email: string; name: string; sentBefore: boolean }[] }[] {
     const seen = new Map<string, { email: string; name: string; sentBefore: boolean }>();
@@ -312,11 +287,11 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
     if (s?.name && !String(this.form.fromName || '').trim()) this.form.fromName = s.name;
   }
 
-  /** "Add sender address": checked here as Zoho would (format, no public mailbox domains). */
+  /** "Add sender address": checked here as the server does (format, no public mailbox domains). */
   addSender(): void {
     const e = String(this.newSender || '').trim().toLowerCase();
     if (!SENDER_RE.test(e)) { this.senderError = 'Enter a full email address, e.g. news@yourdomain.com.'; return; }
-    if (PUBLIC_MAIL_RE.test(e)) { this.senderError = 'Zoho does not send from Gmail, Yahoo, Outlook or other public mailboxes. Use an address on your own domain.'; return; }
+    if (PUBLIC_MAIL_RE.test(e)) { this.senderError = 'Use an address on your own domain: Gmail, Yahoo, Outlook and other public mailboxes fail email authentication when sent through Amazon SES.'; return; }
     if (this.form) this.form.fromEmail = e;
     this.senderAdding = false; this.newSender = ''; this.senderError = '';
   }
@@ -331,8 +306,8 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
   private subjectAt = -1;
 
   /**
-   * Subject "Merge tags" menu: uses the last cursor position, then asks for the default value (as Zoho
-   * does). A subject is not a greeting, so the first-name default starts as "you", not "there".
+   * Subject "Merge tags" menu: uses the last cursor position, then asks for the default value. A
+   * subject is not a greeting, so the first-name default starts as "you", not "there".
    */
   pickSubjectTag(key: string, _box?: HTMLInputElement): void {
     const f = CONTACT_FIELDS.find(x => x.key === key);
@@ -370,7 +345,7 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
     ];
   }
 
-  /** Inserts the Zoho merge tag (e.g. $[FNAME|you]$) at the remembered cursor position. */
+  /** Inserts the merge tag (e.g. $[FNAME|you]$) at the remembered cursor position. */
   confirmSubjectTag(box?: HTMLInputElement): void {
     const ask = this.subjectAsk;
     if (!ask || !this.editable || !this.form) { this.subjectAsk = null; return; }
@@ -385,9 +360,6 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
     if (this.dirty) this.save(() => this.goStep(this.step + 1));
     else this.goStep(this.step + 1);
   }
-
-  /** The recipient-lists "Connect Zoho" button uses the same connect flow as the Zoho panel. */
-  connectZoho(): void { this.zohoPanel?.connect(); }
 
   /** A copy of the template's HTML goes into the campaign; the template itself is not changed. */
   onTemplatePicked(t: any): void {
@@ -419,10 +391,10 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
     });
   }
 
-  /** Quietly updates the figures: if Zoho cannot be reached, the last ones stay on screen. */
+  /** Quietly updates the figures; on an error the last ones stay on screen. */
   private refreshReport(c: any): void {
     if (c.status !== 'submitted') return;
-    // Recent figures are reused, unless Zoho had none yet (they appear minutes after sending).
+    // Recent figures are reused, unless there were none yet (delivery reports arrive within minutes).
     if (c.report && c.lastCheckedAt && Date.now() - new Date(c.lastCheckedAt).getTime() < REPORT_MAX_AGE_MS) return;
     this.http.post<any>(`${this.base}/${c.id}/refresh`, {}).subscribe({
       next: r => { if (this.selected?.id === c.id) { this.selected = r.campaign; if (!r.campaign.report || r.campaign.report.pending) this.pollReport(c.id, 2); } this.load(); },
@@ -430,11 +402,11 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
     });
   }
 
-  /** After sending, checks Zoho's figures a few times while the campaign stays open. */
+  /** After sending, re-reads the figures a few times while the campaign stays open. */
   private reportPoll: any = null;
   private pollReport(id: number, step = 0): void {
     clearTimeout(this.reportPoll);
-    // After the schedule, keep checking each minute (up to an hour) while Zoho is still sending.
+    // After the schedule, keep checking each minute (up to an hour) while it is still sending.
     const stillSending = !!this.selected?.report?.pending || !this.selected?.report;
     if (step >= REPORT_POLL_S.length + 45 || (step >= REPORT_POLL_S.length && !stillSending)) return;
     this.reportPoll = setTimeout(() => {
@@ -446,7 +418,7 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
     }, (REPORT_POLL_S[step] ?? 60) * 1000);
   }
 
-  /** While the lists are uploaded to Zoho (worker), the campaign is checked every few seconds. */
+  /** While it is being sent (worker), the campaign is checked every few seconds. */
   private uploadPoll: any = null;
   private watchUpload(id: number): void {
     clearTimeout(this.uploadPoll);
@@ -464,17 +436,12 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
     }, UPLOAD_POLL_MS);
   }
 
-  /** "Putting your lists into Zoho: 1,200 of 7,219" while the worker uploads. */
+  /** "Sending with Amazon SES: 1,200 of 7,219 emails." while the worker sends. */
   get uploadText(): string {
     const c = this.selected;
-    if (c?.status === 'submitting' && c.submitStage === 'ses_send') {
-      const u = c.upload;
-      return u?.total ? `Sending with Amazon SES: ${Number(u.done).toLocaleString('en-US')} of ${Number(u.total).toLocaleString('en-US')} emails.` : 'Sending with Amazon SES…';
-    }
-    if (c?.status !== 'submitting' || c.submitStage !== 'upload') return c?.status === 'submitting' ? 'Sending through Zoho…' : '';
+    if (c?.status !== 'submitting') return '';
     const u = c.upload;
-    if (!u || !u.total) return 'Getting your lists ready for Zoho…';
-    return `Putting your lists into Zoho: ${Number(u.done).toLocaleString('en-US')} of ${Number(u.total).toLocaleString('en-US')} contacts. The campaign is sent as soon as this finishes.`;
+    return u?.total ? `Sending with Amazon SES: ${Number(u.done).toLocaleString('en-US')} of ${Number(u.total).toLocaleString('en-US')} emails.` : 'Sending with Amazon SES…';
   }
 
   get uploadPct(): number { const u = this.selected?.upload; return u?.total ? Math.min(100, Math.round((u.done / u.total) * 100)) : 0; }
@@ -488,7 +455,7 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
     this.validation = null;
     this.form = {
       name: c.name, subject: c.subject || '', fromName: c.fromName || '', fromEmail: c.fromEmail || '', html: c.html || '',
-      topicId: c.topicId || '', listKeys: new Set((c.lists || []).map((l: any) => l.key)), mailListIds: new Set<number>(c.mailListIds || [])
+      mailListIds: new Set<number>(c.mailListIds || [])
     };
     this.original = this.snapshot();
     if (fresh) this.step = this.editable ? 1 : 4;
@@ -497,13 +464,9 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
 
   onContacts(list: any[] | null): void {
     this.allContacts = list;
-    this.picksByList = new Map();
-    for (const c of list || []) {
-      if (c.sourceListKey) this.picksByList.set(c.sourceListKey, [...(this.picksByList.get(c.sourceListKey) || []), c]);
-    }
   }
 
-  /** The campaign's picked contacts (from Zoho lists, or leads chosen earlier). */
+  /** The campaign's leads chosen directly. */
   private loadContacts(id: number): void {
     this.http.get<any>(`${this.base}/${id}/contacts`).subscribe({
       next: r => { if (this.selected?.id === id) this.onContacts(r.contacts || []); },
@@ -511,10 +474,8 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
     });
   }
 
-  /** Leads chosen directly (before Zoho lists became the way to reach leads). */
-  get leadContacts(): any[] { return (this.allContacts || []).filter(c => !c.sourceListKey); }
-
-  ineligibleIn(picks: any[]): number { return picks.filter(c => c.eligible === false).length; }
+  /** Leads chosen directly for this campaign. */
+  get leadContacts(): any[] { return this.allContacts || []; }
 
   private removeContacts(ids: number[], message: string): void {
     if (!ids.length || !this.selected) return;
@@ -523,11 +484,6 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
       next: r => { if (this.selected?.id === id) { this.onContacts(r.contacts || []); this.onCampaignChanged(r.campaign); } this.toast.emit(message); },
       error: e => this.toast.emit(this.err(e))
     });
-  }
-
-  clearPicks(list: any, picks: any[]): void {
-    if (!confirm(`Remove the ${picks.length} contact(s) picked from "${list.name || list.key}" from this campaign?`)) return;
-    this.removeContacts(picks.map(c => c.id), 'Contacts removed. Approve the campaign before sending.');
   }
 
   clearLeadContacts(): void {
@@ -543,16 +499,9 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
     this.load();
   }
 
-  onZohoContactsAdded(r: any): void {
-    this.onContacts(r.contacts || this.allContacts);
-    this.onCampaignChanged(r.campaign);
-    const refused = r.refused ? ` ${r.refused} could not be added (unsubscribed or blocked).` : '';
-    this.toast.emit(`${r.added} contact${r.added === 1 ? '' : 's'} added.${refused} Approve the campaign before sending.`);
-  }
-
   private snapshot(): string {
     const f = this.form;
-    return f ? JSON.stringify([f.name, f.subject, f.fromName, f.fromEmail, f.html, f.topicId, [...f.listKeys].sort(), [...f.mailListIds].sort()]) : '';
+    return f ? JSON.stringify([f.name, f.subject, f.fromName, f.fromEmail, f.html, [...f.mailListIds].sort()]) : '';
   }
 
   /** True when the open campaign has edits that are not saved yet. */
@@ -573,17 +522,9 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
   @HostListener('window:beforeunload', ['$event'])
   onBeforeUnload(e: BeforeUnloadEvent): void { if (this.dirty) { e.preventDefault(); e.returnValue = ''; } }
 
-  toggleList(key: string): void {
-    this.form.listKeys.has(key) ? this.form.listKeys.delete(key) : this.form.listKeys.add(key);
-  }
-
   save(then?: () => void): void {
-    const known = new Map((this.audiences?.lists || []).map((l: any) => [l.key, l.name]));
-    const prior = new Map((this.selected.lists || []).map((l: any) => [l.key, l.name]));
     const body = {
       name: this.form.name, subject: this.form.subject, fromName: this.form.fromName, fromEmail: this.form.fromEmail, html: this.form.html,
-      topicId: this.form.topicId || '',
-      lists: [...this.form.listKeys].map((k: any) => ({ key: k, ...((known.get(k) || prior.get(k)) ? { name: String(known.get(k) || prior.get(k)).slice(0, 200) } : {}) })),
       mailListIds: [...this.form.mailListIds]
     };
     this.busy = 'save';
@@ -611,12 +552,9 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
 
   /** Who the saved campaign goes to, as shown in the send confirmation. */
   sendRecipients(): string {
-    const lists = (this.selected.lists || []).map((l: any) => l.name || l.key).join(', ');
-    // A ticked list already covers the contacts picked from it.
-    const keys = new Set((this.selected.lists || []).map((l: any) => l.key));
-    const contacts = this.allContacts ? this.allContacts.filter(c => c.eligible && !keys.has(c.sourceListKey)).length : this.selected.contactCount ?? 0;
+    const contacts = this.allContacts ? this.allContacts.filter(c => c.eligible).length : this.selected.contactCount ?? 0;
     const mine = (this.selected.mailLists || []).map((l: any) => `${l.name} (${Number(l.reachable || 0).toLocaleString('en-US')})`).join(', ');
-    return [mine && `Lists ${mine}, put into Zoho for this send`, lists && `Zoho lists ${lists}`, contacts && `${contacts} selected contact${contacts === 1 ? '' : 's'} (added to Zoho first)`].filter(Boolean).join(' and ');
+    return [mine && `Lists ${mine}`, contacts && `${contacts} selected contact${contacts === 1 ? '' : 's'}`].filter(Boolean).join(' and ');
   }
 
   /** Opens the confirmation popup; nothing is sent until "Send now". */
@@ -630,89 +568,19 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
     this.http.post<any>(`${this.base}/${this.selected.id}/send`, { confirm: true }).subscribe({
       next: r => {
         this.busy = ''; this.sendConfirm = null; this.setSelected(r.campaign); this.load();
-        if (r.campaign.status === 'submitting') {
-          this.watchUpload(r.campaign.id);
-          this.toast.emit(r.campaign.submitStage === 'ses_send' ? 'Sending with Amazon SES. Progress and results show here as it goes.' : 'Putting your lists into Zoho. The campaign is sent as soon as that finishes.');
-          return;
-        }
-        this.pollReport(r.campaign.id); this.toast.emit('Zoho accepted the campaign. Results are shown below and update on their own while Zoho sends.');
+        if (r.campaign.status === 'submitting') this.watchUpload(r.campaign.id);
+        else this.pollReport(r.campaign.id);
+        this.toast.emit('Sending with Amazon SES. Progress and results show here as it goes.');
       },
       error: e => { this.busy = ''; this.sendConfirm = null; this.toast.emit(this.err(e)); this.open(this.selected); this.load(); }
     });
   }
 
-  /** What Zoho reported for the recipients (it emails only "active" contacts), as label/value pairs. */
-  readinessItems(c: any): { label: string; value: string; tone?: string }[] {
-    const r = c?.zohoReadiness;
-    // What Zoho's own campaign details showed when it was last asked (before the send, or a later check).
-    const snap = r?.zohoCampaign;
-    const zohoSide = snap && snap.total != null ? [{ label: `Recipients on the Zoho campaign (${snap.when === 'check' ? 'last check' : 'before sending'})`, value: String(snap.total), tone: snap.total ? 'good' : 'bad' }] : [];
-    if (!r || r.active == null) return zohoSide;
-    const n = (v: number) => `${v}${r.capped ? '+' : ''}`;
-    return [
-      ...(r.total != null ? [{ label: 'Contacts in Zoho lists', value: String(r.total) }] : []),
-      { label: 'Active (can be emailed)', value: n(r.active), tone: r.active ? 'good' : 'bad' },
-      ...(r.notActive ? [{ label: 'Not active yet (review or confirmation)', value: String(r.notActive), tone: 'warn' }] : []),
-      ...(r.unsubscribed ? [{ label: 'Unsubscribed', value: n(r.unsubscribed) }] : []),
-      ...(r.bounced ? [{ label: 'Bounced', value: n(r.bounced) }] : []),
-      ...(r.names?.confirmations ? [{ label: 'Asked by Zoho to confirm by email', value: String(r.names.confirmations), tone: 'warn' }] : []),
-      ...(r.consent?.noConsent ? [{ label: 'Left out: no marketing consent', value: String(r.consent.noConsent) }] : []),
-      ...zohoSide
-    ];
-  }
-
-  /** The campaign opened in Zoho to send it there by hand (the first send to newly uploaded contacts). */
-  openedInZoho: number | null = null;
-
-  /** This campaign's page in Zoho Campaigns (or Zoho Campaigns itself when its Zoho id is not known). */
-  zohoCampaignUrl(c: any): string {
-    const base = String(this.zoho?.connection?.webUrl || 'https://campaigns.zoho.com').replace(/\/$/, '');
-    const id = /^\d{5,25}$/.test(String(c?.zohoCampaignId || '')) ? c.zohoCampaignId : null;
-    const org = /^\d{5,20}$/.test(String(this.zoho?.connection?.webOrg || '')) ? `org${this.zoho.connection.webOrg}/` : '';
-    return id ? `${base}/campaigns/${org}home.do#emailcampaign/${id}/cmpdetails` : `${base}/campaigns/${org}home.do`;
-  }
-
-  /** A Zoho Campaigns address pasted once: its org number makes the links open campaigns directly. */
-  zohoOrgInput = '';
-  saveZohoOrg(): void {
-    const value = this.zohoOrgInput.trim();
-    if (!value || this.busy) return;
-    this.busy = 'org';
-    this.http.put<any>(`${apiRoot()}/api/v1/mail/zoho/web-org`, { value }).subscribe({
-      next: r => {
-        this.busy = ''; this.zohoOrgInput = '';
-        this.zoho = { ...this.zoho, connection: { ...(this.zoho?.connection || {}), webOrg: r.webOrg } };
-        this.toast.emit('Saved. "Open in Zoho" now opens the campaign directly.');
-      },
-      error: e => { this.busy = ''; this.toast.emit(this.err(e)); }
-    });
-  }
-
-  /** Back from Zoho after sending it there: check Zoho right away, so it shows as sent without another click. */
-  @HostListener('window:focus')
-  onReturnFromZoho(): void {
-    if (!this.openedInZoho || this.selected?.id !== this.openedInZoho || !this.waitingForZoho(this.selected) || this.busy) return;
-    this.refresh();
-  }
-
   refresh(): void {
     this.busy = 'refresh';
     this.http.post<any>(`${this.base}/${this.selected.id}/refresh`, {}).subscribe({
-      next: r => {
-        this.busy = '';
-        const wasWaiting = this.openedInZoho === r.campaign?.id;
-        this.setSelected(r.campaign); this.load();
-        if (wasWaiting && r.campaign.status === 'submitted') { this.openedInZoho = null; this.toast.emit('Zoho has sent it. It now shows as submitted.'); }
-      },
+      next: r => { this.busy = ''; this.setSelected(r.campaign); this.load(); },
       error: e => { this.busy = ''; this.toast.emit(this.err(e)); }
-    });
-  }
-
-  resolve(): void {
-    if (!confirm('Only after checking: Zoho does not show this campaign as prepared or sent. Mark the last attempt as not done so it can be sent again?')) return;
-    this.http.post<any>(`${this.base}/${this.selected.id}/resolve`, { confirm: true }).subscribe({
-      next: r => { this.setSelected(r.campaign); this.load(); this.toast.emit('Marked as not done. You can send it again.'); },
-      error: e => { this.toast.emit(this.err(e)); this.open(this.selected); }
     });
   }
 
@@ -736,7 +604,7 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
 
   removeCampaign(c: any): void {
     const msg = c.status === 'submitted'
-      ? `Delete "${c.name}" from Marketech.ai?\n\nIts results and recipient activity will no longer show here. The campaign and its report stay in Zoho Campaigns. People who unsubscribed or bounced are kept in the stop-list.`
+      ? `Delete "${c.name}"?\n\nIts results and recipient activity will no longer show here. People who unsubscribed or bounced are kept in the stop-list.`
       : `Delete "${c.name}"?`;
     if (!confirm(msg)) return;
     this.http.delete<any>(`${this.base}/${c.id}`).subscribe({
@@ -745,16 +613,8 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
     });
   }
 
-  /** Zoho is holding the send (reviewing contacts new to it) and usually sends it by itself later. */
-  waitingForZoho(c: any): boolean {
-    return !!c && c.status === 'needs_review' && c.providerCode === 'ZOHO_HELD';
-  }
-
-  statusLabel(s: string, c?: any): string {
-    if (this.waitingForZoho(c)) return 'Waiting for Zoho';
-    if (c?.provider === 'ses' && s === 'submitted') return 'Sent with Amazon SES';
-    if (c?.provider === 'ses' && s === 'submitting') return 'Sending…';
-    return ({ draft: 'Draft', approved: 'Approved', submitting: 'Submitting…', submitted: 'Submitted to Zoho', failed: 'Not sent', needs_review: 'Unknown — check' } as any)[s] || s;
+  statusLabel(s: string): string {
+    return ({ draft: 'Draft', approved: 'Approved', submitting: 'Sending…', submitted: 'Sent', failed: 'Not sent' } as any)[s] || s;
   }
 
   private err(e: any): string {

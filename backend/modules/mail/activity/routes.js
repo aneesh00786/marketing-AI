@@ -6,7 +6,7 @@ const { requireCapability } = require('../../../middleware/auth');
 /**
  * Mail activity for the Mail Center: chart data for the Overview and the campaign log, plus the
  * shared SQL the Inbox / Sent Mail lists use (modules/mail/routes.js). Read-only and workspace-scoped (the workspace always comes from the session). Counts come
- * from what the app recorded — emails, AI campaign sends, delivery tracking and Zoho reports —
+ * from what the app recorded — emails, AI campaign sends, delivery tracking and campaign reports —
  * nothing is estimated, and nothing here contacts a provider.
  */
 const router = express.Router();
@@ -141,7 +141,7 @@ router.get('/summary', requireCapability('mail.view'), wrap(async (req, res) => 
 
 const isoDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const campaignLogQuery = z.object({
-  type: z.enum(['ai', 'zoho']).optional(),
+  type: z.enum(['ai', 'email']).optional(),
   from: isoDay.optional(),
   to: isoDay.optional(),
   page: z.coerce.number().int().min(1).max(1000).optional()
@@ -156,17 +156,16 @@ function dayRange(col, q) {
 }
 
 /**
- * Campaign log: only campaigns that have sent — AI Campaigns with at least one email sent and Zoho
- * Campaigns submitted to Zoho (or whose submission outcome is unknown and must be checked). Drafts,
- * approved-but-unsent and failed campaigns are not listed. With a date range, an AI campaign is
- * listed when it sent within the range (and "sent" counts those emails); a Zoho campaign when it was
- * submitted within the range.
+ * Campaign log: only campaigns that have sent — AI Campaigns with at least one email sent and email
+ * campaigns sent with Amazon SES. Drafts, approved-but-unsent and failed campaigns are not listed.
+ * With a date range, an AI campaign is listed when it sent within the range (and "sent" counts those
+ * emails); an email campaign when it was sent within the range.
  */
 router.get('/campaigns', requireCapability('mail.view'), wrap(async (req, res) => {
   const q = parse(campaignLogQuery, req.query);
   const page = q.page || 1;
   const sr = dayRange('s.sent_at', q);
-  const ai = q.type === 'zoho' ? [] : await all(
+  const ai = q.type === 'email' ? [] : await all(
     `SELECT c.id, c.name, c.status, c.created_at, c.approved_at, c.completed_at, c.updated_at, c.last_error,
             (SELECT COUNT(*) FROM outreach_recipients r WHERE r.workspace_id = c.workspace_id AND r.campaign_id = c.id) AS recipients,
             (SELECT COUNT(*) FROM outreach_recipients r WHERE r.workspace_id = c.workspace_id AND r.campaign_id = c.id AND r.status = 'replied') AS replied,
@@ -180,11 +179,11 @@ router.get('/campaigns', requireCapability('mail.view'), wrap(async (req, res) =
      WHERE c.workspace_id = ?
        AND EXISTS (SELECT 1 FROM outreach_sends s WHERE s.workspace_id = c.workspace_id AND s.campaign_id = c.id AND s.status = 'sent'${sr.sql})`,
     [...sr.params, ...sr.params, ...sr.params, ws(req), ...sr.params]);
-  const zr = dayRange('submitted_at', q);
-  const zoho = q.type === 'ai' ? [] : await all(
+  const er = dayRange('submitted_at', q);
+  const email = q.type === 'ai' ? [] : await all(
     `SELECT id, name, status, zoho_status, report_json, provider_message, created_at, approved_at, submitted_at, updated_at
-     FROM mail_campaigns WHERE workspace_id = ? AND status IN ('submitted', 'needs_review') AND submitted_at IS NOT NULL${zr.sql}`,
-    [ws(req), ...zr.params]);
+     FROM mail_campaigns WHERE workspace_id = ? AND status = 'submitted' AND submitted_at IS NOT NULL${er.sql}`,
+    [ws(req), ...er.params]);
 
   const items = [
     ...ai.map(c => ({
@@ -194,11 +193,11 @@ router.get('/campaigns', requireCapability('mail.view'), wrap(async (req, res) =
       replied: num(c.replied), bounced: num(c.bounced), unsubscribed: num(c.unsubscribed), opened: null,
       note: c.last_error || null
     })),
-    ...zoho.map(c => {
+    ...email.map(c => {
       const r = json(c.report_json, null) || {};
       const n = k => (r[k] === undefined || r[k] === null || r[k] === '' ? null : num(r[k]));
       return {
-        type: 'zoho', id: c.id, name: c.name, status: c.status, providerStatus: c.zoho_status || null,
+        type: 'email', id: c.id, name: c.name, status: c.status, providerStatus: c.zoho_status || null,
         createdAt: c.created_at, approvedAt: c.approved_at, startedAt: c.submitted_at, sentAt: c.submitted_at, lastActivityAt: c.submitted_at,
         recipients: null, sent: n('emails_sent_count'), failed: n('unsent_count'),
         replied: null, bounced: n('bounces_count'), unsubscribed: n('unsub_count'), opened: n('opens_count'),

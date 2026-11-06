@@ -1,15 +1,15 @@
 /**
  * "Fill in the template": finds the [bracketed] parts of an email and its sample links
  * (example.com), and puts the typed values into the HTML. Detection matches the server's
- * approval check (backend/lib/mailContent.js): visible text only, Zoho merge tags ignored.
+ * approval check (backend/lib/mailContent.js): visible text only, merge tags ignored.
  */
 const PLACEHOLDER_RE = /\[[^[\]{}<>\n]{0,80}[A-Za-z][^[\]{}<>\n]{0,80}\]/g;
-const ZOHO_TAG_RE = /\$\[[^\]\n]{1,80}\]\$/g;
+const MERGE_TAG_RE = /\$\[[^\]\n]{1,80}\]\$/g;
 const SAMPLE_LINK_RE = /href=(["'])(https?:\/\/(?:www\.)?example\.(?:com|org|net)\b[^"']*)\1/gi;
 
 function visibleText(html: string): string {
   return String(html || '')
-    .replace(ZOHO_TAG_RE, ' ')
+    .replace(MERGE_TAG_RE, ' ')
     .replace(/<!--[\s\S]*?-->/g, ' ')
     .replace(/<(style|script|head)[\s\S]*?<\/\1>/gi, ' ')
     .replace(/<[^>]+>/g, ' ')

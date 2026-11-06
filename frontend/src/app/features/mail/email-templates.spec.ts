@@ -28,7 +28,6 @@ describe('EmailTemplatesComponent', () => {
     fixture = TestBed.createComponent(EmailTemplatesComponent);
     comp = fixture.componentInstance;
     fixture.detectChanges();
-    http.expectNone(`${apiRoot()}/api/v1/mail/zoho/status`); // permissions no longer depend on Zoho
     http.expectOne(`${BASE}/categories`).flush({ categories: ['Newsletter', 'Custom'], tokens: ['first_name', 'company'], canManage: canCompose, limits: { htmlKb: 1024, zipMb: 10 } });
     const list = http.expectOne(r => r.url === BASE);
     expect(list.request.params.get('thumbs')).withContext('thumbnails requested').toBe('1');

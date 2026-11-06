@@ -5,8 +5,7 @@ const emailService = require('../../../services/emailService');
 
 /**
  * Contact lists kept in Marketech.ai (mail_lists, mail_contacts, mail_list_members). Lists are
- * created and changed here only; Zoho gets a list when a campaign is sent to it. A person is stored
- * once per workspace; their status is per list (subscribed, unsubscribed, bounced). The workspace
+ * created and changed here only. A person is stored once per workspace; their status is per list (subscribed, unsubscribed, bounced). The workspace
  * stop-list (email_suppressions) always wins: such people are shown as not reachable and never sent to.
  */
 const ws = ctx => ctx.auth.workspaceId;
@@ -55,7 +54,7 @@ async function requireList(ctx, id) {
 /** Every list with its counts: all members, and those that can be emailed (subscribed, not on the stop-list). */
 async function lists(ctx) {
   const rows = await all(
-    `SELECT l.id, l.name, l.source, l.zoho_list_key, l.created_at, l.updated_at,
+    `SELECT l.id, l.name, l.source, l.created_at, l.updated_at,
        COUNT(m.contact_id) AS total,
        SUM(m.status = 'subscribed' AND s.email IS NULL AND ${require('./consent').eligibleSql('c')}) AS reachable,
        SUM(m.status = 'subscribed' AND s.email IS NULL AND NOT ${require('./consent').eligibleSql('c')}) AS no_consent
@@ -67,11 +66,10 @@ async function lists(ctx) {
      GROUP BY l.id ORDER BY l.name`, [ws(ctx)]);
   return {
     lists: rows.map(r => ({
-      id: r.id, name: r.name, source: r.source, inZoho: !!r.zoho_list_key, zohoListKey: r.zoho_list_key || null,
+      id: r.id, name: r.name, source: r.source,
       total: Number(r.total) || 0, reachable: Number(r.reachable) || 0, noConsent: Number(r.no_consent) || 0, createdAt: r.created_at, updatedAt: r.updated_at
     })),
     contacts: Number((await get('SELECT COUNT(*) AS n FROM mail_contacts WHERE workspace_id = ?', [ws(ctx)])).n) || 0,
-    sync: await require('./zohoImport').importStatus(ws(ctx))
   };
 }
 
@@ -193,7 +191,7 @@ async function listContacts(ctx, id, { status = 'all', q = '', page = 1 } = {}) 
   // Marketing consent, by the same rule as campaign uploads (contacts/consent.js): withdrawn on any lead wins.
   const withdrawn = new Set(leads.filter(l => l.marketing_consent === 'withdrawn').map(l => l.email));
   const granted = new Set(leads.filter(l => l.marketing_consent === 'granted' && l.marketing_consent_method && l.marketing_consent_evidence).map(l => l.email));
-  const consentOf = r => (withdrawn.has(r.email) ? 'withdrawn' : r.source === 'zoho' ? 'zoho' : granted.has(r.email) ? 'granted' : 'none');
+  const consentOf = r => (withdrawn.has(r.email) ? 'withdrawn' : r.source === 'zoho' ? 'imported' : granted.has(r.email) ? 'granted' : 'none');
   return {
     contacts: pageRows.map(r => ({
       id: r.id, email: r.email,
@@ -218,28 +216,14 @@ async function removeContacts(ctx, id, body) {
 }
 
 /**
- * Deletes a list. where: 'here' (Marketech.ai only; its Zoho list, if any, is not touched),
- * 'zoho' (its Zoho list only; kept here, unlinked) or 'both'. People stay in the workspace's
- * contacts and the stop-list keeps every opt-out. Zoho contacts are never deleted.
+ * Deletes a list. People stay in the workspace's contacts and the stop-list keeps every opt-out.
  */
 async function deleteList(ctx, id, body) {
   const list = await requireList(ctx, id);
-  const where = body?.where;
-  if (!['here', 'zoho', 'both'].includes(where)) throw httpError(400, 'Choose where to delete the list: here, zoho or both.', 'VALIDATION_ERROR');
   if (body?.confirm !== true) throw httpError(400, 'Explicit confirmation (confirm: true) is required.', 'CONFIRMATION_REQUIRED');
-  if (where !== 'here') {
-    if (!list.zoho_list_key) throw httpError(409, 'This list is not in Zoho.', 'NOT_IN_ZOHO');
-    if (!ctx.auth.capabilities.has('mail.configure')) throw httpError(403, 'Only an Owner or Admin can delete lists in Zoho.', 'FORBIDDEN');
-    try {
-      await require('../zoho/zohoLists').deleteList(ctx, list.zoho_list_key, { confirm: true });
-    } catch (err) {
-      if (err.code !== 'NOT_FOUND') throw err; // already gone in Zoho: just unlink
-    }
-    await run('UPDATE mail_lists SET zoho_list_key = NULL, updated_at = UTC_TIMESTAMP() WHERE id = ?', [list.id]);
-  }
-  if (where !== 'zoho') await run('DELETE FROM mail_lists WHERE id = ? AND workspace_id = ?', [list.id, ws(ctx)]);
-  await audit(ctx, 'mail.list_deleted', { resourceType: 'mail_list', resourceId: list.id, metadata: { where } });
-  return { deleted: true, where };
+  await run('DELETE FROM mail_lists WHERE id = ? AND workspace_id = ?', [list.id, ws(ctx)]);
+  await audit(ctx, 'mail.list_deleted', { resourceType: 'mail_list', resourceId: list.id });
+  return { deleted: true };
 }
 
 module.exports = { lists, create, addContacts, listContacts, removeContacts, deleteList, upsertContacts, requireList, PAGE_SIZE };

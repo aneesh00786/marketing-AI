@@ -306,7 +306,7 @@
       </div>
       <div class="header-actions">
         <button class="btn btn-accent" (click)="openExcelImport()">📂 Import Excel / CSV</button>
-        <button *ngIf="canSendCampaigns" class="btn btn-secondary" type="button" (click)="showLeadsToZoho = true" title="Put leads into a contact list to email them with a campaign">📤 Add to contact list</button>
+        <button *ngIf="canSendCampaigns" class="btn btn-secondary" type="button" (click)="showLeadsToList = true" title="Put leads into a contact list to email them with a campaign">📤 Add to contact list</button>
         <div class="export-menu">
           <button class="btn btn-secondary" type="button" (click)="leadExportOpen = !leadExportOpen" [disabled]="leadExporting || !leadTotal" aria-haspopup="menu" [attr.aria-expanded]="leadExportOpen"
                   [title]="leadTotal ? 'Download the ' + leadTotal + ' lead(s) that match the current filters' : 'No leads to export'">
@@ -360,7 +360,7 @@
             <th>Product</th>
             <th>Budget</th>
             <th>Status</th>
-            <th title="Marketing email consent: Zoho campaigns go only to people whose consent is recorded with evidence">Consent</th>
+            <th title="Marketing email consent: campaigns go only to people whose consent is recorded with evidence">Consent</th>
             <th title="Rule-based score: contact details, budget and buying-intent words">Lead score (rule-based)</th>
             <th>AI follow-up advice</th>
             <th>Actions</th>
@@ -441,7 +441,7 @@
         [imapReady]="mailConfigLoaded ? !!mailConfig.has_imap_auth : null" [mailboxVersion]="mailboxVersion"
         (compose)="openCompose()" (reply)="replyToEmail($event)" (forward)="forwardEmail($event)" (smartReply)="applySmartReply($event.reply, $event.email)" (sendAgain)="sendEmailAgain($event)"
         [draftTemplate]="draftTemplate" (templateConsumed)="draftTemplate = null" [draftProduct]="draftProduct" (productConsumed)="draftProduct = null"
-        [campaignStartTemplate]="campaignStartTemplate" [zohoOauthResult]="zohoOauthResult" (templateUse)="onTemplateUse($event)"
+        [campaignStartTemplate]="campaignStartTemplate" (templateUse)="onTemplateUse($event)"
         (toast)="showToast($event)" (draftsChanged)="loadDrafts()" (mailSent)="onMailboxChanged()" (settingsChanged)="loadMailConfig(); onMailboxChanged()">
         <div mcStatus class="mail-auth-status-bar" [class.connected]="mailConfig.has_smtp_auth">
           <div class="status-left">
@@ -770,8 +770,8 @@
   </div>
 
   <!-- Playbook -> Mail Drafts for explicitly selected leads (never sends) -->
-  <app-leads-to-zoho *ngIf="showLeadsToZoho" (closed)="showLeadsToZoho = false" (toast)="showToast($event)"
-    (openCampaigns)="showLeadsToZoho = false; navigate('emails', 'campaigns')"></app-leads-to-zoho>
+  <app-leads-to-list *ngIf="showLeadsToList" (closed)="showLeadsToList = false" (toast)="showToast($event)"
+    (openCampaigns)="showLeadsToList = false; navigate('emails', 'campaigns')"></app-leads-to-list>
 
   <div *ngIf="dispatchIdea" class="modal-backdrop" (click)="closeDispatch()">
     <div class="modal-card wide-modal" role="dialog" aria-modal="true" aria-labelledby="dispatch-title" (click)="$event.stopPropagation()">
@@ -954,11 +954,11 @@
           <p class="helper-text" *ngIf="excelPreviewRows.length > 8">Showing 8 of {{ excelPreviewRows.length }} rows.</p>
         </div>
 
-        <app-import-sync-options *ngIf="excelPreviewRows.length > 0 && !leadImportResult" [sync]="importSync" [canZoho]="canSendCampaigns"></app-import-sync-options>
+        <app-import-sync-options *ngIf="excelPreviewRows.length > 0 && !leadImportResult" [sync]="importSync" [canList]="canSendCampaigns"></app-import-sync-options>
 
         <div *ngIf="leadImportResult" class="lead-import-result">
           <strong>Import finished:</strong> {{ leadImportResult.imported }} imported<span *ngIf="leadImportResult.flagged.length">, {{ leadImportResult.flagged.length }} need product review</span><span *ngIf="leadImportResult.duplicates.length">, {{ leadImportResult.duplicates.length }} already in Leads (not duplicated)</span><span *ngIf="leadImportResult.skipped.length">, {{ leadImportResult.skipped.length }} rows skipped</span><span *ngIf="leadImportResult.consentRecorded">, consent recorded for {{ leadImportResult.consentRecorded }}</span>.
-          <div *ngIf="leadImportResult.list" class="lead-import-zoho">
+          <div *ngIf="leadImportResult.list" class="lead-import-list">
             <ng-container *ngIf="!leadImportResult.list.error">✓ {{ leadImportResult.list.added }} in contact list “{{ leadImportResult.list.list?.name }}”.</ng-container>
             <ng-container *ngIf="leadImportResult.list.error">⚠ Contact list: {{ leadImportResult.list.error }}</ng-container>
           </div>

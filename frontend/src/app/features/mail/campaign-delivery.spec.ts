@@ -4,7 +4,7 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { CampaignDeliveryComponent } from './campaign-delivery.component';
 
 const SETTINGS = (over: any = {}) => ({
-  provider: 'zoho', canConfigure: true,
+  provider: 'ses', canConfigure: true,
   ses: { configured: false, source: null, region: null, accessKeyId: null, hasSecret: false, configurationSet: null, maxPerSecond: null, notificationUrl: 'https://app.test/api/v1/mail/t/webhooks/ses/abc', snsTopicArn: null, lastCheckedAt: null, lastError: null, ...(over.ses || {}) },
   ...over, ...(over.ses ? { ses: { configured: false, source: null, region: null, accessKeyId: null, hasSecret: false, configurationSet: null, maxPerSecond: null, notificationUrl: 'https://app.test/api/v1/mail/t/webhooks/ses/abc', snsTopicArn: null, ...over.ses } } : {})
 });
@@ -25,13 +25,10 @@ describe('CampaignDeliveryComponent (Mail Settings → Campaigns)', () => {
   });
   afterEach(() => http.verify());
 
-  it('Zoho is the default; Amazon SES can be chosen only once its connection is set up', () => {
+  it('says what is missing until the Amazon SES connection is set up', () => {
     http.expectOne(r => r.url.endsWith(url)).flush(SETTINGS());
     fixture.detectChanges();
-    const radios = Array.from(el().querySelectorAll('input[type=radio]')) as HTMLInputElement[];
-    expect(radios.map(r => r.checked)).toEqual([true, false]);
-    expect(radios[1].disabled).withContext('SES not set up').toBeTrue();
-    expect(el().textContent).toContain('Set up the connection below first.');
+    expect(el().querySelectorAll('input[type=radio]').length).withContext('Amazon SES is the only sender: nothing to choose').toBe(0);
     expect(el().textContent).toContain('Not set up yet: region, access key ID, secret access key are missing.');
     expect(el().textContent).withContext('the SNS steps show even before the connection is complete').toContain('Delivery reports (Amazon SNS)');
     comp.s = { ...comp.s, ses: { ...comp.s.ses, notificationUrl: 'http://localhost:8000/api/v1/mail/t/webhooks/ses/abc' } };
@@ -57,16 +54,11 @@ describe('CampaignDeliveryComponent (Mail Settings → Campaigns)', () => {
     again.flush(SETTINGS({ ses: { configured: true, source: 'workspace', hasSecret: true } }));
   });
 
-  it('choosing Amazon SES asks first; the test shows the account state; the SNS endpoint is shown with the steps', () => {
+  it('the test shows the account state; the SNS endpoint is shown with the steps', () => {
     http.expectOne(r => r.url.endsWith(url)).flush(SETTINGS({ ses: { configured: true, source: 'workspace', region: 'us-east-1', hasSecret: true } }));
     fixture.detectChanges();
     expect(el().textContent).toContain('https://app.test/api/v1/mail/t/webhooks/ses/abc');
     expect(el().textContent).toContain('No SNS subscription confirmed yet.');
-    spyOn(window, 'confirm').and.returnValue(true);
-    comp.setProvider('ses');
-    const put = http.expectOne(r => r.method === 'PUT' && r.url.endsWith(url));
-    expect(put.request.body).toEqual({ provider: 'ses' });
-    put.flush(SETTINGS({ provider: 'ses', ses: { configured: true } }));
     comp.test();
     http.expectOne(r => r.method === 'POST' && r.url.endsWith('/api/v1/mail/ses/test')).flush({ ok: true, account: { productionAccess: false }, message: 'Connected, but the account is in the SES sandbox.' });
     fixture.detectChanges();

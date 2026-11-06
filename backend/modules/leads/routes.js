@@ -83,7 +83,7 @@ router.post('/', requireCapability('leads.manage'), body(z.object(leadFields)), 
  *   leads (and on matching existing leads whose consent is unknown; withdrawn consent is never
  *   overridden).
  * - mailList: also add them to a contact list in Marketech.ai ({ id }) or a new one ({ name }).
- *   Zoho gets them when a campaign is sent to that list. A list problem never undoes the import.
+ *   A list problem never undoes the import.
  */
 const importConsent = z.object({
   method: z.enum(productEmails.CONSENT_METHODS),

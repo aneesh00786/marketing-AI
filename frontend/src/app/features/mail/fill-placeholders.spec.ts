@@ -22,7 +22,7 @@ describe('Fill in the template (placeholders)', () => {
     expect(describePlaceholder('[Your name]')).toEqual({ label: 'Your name', hint: '' });
   });
 
-  it('fills typed values (escaped) and links; leaves empty ones and Zoho merge tags alone', () => {
+  it('fills typed values (escaped) and links; leaves empty ones and merge tags alone', () => {
     const out = fillPlaceholders(sample, { '[Your name]': 'Aneesh <CEO>', '[Benefit 1, e.g. next-day delivery]': 'Next-day delivery', '[Your role]': '  ' },
       { 'https://example.com': 'https://brightcart.com/book' });
     expect(out).toContain('Aneesh &lt;CEO&gt;');

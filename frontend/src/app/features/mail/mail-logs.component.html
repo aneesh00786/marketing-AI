@@ -31,7 +31,7 @@
           <select class="hud-input" name="ctype" [(ngModel)]="campaignType" (ngModelChange)="loadCampaigns(1)">
             <option value="">All sent campaigns</option>
             <option value="ai">AI Campaigns (sequences)</option>
-            <option value="zoho">Zoho Campaigns</option>
+            <option value="email">Email campaigns</option>
           </select>
         </label>
         <button type="button" class="ml-link" (click)="openSection.emit('campaigns')">Open Campaigns →</button>
@@ -47,7 +47,7 @@
               <tr *ngFor="let c of campaigns.campaigns">
                 <td class="nowrap">{{ c.sentAt ? (c.sentAt | date:'MMM d, y, h:mm a') : '—' }}</td>
                 <td class="subj"><strong>{{ c.name }}</strong><small class="detail" *ngIf="c.note">{{ c.note }}</small></td>
-                <td>{{ c.type === 'ai' ? 'AI Campaign' : 'Zoho' }}</td>
+                <td>{{ c.type === 'ai' ? 'AI Campaign' : 'Email campaign' }}</td>
                 <td><span class="mx-tag" [ngClass]="tone(c.status)">{{ statusLabel(c.status) }}</span></td>
                 <td class="num">{{ n(c.recipients) }}</td>
                 <td class="num">{{ n(c.sent) }}</td>
@@ -59,7 +59,7 @@
             </tbody>
           </table>
         </div>
-        <p class="muted small">“Sent” is the latest send for AI Campaigns and the submission time for Zoho. “—” means the number is not available for that campaign type (Zoho reports opens; AI Campaigns record replies).</p>
+        <p class="muted small">“Sent” is the latest send for AI Campaigns and the send time for email campaigns. “—” means the number is not available for that campaign type.</p>
         <div class="ml-pager" *ngIf="campaignPage > 1 || campaigns.hasMore">
           <button type="button" class="btn btn-secondary btn-sm" (click)="loadCampaigns(campaignPage - 1)" [disabled]="campaignPage <= 1 || campaignsLoading">← Newer</button>
           <span class="muted small">Page {{ campaignPage }}</span>

@@ -611,7 +611,7 @@ const PURPOSE_REASON_TEXT = {
   template_unknown: 'the template is not one of this workspace\'s templates',
   template_marketing_category: 'it uses a marketing template',
   matches_marketing_template: 'it contains a marketing template',
-  zoho_merge_tags: 'it contains Zoho Campaigns merge tags',
+  merge_tags: 'it contains campaign merge tags',
   unsubscribe_wording: 'it contains unsubscribe wording',
   promotional_phrases: 'it contains promotional wording'
 };

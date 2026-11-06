@@ -409,7 +409,7 @@ function headerBlock(c, t, brand, logoId) {
   const mark = logoId
     ? `<img src="mkt-asset://${logoId}" alt="${name}" height="40" style="display:block;height:40px;max-width:220px;border:0;" />`
     : `<span style="font-size:22px;font-weight:bold;color:${onBar ? t.ink : t.accentText};font-family:${t.font};">${name}</span>`;
-  const view = `<a href="$[LI:VIEWINBROWSER]$" style="color:${onBar ? t.ink : t.muted};font-size:12px;">View in browser</a>`;
+  const view = ''; // no "view in browser" page: campaigns are sent one by one with Amazon SES
   if (onBar) {
     return `
       <tr><td style="padding:16px 32px;background:${t.color};"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
@@ -587,7 +587,7 @@ function footerBlock(t, brand, socials, address) {
       <tr><td style="padding:22px 32px;background:${t.footer};border-top:1px solid ${t.line};font-size:12px;line-height:1.6;color:${t.muted};text-align:center;">
         ${links.length ? `<p style="margin:0 0 12px;font-size:13px;">${links.join(' &nbsp;·&nbsp; ')}</p>` : ''}
         <p style="margin:0 0 8px;">You are receiving this email because you are a contact of ${name}.</p>
-        <p style="margin:0 0 8px;">${address ? esc(address).replace(/\n/g, '<br />') : '$[HF:ORGADDRESS]$'}</p>
+        <p style="margin:0 0 8px;">${address ? esc(address).replace(/\n/g, '<br />') : '[Your company address]'}</p>
         <p style="margin:0;"><a href="$[LI:UNSUBSCRIBE]$" style="color:${t.muted};">Unsubscribe</a></p>
       </td></tr>`;
 }

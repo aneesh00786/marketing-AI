@@ -762,7 +762,7 @@ button.dropdown-item:disabled { opacity: 0.6; cursor: default; }
 .export-options button { text-align: left; background: none; border: 0; padding: 9px 10px; border-radius: 6px; color: var(--text); font-size: 0.86rem; cursor: pointer; }
 .export-options button:hover { background: var(--surface-hover); }
 .export-hint { padding: 6px 10px 4px; font-size: 0.74rem; color: var(--text-muted); border-top: 1px solid var(--border); margin-top: 4px; }
-.lead-import-zoho { margin-top: 6px; }
+.lead-import-list { margin-top: 6px; }
 
 /* Marketing consent badge on the Leads table (click to record consent). */
 .consent-badge { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--surface-muted, rgba(100, 116, 139, 0.12)); color: var(--text-muted); }

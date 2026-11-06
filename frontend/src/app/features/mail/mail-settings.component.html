@@ -102,12 +102,9 @@
 
     <app-mail-tracking-settings *ngSwitchCase="'tracking'" [startOpen]="true" (toast)="toast.emit($event)"></app-mail-tracking-settings>
 
-    <!-- Campaigns: which service sends them (Zoho Campaigns or Amazon SES), then each service's connection -->
-    <div *ngSwitchCase="'campaigns'" class="ms-zoho">
+    <!-- Campaigns: the Amazon SES connection that sends them -->
+    <div *ngSwitchCase="'campaigns'" class="ms-campaigns">
       <app-campaign-delivery (toast)="toast.emit($event)"></app-campaign-delivery>
-      <h3 class="mx-subhead ms-campaign-zoho">Zoho Campaigns connection</h3>
-      <app-zoho-app-settings (toast)="toast.emit($event)" (changed)="zohoConn.loadStatus()"></app-zoho-app-settings>
-      <app-zoho-campaigns #zohoConn [inSettings]="true" (toast)="toast.emit($event)"></app-zoho-campaigns>
       <p class="mx-desc">Campaigns themselves are written and approved in <button type="button" class="link-btn" (click)="openSection.emit('campaigns')">Campaigns</button>.</p>
     </div>
   </div>

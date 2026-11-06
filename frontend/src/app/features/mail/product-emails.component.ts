@@ -81,7 +81,7 @@ export class ProductEmailsComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     this.form.senderName = this.auth.user?.displayName || '';
-    this.http.get<any>(`${apiRoot()}/api/v1/mail/zoho/status`).subscribe({ next: r => this.caps = { compose: !!r.canCompose, send: !!r.canSend, configure: !!r.canConfigure } });
+    this.http.get<any>(`${apiRoot()}/api/v1/mail/ses/settings`).subscribe({ next: r => this.caps = { compose: !!r.canCompose, send: !!r.canSend, configure: !!r.canConfigure } });
     this.loadDelivery();
     this.http.get<any>(`${apiRoot()}/api/v1/products`).subscribe({ next: r => this.products = r.products || [] });
   }

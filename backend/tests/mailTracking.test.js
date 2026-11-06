@@ -4,7 +4,7 @@ const crypto = require('crypto');
 const h = require('./helpers');
 
 // Email tracking. ZeptoMail and SMTP are mocked (nothing is sent); ZeptoMail webhooks are
-// simulated with locally signed requests; Zoho is stubbed at the service boundary. These tests do
+// simulated with locally signed requests. These tests do
 // NOT show that real provider events arrive in this format (see the final report).
 const db = () => h.db();
 const tracking = () => require('../modules/mail/tracking/trackingService');
@@ -478,68 +478,6 @@ test('retention removes old events and links; summaries stay', async () => {
   assert.equal((await db().get('SELECT open_events FROM mail_message_tracking WHERE id = ?', [row.id])).open_events, row.open_events);
 });
 
-// ------------------------------------------------------------------ Zoho per-recipient activity
-
-test('Zoho per-recipient activity: mail.send roles only, read on demand, nothing stored, unsent campaigns say so', async () => {
-  const zsvc = require('../modules/mail/zoho/zohoService');
-  const original = zsvc.readCall;
-  const seen = [];
-  zsvc.readCall = async (wsId, endpoint, params) => {
-    seen.push({ wsId, endpoint, params });
-    if (params.action === 'clickedcontacts') return { list_of_details: [] };
-    return { list_of_details: [{ contact_email: 'ann@acme.io', firstname: 'Ann', lastname: 'Lee', secret_field: 'x' }, { contact_email: 'bo@acme.io' }] };
-  };
-  try {
-    const sent = await db().run("INSERT INTO mail_campaigns (workspace_id, name, status, zoho_campaign_key, created_at, updated_at) VALUES (?, 'Spring', 'submitted', 'zk-1', UTC_TIMESTAMP(), UTC_TIMESTAMP())", [A.workspaceId]);
-    const draft = await db().run("INSERT INTO mail_campaigns (workspace_id, name, status, created_at, updated_at) VALUES (?, 'Draft', 'draft', UTC_TIMESTAMP(), UTC_TIMESTAMP())", [A.workspaceId]);
-    const member = await h.addMember(A.workspaceId, 'Member');
-    const approver = await h.addMember(A.workspaceId, 'Approver');
-    const mm = await h.addMember(A.workspaceId, 'Marketing Manager');
-    assert.equal((await h.api('GET', `/api/v1/mail/campaigns/${sent.lastID}/recipients?activity=opened`, { token: member.token })).status, 403);
-    for (const who of [A, approver, mm]) {
-      const r = await h.api('GET', `/api/v1/mail/campaigns/${sent.lastID}/recipients?activity=opened`, { token: who.token });
-      assert.equal(r.status, 200, JSON.stringify(r.data));
-      assert.deepEqual(r.data.recipients.map(x => [x.email, x.name, x.leadId]), [['ann@acme.io', 'Ann Lee', null], ['bo@acme.io', null, null]]);
-      assert.equal(r.data.recipients[0].secret_field, undefined, 'only known fields are passed on');
-    }
-    assert.deepEqual(seen[0], { wsId: A.workspaceId, endpoint: 'getcampaignrecipientsdata', params: { campaignkey: 'zk-1', action: 'openedcontacts', fromindex: '1', range: '50' } });
-    const clicked = await h.api('GET', `/api/v1/mail/campaigns/${sent.lastID}/recipients?activity=clicked&page=2`, { token: A.token });
-    assert.equal(seen.at(-1).params.fromindex, '51');
-    assert.deepEqual(clicked.data.recipients, []);
-    const notSent = await h.api('GET', `/api/v1/mail/campaigns/${draft.lastID}/recipients?activity=opened`, { token: A.token });
-    assert.equal(notSent.data.available, false);
-    assert.equal(notSent.data.reason, 'not_sent');
-    assert.equal((await h.api('GET', `/api/v1/mail/campaigns/${sent.lastID}/recipients?activity=everything`, { token: A.token })).status, 400);
-    assert.equal((await h.api('GET', `/api/v1/mail/campaigns/${sent.lastID}/recipients?activity=opened`, { token: B.token })).status, 404, 'other workspace');
-    assert.ok(await db().get("SELECT 1 AS x FROM audit_logs WHERE action = 'mail.campaign_recipients_viewed' AND resource_id = ?", [String(sent.lastID)]));
-    assert.doesNotMatch(JSON.stringify(await db().all("SELECT metadata_json FROM audit_logs WHERE action = 'mail.campaign_recipients_viewed'")), /ann@acme\.io/, 'addresses not stored');
-  } finally { zsvc.readCall = original; }
-});
-
-test('Zoho per-recipient activity: full details as Zoho returns them, matched to the lead', async () => {
-  const zsvc = require('../modules/mail/zoho/zohoService');
-  const original = zsvc.readCall;
-  zsvc.readCall = async () => ({ list_of_details: [{ contactemailaddress: 'Kim@Shop.com.au', contactfn: 'Kim', contactln: 'Lee', companyname: 'Shop', phone: '', mobile: '0400 111 222',
-    city: 'Sydney', state: 'NSW', country: 'Australia', sentdate: '04 Nov 2026, 11:33 AM', numoftimeopened: '3',
-    openreports: '{1=Nov 04, 2026 11:33 AM, 2=Nov 05, 2026 09:10 AM}' }] });
-  try {
-    const lead = await db().run("INSERT INTO leads (workspace_id, name, email, company_name, phone, status, created_at) VALUES (?, 'Kim Lee', 'kim@shop.com.au', 'Shop Pty Ltd', '0400 000 000', 'Contacted', UTC_TIMESTAMP())", [A.workspaceId]);
-    const sent = await db().run("INSERT INTO mail_campaigns (workspace_id, name, status, zoho_campaign_key, created_at, updated_at) VALUES (?, 'Full', 'submitted', 'zk-2', UTC_TIMESTAMP(), UTC_TIMESTAMP())", [A.workspaceId]);
-    const r = await h.api('GET', `/api/v1/mail/campaigns/${sent.lastID}/recipients?activity=opened`, { token: A.token });
-    assert.equal(r.status, 200, JSON.stringify(r.data));
-    const [k] = r.data.recipients;
-    assert.equal(k.name, 'Kim Lee');
-    assert.equal(k.company, 'Shop Pty Ltd', 'the lead\'s business');
-    assert.equal(k.phone, '0400 000 000');
-    assert.equal(k.location, 'Sydney, NSW, Australia');
-    assert.equal(k.sentAt, '04 Nov 2026, 11:33 AM');
-    assert.equal(k.opens, 3);
-    assert.equal(k.lastOpenedAt, 'Nov 05, 2026 09:10 AM');
-    assert.equal(k.leadId, lead.lastID);
-    assert.equal(k.leadStatus, 'Contacted');
-  } finally { zsvc.readCall = original; }
-});
-
 test('without verified consent, opens and clicks stay off even when the workspace enabled them (delivery is still recorded)', async () => {
   const t1 = await tracking().begin(SM.workspaceId, { draftId: null, consentOk: false });
   const t2 = await tracking().begin(SM.workspaceId, { draftId: null, consentOk: true });
@@ -551,49 +489,6 @@ test('without verified consent, opens and clicks stay off even when the workspac
 });
 
 // ------------------------------------------------------------------ review regressions (2026-10-28)
-
-test('REVIEW: Zoho recipient lists parse the documented response shape (list_of_details[].contactemailaddress)', async () => {
-  const zsvc = require('../modules/mail/zoho/zohoService');
-  const original = zsvc.readCall;
-  // Shape from zoho.com/campaigns/help/developers/campaign-recipient-data.html (JSON sample).
-  zsvc.readCall = async () => ({ status: 'success', code: '0', requestdetails: { range: 20, fromindex: 1 },
-    list_of_details: [{ contactemailaddress: 'john.doe@xyz.com', sent_time: '1375456161000', firstname: 'John', lastname: 'Doe', contactid: '303000014269257', phone: '123' }] });
-  try {
-    const c = await db().run("INSERT INTO mail_campaigns (workspace_id, name, status, zoho_campaign_key, created_at, updated_at) VALUES (?, 'Docs', 'submitted', 'zk-docs', UTC_TIMESTAMP(), UTC_TIMESTAMP())", [A.workspaceId]);
-    const r = await h.api('GET', `/api/v1/mail/campaigns/${c.lastID}/recipients?activity=sent`, { token: A.token });
-    assert.deepEqual(r.data.recipients.map(x => [x.email, x.name, x.phone]), [['john.doe@xyz.com', 'John Doe', '123']]);
-  } finally { zsvc.readCall = original; }
-});
-
-test('REVIEW: getcampaignrecipientsdata is sent as documented (POST, form body) and stays a read call', async () => {
-  const zc = require('../modules/mail/zoho/zohoClient');
-  const seen = [];
-  const mock = h.mockFetch([{ match: u => u.startsWith('https://campaigns.zoho.com/api/v1.1/getcampaignrecipientsdata'),
-    respond: (url, init) => { seen.push({ url, method: init.method, body: init.body, type: init.headers['Content-Type'] }); return h.json(200, { status: 'success', code: '0', list_of_details: [] }); } }]);
-  try { await zc.call(zc.DATA_CENTERS.us, 'tok', 'getcampaignrecipientsdata', { campaignkey: 'k1', action: 'openedcontacts', fromindex: '1', range: '50' }); } finally { mock.restore(); }
-  assert.equal(seen[0].method, 'POST');
-  assert.equal(seen[0].url, 'https://campaigns.zoho.com/api/v1.1/getcampaignrecipientsdata');
-  assert.equal(seen[0].type, 'application/x-www-form-urlencoded');
-  assert.deepEqual(Object.fromEntries(new URLSearchParams(seen[0].body)), { resfmt: 'JSON', campaignkey: 'k1', action: 'openedcontacts', fromindex: '1', range: '50' });
-  // A failed read is a plain error, never an "outcome unknown" write.
-  const down = h.mockFetch([{ match: u => u.includes('getcampaignrecipientsdata'), respond: () => new Error('boom') }]);
-  try { await assert.rejects(zc.call(zc.DATA_CENTERS.us, 'tok', 'getcampaignrecipientsdata', { campaignkey: 'k1', action: 'sentcontacts' }), e => e.code === 'ZOHO_UNREACHABLE' && !e.outcomeUnknown); } finally { down.restore(); }
-});
-
-test('REVIEW: recipient lookups are rate limited per workspace so Zoho\'s 500-per-5-minutes lock cannot be triggered from here', async () => {
-  const zsvc = require('../modules/mail/zoho/zohoService');
-  const original = zsvc.readCall;
-  let calls = 0;
-  zsvc.readCall = async () => { calls++; return { list_of_details: [] }; };
-  const W = await h.createWorkspace({ name: 'Zoho limit' });
-  try {
-    const c = await db().run("INSERT INTO mail_campaigns (workspace_id, name, status, zoho_campaign_key, created_at, updated_at) VALUES (?, 'L', 'submitted', 'zk-l', UTC_TIMESTAMP(), UTC_TIMESTAMP())", [W.workspaceId]);
-    const statuses = [];
-    for (let i = 0; i < 35; i++) statuses.push((await h.api('GET', `/api/v1/mail/campaigns/${c.lastID}/recipients?activity=opened`, { token: W.token })).status);
-    assert.ok(statuses.includes(429), 'limited');
-    assert.ok(calls <= 30, `Zoho called ${calls} times`);
-  } finally { zsvc.readCall = original; }
-});
 
 test('REVIEW: Compose & Send refuses suppressed addresses (bounced, complaint, unsubscribed) before claiming or sending', async () => {
   const addr = `gone-${uid()}@acme.io`;

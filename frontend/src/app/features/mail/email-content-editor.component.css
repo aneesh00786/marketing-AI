@@ -40,7 +40,7 @@ textarea.code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; fon
 @media (max-width: 1400px) { .ec-count { display: none; } }
 .ec-unsub { display: inline-flex; align-items: center; gap: 8px; align-self: flex-start; font-size: 0.86rem; font-weight: 600; color: var(--text); cursor: pointer; }
 
-/* Merge tag default value (Zoho asks for one when a contact field is inserted) */
+/* Merge tag default value (asked for when a contact field is inserted) */
 .ec-merge-ask { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; padding: 10px 12px; border: 1px solid var(--border); border-top: 0; background: var(--surface-2, rgba(127,127,127,.06)); }
 .ec-merge-ask label { display: flex; flex-direction: column; gap: 4px; flex: 1 1 220px; font-size: 0.82rem; }
 .ec-merge-ask input { max-width: 260px; }

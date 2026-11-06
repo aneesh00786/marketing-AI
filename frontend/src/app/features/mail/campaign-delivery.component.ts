@@ -5,8 +5,8 @@ import { HttpClient } from '@angular/common/http';
 import { apiRoot } from '../../core/api-base';
 
 /**
- * Mail Settings → Campaigns: which service sends this workspace's campaigns (Zoho Campaigns
- * or Amazon SES) and the Amazon SES connection. The secret key can be written but never read back.
+ * Mail Settings → Campaigns: the Amazon SES connection that sends this workspace's campaigns, and
+ * the SNS set-up for delivery reports. The secret key can be written but never read back.
  * Owners/Admins (mail.configure) change it; others see it read-only.
  */
 @Component({
@@ -17,22 +17,8 @@ import { apiRoot } from '../../core/api-base';
   template: `
 <section class="cd" *ngIf="s; else loadingTpl">
   <div class="cd-card">
-    <h3>Send campaigns with</h3>
-    <p class="mx-desc">The campaign flow stays the same (write → recipients → approve → send). Only the service that delivers it changes.</p>
-    <div class="cd-choice" role="radiogroup" aria-label="Campaign sending service">
-      <label class="cd-option" [class.on]="s.provider === 'zoho'">
-        <input type="radio" name="provider" value="zoho" [checked]="s.provider === 'zoho'" [disabled]="!s.canConfigure || busy" (change)="setProvider('zoho')" />
-        <span><b>Zoho Campaigns</b><small>Zoho delivers the campaign; lists are put into Zoho for each send.</small></span>
-      </label>
-      <label class="cd-option" [class.on]="s.provider === 'ses'">
-        <input type="radio" name="provider" value="ses" [checked]="s.provider === 'ses'" [disabled]="!s.canConfigure || busy || !s.ses.configured" (change)="setProvider('ses')" />
-        <span><b>Amazon SES</b><small>Marketech.ai sends each email through your Amazon SES account, with delivered, opened, clicked, bounced and complaint reports.{{ s.ses.configured ? '' : ' Set up the connection below first.' }}</small></span>
-      </label>
-    </div>
-  </div>
-
-  <div class="cd-card">
     <h3>Amazon SES connection</h3>
+    <p class="mx-desc">Campaigns are sent with your Amazon SES account: Marketech.ai emails each person, with delivered, opened, clicked, bounced and complaint reports.</p>
     <p class="mx-desc" *ngIf="s.ses.source === 'server'">Using the server's Amazon SES account (backend .env). Enter keys here to use this workspace's own account instead.</p>
     <form class="cd-form" (submit)="$event.preventDefault(); save()">
       <label>Region <input class="hud-input" name="region" [(ngModel)]="form.region" placeholder="e.g. us-east-1 or ap-south-1" [disabled]="!s.canConfigure" /></label>
@@ -52,7 +38,7 @@ import { apiRoot } from '../../core/api-base';
     <p class="cd-result" *ngIf="!s.ses.configured && s.canConfigure" role="status">Not set up yet: {{ missing.join(', ') }} {{ missing.length === 1 ? 'is' : 'are' }} missing. Save them, then test the connection.</p>
   </div>
 
-  <div class="cd-card" *ngIf="s.canConfigure || s.provider === 'ses'">
+  <div class="cd-card">
     <h3>Delivery reports (Amazon SNS)</h3>
     <p class="mx-desc">Opens and clicks are tracked by Marketech.ai. Delivered, bounced and complaint reports come from SES through Amazon SNS:</p>
     <ol class="cd-steps">
@@ -113,11 +99,6 @@ export class CampaignDeliveryComponent implements OnInit {
     body.maxPerSecond = f.maxPerSecond ? Number(f.maxPerSecond) : null;
     this.testResult = null;
     this.put(body, 'Amazon SES connection saved.');
-  }
-
-  setProvider(p: 'zoho' | 'ses'): void {
-    if (p === 'ses' && !confirm('Send this workspace\'s campaigns with Amazon SES from now on? Campaigns already sent stay as they are.')) { this.load(); return; }
-    this.put({ provider: p }, p === 'ses' ? 'Campaigns are now sent with Amazon SES.' : 'Campaigns are now sent with Zoho Campaigns.');
   }
 
   clearKeys(): void {

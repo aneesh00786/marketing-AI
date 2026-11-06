@@ -3,7 +3,7 @@
     <div class="ltz-head">
       <div>
         <h3 id="ltz-title">Add leads to a contact list</h3>
-        <p class="ltz-desc">The list is kept in Marketech.ai and can be chosen when you send a campaign. Their names go to Zoho with them, so “Hi {{ '{' }}first name{{ '}' }}” works.</p>
+        <p class="ltz-desc">The list is kept in Marketech.ai and can be chosen when you send a campaign. Their names are filled into the email, so “Hi {{ '{' }}{{ '{' }}first_name{{ '}' }}{{ '}' }}” greets each person by name. Only leads with recorded marketing consent are emailed.</p>
       </div>
       <button type="button" class="ltz-x" aria-label="Close" (click)="close()">✕</button>
     </div>

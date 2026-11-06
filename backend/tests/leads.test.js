@@ -393,7 +393,7 @@ test('consent on the Leads screen: works without Product Emails, needs evidence 
     assert.equal(ok.status, 200, JSON.stringify(ok.data));
     const shown = (await h.api('GET', `/api/v1/leads?q=consent.${stamp}`, { token: ws.token })).data.leads[0];
     assert.deepEqual([shown.marketingConsent, shown.marketingConsentProven, shown.marketingConsentMethod], ['granted', true, 'web_form']);
-    // A contact list with this person now counts them as reachable for Zoho campaigns.
+    // A contact list with this person now counts them as reachable for email campaigns.
     const list = await h.api('POST', '/api/v1/mail/campaigns/contact-lists', { token: ws.token, body: { name: `Consent list ${stamp}`, leadIds: [lead.id] } });
     assert.equal(list.status, 200, JSON.stringify(list.data));
     const lists = (await h.api('GET', '/api/v1/mail/campaigns/contact-lists', { token: ws.token })).data.lists;

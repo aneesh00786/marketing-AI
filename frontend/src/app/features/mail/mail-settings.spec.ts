@@ -5,8 +5,6 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { MailSettingsComponent } from './mail-settings.component';
 import { MarketingDeliveryComponent } from './marketing-delivery.component';
 import { MailTrackingSettingsComponent } from './mail-tracking-settings.component';
-import { ZohoAppSettingsComponent } from './zoho-app-settings.component';
-import { ZohoCampaignsComponent } from './zoho-campaigns.component';
 import { CampaignDeliveryComponent } from './campaign-delivery.component';
 
 // The marketing and tracking panels are tested in their own specs.
@@ -15,13 +13,9 @@ class MarketingStub { static last: MarketingStub | null = null; @Input() refresh
 @Component({ selector: 'app-mail-tracking-settings', standalone: true, template: '<p class="stub-tracking">tracking</p>' })
 class TrackingStub { static last: TrackingStub | null = null; @Input() startOpen = false; @Output() toast = new EventEmitter<string>(); constructor() { TrackingStub.last = this; } }
 
-@Component({ selector: 'app-zoho-app-settings', standalone: true, template: '<p class="stub-zoho-app">zoho app</p>' })
-class ZohoAppStub { static last: ZohoAppStub | null = null; @Output() toast = new EventEmitter<string>(); @Output() changed = new EventEmitter<void>(); constructor() { ZohoAppStub.last = this; } }
-// Campaign sending service (Zoho / Amazon SES): tested in campaign-delivery.spec.ts.
+// The Amazon SES connection: tested in campaign-delivery.spec.ts.
 @Component({ selector: 'app-campaign-delivery', standalone: true, template: '<p class="stub-delivery">campaign sending</p>' })
 class DeliveryStub { @Output() toast = new EventEmitter<string>(); }
-@Component({ selector: 'app-zoho-campaigns', standalone: true, template: '<p class="stub-zoho">zoho connection</p>' })
-class ZohoStub { static last: ZohoStub | null = null; @Input() inSettings = false; @Output() toast = new EventEmitter<string>(); reloads = 0; loadStatus() { this.reloads++; } constructor() { ZohoStub.last = this; } }
 
 const CONFIG = { provider: 'custom_smtp', smtp_host: 'smtp.acme.io', smtp_port: 587, smtp_secure: 0, smtp_user: 'hello@acme.io', imap_tls: 1, sender_email: 'hello@acme.io', has_smtp_auth: true, has_imap_auth: false, status: 'Connected' };
 
@@ -43,8 +37,8 @@ describe('MailSettingsComponent', () => {
   beforeEach(() => {
     TestBed.configureTestingModule({ imports: [MailSettingsComponent], providers: [provideHttpClient(), provideHttpClientTesting()] });
     TestBed.overrideComponent(MailSettingsComponent, {
-      remove: { imports: [MarketingDeliveryComponent, MailTrackingSettingsComponent, ZohoAppSettingsComponent, ZohoCampaignsComponent, CampaignDeliveryComponent] },
-      add: { imports: [MarketingStub, TrackingStub, ZohoAppStub, ZohoStub, DeliveryStub] }
+      remove: { imports: [MarketingDeliveryComponent, MailTrackingSettingsComponent, CampaignDeliveryComponent] },
+      add: { imports: [MarketingStub, TrackingStub, DeliveryStub] }
     });
     http = TestBed.inject(HttpTestingController);
   });
@@ -57,7 +51,7 @@ describe('MailSettingsComponent', () => {
   const tabs = () => Array.from(el().querySelectorAll('[role=tab]')) as HTMLButtonElement[];
   const openTab = (label: string) => { tabs().find(t => t.textContent!.trim() === label)!.click(); fixture.detectChanges(); };
 
-  it('each setting has its own tab: Sending, Replies, Marketing, Tracking, Zoho; only the open one is shown', async () => {
+  it('each setting has its own tab: Sending, Replies, Marketing, Tracking, Campaigns; only the open one is shown', async () => {
     init(r => r.flush({ config: CONFIG }));
     expect(tabs().map(t => t.textContent!.trim())).toEqual(['Sending', 'Replies (IMAP)', 'Marketing email', 'Tracking & privacy', 'Campaigns']);
     expect(tabs()[0].getAttribute('aria-selected')).toBe('true');
@@ -129,28 +123,24 @@ describe('MailSettingsComponent', () => {
     expect(el().querySelector('.stub-marketing')).withContext('marketing status is still shown').toBeTruthy();
   });
 
-  it('the Zoho tab holds the API credentials and the connection; saving credentials refreshes the connection', () => {
+  it('the Campaigns tab holds the Amazon SES connection and links to Campaigns', () => {
     init(r => r.flush({ config: CONFIG }));
     openTab('Campaigns');
-    expect(el().querySelector('.stub-zoho-app')).toBeTruthy();
-    expect(el().querySelector('.stub-zoho')).toBeTruthy();
-    expect(ZohoStub.last!.inSettings).toBeTrue();
-    ZohoAppStub.last!.changed.emit();
-    expect(ZohoStub.last!.reloads).toBe(1);
+    expect(el().querySelector('.stub-delivery')).toBeTruthy();
     const opened: string[] = [];
     comp.openSection.subscribe(s => opened.push(s));
-    (el().querySelector('.ms-zoho .link-btn') as HTMLButtonElement).click();
+    (el().querySelector('.ms-campaigns .link-btn') as HTMLButtonElement).click();
     expect(opened).toEqual(['campaigns']);
   });
 
-  it('can open straight on the Zoho tab (from the Campaigns "Set up in Settings" link)', () => {
+  it('can open straight on the Campaigns tab (from the Campaigns "Set up Amazon SES" link)', () => {
     fixture = TestBed.createComponent(MailSettingsComponent);
     comp = fixture.componentInstance;
-    comp.initialTab = 'zoho';
+    comp.initialTab = 'campaigns';
     fixture.detectChanges();
     http.expectOne(r => r.url.endsWith('/mail/config')).flush({ config: CONFIG });
     fixture.detectChanges();
-    expect(comp.tab).withContext("the old 'zoho' link opens the Campaigns tab").toBe('campaigns');
-    expect(el().querySelector('.stub-zoho-app')).toBeTruthy();
+    expect(comp.tab).toBe('campaigns');
+    expect(el().querySelector('.stub-delivery')).toBeTruthy();
   });
 });

@@ -1,11 +1,9 @@
 /**
- * Zoho Campaigns merge tags, offered the way Zoho's own editor offers them: a Merge Tags menu
- * grouped into Contact, Links and Organization. Contact tags carry a default value used when the
- * contact's field is empty ($[FNAME|Customer]$). Campaigns here are email only, so Zoho's second
- * (social sharing) default is not used; a blank default is written $[LNAME||]$ as Zoho documents it.
- * Syntax from Zoho's help pages (Predefined Merge Tags, Campaign customization).
+ * Campaign merge tags: the contact's first and last name, each with a default value used when the
+ * contact has none ($[FNAME|Customer]$; a blank default is written $[LNAME||]$). Marketech.ai fills
+ * them in for each recipient when it sends with Amazon SES, with the unsubscribe link ($[LI:UNSUBSCRIBE]$).
  */
-/** No "full name": Zoho prints the space between two tags even without a last name ("Hi Priya ,"). */
+/** No "full name": the space between two tags would stay even without a last name ("Hi Priya ,"). */
 export type ContactField = 'first' | 'last';
 
 export interface LinkTag { key: string; label: string; tag: string; text: string; help: string; }
@@ -15,27 +13,18 @@ export const CONTACT_FIELDS: { key: ContactField; label: string; fallback: strin
   { key: 'last', label: 'Last name', fallback: '', help: 'e.g. “Dear Ms Nair,”' }
 ];
 
-/**
- * Links Zoho fills in for each recipient. Unsubscribe has its own checkbox; Subscribe (they are
- * already subscribed) and the mailing list name (internal) are left out as confusing.
- */
-export const LINK_TAGS: LinkTag[] = [
-  { key: 'viewinbrowser', label: 'View in browser link', tag: '$[LI:VIEWINBROWSER]$', text: 'View in browser', help: 'Opens the email as a web page' },
-  { key: 'updateprofile', label: 'Update profile link', tag: '$[LI:UPDATEPROFILE]$', text: 'Update your profile', help: 'Lets them change their details' },
-  { key: 'tellafriend', label: 'Forward to a friend link', tag: '$[LI:TELLAFRIEND]$', text: 'Forward to a friend', help: 'Lets them share the email' }
-];
+/** Link tags filled per recipient (besides the unsubscribe link, which has its own checkbox): none. */
+export const LINK_TAGS: LinkTag[] = [];
 
-/** Text Zoho replaces with your organization's details. */
-export const INFO_TAGS: { key: string; label: string; tag: string; help: string }[] = [
-  { key: 'orgaddress', label: 'Your company address', tag: '$[HF:ORGADDRESS]$', help: 'From your Zoho company profile; often required by anti-spam law' }
-];
+/** Organization tags: none (write your company address as text; anti-spam law often requires it). */
+export const INFO_TAGS: { key: string; label: string; tag: string; help: string }[] = [];
 
-/** A default value cannot contain the characters that end or split a Zoho tag. */
+/** A default value cannot contain the characters that end or split a tag. */
 export function cleanFallback(v: string): string {
   return String(v ?? '').replace(/[|$[\]{}<>]/g, '').replace(/\s+/g, ' ').trim().slice(0, 40);
 }
 
-/** The Zoho tag for a contact field with its default value, e.g. $[FNAME|there]$ (blank: $[FNAME||]$). */
+/** The merge tag for a contact field with its default value, e.g. $[FNAME|there]$ (blank: $[FNAME||]$). */
 export function contactTag(field: ContactField, fallback: string): string {
   const fb = cleanFallback(fallback);
   const one = (name: string, f: string) => f ? `$[${name}|${f}]$` : `$[${name}||]$`;

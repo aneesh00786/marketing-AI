@@ -5,7 +5,7 @@ const settings = require('./sesSettings');
 const sns = require('./snsWebhook');
 
 /**
- * Campaign sending service (Zoho Campaigns / Amazon SES) and the SES connection.
+ * The Amazon SES connection that sends campaigns.
  * Read: mail.view (the campaign editor needs to know the service). Change and test: mail.configure.
  */
 const router = express.Router();

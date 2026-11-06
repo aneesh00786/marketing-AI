@@ -9,7 +9,7 @@ export const PURPOSE_REASON_LABELS: Record<string, string> = {
   template_unknown: 'Unknown template',
   template_marketing_category: 'Marketing template',
   matches_marketing_template: 'Contains a marketing template',
-  zoho_merge_tags: 'Zoho merge tags',
+  merge_tags: 'Campaign merge tags',
   unsubscribe_wording: 'Unsubscribe wording',
   promotional_phrases: 'Promotional wording',
   transactional_not_permitted: 'No permission for transactional',

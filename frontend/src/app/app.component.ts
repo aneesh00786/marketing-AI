@@ -5,7 +5,7 @@ import * as XLSX from 'xlsx';
 import { parseLeadSheet } from './features/leads/lead-sheet';
 import { ImportSync, importSyncBody, importSyncProblem, newImportSync } from './features/leads/import-sync';
 import { ImportSyncOptionsComponent } from './features/leads/import-sync-options.component';
-import { LeadsToZohoComponent } from './features/leads/leads-to-zoho.component';
+import { LeadsToListComponent } from './features/leads/leads-to-list.component';
 import { ApiService } from './services/api.service';
 import { SpeechService } from './services/speech.service';
 import { AuthStateService, SessionChangeKind } from './core/auth-state.service';
@@ -35,7 +35,7 @@ import { findTokens, fillTokens, defaultTokenValues } from './features/mail/temp
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [CommonModule, FormsModule, LoginComponent, SocialHubComponent, CommandCenterComponent, IconComponent, DashboardComponent, LeadDiscoveryComponent, CrmComponent, PlatformAdminComponent, CallButtonComponent, SoftphoneComponent, MembersComponent, TemplatePickerComponent, MailCenterComponent, EmailPreviewComponent, ImportSyncOptionsComponent, LeadsToZohoComponent, CountryFilterComponent, LeadConsentComponent],
+  imports: [CommonModule, FormsModule, LoginComponent, SocialHubComponent, CommandCenterComponent, IconComponent, DashboardComponent, LeadDiscoveryComponent, CrmComponent, PlatformAdminComponent, CallButtonComponent, SoftphoneComponent, MembersComponent, TemplatePickerComponent, MailCenterComponent, EmailPreviewComponent, ImportSyncOptionsComponent, LeadsToListComponent, CountryFilterComponent, LeadConsentComponent],
   templateUrl: './app.component.html',
   styleUrls: ['./app.component.css']
 })
@@ -43,13 +43,12 @@ export class AppComponent implements OnInit, OnDestroy {
   // Navigation: Directly accessible HUD
   // Mail Center section (Overview, Drafts, Approvals, Product Emails, Campaigns, Email Templates).
   mailSection: MailSection = 'overview';
-  // Template picker for Compose; template handed to Campaigns or Drafts; result of returning from Zoho sign-in.
+  // Template picker for Compose; template handed to Campaigns or Drafts.
   templatePickerFor: 'compose' | null = null;
   campaignStartTemplate: { id: number; name: string } | null = null;
   draftTemplate: { id: number; name: string } | null = null;
   composeTemplateName = '';
   composeTokenValues: Record<string, string> = {};
-  zohoOauthResult: { zoho?: string; reason?: string } | null = null;
   currentRoute: 'dashboard' | 'products' | 'crm' | 'admin' | 'leads' | 'emails' | 'businesses' | 'social' | 'voice' | 'appointments' | 'members' = 'dashboard';
 
   // ---------- App shell (sidebar, top bar, menus) ----------
@@ -610,13 +609,11 @@ export class AppComponent implements OnInit, OnDestroy {
       try { sessionStorage.setItem(this.INVITE_KEY, invite); } catch { /* storage unavailable */ }
       window.history.replaceState({}, '', window.location.pathname);
     }
-    // Mail Center links: /?view=mail&section=<section>, the Zoho sign-in return
-    // (/?view=mail&section=zoho&zoho=connected|error&reason=...) and the former Mail Drafts page (/?view=drafts).
+    // Mail Center links: /?view=mail&section=<section> and the former Mail Drafts page (/?view=drafts).
     const mailSection = mailSectionFromLink(params.get('view'), params.get('section'));
     if (mailSection) {
       this.currentRoute = 'emails';
       this.mailSection = mailSection;
-      if (params.get('zoho')) this.zohoOauthResult = { zoho: params.get('zoho') || undefined, reason: params.get('reason') || undefined };
       window.history.replaceState({}, '', window.location.pathname);
     }
     const crmSection = crmSectionFromLink(params.get('view'), params.get('section'));
@@ -1169,7 +1166,7 @@ export class AppComponent implements OnInit, OnDestroy {
   onConsentSaved(e: { status: string }): void {
     const name = this.consentLead?.name || 'the lead';
     this.consentLead = null;
-    this.showToast(e.status === 'granted' ? `Consent recorded for ${name}. They can now get Zoho campaigns.` : e.status === 'withdrawn' ? `Consent withdrawn for ${name}: no marketing email will reach them.` : `Consent for ${name} is now not recorded.`);
+    this.showToast(e.status === 'granted' ? `Consent recorded for ${name}. They can now get email campaigns.` : e.status === 'withdrawn' ? `Consent withdrawn for ${name}: no marketing email will reach them.` : `Consent for ${name} is now not recorded.`);
     this.loadLeads();
   }
 
@@ -1309,10 +1306,10 @@ export class AppComponent implements OnInit, OnDestroy {
     event.target.value = '';
   }
 
-  /** Leads → "Add to Zoho list" popup. */
-  showLeadsToZoho = false;
+  /** Leads → "Add to contact list" popup. */
+  showLeadsToList = false;
 
-  /** Consent and Zoho list for the Excel import (see ImportSyncOptionsComponent). */
+  /** Consent and contact list for the Excel import (see ImportSyncOptionsComponent). */
   importSync: ImportSync = newImportSync();
   get canSendCampaigns(): boolean { return !!this.myCaps?.has('mail.send'); }
   get importSyncProblem(): string { return importSyncProblem(this.importSync); }

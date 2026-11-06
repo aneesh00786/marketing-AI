@@ -2,7 +2,7 @@
   <div class="zl-head">
     <div>
       <h3 id="cl-title">Contact lists</h3>
-      <p class="mx-desc">Your mailing lists, kept in Marketech.ai. Create lists and add your leads, people you type in or an Excel file. When you send a campaign, its list is added to Zoho for that send.</p>
+      <p class="mx-desc">Your mailing lists, kept in Marketech.ai. Create lists and add your leads, people you type in or an Excel file, then choose them as a campaign's recipients.</p>
     </div>
     <span class="zl-head-actions" *ngIf="canManage">
       <button type="button" class="btn btn-secondary btn-sm" (click)="openImport()">📂 Import from Excel</button>
@@ -10,25 +10,6 @@
     </span>
   </div>
 
-  <p class="cl-sync" [class.warn]="sync?.status === 'failed'" role="status"><app-icon name="info" [size]="15"></app-icon><span>{{ syncText }}</span>
-    <button *ngIf="!zohoReady || sync?.status === 'failed' || sync?.status === 'never'" type="button" class="btn btn-secondary btn-sm" (click)="openZoho.emit()">{{ zohoReady ? 'Reconnect Zoho' : 'Set up Zoho' }}</button></p>
-  <!-- Zoho plan: contacts in Zoho against the limit (subscriber-based plans) -->
-  <div class="zl-plan" *ngIf="plan">
-    <ng-container *ngIf="limitEdit === null">
-      <div class="zl-plan-text">
-        <b>Contacts in Zoho: up to {{ plan.usage.upTo | number }}{{ plan.contactLimit ? ' of ' + (plan.contactLimit | number) : '' }}</b>
-        <small class="muted">{{ plan.contactLimit ? 'Your Zoho plan\'s limit. People sent a campaign stay in Zoho and count; Zoho\'s billing page has the exact figure.' : (canConfigure ? 'Enter your Zoho plan\'s contact limit to be warned before a send goes over it.' : 'An admin can enter your Zoho plan\'s contact limit.') }}</small>
-        <span class="zl-plan-bar" *ngIf="plan.contactLimit" [class.full]="usagePct >= 100" [class.near]="usagePct >= 85 && usagePct < 100" aria-hidden="true"><i [style.width.%]="usagePct"></i></span>
-      </div>
-      <button type="button" class="btn btn-secondary btn-sm" *ngIf="canConfigure" (click)="editLimit()">{{ plan.contactLimit ? 'Change limit' : 'Set plan limit' }}</button>
-    </ng-container>
-    <form class="zl-plan-edit" *ngIf="limitEdit !== null" (ngSubmit)="saveLimit()">
-      <label><span>Contacts your Zoho plan allows</span>
-        <input class="hud-input" name="limit" [(ngModel)]="limitEdit" inputmode="numeric" placeholder="e.g. 10000 (empty: no limit set)" /></label>
-      <button type="submit" class="btn btn-primary btn-sm" [disabled]="limitSaving">{{ limitSaving ? 'Saving…' : 'Save' }}</button>
-      <button type="button" class="btn btn-secondary btn-sm" (click)="limitEdit = null">Cancel</button>
-    </form>
-  </div>
   <div class="mx-callout warn" *ngIf="!canManage" role="status"><app-icon name="info" [size]="16"></app-icon><span>Only people who can send campaigns can change lists.</span></div>
   <div class="note error" *ngIf="error" role="alert">{{ error }} <button type="button" class="link-btn" (click)="load()">Try again</button></div>
 
@@ -47,7 +28,7 @@
   <div class="zl-table" *ngIf="!loading && visibleLists.length" role="table" aria-label="Contact lists">
     <div class="zl-row cl-row zl-th" role="row"><span role="columnheader">List name</span><span role="columnheader">Contacts</span><span role="columnheader">Can be emailed</span><span role="columnheader"><span class="sr-only">Actions</span></span></div>
     <div class="zl-row cl-row" role="row" *ngFor="let l of visibleLists">
-      <span role="cell" class="zl-name"><b>{{ l.name }}</b><small class="zl-badge" *ngIf="l.inZoho" title="This list is also in Zoho Campaigns">Also in Zoho</small></span>
+      <span role="cell" class="zl-name"><b>{{ l.name }}</b></span>
       <span role="cell" class="zl-count">{{ l.total | number }}</span>
       <span role="cell" class="zl-count">{{ l.reachable | number }}<small class="muted cl-noconsent" *ngIf="l.noConsent" [title]="l.noConsent + ' contact(s) have no recorded marketing consent and are left out of campaigns'"> · {{ l.noConsent | number }} no consent</small></span>
       <span role="cell" class="zl-actions">
@@ -57,7 +38,7 @@
       </span>
     </div>
   </div>
-  <p class="muted small zl-foot">"Can be emailed" counts people with recorded marketing consent (or from your own Zoho lists) who have not unsubscribed or bounced. Others are never sent campaigns: record consent on their lead (Leads → Consent…: how and when it was given) to include them.</p>
+  <p class="muted small zl-foot">"Can be emailed" counts people with recorded marketing consent who have not unsubscribed or bounced. Others are never sent campaigns: record consent on their lead (Leads → Consent…: how and when it was given) to include them.</p>
 </section>
 
 <!-- New list / add contacts -->
@@ -234,27 +215,9 @@
 <div class="zc-backdrop" *ngIf="deleting as d" (click)="deleting = null">
   <div class="zc-card zl-card zl-del-card" role="dialog" aria-modal="true" aria-labelledby="cl-del-title" (click)="$event.stopPropagation()">
     <div class="zc-head">
-      <div><h3 id="cl-del-title">Delete “{{ d.list.name }}”</h3><p class="mx-desc">{{ d.list.total | number }} contact(s).{{ d.list.inZoho ? ' This list is also in Zoho: choose where to delete it.' : '' }}</p></div>
+      <div><h3 id="cl-del-title">Delete “{{ d.list.name }}”?</h3><p class="mx-desc">{{ d.list.total | number }} contact(s). The list is removed; the people stay in your contacts and other lists, and every unsubscribe is kept.</p></div>
       <button type="button" class="zc-close" aria-label="Close" (click)="deleting = null"><app-icon name="x" [size]="18"></app-icon></button>
     </div>
-    <label class="zl-del-opt" [class.on]="d.where === 'here'">
-      <input type="radio" name="cl-del" value="here" [(ngModel)]="d.where" />
-      <span><b>{{ d.list.inZoho ? 'Delete here only' : 'Delete this list' }}</b>
-        <small>Removed from Marketech.ai.{{ d.list.inZoho ? ' The list stays in Zoho Campaigns.' : '' }} The people stay in your contacts and other lists.</small></span>
-    </label>
-    <ng-container *ngIf="d.list.inZoho">
-      <label class="zl-del-opt" [class.on]="d.where === 'zoho'" [class.off]="!!zohoDeleteBlock">
-        <input type="radio" name="cl-del" value="zoho" [(ngModel)]="d.where" [attr.disabled]="zohoDeleteBlock ? true : null" />
-        <span><b>Delete in Zoho only</b>
-          <small>The list is deleted in Zoho Campaigns and kept here. Its contacts stay in your Zoho account; unsubscribes are kept.</small></span>
-      </label>
-      <label class="zl-del-opt" [class.on]="d.where === 'both'" [class.off]="!!zohoDeleteBlock">
-        <input type="radio" name="cl-del" value="both" [(ngModel)]="d.where" [attr.disabled]="zohoDeleteBlock ? true : null" />
-        <span><b>Delete here and in Zoho</b>
-          <small>Removed from both. Its contacts stay in your Zoho account and in your contacts here.</small></span>
-      </label>
-      <p class="muted small zl-del-why" *ngIf="zohoDeleteBlock">{{ zohoDeleteBlock }}</p>
-    </ng-container>
     <div class="zl-form-foot">
       <span></span>
       <button type="button" class="btn btn-secondary btn-sm" (click)="deleting = null">Cancel</button>

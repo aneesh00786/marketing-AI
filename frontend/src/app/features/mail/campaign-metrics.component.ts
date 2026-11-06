@@ -9,21 +9,21 @@ export interface Metric { label: string; value: string; hint?: string; unavailab
 export interface SummaryItem { label: string; value: string; sub: string | null; activity?: string; unavailable: boolean }
 export interface BarRow { label: string; value: number; pct: number; activity?: string }
 
-/** Popup tabs. "delivered" shows Zoho's sent-to list; "forwards" has no list in Zoho. */
+/** Popup tabs: each opens the list of those recipients. */
 const ACTIVITIES = [
-  { key: 'sent', label: 'Sent', api: 'sent', help: 'Everyone Zoho sent this campaign to.' },
-  { key: 'delivered', label: 'Delivered', api: 'sent', help: 'Zoho lists everyone it sent to; those that bounced are under Bounced.' },
+  { key: 'sent', label: 'Sent', api: 'sent', help: 'Everyone this campaign was sent to.' },
+  { key: 'delivered', label: 'Delivered', api: 'delivered', help: 'Accepted by the recipient\'s mail server.' },
   { key: 'opened', label: 'Opened', api: 'opened', help: 'Opened the email at least once (an estimate: image blocking and privacy features affect it).' },
   { key: 'unopened', label: 'Unopened', api: 'unopened', help: 'Delivered, but no open recorded yet. Good candidates for a follow-up.' },
   { key: 'clicked', label: 'Clicked', api: 'clicked', help: 'Clicked a link in the email: your most interested contacts.' },
-  { key: 'hard_bounced', label: 'Hard bounced', api: 'hard_bounced', help: 'Addresses that do not exist or refuse mail. Zoho will not send to them again.' },
+  { key: 'hard_bounced', label: 'Hard bounced', api: 'hard_bounced', help: 'Addresses that do not exist or refuse mail. They are added to the stop-list and not emailed again.' },
   { key: 'soft_bounced', label: 'Soft bounced', api: 'soft_bounced', help: 'Temporary problems such as a full mailbox.' },
   { key: 'unsubscribed', label: 'Unsubscribed', api: 'unsubscribed', help: 'Asked not to get these emails any more.' },
-  { key: 'spam', label: 'Marked spam', api: 'spam', help: 'Reported the email as spam.' },
-  { key: 'forwards', label: 'Forwards', api: null, help: 'Times the email was forwarded.' }
+  { key: 'spam', label: 'Marked spam', api: 'spam', help: 'Reported the email as spam. They are added to the stop-list.' },
+  { key: 'failed', label: 'Not sent', api: 'failed', help: 'Amazon SES did not accept these, or they were stopped before sending (unsubscribed or bounced meanwhile).' }
 ];
 
-/** Zoho reports numbers as strings or numbers; anything else is "not reported". */
+/** Figures may be strings or numbers; anything else is "not reported". */
 export function num(v: any): number | null {
   if (v === null || v === undefined || v === '') return null;
   const n = Number(String(v).replace('%', ''));
@@ -35,7 +35,7 @@ export function rate(part: number | null, whole: number | null): string | null {
   return `${(Math.round((part / whole) * 1000) / 10).toFixed(1)}%`;
 }
 
-/** Bars for the figures Zoho reported, scaled to the largest. A missing figure gets no bar, never 0. */
+/** Bars for the reported figures, scaled to the largest. A missing figure gets no bar, never 0. */
 function bars(rows: { label: string; value: number | null; activity?: string }[]): BarRow[] {
   const known = rows.filter(r => r.value !== null) as (BarRow & { value: number })[];
   const max = Math.max(0, ...known.map(r => r.value));
@@ -43,10 +43,9 @@ function bars(rows: { label: string; value: number | null; activity?: string }[]
 }
 
 /**
- * Campaign figures from Zoho's campaign report (read when a sent campaign is opened, or with "Refresh status"), and, for roles
- * with mail.send, per-recipient lists read from Zoho on demand: a chart row or figure opens the
- * list of those people. Figures Zoho did not report are
- * "Unavailable", never 0. Zoho gives campaign totals and recipient lists, not per-recipient times.
+ * Campaign figures from Marketech.ai's records: sent with Amazon SES, delivered, bounced and complaints
+ * reported by SES, opens and clicks tracked by Marketech.ai. For roles with mail.send, a chart row or
+ * figure opens the list of those people. Figures not reported are "Unavailable", never 0.
  */
 @Component({
   selector: 'app-campaign-metrics',
@@ -58,15 +57,13 @@ function bars(rows: { label: string; value: number | null; activity?: string }[]
 export class CampaignMetricsComponent implements OnChanges {
   @Input() campaignId: number | null = null;
   @Input() report: any = null;
-  @Input() zohoStatus: string | null = null;
-  /** 'ses': figures come from Marketech.ai's own records (SES events); otherwise from Zoho. */
-  @Input() provider: string | null = null;
-  get source(): string { return this.provider === 'ses' ? 'Amazon SES' : 'Zoho'; }
+  /** Sending / Sent, as recorded when it was sent. */
+  @Input() sendStatus: string | null = null;
   @Input() status: string | null = null;
   @Input() lastCheckedAt: string | null = null;
   /** Owner, Admin, Marketing Manager and Approver (mail.send); the server enforces it too. */
   @Input() canViewRecipients = false;
-  /** Fetching the latest figures from Zoho right now (the parent does the request). */
+  /** Fetching the latest figures right now (the parent does the request). */
   @Input() refreshing = false;
   /** The campaign's subject, for the follow-up email's subject. */
   @Input() campaignSubject: string | null = null;
@@ -90,10 +87,9 @@ export class CampaignMetricsComponent implements OnChanges {
     if (ch['campaignId'] && !ch['campaignId'].firstChange) { this.showRecipients = false; this.recipients = []; this.error = null; this.page = 1; }
   }
 
-  get sent(): boolean { return this.status === 'submitted' || this.status === 'needs_review'; }
+  get sent(): boolean { return this.status === 'submitted' || this.status === 'submitting'; }
 
-  /** The headline row, as in Zoho's report summary: count, and its share of sent or delivered. */
-  /** Zoho is still sending and has no figures yet: the row shows how many it goes to, and 0 so far. */
+  /** The headline row: count, and its share of sent or delivered. While still sending, the row shows how many it goes to. */
   get pending(): boolean { return !!this.report?.pending; }
 
   get summary(): SummaryItem[] {
@@ -103,7 +99,7 @@ export class CampaignMetricsComponent implements OnChanges {
       return [
         { label: 'Sending to', value: to === null ? '…' : to.toLocaleString('en-US'), sub: 'in progress', activity: 'sent', unavailable: false },
         zero('Delivered', 'delivered'), zero('Opened', 'opened'), zero('Unopened', 'unopened'), zero('Clicked', 'clicked'),
-        zero('Bounced', 'hard_bounced'), zero('Unsubscribes', 'unsubscribed'), zero('Marked spam', 'spam'), zero('Forwards', 'forwards')
+        zero('Bounced', 'hard_bounced'), zero('Unsubscribes', 'unsubscribed'), zero('Marked spam', 'spam')
       ];
     }
     const r = this.report || {};
@@ -111,7 +107,7 @@ export class CampaignMetricsComponent implements OnChanges {
     const delivered = num(r.delivered_count);
     const opened = num(r.opens_count);
     const unopened = num(r.unopened) ?? (delivered !== null && opened !== null ? Math.max(0, delivered - opened) : null);
-    const share = (zohoPct: any, part: number | null, whole: number | null) => (num(zohoPct) !== null ? `${num(zohoPct)}%` : rate(part, whole));
+    const share = (reportedPct: any, part: number | null, whole: number | null) => (num(reportedPct) !== null ? `${num(reportedPct)}%` : rate(part, whole));
     const item = (label: string, v: number | null, sub: string | null, activity?: string): SummaryItem =>
       ({ label, value: v === null ? '—' : v.toLocaleString('en-US'), sub: v === null ? null : sub, activity, unavailable: v === null });
     return [
@@ -122,8 +118,7 @@ export class CampaignMetricsComponent implements OnChanges {
       item('Clicked', num(r.unique_clicks_count), share(r.unique_clicked_percent, num(r.unique_clicks_count), delivered), 'clicked'),
       item('Bounced', num(r.bounces_count), share(r.bounce_percent, num(r.bounces_count), sent), 'hard_bounced'),
       item('Unsubscribes', num(r.unsub_count), share(r.unsubscribe_percent, num(r.unsub_count), delivered), 'unsubscribed'),
-      item('Marked spam', num(r.spams_count) ?? num(r.complaints_count), share(r.spam_percent, num(r.spams_count), delivered), 'spam'),
-      item('Forwards', num(r.forwards_count), share(r.forward_percent, num(r.forwards_count), delivered), 'forwards')
+      item('Marked spam', num(r.spams_count) ?? num(r.complaints_count), share(r.spam_percent, num(r.spams_count), delivered), 'spam')
     ];
   }
 
@@ -135,20 +130,19 @@ export class CampaignMetricsComponent implements OnChanges {
     const opens = num(r.opens_count);
     const clicks = num(r.unique_clicks_count);
     const show = (v: number | null) => (v === null ? 'Unavailable' : v.toLocaleString('en-US'));
-    const pct = (zoho: any, computed: string | null) => (num(zoho) !== null ? `${num(zoho)}%` : computed ?? 'Unavailable');
+    const pct = (reported: any, computed: string | null) => (num(reported) !== null ? `${num(reported)}%` : computed ?? 'Unavailable');
     const hard = num(r.hardbounce_count);
     const soft = num(r.softbounce_count);
     return [
       { label: 'Delivery rate', value: pct(r.delivered_percent, rate(delivered, sent)) },
       { label: 'Bounced', value: show(bounced), hint: hard !== null || soft !== null ? `Hard ${show(hard)} · Soft ${show(soft)}` : undefined, activity: 'hard_bounced' },
-      { label: 'Not sent', value: show(num(r.unsent_count)), hint: 'Zoho could not send to these addresses' },
+      { label: 'Not sent', value: show(num(r.unsent_count)), hint: 'Not accepted by Amazon SES, or stopped before sending', activity: 'failed' },
       { label: 'Open rate', value: pct(r.open_percent, rate(opens, delivered)), hint: 'Unique opens ÷ delivered. An estimate, not proof of reading.' },
-      { label: 'Click rate', value: rate(clicks, delivered) ?? 'Unavailable', hint: 'Unique clickers ÷ delivered' },
-      { label: 'Auto-replies', value: show(num(r.autoreply_count)) }
+      { label: 'Click rate', value: rate(clicks, delivered) ?? 'Unavailable', hint: 'Unique clickers ÷ delivered' }
     ].map(m => ({ ...m, unavailable: m.value === 'Unavailable' }));
   }
 
-  /** From Sent down to Clicked. Delivered has no list: Zoho has no such recipient group. */
+  /** From Sent down to Clicked. */
   get reach(): BarRow[] {
     const r = this.report || {};
     return bars([
@@ -202,9 +196,9 @@ export class CampaignMetricsComponent implements OnChanges {
   activityLabel(key: string): string { return this.def(key)?.label || key; }
   activityHelp(key: string): string { return this.def(key)?.help || ''; }
   /** Why a group has no list of people ('' when it has one). */
-  noList(key: string): string { return this.def(key) && !this.def(key)!.api ? 'Zoho counts forwards but does not say who forwarded the email.' : ''; }
+  noList(key: string): string { return this.def(key) && !this.def(key)!.api ? 'No list of people for this figure.' : ''; }
 
-  /** The figure for a popup tab, from the report (null when Zoho did not report it). */
+  /** The figure for a popup tab, from the report (null when it was not reported). */
   activityCount(key: string): number | null {
     const r = this.report || {};
     const map: Record<string, any> = {
@@ -234,7 +228,7 @@ export class CampaignMetricsComponent implements OnChanges {
         if (mine !== this.seq) return;
         this.loading = false;
         this.recipients = [];
-        this.error = e?.status === 403 ? 'Your role cannot see recipient activity.' : (e?.error?.error || 'Recipient activity could not be loaded from Zoho.');
+        this.error = e?.status === 403 ? 'Your role cannot see recipient activity.' : (e?.error?.error || 'Recipient activity could not be loaded.');
       }
     });
   }
@@ -306,7 +300,7 @@ export class CampaignMetricsComponent implements OnChanges {
     const rowsOf = (list: any[]) => bars((list || []).map((x: any) => ({ label: String(x.label), value: num(x.value) })));
     return [
       { label: 'Devices', hint: 'Opens by device', empty: 'No opens recorded yet.', rows: rowsOf(ins.devices) },
-      { label: 'Email apps', empty: 'Zoho has not identified any email app yet.', rows: rowsOf(ins.emailClients) },
+      { label: 'Email apps', empty: 'No email app identified yet.', rows: rowsOf(ins.emailClients) },
       { label: 'Browsers', hint: 'For opens in webmail', empty: 'No browser opens recorded yet.', rows: rowsOf(ins.browsers) },
       { label: 'Locations', hint: 'Opens by country', empty: 'No locations recorded yet.', rows: rowsOf(ins.locations) }
     ];

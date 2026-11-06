@@ -79,7 +79,7 @@ async function zeptoWebhookActive(workspaceId) {
  */
 async function begin(workspaceId, { draftId = null, consentOk = true, opens: forceOpens, clicks: forceClicks } = {}) {
   try {
-    // Campaigns (Amazon SES) always report opens and clicks, like Zoho; other emails follow the workspace policy.
+    // Campaigns (Amazon SES) always report opens and clicks; other emails follow the workspace policy.
     const policy = typeof forceOpens === 'boolean' ? { opens: forceOpens, clicks: !!forceClicks } : await workspacePolicy(workspaceId);
     const opens = policy.opens && consentOk;
     const clicks = policy.clicks && consentOk;

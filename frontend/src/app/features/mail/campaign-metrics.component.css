@@ -32,7 +32,7 @@ button.cm-bar:focus-visible, .cm-link:focus-visible { outline: 2px solid var(--a
 .btn-sm { padding: 6px 11px; font-size: 0.8rem; border-radius: 8px; }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
-/* Summary row, as in Zoho's report */
+/* Summary row */
 .cm-refresh { margin-left: auto; }
 .cm-summary { display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
 .cm-sum { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 14px 6px; min-width: 0; background: none; border: 0; border-left: 1px solid var(--border); color: inherit; font: inherit; text-align: center; }
@@ -79,7 +79,7 @@ button.cm-bar:focus-visible, .cm-link:focus-visible { outline: 2px solid var(--a
 .cm-pop-foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .cm-spacer { flex: 1; }
 
-/* Zoho still sending */
+/* Still sending */
 .cm-sending { display: flex; align-items: center; gap: 8px; margin: 0; padding: 8px 12px; border-radius: 8px; background: rgba(42, 120, 214, 0.08); font-size: 0.84rem; }
 .cm-dot { width: 8px; height: 8px; border-radius: 50%; background: #2a78d6; animation: cm-pulse 1.2s ease-in-out infinite; flex: 0 0 auto; }
 @keyframes cm-pulse { 50% { opacity: 0.3; } }

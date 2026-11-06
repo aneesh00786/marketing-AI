@@ -46,7 +46,6 @@ export class MailCenterComponent implements OnInit {
   @Input() campaignStartTemplate: { id: number; name: string } | null = null;
   /** Set by Campaigns → New Campaign → "New email template": Email Templates opens a blank template. */
   templateStartNew = false;
-  @Input() zohoOauthResult: { zoho?: string; reason?: string } | null = null;
   @Output() templateConsumed = new EventEmitter<void>();
   @Output() productConsumed = new EventEmitter<void>();
   @Output() templateUse = new EventEmitter<{ template: any; target: TemplateUseTarget }>();
@@ -72,7 +71,7 @@ export class MailCenterComponent implements OnInit {
   draftId: number | null = null;
   /** Status filter Sent Mail opens with (from an Overview shortcut). */
   sentStatus: string | null = null;
-  /** Settings tab to open on (e.g. 'zoho' from Campaigns); cleared when Settings is left. */
+  /** Settings tab to open on (e.g. 'campaigns' from Campaigns); cleared when Settings is left. */
   settingsTab: any = null;
   /** Unread received emails (null until known). */
   inboxUnread: number | null = null;

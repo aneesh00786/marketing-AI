@@ -33,7 +33,7 @@ export class EmailContentEditorComponent implements OnChanges {
   /** Identifies the email being edited; a new one starts again in Edit → Visual. */
   @Input() contentKey: any = null;
   @Input() name = '';
-  /** Campaign content needs Zoho's unsubscribe link; template content is reused in many places. */
+  /** Campaign content needs the unsubscribe link; template content is reused in many places. */
   @Input() purpose: 'campaign' | 'template' = 'campaign';
   @Input() canChooseTemplate = true;
   @Output() htmlChange = new EventEmitter<string>();
@@ -180,12 +180,12 @@ export class EmailContentEditorComponent implements OnChanges {
   readonly infoTags = INFO_TAGS;
   /** The 👤 Personalize panel is open. */
   personalizeOpen = false;
-  /** A contact field waiting for its default value (Zoho asks for one the same way). */
+  /** A contact field waiting for its default value. */
   mergeAsk: { field: ContactField; label: string; fallback: string } | null = null;
 
   /**
-   * The Merge Tags menu (as in Zoho's editor). Contact fields ask for a default value first; links
-   * and organization tags go in at once. Zoho fills every tag per recipient when it sends.
+   * The Merge Tags menu. Contact fields ask for a default value first. Every tag is filled in per
+   * recipient when the campaign is sent.
    */
   pickMergeTag(key: string): void {
     if (!key || !this.editable) return;
@@ -195,7 +195,7 @@ export class EmailContentEditorComponent implements OnChanges {
     if (link) {
       const a = `<a href="${link.tag}">${link.text}</a>`;
       if (!this.visualExec('insertHTML', a)) this.replaceSelection(a);
-      this.toast.emit(`${link.label} link added. Zoho fills in the address when it sends.`);
+      this.toast.emit(`${link.label} link added. It is filled in for each recipient when the campaign is sent.`);
       return;
     }
     const info = INFO_TAGS.find(i => i.key === key);
@@ -232,7 +232,7 @@ export class EmailContentEditorComponent implements OnChanges {
     if (typeof document.execCommand === 'function') document.execCommand(cmd);
   }
 
-  /** True when the email already has Zoho's unsubscribe link (added here or written by hand). */
+  /** True when the email already has the unsubscribe link (added here or written by hand). */
   get hasUnsubscribe(): boolean { return UNSUB_TAG.test(this.html || ''); }
 
   /** The "Add unsubscribe link" checkbox: adds the link at the end of the email, or removes it. */
@@ -255,7 +255,7 @@ export class EmailContentEditorComponent implements OnChanges {
     const html = this.html || '';
     const out: string[] = [];
     if (!html.trim()) return [`Add the email content: write HTML${this.canChooseTemplate ? ' or choose a template' : ''}.`];
-    if (this.purpose === 'campaign' && !html.includes('$[LI:UNSUBSCRIBE]$')) out.push('No unsubscribe link yet: Zoho requires one. Tick "Add unsubscribe link" below.');
+    if (this.purpose === 'campaign' && !html.includes('$[LI:UNSUBSCRIBE]$')) out.push('No unsubscribe link yet: campaigns need one. Tick "Add unsubscribe link" below.');
     if (/<img\b[^>]*\bsrc\s*=\s*["']?http:\/\//i.test(html)) out.push('Some images use http://. Use https:// image URLs so they load for recipients.');
     return out;
   }

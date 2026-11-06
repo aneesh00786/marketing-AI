@@ -8,7 +8,7 @@ const importer = require('./importer');
 
 /**
  * Email templates: /api/v1/mail/templates (signed-in members), plus the public asset route
- * /api/v1/mail/assets/:publicId used by recipients' mail clients and Zoho to load images.
+ * /api/v1/mail/assets/:publicId used by recipients' mail clients to load images.
  */
 const templates = express.Router();
 const assets = express.Router();

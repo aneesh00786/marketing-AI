@@ -1,4 +1,3 @@
-process.env.ZOHO_LOG = process.env.ZOHO_LOG || 'off';
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('crypto');
@@ -9,7 +8,6 @@ const h = require('./helpers');
 const db = () => h.db();
 process.env.APP_BASE_URL = 'https://app.marketech.test';
 process.env.SES_SEND_INLINE = '0';
-process.env.ZOHO_UPLOAD_INLINE = '0';
 
 const sns = () => require('../modules/mail/ses/snsWebhook');
 const sesCampaigns = () => require('../modules/mail/ses/sesCampaigns');
@@ -79,7 +77,7 @@ const KEYS = { region: 'us-east-1', accessKeyId: 'AKIATESTKEY0000001', secretAcc
 
 async function sesWorkspace(name) {
   const ws = await h.createWorkspace({ name: `${name} ${Date.now()}` });
-  const r = await sapi(ws, 'PUT', '/settings', { ...KEYS, provider: 'ses' });
+  const r = await sapi(ws, 'PUT', '/settings', KEYS);
   assert.equal(r.status, 200, JSON.stringify(r.data));
   return ws;
 }
@@ -97,7 +95,7 @@ async function consentedList(ws, people, name = 'Customers') {
 
 const CAMPAIGN = {
   name: 'November offer', subject: 'Hi {{first_name}}, our November offer', fromName: 'Acme', fromEmail: 'news@acme-co.io',
-  html: '<p>Hello $[FNAME|there]$,</p><p>See <a href="https://acme-co.io/offer">the offer</a>.</p><p><a href="$[LI:UNSUBSCRIBE]$">Unsubscribe</a></p>', lists: []
+  html: '<p>Hello $[FNAME|there]$,</p><p>See <a href="https://acme-co.io/offer">the offer</a>.</p><p><a href="$[LI:UNSUBSCRIBE]$">Unsubscribe</a></p>',
 };
 
 async function sentCampaign(ws, people) {
@@ -123,12 +121,10 @@ async function runJobs(ws) {
 
 test('SES settings: the secret is stored encrypted and never returned; the connection test reads the account; SES needs keys first', async () => {
   const ws = await h.createWorkspace({ name: `SES settings ${Date.now()}` });
-  const refused = await sapi(ws, 'PUT', '/settings', { provider: 'ses' });
-  assert.equal(refused.status, 400, 'not without keys');
-  assert.equal((await sapi(ws, 'GET', '/settings')).data.provider, 'zoho', 'Zoho stays the default');
-  const saved = await sapi(ws, 'PUT', '/settings', { ...KEYS, provider: 'ses' });
+  assert.equal((await sapi(ws, 'GET', '/settings')).data.ses.configured, false, 'not set up until keys are saved');
+  const saved = await sapi(ws, 'PUT', '/settings', KEYS);
   assert.equal(saved.status, 200, JSON.stringify(saved.data));
-  assert.equal(saved.data.provider, 'ses');
+  assert.equal(saved.data.ses.configured, true);
   assert.equal(saved.data.ses.accessKeyId, 'AKIA…0001', 'masked');
   assert.ok(!JSON.stringify(saved.data).includes(KEYS.secretAccessKey), 'the secret is never returned');
   const stored = await db().get('SELECT ses_secret_ciphertext FROM mail_delivery_settings WHERE workspace_id = ?', [ws.workspaceId]);
@@ -164,7 +160,7 @@ test('SES send: each consented person gets one personalized email with their uns
   assert.match(priya.raw, /List-Unsubscribe-Post: List-Unsubscribe=One-Click/);
   assert.match(priya.raw.replace(/=\r?\n/g, ''), /\/api\/v1\/mail\/t\/o\/[a-f0-9]{32}\.gif/, 'open pixel');
   assert.match(priya.raw.replace(/=\r?\n/g, ''), /\/api\/v1\/mail\/t\/c\/[a-f0-9]{32}/, 'tracked link');
-  assert.ok(!/\$\[/.test(priya.raw), 'no Zoho merge tags left');
+  assert.ok(!/\$\[/.test(priya.raw), 'no merge tags left');
   assert.match(S.sent.find(x => x.to === 'info@kt.in').raw, /Hello Kerala Traders team,/, 'a business without a contact person is greeted by its name');
   const report = JSON.parse(r.report_json);
   assert.deepEqual([report.provider, report.emails_sent_count, report.delivered_count, report.opens_count], ['ses', 3, 0, 0]);
@@ -243,17 +239,15 @@ test('SES stops on a hard refusal with SES\'s reason; Send again continues with 
   assert.deepEqual(S.sent.map(x => x.to).sort(), ['p1@shop.io', 'p2@shop.io', 'p3@shop.io'], 'each person exactly once');
 });
 
-test('SES checks before approval: Zoho lists, an unverified sender, no unsubscribe link and no consent are refused', async () => {
+test('SES checks before approval: an unverified sender, no unsubscribe link and no consent are refused', async () => {
   const ws = await sesWorkspace('SES checks');
   const listId = await consentedList(ws, [{ name: 'Ann', email: 'ann@shop.io' }]);
   const check = async body => (await capi(ws, 'POST', `/${(await capi(ws, 'POST', '', { ...CAMPAIGN, mailListIds: [listId], ...body })).data.campaign.id}/validate`, {})).data.validation;
-  assert.ok((await check({ lists: [{ key: 'L1', name: 'Zoho list' }] })).problems.some(p => /Zoho lists cannot be used with Amazon SES/.test(p)));
   assert.ok((await check({ fromEmail: 'news@not-verified.io' })).problems.some(p => /not verified in Amazon SES/.test(p)));
   assert.ok((await check({ html: '<p>Hello</p>' })).problems.some(p => /unsubscribe link/.test(p)));
   const cold = (await capi(ws, 'POST', '/contact-lists', { name: 'Cold', contacts: [{ name: 'X', email: 'x@cold.io' }] })).data.list.id;
   assert.ok((await check({ mailListIds: [cold] })).problems.some(p => /no recorded marketing consent/.test(p)));
-  // Zoho workspaces are untouched: the audiences still need Zoho.
-  const z = await h.createWorkspace({ name: `Zoho ws ${Date.now()}` });
-  assert.equal((await capi(z, 'GET', '/audiences')).status, 409);
-  assert.equal((await capi(ws, 'GET', '/audiences')).data.provider, 'ses');
+  const aud = await capi(ws, 'GET', '/audiences');
+  assert.equal(aud.status, 200);
+  assert.ok(aud.data.mailLists.some(l => l.id === listId));
 });

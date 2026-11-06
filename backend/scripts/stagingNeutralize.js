@@ -9,7 +9,7 @@
  * would revoke them at Meta/Google/LinkedIn and break production). Changes, all in this database:
  *   social accounts   -> disconnected, credentials deleted; their queued/processing posts cancelled
  *   mailboxes         -> passwords cleared, marketing approval removed, status "Not Configured"
- *   Zoho connections  -> disconnected, refresh token cleared
+ *   Amazon SES keys   -> cleared (Mail Settings → Campaigns)
  *   product email batches queued/sending -> approved (not sending); outreach running -> paused;
  *   automation active -> paused
  * Allowed test integrations (STAGING_ALLOWED_* settings) are left alone. Refuses unless the staging
@@ -83,10 +83,10 @@ const NOTE = 'Staging copy: switched off locally by stagingNeutralize (provider 
       await query(`UPDATE mail_configurations SET smtp_pass = NULL, imap_pass = NULL, marketing_approved = 0, status = 'Not Configured' WHERE id IN (${inList(mb)})`, mb);
       done.push(`${mb.length} mailbox password(s) cleared`);
     }
-    const z = ids('zoho');
-    if (z.length) {
-      await query(`UPDATE mail_provider_connections SET status = 'disconnected', refresh_token_ciphertext = NULL, last_error = ? WHERE id IN (${inList(z)})`, [NOTE, ...z]);
-      done.push(`${z.length} Zoho connection(s) disconnected`);
+    const sesWs = ids('ses');
+    if (sesWs.length) {
+      await query(`UPDATE mail_delivery_settings SET ses_access_key_id = NULL, ses_secret_ciphertext = NULL, ses_last_error = ? WHERE workspace_id IN (${inList(sesWs)})`, [NOTE, ...sesWs]);
+      done.push(`${sesWs.length} workspace(s) Amazon SES keys cleared`);
     }
     const b = ids('batches');
     if (b.length) {

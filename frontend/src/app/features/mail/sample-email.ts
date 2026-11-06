@@ -1,7 +1,7 @@
 /**
  * A ready-made campaign email to start from: email-safe layout (600px table, inline styles),
- * Zoho merge tags (first name with a default, view in browser, organization address, update
- * profile, unsubscribe) and [bracketed] parts to fill in. Approval is blocked while any [bracket]
+ * merge tags (first name with a default, unsubscribe) and [bracketed] parts to fill in, including
+ * your company address. Approval is blocked while any [bracket]
  * is left, and the server flags the sample example.com link, so it cannot go out half-edited.
  */
 /** "you", not "there": a subject is not a greeting ("A quick idea for you"). */
@@ -19,7 +19,6 @@ export function sampleCampaignHtml(company?: string): string {
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f5f7;">
   <tr><td align="center" style="padding:24px 12px;">
     <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:100%;max-width:600px;background:#ffffff;border-radius:8px;font-family:Arial,Helvetica,sans-serif;color:#1f2937;">
-      <tr><td style="padding:12px 32px 0;text-align:right;font-size:12px;"><a href="$[LI:VIEWINBROWSER]$" style="color:#6b7280;">View in browser</a></td></tr>
       <tr><td style="padding:16px 32px;border-bottom:3px solid #4f46e5;font-size:22px;font-weight:bold;color:#4f46e5;">${name}</td></tr>
       <tr><td style="padding:28px 32px 8px;font-size:16px;line-height:1.6;">
         <p style="margin:0 0 16px;">Hi $[FNAME|there]$,</p>
@@ -40,8 +39,8 @@ export function sampleCampaignHtml(company?: string): string {
       </td></tr>
       <tr><td style="padding:20px 32px;background:#f9fafb;border-top:1px solid #e5e7eb;border-radius:0 0 8px 8px;font-size:12px;line-height:1.6;color:#6b7280;text-align:center;">
         <p style="margin:0 0 8px;">You are receiving this email because you are a business contact of ${name}.</p>
-        <p style="margin:0 0 8px;">$[HF:ORGADDRESS]$</p>
-        <p style="margin:0;"><a href="$[LI:UPDATEPROFILE]$" style="color:#6b7280;">Update your profile</a> &middot; <a href="$[LI:UNSUBSCRIBE]$" style="color:#6b7280;">Unsubscribe</a></p>
+        <p style="margin:0 0 8px;">[Your company address]</p>
+        <p style="margin:0;"><a href="$[LI:UNSUBSCRIBE]$" style="color:#6b7280;">Unsubscribe</a></p>
       </td></tr>
     </table>
   </td></tr>

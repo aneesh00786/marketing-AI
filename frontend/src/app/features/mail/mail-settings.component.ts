@@ -5,12 +5,10 @@ import { ApiService } from '../../services/api.service';
 import { CampaignDeliveryComponent } from './campaign-delivery.component';
 import { MarketingDeliveryComponent } from './marketing-delivery.component';
 import { MailTrackingSettingsComponent } from './mail-tracking-settings.component';
-import { ZohoAppSettingsComponent } from './zoho-app-settings.component';
-import { ZohoCampaignsComponent } from './zoho-campaigns.component';
 
 export type SettingsTab = 'sending' | 'replies' | 'marketing' | 'tracking' | 'campaigns';
-/** Older links (Campaigns "Set up in Settings", the Zoho sign-in return) still name 'zoho'. */
-const TAB_ALIASES: Record<string, SettingsTab> = { zoho: 'campaigns', 'campaign-sending': 'campaigns' };
+/** Older links may still name the former tab id. */
+const TAB_ALIASES: Record<string, SettingsTab> = { 'campaign-sending': 'campaigns' };
 
 const BLANK = {
   provider: 'custom_smtp', smtp_host: '', smtp_port: 587, smtp_secure: false, smtp_user: '', smtp_pass: '',
@@ -24,14 +22,14 @@ const BLANK = {
  *  Replies (IMAP)     — inbound mailbox replies are synced from
  *  Marketing email    — approve the saved SMTP mailbox for marketing
  *  Tracking & privacy — open/click tracking and the ZeptoMail delivery webhook
- *  Zoho Campaigns     — where that connection lives
+ *  Campaigns          — the Amazon SES connection that sends campaigns
  * Sending and Replies save the same mailbox settings, so each has the Save button.
  * Owners/Admins (mail.configure) edit; the server enforces it. Others see what applies and why.
  */
 @Component({
   selector: 'app-mail-settings',
   standalone: true,
-  imports: [CommonModule, FormsModule, CampaignDeliveryComponent, MarketingDeliveryComponent, MailTrackingSettingsComponent, ZohoAppSettingsComponent, ZohoCampaignsComponent],
+  imports: [CommonModule, FormsModule, CampaignDeliveryComponent, MarketingDeliveryComponent, MailTrackingSettingsComponent],
   templateUrl: './mail-settings.component.html',
   styleUrls: ['../command/command-center.component.css', './mail-ui.css', './mail-settings.component.css']
 })
@@ -39,10 +37,10 @@ export class MailSettingsComponent implements OnInit {
   @Output() toast = new EventEmitter<string>();
   /** Mail settings saved or the mailbox synced: the shell refreshes its status bar and inbox. */
   @Output() changed = new EventEmitter<void>();
-  /** Ask Mail Center to open another section (e.g. Campaigns for the Zoho connection). */
+  /** Ask Mail Center to open another section (e.g. Campaigns). */
   @Output() openSection = new EventEmitter<string>();
-  /** Open on a given tab (e.g. 'campaigns' from the Campaigns "Set up in Settings" link; 'zoho' still works). */
-  @Input() initialTab: SettingsTab | 'zoho' | null = null;
+  /** Open on a given tab (e.g. 'campaigns' from the Campaigns "Set up in Settings" link). */
+  @Input() initialTab: SettingsTab | null = null;
 
   readonly tabs: { id: SettingsTab; label: string }[] = [
     { id: 'sending', label: 'Sending' },

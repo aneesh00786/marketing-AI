@@ -123,14 +123,14 @@
 
       <app-product-emails *ngSwitchCase="'product-emails'" (toast)="toast.emit($event)"></app-product-emails>
 
-      <app-email-campaigns *ngSwitchCase="'campaigns'" (openSettings)="settingsTab = 'campaigns'; go('settings')" (createTemplate)="templateStartNew = true; go('templates')" [oauthResult]="zohoOauthResult" [startTemplate]="campaignStartTemplate" (toast)="toast.emit($event)"></app-email-campaigns>
+      <app-email-campaigns *ngSwitchCase="'campaigns'" (openSettings)="settingsTab = 'campaigns'; go('settings')" (createTemplate)="templateStartNew = true; go('templates')" [startTemplate]="campaignStartTemplate" (toast)="toast.emit($event)"></app-email-campaigns>
 
       <app-email-templates *ngSwitchCase="'templates'" [startNew]="templateStartNew" (toast)="toast.emit($event)" (use)="templateUse.emit($event)"></app-email-templates>
 
       <!-- Email log, campaign log and (Owners/Admins) the Compose audit -->
       <app-mail-logs *ngSwitchCase="'logs'" [canViewAudit]="!!caps?.has('mail.configure')" (openSection)="go($any($event))"></app-mail-logs>
 
-      <!-- All mail settings: mailbox connection, marketing approval, tracking, Zoho pointer. -->
+      <!-- All mail settings: mailbox connection, marketing approval, tracking, Amazon SES. -->
       <app-mail-settings *ngSwitchCase="'settings'" [initialTab]="settingsTab" (toast)="toast.emit($event)" (changed)="settingsChanged.emit()" (openSection)="go($any($event))"></app-mail-settings>
     </ng-container>
   </div>

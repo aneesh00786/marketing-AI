@@ -48,7 +48,7 @@ test('classifier: transactional only when declared and nothing points to marketi
   assert.deepEqual((await c('transactional', PROMO)).reasons, ['promotional_phrases']);
   assert.ok((await c('transactional', PROMO)).reclassified);
   assert.deepEqual((await c('transactional', { subject: 'Update', body: 'News. To unsubscribe, reply STOP.' })).reasons, ['unsubscribe_wording']);
-  assert.deepEqual((await c('transactional', { subject: 'Hi', html: '<a href="$[LI:UNSUBSCRIBE]$">x</a>', body: '' })).reasons.includes('zoho_merge_tags'), true);
+  assert.deepEqual((await c('transactional', { subject: 'Hi', html: '<a href="$[LI:UNSUBSCRIBE]$">x</a>', body: '' })).reasons.includes('merge_tags'), true);
   assert.deepEqual((await c('transactional', RECEIPT, T.promo)).reasons, ['template_marketing_category']);
   assert.equal((await c('transactional', RECEIPT, T.receipt)).purpose, 'transactional');
   assert.deepEqual((await c('transactional', RECEIPT, T.other)).reasons, ['template_unknown'], "another workspace's template is not trusted");

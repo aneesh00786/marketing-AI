@@ -7,16 +7,16 @@ import { CountryFilterComponent, LeadCountry } from '../../shared/leads/country-
 
 /**
  * Leads → "Add to contact list": pick leads (only those that may be emailed can be ticked; the others
- * show why) and a contact list in Marketech.ai, existing or new. Zoho gets them when a campaign is sent.
+ * show why) and a contact list in Marketech.ai, existing or new, to email them with a campaign.
  */
 @Component({
-  selector: 'app-leads-to-zoho',
+  selector: 'app-leads-to-list',
   standalone: true,
   imports: [CommonModule, FormsModule, CountryFilterComponent],
-  templateUrl: './leads-to-zoho.component.html',
-  styleUrls: ['../command/command-center.component.css', '../mail/mail-ui.css', './leads-to-zoho.component.css']
+  templateUrl: './leads-to-list.component.html',
+  styleUrls: ['../command/command-center.component.css', '../mail/mail-ui.css', './leads-to-list.component.css']
 })
-export class LeadsToZohoComponent implements OnInit {
+export class LeadsToListComponent implements OnInit {
   /** Leads ticked when the popup opens (optional). */
   @Input() preselect: number[] = [];
   @Output() closed = new EventEmitter<void>();

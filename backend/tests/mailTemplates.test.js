@@ -327,7 +327,7 @@ test('Email Campaigns: a template is copied into a new campaign; edits stay inde
   await t(A, 'PATCH', `/${tpl.data.template.id}`, { html: '<p>Template changed</p>' });
   assert.match((await h.api('GET', `/api/v1/mail/campaigns/${id}`, { token: A.token })).data.campaign.html, /Big news/, 'campaign copy unaffected');
 
-  // Approve (bypassing Zoho checks by marking approved directly), then an edit resets approval.
+  // Approve (bypassing the sending checks by marking approved directly), then an edit resets approval.
   await db().run("UPDATE mail_campaigns SET status = 'approved', approved_version = version, approved_by = ? WHERE id = ?", [A.userId, id]);
   const edited = await h.api('PATCH', `/api/v1/mail/campaigns/${id}`, { token: A.token, body: { html: '<p>Edited</p><script>x()</script>' } });
   assert.equal(edited.data.campaign.status, 'draft');
@@ -335,10 +335,10 @@ test('Email Campaigns: a template is copied into a new campaign; edits stay inde
   assert.doesNotMatch(edited.data.campaign.html, /<script/, 'campaign HTML sanitized on save');
   assert.equal((await h.api('POST', '/api/v1/mail/campaigns', { token: B.token, body: { name: 'x', templateId: tpl.data.template.id } })).status, 404, 'another workspace\'s template');
 
-  // {{first_name}} is filled by Zoho (merge tag); a token Zoho cannot fill, such as {{company}}, is flagged.
+  // {{first_name}} is filled per recipient; a token that cannot be filled, such as {{company}}, is flagged.
   const tok = await h.api('POST', '/api/v1/mail/campaigns', { token: A.token, body: { name: 'Tok', html: '<p>Hi {{first_name}} at {{company}}</p>' } });
   const v = await h.api('POST', `/api/v1/mail/campaigns/${tok.data.campaign.id}/validate`, { token: A.token });
-  assert.ok(v.data.validation.problems.some(p => /cannot be filled by Zoho: \{\{company\}\}/.test(p)), JSON.stringify(v.data.validation.problems));
+  assert.ok(v.data.validation.problems.some(p => /cannot be filled: \{\{company\}\}/.test(p)), JSON.stringify(v.data.validation.problems));
   assert.ok(!v.data.validation.problems.some(p => /\{\{first_name\}\}\./.test(p)), 'first_name is supported');
 });
 
@@ -605,7 +605,7 @@ test('Create with AI options: style, sections, language, audience, button link, 
     assert.ok(html.includes(`/api/v1/mail/assets/${logo.data.id}`), 'the uploaded logo');
     assert.match(html, /href="https:\/\/linkedin\.com\/company\/brightcart"[^>]*>LinkedIn</);
     assert.match(html, /Level 2, 10 Example St, Sydney/);
-    assert.doesNotMatch(html, /\$\[HF:ORGADDRESS\]\$/, 'the given address replaces Zoho\'s');
+    assert.doesNotMatch(html, /\$\[HF:ORGADDRESS\]\$/, 'the given address replaces the address tag');
     assert.equal(r.data.importId, importId);
     // Another workspace cannot use this logo; links must be https.
     assert.equal((await t(A, 'POST', '/generate', { prompt: 'x', logoAssetId: logo.data.id, importId })).status, 400);

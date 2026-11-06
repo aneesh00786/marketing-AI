@@ -1,6 +1,5 @@
 /**
- * Which service sends a workspace's campaigns (Zoho Campaigns by default, or Amazon SES) and the
- * Amazon SES connection. Like the other mail settings: kept per workspace (the secret encrypted,
+ * The Amazon SES connection that sends a workspace's campaigns. Like the other mail settings: kept per workspace (the secret encrypted,
  * never returned), with the server's .env as the fallback when a workspace has no keys:
  *   AWS_SES_REGION, AWS_SES_ACCESS_KEY_ID, AWS_SES_SECRET_ACCESS_KEY, AWS_SES_CONFIGURATION_SET,
  *   AWS_SES_MAX_PER_SECOND.
@@ -13,7 +12,6 @@ const { audit } = require('../../../lib/audit');
 const secretBox = require('../../../lib/secretBox');
 const ses = require('./sesClient');
 
-const PROVIDERS = ['zoho', 'ses'];
 const ws = ctx => ctx.auth.workspaceId;
 const httpError = (status, message, code) => Object.assign(new Error(message), { status, code, expose: true });
 
@@ -43,10 +41,9 @@ async function sesConfig(workspaceId) {
   return s ? { ...s, configurationSet: r?.ses_configuration_set || s.configurationSet, maxPerSecond: r?.ses_max_per_second || s.maxPerSecond } : null;
 }
 
-/** 'zoho' (default) or 'ses'. */
-async function campaignProvider(workspaceId) {
-  const r = await row(workspaceId);
-  return PROVIDERS.includes(r?.campaign_provider) ? r.campaign_provider : 'zoho';
+/** Campaigns are sent with Amazon SES. */
+async function campaignProvider() {
+  return 'ses';
 }
 
 function publicBase() {
@@ -69,8 +66,11 @@ async function getSettings(ctx) {
   const cfg = await sesConfig(ws(ctx)).catch(() => null);
   const base = publicBase();
   return {
-    provider: PROVIDERS.includes(r?.campaign_provider) ? r.campaign_provider : 'zoho',
+    provider: 'ses',
     canConfigure: ctx.auth.capabilities.has('mail.configure'),
+    // What this person may do with campaigns (the Campaigns screen shows only what is allowed).
+    canCompose: ctx.auth.capabilities.has('mail.compose'),
+    canSend: ctx.auth.capabilities.has('mail.send'),
     ses: {
       configured: !!cfg,
       source: cfg?.source || null,
@@ -89,7 +89,6 @@ async function getSettings(ctx) {
 }
 
 const saveSchema = z.object({
-  provider: z.enum(PROVIDERS).optional(),
   region: z.string().trim().regex(ses.REGION_RE, 'Enter an AWS region such as us-east-1 or ap-south-1.').optional(),
   accessKeyId: z.string().trim().regex(/^[A-Z0-9]{16,128}$/, 'Enter the access key ID (letters and digits, e.g. AKIA…).').optional(),
   secretAccessKey: z.string().trim().min(16).max(128).optional(),
@@ -105,7 +104,6 @@ async function saveSettings(ctx, input) {
   const sets = [];
   const params = [];
   const set = (col, val) => { sets.push(`${col} = ?`); params.push(val); };
-  if (v.provider) set('campaign_provider', v.provider);
   if (v.region !== undefined) set('ses_region', v.region);
   if (v.accessKeyId !== undefined) set('ses_access_key_id', v.accessKeyId);
   if (v.secretAccessKey !== undefined) set('ses_secret_ciphertext', secretBox.encrypt(v.secretAccessKey));
@@ -116,11 +114,7 @@ async function saveSettings(ctx, input) {
     set('updated_by', ctx.auth.userId || null);
     await run(`UPDATE mail_delivery_settings SET ${sets.join(', ')}, updated_at = UTC_TIMESTAMP() WHERE workspace_id = ?`, [...params, ws(ctx)]);
   }
-  if (v.provider === 'ses' && !(await sesConfig(ws(ctx)))) {
-    await run("UPDATE mail_delivery_settings SET campaign_provider = 'zoho' WHERE workspace_id = ?", [ws(ctx)]);
-    throw httpError(400, 'Add the Amazon SES connection (region and access keys) before choosing it for campaigns.', 'SES_NOT_CONFIGURED');
-  }
-  await audit(ctx, 'mail.delivery_settings_saved', { resourceType: 'mail_provider', resourceId: 'ses', metadata: { provider: v.provider || null, keysChanged: !!(v.accessKeyId || v.secretAccessKey || v.clearKeys), region: v.region || null } });
+  await audit(ctx, 'mail.delivery_settings_saved', { resourceType: 'mail_provider', resourceId: 'ses', metadata: { keysChanged: !!(v.accessKeyId || v.secretAccessKey || v.clearKeys), region: v.region || null } });
   return getSettings(ctx);
 }
 
@@ -145,4 +139,4 @@ async function testConnection(ctx) {
   }
 }
 
-module.exports = { sesConfig, campaignProvider, getSettings, saveSettings, testConnection, snsToken, PROVIDERS };
+module.exports = { sesConfig, campaignProvider, getSettings, saveSettings, testConnection, snsToken };

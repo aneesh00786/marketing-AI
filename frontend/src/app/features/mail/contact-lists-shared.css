@@ -88,17 +88,6 @@
 .zl-manual-list small { color: var(--text-muted); font-size: 0.76rem; }
 @media (max-width: 700px) { .zl-manual { grid-template-columns: 1fr 1fr; } .zl-manual button { grid-column: 1 / -1; } }
 
-/* Zoho plan: contacts against the limit */
-.zl-plan { display: flex; align-items: center; gap: 10px 16px; flex-wrap: wrap; padding: 10px 14px; border: 1px solid var(--border); border-radius: 10px; }
-.zl-plan-text { display: flex; flex-direction: column; gap: 3px; flex: 1 1 320px; min-width: 0; }
-.zl-plan-text b { font-size: 0.9rem; }
-.zl-plan-text small { font-size: 0.76rem; }
-.zl-plan-bar { display: block; height: 6px; border-radius: 999px; background: var(--surface-2, rgba(127,127,127,.15)); overflow: hidden; margin-top: 4px; }
-.zl-plan-bar i { display: block; height: 100%; background: #2a78d6; border-radius: 999px; }
-.zl-plan-bar.near i { background: #d97706; }
-.zl-plan-bar.full i { background: #dc2626; }
-.zl-plan-edit { display: flex; align-items: flex-end; gap: 8px; flex-wrap: wrap; flex: 1; }
-.zl-plan-edit label { display: flex; flex-direction: column; gap: 4px; font-size: 0.82rem; font-weight: 600; flex: 0 1 280px; }
 .zl-limit-warn { margin: 0; font-size: 0.82rem; }
 
 /* Delete a list */

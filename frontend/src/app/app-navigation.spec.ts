@@ -57,7 +57,7 @@ describe('App shell: Mail Center navigation', () => {
     expect(app.campaignStartTemplate).toEqual({ id: 3, name: 'Promo' });
   });
 
-  it('?view=drafts (old Mail Drafts link) and the Zoho sign-in return open the right section, then the URL is cleaned', () => {
+  it('?view=drafts (old Mail Drafts link) and Mail Center links open the right section, then the URL is cleaned', () => {
     const replace = spyOn(window.history, 'replaceState');
     const original = window.location.pathname + window.location.search;
     try {
@@ -65,10 +65,9 @@ describe('App shell: Mail Center navigation', () => {
       (app as any).readDeepLink();
       expect(app.currentRoute).toBe('emails');
       expect(app.mailSection).toBe('drafts');
-      window.history.pushState({}, '', '/?view=mail&section=zoho&zoho=connected');
+      window.history.pushState({}, '', '/?view=mail&section=campaigns');
       (app as any).readDeepLink();
       expect(app.mailSection).toBe('campaigns');
-      expect(app.zohoOauthResult).toEqual({ zoho: 'connected', reason: undefined });
       expect(replace).toHaveBeenCalled();
     } finally {
       window.history.pushState({}, '', original);

@@ -10,7 +10,7 @@ class AuditStub { @Input() startOpen = false; }
 
 const CAMPAIGNS = { page: 1, hasMore: false, campaigns: [
   { type: 'ai', id: 1, name: 'Spring sequence', status: 'active', recipients: 3, sent: 2, failed: 1, replied: 1, bounced: 1, opened: null, sentAt: '2026-10-28 10:00:00' },
-  { type: 'zoho', id: 6, name: 'Newsletter', status: 'submitted', recipients: null, sent: 120, failed: null, replied: null, bounced: 2, opened: 40, sentAt: '2026-10-20 10:00:00' }
+  { type: 'email', id: 6, name: 'Newsletter', status: 'submitted', recipients: null, sent: 120, failed: null, replied: null, bounced: 2, opened: 40, sentAt: '2026-10-20 10:00:00' }
 ] };
 const EMAILS = { page: 1, hasMore: true, emails: [
   { id: 9, to: 'kim@client.io', toName: 'Kim', subject: 'Order shipped', sentAt: '2026-10-28 10:00:00', delivery: 'opened', purpose: 'transactional', source: 'compose' }
@@ -58,7 +58,7 @@ describe('MailLogsComponent', () => {
     init();
     const cells = (i: number) => Array.from(el().querySelectorAll('tbody tr')[i].querySelectorAll('td')).slice(1, 10).map(c => c.textContent!.trim());
     expect(cells(0)).toEqual(['Spring sequence', 'AI Campaign', 'Sending', '3', '2', '—', '1', '1', '1']);
-    expect(cells(1)).toEqual(['Newsletter', 'Zoho', 'Submitted to Zoho', '—', '120', '40', '—', '2', '—']);
+    expect(cells(1)).toEqual(['Newsletter', 'Email campaign', 'Sent', '—', '120', '40', '—', '2', '—']);
     expect(el().querySelector('tbody td')!.textContent).toContain('Oct 28, 2026');
   });
 
@@ -115,9 +115,9 @@ describe('MailLogsComponent', () => {
 
   it('the type filter and links work', () => {
     init();
-    comp.campaignType = 'zoho';
+    comp.campaignType = 'email';
     comp.loadCampaigns(1);
-    expect(campaignsReq().request.params.get('type')).toBe('zoho');
+    expect(campaignsReq().request.params.get('type')).toBe('email');
     const opened: string[] = [];
     comp.openSection.subscribe(s => opened.push(s));
     Array.from(el().querySelectorAll('button')).find(b => b.textContent!.includes('Open Campaigns'))!.click();

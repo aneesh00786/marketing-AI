@@ -11,7 +11,7 @@
 
   <!-- Receiving needs a reply mailbox; sending-only services cannot fill an inbox. -->
   <div class="mx-callout warn" *ngIf="imapReady === false" role="status">
-    <span><strong>New mail is not being received.</strong> The inbox fills from your company mailbox over IMAP. ZeptoMail and Zoho Campaigns only send email; they cannot receive it.</span>
+    <span><strong>New mail is not being received.</strong> The inbox fills from your company mailbox over IMAP. ZeptoMail and Amazon SES only send email; they cannot receive it.</span>
     <button type="button" class="btn btn-secondary btn-sm" (click)="openSettings.emit()">Set up replies (IMAP)</button>
   </div>
 

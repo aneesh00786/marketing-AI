@@ -25,7 +25,7 @@ export function consentLabel(ld: any): string {
 /**
  * Records a lead's marketing consent. Granting needs how and when it was given and an evidence
  * reference, and the person confirms they hold that evidence: a note alone is not consent.
- * Withdrawn stops all marketing email to them. Only leads with proven consent get Zoho campaigns.
+ * Withdrawn stops all marketing email to them. Only leads with proven consent get email campaigns.
  */
 @Component({
   selector: 'app-lead-consent',
@@ -35,7 +35,7 @@ export function consentLabel(ld: any): string {
     <div class="lc-backdrop" (click)="close.emit()">
       <div class="lc-card" role="dialog" aria-modal="true" aria-labelledby="lc-title" (click)="$event.stopPropagation()">
         <h3 id="lc-title">Marketing consent: {{ lead?.name }}</h3>
-        <p class="muted small">Now: <b>{{ current }}</b>{{ lead?.email ? ' · ' + lead.email : '' }}. Zoho campaigns go only to people whose consent is recorded with evidence.</p>
+        <p class="muted small">Now: <b>{{ current }}</b>{{ lead?.email ? ' · ' + lead.email : '' }}. Campaigns go only to people whose consent is recorded with evidence.</p>
         <label class="lc-field">Consent
           <select class="hud-input" name="status" [(ngModel)]="status">
             <option value="granted">Given: they agreed to marketing emails</option>

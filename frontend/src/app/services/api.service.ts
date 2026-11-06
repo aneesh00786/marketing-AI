@@ -319,7 +319,7 @@ export class ApiService {
   }
 
   // 22. Bulk Lead Import & AI Qualification
-  importLeadsBulk(leads: any[], extras: { consent?: any; zohoList?: any } = {}): Observable<any> {
+  importLeadsBulk(leads: any[], extras: { consent?: any; mailList?: any } = {}): Observable<any> {
     return this.http.post(`${this.baseUrl}/leads/import-bulk`, { leads, ...extras });
   }
 
@@ -462,19 +462,6 @@ export class ApiService {
   }
 
   // 26. Company Mail Authorization (SMTP & IMAP)
-  // Zoho Campaigns API client entered in Settings (the secret is sent, never returned)
-  getZohoApp(): Observable<any> {
-    return this.http.get(`${this.baseUrl}/mail/zoho/app`);
-  }
-
-  saveZohoApp(body: { clientId: string; clientSecret?: string }): Observable<any> {
-    return this.http.put(`${this.baseUrl}/mail/zoho/app`, body);
-  }
-
-  removeZohoApp(): Observable<any> {
-    return this.http.delete(`${this.baseUrl}/mail/zoho/app`);
-  }
-
   getMailConfig(): Observable<any> {
     return this.http.get(`${this.root}/api/mail/config`);
   }

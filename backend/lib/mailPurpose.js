@@ -9,7 +9,7 @@
  *  - the template id is not one of this workspace's templates          -> marketing
  *  - the message contains the content of one of the workspace's marketing templates (even when
  *    no template id is sent)                                           -> marketing
- *  - marketing markers: unsubscribe links or wording, Zoho Campaigns merge tags   -> marketing
+ *  - marketing markers: unsubscribe links or wording, campaign merge tags         -> marketing
  *  - two or more promotional phrases (discount/% off/sale/promo code/coupon/limited time/
  *    special or exclusive offer/buy, shop or order now/free trial/newsletter/subscribe now)
  *                                                                      -> marketing
@@ -41,7 +41,7 @@ function contentSignals({ subject, html, text }) {
   const raw = `${subject || ''}\n${html || ''}\n${text || ''}`;
   const plain = `${String(subject || '').toLowerCase()} ${toText(html)} ${String(text || '').toLowerCase()}`;
   const reasons = [];
-  if (/\$\[[A-Z]{2}:[A-Z_]+\]\$/.test(raw)) reasons.push('zoho_merge_tags');
+  if (/\$\[[A-Z]{2}:[A-Z_]+\]\$/.test(raw)) reasons.push('merge_tags');
   if (/\bunsubscribe\b|\bopt[-\s]?out\b|manage (your )?(email )?preferences/i.test(plain)) reasons.push('unsubscribe_wording');
   const promo = PROMO_PHRASES.filter(re => re.test(plain)).length;
   if (promo >= 2) reasons.push('promotional_phrases');

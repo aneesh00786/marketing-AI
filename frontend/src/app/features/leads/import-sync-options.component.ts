@@ -7,8 +7,8 @@ import { CONSENT_METHOD_LABELS, ImportSync } from './import-sync';
 
 /**
  * The two optional steps of an Excel / CSV import, shown under the file preview:
- * 1. Marketing consent (optional): needed only for Product Emails; Zoho handles consent itself.
- * 2. Contact list: also add the imported contacts to a contact list here (existing or new); Zoho gets them when a campaign is sent to it.
+ * 1. Marketing consent (optional): needed for email campaigns and Product Emails.
+ * 2. Contact list: also add the imported contacts to a contact list here (existing or new), to email them with a campaign.
  * It edits the ImportSync object it is given; the import itself is sent by the parent.
  */
 @Component({
@@ -22,7 +22,7 @@ import { CONSENT_METHOD_LABELS, ImportSync } from './import-sync';
     <fieldset class="iso-box">
       <legend>Marketing consent <span class="iso-opt">(optional)</span></legend>
       <label class="iso-check"><input type="checkbox" [(ngModel)]="sync.consent" /> These contacts agreed to receive marketing emails, and I have proof</label>
-      <p class="iso-help" *ngIf="!sync.consent">Not needed for Zoho Campaigns. Record it only if you will send these contacts Product Emails.</p>
+      <p class="iso-help" *ngIf="!sync.consent">Campaigns go only to people with recorded consent. Record it only if these people agreed to marketing emails.</p>
       <div class="iso-grid" *ngIf="sync.consent">
         <label>How they agreed
           <select class="hud-input" [(ngModel)]="sync.method"><option *ngFor="let m of methods" [value]="m.value">{{ m.label }}</option></select></label>
@@ -33,7 +33,7 @@ import { CONSENT_METHOD_LABELS, ImportSync } from './import-sync';
       </div>
     </fieldset>
 
-    <fieldset class="iso-box" *ngIf="canZoho">
+    <fieldset class="iso-box" *ngIf="canList">
       <legend>Contact list <span class="iso-opt">(optional)</span></legend>
       <div class="iso-radios">
         <label><input type="radio" name="iso-list" value="none" [(ngModel)]="sync.list" /> Leads only</label>
@@ -46,7 +46,7 @@ import { CONSENT_METHOD_LABELS, ImportSync } from './import-sync';
       </select>
       <input *ngIf="sync.list === 'new'" class="hud-input" [(ngModel)]="sync.listName" maxlength="150" placeholder="e.g. Trade show Oct 2026" aria-label="New list name" />
       <p class="iso-help" *ngIf="listsError">{{ listsError }}</p>
-      <p class="iso-help" *ngIf="sync.list !== 'none'">Kept in Marketech.ai (Zoho Campaigns › Contact lists). People who unsubscribed or bounced are never emailed.</p>
+      <p class="iso-help" *ngIf="sync.list !== 'none'">Kept in Marketech.ai (Campaigns › Contact lists). People who unsubscribed or bounced are never emailed.</p>
     </fieldset>
   </div>`,
   styles: [`
@@ -69,7 +69,7 @@ import { CONSENT_METHOD_LABELS, ImportSync } from './import-sync';
 export class ImportSyncOptionsComponent implements OnInit {
   @Input({ required: true }) sync!: ImportSync;
   /** The user may add contacts to contact lists (mail.send). */
-  @Input() canZoho = false;
+  @Input() canList = false;
   readonly methods = CONSENT_METHOD_LABELS;
   readonly today = new Date().toISOString().slice(0, 10);
   lists: { id: number; name: string; total: number }[] = [];
@@ -78,7 +78,7 @@ export class ImportSyncOptionsComponent implements OnInit {
   constructor(private http: HttpClient) {}
 
   ngOnInit(): void {
-    if (!this.canZoho) return;
+    if (!this.canList) return;
     this.http.get<any>(`${apiRoot()}/api/v1/mail/campaigns/contact-lists`).subscribe({
       next: r => { this.lists = r.lists || []; if (!this.lists.length && this.sync.list === 'existing') this.sync.list = 'new'; },
       error: e => { this.listsError = e?.error?.error || 'Contact lists could not be loaded.'; this.sync.list = 'none'; }

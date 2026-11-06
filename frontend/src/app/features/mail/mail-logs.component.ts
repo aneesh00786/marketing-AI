@@ -8,7 +8,7 @@ export type LogTab = 'campaigns' | 'emails' | 'audit';
 
 const CAMPAIGN_STATUS: Record<string, string> = {
   active: 'Sending', running: 'Sending', paused: 'Paused', stopped: 'Stopped', completed: 'Completed',
-  submitted: 'Submitted to Zoho', needs_review: 'Outcome unknown — check'
+  submitted: 'Sent', needs_review: 'Outcome unknown — check'
 };
 const PURPOSE: Record<string, string> = { transactional: 'Transactional / Direct', marketing: 'Marketing' };
 const SOURCE: Record<string, string> = { compose: 'Compose', draft: 'Mail Drafts', ai_campaign: 'AI Campaigns', other: 'Not recorded' };
@@ -18,7 +18,7 @@ const isoDay = (d: Date) => d.toISOString().slice(0, 10);
 
 /**
  * Mail Center → Logs: a record of what was actually sent, filtered by date.
- *  - Sent campaigns: AI Campaigns that sent emails and Zoho Campaigns submitted to Zoho (no drafts,
+ *  - Sent campaigns: AI Campaigns that sent emails and email campaigns sent with Amazon SES (no drafts,
  *    approved-but-unsent or failed campaigns).
  *  - Sent emails: every email that went out (failed attempts are in Sent Mail).
  *  - Compose audit (Owners/Admins): the purpose recorded for each Compose send.

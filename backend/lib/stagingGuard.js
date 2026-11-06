@@ -9,13 +9,14 @@
  *     APP_BASE_URL/FRONTEND_URL are not the production host (PRODUCTION_APP_HOST). When these are
  *     not configured the guard warns that it cannot tell.
  *   - The database holds no live outward-facing integration that is not explicitly allowed. A copy
- *     of production data still holds production social accounts, mailbox passwords, Zoho
- *     connections and queued sends; from staging they would post or email for real:
+ *     of production data still holds production social accounts, mailbox passwords, Amazon SES
+ *     keys and queued sends; from staging they would post or email for real:
  *       social accounts      demo or listed in STAGING_ALLOWED_SOCIAL_ACCOUNTS (external ids)
  *       mailboxes            no stored password, or sender in STAGING_ALLOWED_MAILBOXES
- *       Zoho connections     none connected, unless STAGING_ALLOW_ZOHO=1
+ *       Amazon SES keys      none stored (Mail Settings → Campaigns), unless STAGING_ALLOW_SES=1
  *       product email batches, outreach campaigns, automation workflows: none sending/running/active
  *       ZEPTOMAIL_TOKEN      not set, unless STAGING_ALLOW_ZEPTOMAIL=1 (e.g. a sandbox token)
+ *       AWS_SES_* keys       not set, unless STAGING_ALLOW_SES=1 (e.g. a sandbox account)
  *     scripts/stagingNeutralize.js switches these off locally, without calling any provider.
  *   - A restore target (when given) is not the production name and is empty.
  *
@@ -58,9 +59,9 @@ async function integrationFindings(query, env = process.env) {
     .filter(m => !allowedMailboxes.has(String(m.sender_email || '').toLowerCase()));
   if (mailboxes.length) out.push({ key: 'mailboxes', ids: mailboxes.map(m => m.id), text: `${mailboxes.length} mailbox(es) with stored passwords not in STAGING_ALLOWED_MAILBOXES (ids ${mailboxes.slice(0, 10).map(m => `#${m.id}`).join(', ')})` });
 
-  if (env.STAGING_ALLOW_ZOHO !== '1') {
-    const zoho = await rows(query, "SELECT id FROM mail_provider_connections WHERE status = 'connected'");
-    if (zoho.length) out.push({ key: 'zoho', ids: zoho.map(z => z.id), text: `${zoho.length} connected Zoho Campaigns account(s)` });
+  if (env.STAGING_ALLOW_SES !== '1') {
+    const ses = await rows(query, 'SELECT workspace_id AS id FROM mail_delivery_settings WHERE ses_secret_ciphertext IS NOT NULL');
+    if (ses.length) out.push({ key: 'ses', ids: ses.map(x => x.id), text: `${ses.length} workspace(s) with Amazon SES keys (campaigns would be sent for real)` });
   }
   const batches = await rows(query, "SELECT id FROM mail_draft_batches WHERE status IN ('queued', 'sending')");
   if (batches.length) out.push({ key: 'batches', ids: batches.map(b => b.id), text: `${batches.length} product email batch(es) queued or sending` });
@@ -91,6 +92,9 @@ async function stagingProblems({ env = process.env, query, restoreTarget = null,
   }
   if (restoreTarget === null && (env.ZEPTOMAIL_TOKEN || '').trim() && env.STAGING_ALLOW_ZEPTOMAIL !== '1') {
     problems.push('ZEPTOMAIL_TOKEN is set: staging would send real transactional email (invitations, drafts). Remove it, or set STAGING_ALLOW_ZEPTOMAIL=1 for a sandbox token.');
+  }
+  if (restoreTarget === null && (env.AWS_SES_SECRET_ACCESS_KEY || '').trim() && env.STAGING_ALLOW_SES !== '1') {
+    problems.push('AWS_SES_SECRET_ACCESS_KEY is set: staging would send real campaign email with Amazon SES. Remove it, or set STAGING_ALLOW_SES=1 for a sandbox account.');
   }
 
   if (restoreTarget !== null) {

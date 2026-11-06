@@ -110,7 +110,7 @@ describe('MailInboxComponent', () => {
   it('without a reply mailbox it explains that nothing is received and links to setup (no sync button)', () => {
     init(false, { page: 1, hasMore: false, unread: 0, emails: [] });
     expect(el().textContent).toContain('New mail is not being received.');
-    expect(el().textContent).toContain('ZeptoMail and Zoho Campaigns only send email');
+    expect(el().textContent).toContain('ZeptoMail and Amazon SES only send email');
     expect(button('Sync inbox')).toBeUndefined();
     let opened = false;
     comp.openSettings.subscribe(() => opened = true);

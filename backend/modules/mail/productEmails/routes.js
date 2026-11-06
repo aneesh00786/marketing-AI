@@ -26,7 +26,7 @@ const wrap = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch
 const page = (title, text, form = '') => `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title></head>
 <body style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;max-width:480px;margin:60px auto;padding:0 16px;color:#1e293b"><h1 style="font-size:20px">${title}</h1><p>${text}</p>${form}</body></html>`;
 
-// Campaigns sent through Zoho: Marketech.ai keeps the unsubscribe (the Zoho list is temporary).
+// Email campaigns: each email links to Marketech.ai's own unsubscribe page for the campaign.
 const CONFIRM_FORM = '<form method="post" action=""><button type="submit" style="font:inherit;padding:10px 18px;border-radius:8px;border:0;background:#1e293b;color:#fff;cursor:pointer">Unsubscribe</button></form>';
 const campaigns = () => require('../campaigns/campaignService');
 unsubscribe.get('/c/:token', wrap(async (req, res) => {

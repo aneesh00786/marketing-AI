@@ -10,53 +10,30 @@ describe('ContactListsComponent (lists kept in Marketech.ai)', () => {
   const el = () => fixture.nativeElement as HTMLElement;
   const button = (text: string) => Array.from(el().querySelectorAll('button')).find(b => b.textContent!.trim().includes(text)) as HTMLButtonElement;
   const LISTS = [
-    { id: 1, name: 'Compiled B2B Oct 26', source: 'zoho', inZoho: true, total: 7380, reachable: 7219 },
-    { id: 2, name: 'Sydney buyers', source: 'local', inZoho: false, total: 3, reachable: 2, noConsent: 1 }
+    { id: 1, name: 'Compiled B2B Oct 26', source: 'zoho', total: 7380, reachable: 7219 },
+    { id: 2, name: 'Sydney buyers', source: 'local', total: 3, reachable: 2, noConsent: 1 }
   ];
-  const SYNC = { status: 'succeeded', result: { lists: 4, contacts: 7387 } };
 
   function start(o: Partial<ContactListsComponent> = {}): void {
     TestBed.configureTestingModule({ imports: [ContactListsComponent], providers: [provideHttpClient(), provideHttpClientTesting()] });
     http = TestBed.inject(HttpTestingController);
     fixture = TestBed.createComponent(ContactListsComponent);
     comp = fixture.componentInstance;
-    Object.assign(comp, { zohoReady: true, canManage: true, canConfigure: true, ...o });
+    Object.assign(comp, { canManage: true, ...o });
     fixture.detectChanges();
-    http.expectOne(r => r.url.endsWith('/contact-lists')).flush({ lists: structuredClone(LISTS), contacts: 7390, sync: SYNC });
-    if (comp.zohoReady) http.expectOne(r => r.url.endsWith('/zoho-lists')).flush({ lists: [], plan: { contactLimit: 10000, usage: { upTo: 7227, atLeast: 7219 } } });
+    http.expectOne(r => r.url.endsWith('/contact-lists')).flush({ lists: structuredClone(LISTS), contacts: 7390 });
     fixture.detectChanges();
   }
-  const reload = () => http.expectOne(r => r.method === 'GET' && r.url.endsWith('/contact-lists')).flush({ lists: structuredClone(LISTS), contacts: 7390, sync: SYNC });
+  const reload = () => http.expectOne(r => r.method === 'GET' && r.url.endsWith('/contact-lists')).flush({ lists: structuredClone(LISTS), contacts: 7390 });
   afterEach(() => http.verify());
 
-  it('shows the lists from Marketech.ai with counts, the one-time copy from Zoho, and which are also in Zoho', () => {
+  it('shows the lists from Marketech.ai with their counts', () => {
     start();
-    expect(el().querySelector('.cl-sync')!.textContent).toContain('Copied 7,387 contacts from 4 Zoho list(s) when Zoho was connected');
     const rows = Array.from(el().querySelectorAll('.cl-row:not(.zl-th)'));
     expect(rows.length).toBe(2);
-    expect(rows[0].textContent).toContain('Also in Zoho');
     expect(rows[0].textContent).toContain('7,380');
-    expect(rows[1].textContent).not.toContain('Also in Zoho');
-    expect(el().querySelector('.zl-plan')!.textContent).toContain('Contacts in Zoho: up to 7,227 of 10,000');
+    expect(el().textContent).not.toContain('Zoho');
   });
-
-  it('while the copy from Zoho runs, the lists are checked again until it is done', fakeAsync(() => {
-    TestBed.configureTestingModule({ imports: [ContactListsComponent], providers: [provideHttpClient(), provideHttpClientTesting()] });
-    http = TestBed.inject(HttpTestingController);
-    fixture = TestBed.createComponent(ContactListsComponent);
-    comp = fixture.componentInstance;
-    Object.assign(comp, { zohoReady: false, canManage: true });
-    fixture.detectChanges();
-    http.expectOne(r => r.url.endsWith('/contact-lists')).flush({ lists: [], contacts: 0, sync: { status: 'running' } });
-    fixture.detectChanges();
-    expect(el().querySelector('.cl-sync')!.textContent).toContain('Copying your Zoho lists');
-    tick(3000);
-    http.expectOne(r => r.url.endsWith('/contact-lists')).flush({ lists: structuredClone(LISTS), contacts: 7390, sync: SYNC });
-    fixture.detectChanges();
-    expect(el().querySelectorAll('.cl-row:not(.zl-th)').length).toBe(2);
-    tick(10000);
-    http.expectNone(r => r.url.endsWith('/contact-lists'));
-  }));
 
   it('New list: created here with chosen leads, typed contacts and pasted addresses (an empty list is fine)', () => {
     start();
@@ -115,7 +92,7 @@ describe('ContactListsComponent (lists kept in Marketech.ai)', () => {
     fixture.detectChanges();
     const cells = Array.from(el().querySelectorAll('.zl-ctable tbody td')).map(td => td.textContent!.trim());
     expect(cells.slice(0, 9)).toEqual(['1', 'Kim Lee', 'Shop', 'kim@shop.io', '0400', 'Sydney', 'Unsubscribed', 'Not recorded', 'Contacted']);
-    expect(['granted', 'zoho', 'withdrawn', 'none'].map(x => comp.consentLabel(x))).toEqual(['Given', 'Zoho subscriber', 'Withdrawn', 'Not recorded']);
+    expect(['granted', 'imported', 'withdrawn', 'none'].map(x => comp.consentLabel(x))).toEqual(['Given', 'Subscriber (imported)', 'Withdrawn', 'Not recorded']);
     comp.viewing!.q = 'kim';
     comp.view(comp.viewing!.list, 'subscribed', 1, 'kim');
     req = http.expectOne(r => r.url.endsWith('/contact-lists/1/contacts') && r.params.get('status') === 'subscribed' && r.params.get('q') === 'kim');
@@ -146,23 +123,15 @@ describe('ContactListsComponent (lists kept in Marketech.ai)', () => {
     expect(el().textContent).toContain('1 row(s) without an email skipped');
   });
 
-  it('Delete: a list also in Zoho offers here / Zoho only / both (Zoho options for admins only)', () => {
-    start({ canConfigure: false });
+  it('Delete asks first, then removes the list (people stay in contacts)', () => {
+    start();
     button('Delete').click(); fixture.detectChanges();
     const dlg = () => el().querySelector('.zl-del-card') as HTMLElement;
-    expect(dlg().textContent).toContain('Delete in Zoho only');
-    expect((dlg().querySelector('input[value=zoho]') as HTMLInputElement).disabled).toBeTrue();
-    expect(dlg().textContent).toContain('Only an Owner or Admin');
-    comp.canConfigure = true; fixture.detectChanges();
-    comp.deleting!.where = 'zoho';
+    expect(dlg().textContent).toContain('the people stay in your contacts');
     (dlg().querySelector('.zl-del-go') as HTMLButtonElement).click();
     const del = http.expectOne(r => r.method === 'DELETE' && r.url.endsWith('/contact-lists/1'));
-    expect(del.request.body).toEqual({ where: 'zoho', confirm: true });
-    del.flush({ deleted: true, where: 'zoho' });
+    expect(del.request.body).toEqual({ confirm: true });
+    del.flush({ deleted: true });
     reload();
-    // A list only here: one plain option.
-    comp.openDelete(comp.lists[1]); fixture.detectChanges();
-    expect(dlg().querySelector('input[value=zoho]')).toBeNull();
-    expect(dlg().textContent).toContain('Delete this list');
   });
 });

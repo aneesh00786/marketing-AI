@@ -7,7 +7,7 @@ const { deleteRows, removeDir } = require('./workspaceDeletion');
 /**
  * Clear data (platform admin): erases the chosen kinds of data of one workspace at once, keeping
  * the workspace itself. For test data, e.g. in the platform workspace, which cannot be deleted.
- * Always kept: the workspace, its business profile, connections and settings (Zoho, email, social
+ * Always kept: the workspace, its business profile, connections and settings (email, social
  * accounts, Telnyx), Owners, and the activity log. Not undoable; the activity log records it.
  */
 const OWNER = 'Workspace Owner';
@@ -16,8 +16,8 @@ const CATEGORIES = [
     tables: ['lead_place_refs', 'lead_consent_events', 'lead_discovery_places', 'lead_discovery_runs', 'leads'] },
   { key: 'contacts', label: 'Contact lists and their contacts (Mail Center)', count: 'mail_contacts',
     tables: ['mail_lists', 'mail_contacts', 'mail_hidden_lists'] },
-  { key: 'mailCampaigns', label: 'Email campaigns (Zoho) and their reports', count: 'mail_campaigns', calls: true,
-    tables: ['mail_campaign_contacts', 'zoho_campaign_submissions', 'mail_campaigns'] },
+  { key: 'mailCampaigns', label: 'Email campaigns and their reports', count: 'mail_campaigns', calls: true,
+    tables: ['mail_campaign_recipients', 'mail_campaign_contacts', 'zoho_campaign_submissions', 'mail_campaigns'] },
   { key: 'emails', label: 'Emails: Inbox, Sent Mail, drafts, product email batches and tracking', count: 'emails',
     tables: ['mail_tracked_links', 'mail_events', 'mail_message_tracking', 'mail_send_requests', 'mail_draft_batches', 'email_drafts', 'emails'] },
   { key: 'outreach', label: 'Outreach sequences and A/B tests', count: 'outreach_campaigns',
@@ -69,7 +69,7 @@ async function options(ctx, rawId) {
     const count = c.members ? await countMembers(row.id) : Number((await get(`SELECT COUNT(*) AS n FROM \`${c.count}\` WHERE workspace_id = ?`, [row.id])).n);
     categories.push({ key: c.key, label: c.label, count, warn: c.warn || null });
   }
-  return { workspace: { id: row.id, name: row.name }, categories, kept: 'The workspace, its business profile, connections and settings (Zoho, email, social accounts, Telnyx), its Owners and the activity log are always kept.' };
+  return { workspace: { id: row.id, name: row.name }, categories, kept: 'The workspace, its business profile, connections and settings (email, social accounts, Telnyx), its Owners and the activity log are always kept.' };
 }
 
 const clearSchema = z.object({

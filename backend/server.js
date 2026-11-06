@@ -124,10 +124,7 @@ app.use('/api', apiGate({
     '/api/v1/telnyx/dialogue', '/api/telnyx/dialogue',
     // OAuth callbacks are authenticated by single-use state; webhooks by provider signatures.
     /^\/api\/v1\/social\/oauth\/[a-z_]+\/callback$/,
-    '/api/v1/mail/zoho/callback',
-    // Zoho imports approved campaign HTML from a token-bound, expiring URL.
-    /^\/api\/v1\/mail\/campaigns\/content\/[A-Za-z0-9_-]{43}$/,
-    // Template images/fonts, loaded by recipients' mail clients and Zoho (opaque, unguessable ids).
+    // Template images/fonts, loaded by recipients' mail clients (opaque, unguessable ids).
     /^\/api\/v1\/mail\/assets\/[A-Za-z0-9_-]{43}$/,
     // Unsubscribe links in product emails carry a random per-recipient token.
     /^\/api\/v1\/mail\/unsubscribe\/[a-f0-9]{40}$/,
@@ -167,8 +164,7 @@ app.use(['/api/v1/products', '/api/products'], productsRouter);
 // Tenant-aware Mail Drafts, Mail Center and mail settings; the voice tool send_email only saves a draft.
 app.use(['/api/v1/drafts', '/api/drafts'], mailRoutes.drafts);
 app.use(['/api/v1/emails', '/api/emails'], mailRoutes.emails);
-// Zoho Campaigns connection and Marketech.ai email campaigns delivered through Zoho. Before the mail settings router.
-app.use('/api/v1/mail/zoho', require('./modules/mail/zoho/routes'));
+// Email campaigns (sent with Amazon SES). Before the mail settings router.
 app.use('/api/v1/mail/campaigns', require('./modules/mail/campaigns/routes'));
 // Reusable email templates (HTML/ZIP import) and their public image URLs.
 const mailTemplateRoutes = require('./modules/mail/templates/routes');

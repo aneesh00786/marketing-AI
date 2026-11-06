@@ -5,19 +5,19 @@ describe('Mail Center navigation links', () => {
     expect(mailSectionFromLink('drafts', null)).toBe('drafts');
   });
 
-  it('?view=mail opens the requested section, the overview by default, and Campaigns after Zoho sign-in', () => {
+  it('?view=mail opens the requested section, the overview by default', () => {
     expect(mailSectionFromLink('mail', null)).toBe('overview');
     expect(mailSectionFromLink('mail', 'approvals')).toBe('approvals');
     expect(mailSectionFromLink('mail', 'templates')).toBe('templates');
     expect(mailSectionFromLink('mail', 'settings')).toBe('settings');
     expect(mailSectionFromLink('mail', 'inbox')).toBe('inbox');
     expect(mailSectionFromLink('mail', 'sent')).toBe('sent');
-    expect(mailSectionFromLink('mail', 'zoho')).toBe('campaigns');
+    expect(mailSectionFromLink('mail', 'campaigns')).toBe('campaigns');
     expect(mailSectionFromLink('mail', 'nonsense')).toBe('overview');
   });
 
   it('other links are not mail links', () => {
-    expect(mailSectionFromLink('social', 'zoho')).toBeNull();
+    expect(mailSectionFromLink('social', 'campaigns')).toBeNull();
     expect(mailSectionFromLink(null, null)).toBeNull();
   });
 

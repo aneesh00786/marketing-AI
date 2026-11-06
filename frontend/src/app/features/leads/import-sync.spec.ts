@@ -3,7 +3,7 @@ import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { importSyncBody, importSyncProblem, newImportSync } from './import-sync';
 import { ImportSyncOptionsComponent } from './import-sync-options.component';
-import { LeadsToZohoComponent } from './leads-to-zoho.component';
+import { LeadsToListComponent } from './leads-to-list.component';
 
 describe('Import sync (consent + contact list)', () => {
   it('needs full consent details and a list choice before importing; builds the request body', () => {
@@ -32,19 +32,19 @@ describe('Import sync (consent + contact list)', () => {
 describe('ImportSyncOptionsComponent', () => {
   let http: HttpTestingController;
   afterEach(() => http.verify());
-  function make(canZoho: boolean): { fixture: ComponentFixture<ImportSyncOptionsComponent>; el: HTMLElement } {
+  function make(canList: boolean): { fixture: ComponentFixture<ImportSyncOptionsComponent>; el: HTMLElement } {
     TestBed.configureTestingModule({ imports: [ImportSyncOptionsComponent], providers: [provideHttpClient(), provideHttpClientTesting()] });
     http = TestBed.inject(HttpTestingController);
     const fixture = TestBed.createComponent(ImportSyncOptionsComponent);
     fixture.componentInstance.sync = newImportSync();
-    fixture.componentInstance.canZoho = canZoho;
+    fixture.componentInstance.canList = canList;
     fixture.detectChanges();
     return { fixture, el: fixture.nativeElement };
   }
 
-  it('marks consent optional (not needed for Zoho); consent shows how, when, proof and the confirmation', () => {
+  it('marks consent optional; consent shows how, when, proof and the confirmation', () => {
     const { fixture, el } = make(false);
-    expect(el.textContent).toContain('Not needed for Zoho Campaigns');
+    expect(el.textContent).toContain('Campaigns go only to people with recorded consent');
     expect(el.textContent).not.toContain('Contact list');
     fixture.componentInstance.sync.consent = true;
     fixture.detectChanges();
@@ -69,15 +69,15 @@ describe('ImportSyncOptionsComponent', () => {
   });
 });
 
-describe('LeadsToZohoComponent (Leads → Add to contact list)', () => {
-  let fixture: ComponentFixture<LeadsToZohoComponent>;
+describe('LeadsToListComponent (Leads → Add to contact list)', () => {
+  let fixture: ComponentFixture<LeadsToListComponent>;
   let http: HttpTestingController;
   const el = () => fixture.nativeElement as HTMLElement;
   const btn = (t: string) => Array.from(el().querySelectorAll('button')).find(b => b.textContent!.trim().includes(t)) as HTMLButtonElement;
   beforeEach(() => {
-    TestBed.configureTestingModule({ imports: [LeadsToZohoComponent], providers: [provideHttpClient(), provideHttpClientTesting()] });
+    TestBed.configureTestingModule({ imports: [LeadsToListComponent], providers: [provideHttpClient(), provideHttpClientTesting()] });
     http = TestBed.inject(HttpTestingController);
-    fixture = TestBed.createComponent(LeadsToZohoComponent);
+    fixture = TestBed.createComponent(LeadsToListComponent);
     fixture.detectChanges();
     http.expectOne(r => r.url.endsWith('/contact-lists')).flush({ lists: [{ id: 3, name: 'Sydney', total: 3 }] });
   });

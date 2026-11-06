@@ -1,11 +1,11 @@
 /**
- * Campaigns sent with Amazon SES (workspace setting; Zoho Campaigns is the default). Same flow as
- * Zoho: write → recipients → approve → send. Here Marketech.ai sends each email itself:
+ * Campaigns sent with Amazon SES: write → recipients → approve → send. Marketech.ai sends each
+ * email itself:
  *
  * 1. prepare: the recipients are fixed for this campaign version, one row each in
  *    mail_campaign_recipients (unique per address): people in the chosen contact lists who may get
  *    marketing email (subscribed, not stopped, with marketing consent: contacts/consent.js) and the
- *    eligible picked contacts. Zoho lists cannot be used with SES.
+ *    eligible picked contacts.
  * 2. the worker (job "ses_campaign_send") sends to them in parts, at the account's sending rate:
  *    each row is claimed (queued → sending) before the SES call, so a retried job never emails anyone
  *    twice; an unclear SES reply leaves that row "unknown" and it is never resent automatically.
@@ -32,7 +32,7 @@ const parse = (v, d) => { try { return v ? JSON.parse(v) : d; } catch { return d
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const escapeHtml = v => String(v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-/** Merge tags for one person: Zoho's ($[FNAME|default]$, $[LNAME|]$, $[UD:CONTACT_EMAIL]$) and {{first_name}}. */
+/** Merge tags for one person: $[FNAME|default]$, $[LNAME|]$, $[UD:CONTACT_EMAIL]$ and {{first_name}}. (zoho_status holds the send status.) */
 function personalize(text, p, { html }) {
   const val = v => (html ? escapeHtml(v) : v);
   return String(text || '')
@@ -43,7 +43,7 @@ function personalize(text, p, { html }) {
       const v = t === 'FNAME' ? p.first_name : t === 'LNAME' ? p.last_name : p.email;
       return val(v || def || '');
     })
-    // Any other Zoho tag has no meaning outside Zoho: its default value, or nothing.
+    // Any other merge tag: its default value, or nothing.
     .replace(/\$\[[^\]|\n]{1,60}\|([^\]\n]{0,80})\]\$/g, (m, def) => val(def || ''))
     .replace(/\$\[[^\]\n]{1,80}\]\$/g, '');
 }
@@ -68,7 +68,7 @@ function buildRaw({ from, to, subject, html, unsubscribeUrl }) {
 async function prepare(ctx, row) {
   const workspaceId = row.workspace_id;
   const contactsSvc = require('../campaigns/campaignContacts');
-  const upload = require('../contacts/zohoUpload');
+  const upload = require('../contacts/recipients');
   const people = new Map();
   const add = (p) => {
     const email = String(p.email || '').trim().toLowerCase();
@@ -111,7 +111,7 @@ async function enqueue(row, part, runAt = new Date()) {
     { idempotencyKey: `ses_campaign_send:${row.id}:${row.version}:${part}:${Date.now()}`, runAt, maxAttempts: 1 });
 }
 
-/** Runs the queued job right away (like the Zoho upload), unless tests run it explicitly. */
+/** Runs the queued job right away, unless tests run it explicitly. */
 async function kick(workspaceId, campaignId) {
   if (process.env.SES_SEND_INLINE === '0') return false;
   const job = await get(`SELECT * FROM background_jobs WHERE workspace_id = ? AND job_type = 'ses_campaign_send' AND status = 'queued' AND run_at <= UTC_TIMESTAMP()
@@ -248,7 +248,7 @@ async function counts(row) {
 
 const pct = (n, d) => (d ? Math.round((n / d) * 1000) / 10 : 0);
 
-/** The campaign's figures, in the same fields the Zoho report uses (the page shows either). */
+/** The campaign's figures (sent, delivered, opened, clicked, bounced, unsubscribed, complaints). */
 async function report(row) {
   const c = await counts(row);
   const t = await get(`SELECT
@@ -278,7 +278,7 @@ async function report(row) {
   return out;
 }
 
-/** Per-recipient activity (same activities as the Zoho view), from Marketech.ai's records. */
+/** Per-recipient activity, from Marketech.ai's records. */
 const ACTIVITY_SQL = {
   sent: "r.status = 'sent'",
   opened: 't.first_open_at IS NOT NULL',

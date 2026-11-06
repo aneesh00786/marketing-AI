@@ -7,11 +7,6 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { EmailCampaignsComponent } from './email-campaigns.component';
 import { VisualHtmlEditorComponent } from './visual-html-editor.component';
 import { EmailContentEditorComponent } from './email-content-editor.component';
-import { ZohoCampaignsComponent } from './zoho-campaigns.component';
-
-@Component({ selector: 'app-zoho-campaigns', standalone: true, template: '' })
-class ZohoStub { @Input() oauthResult: any; @Output() toast = new EventEmitter<string>(); @Output() statusChange = new EventEmitter<any>(); }
-
 
 const ORIGINAL = '<p>Original campaign content</p>';
 
@@ -24,13 +19,14 @@ describe('EmailCampaignsComponent: Choose Template', () => {
 
   beforeEach(() => {
     TestBed.configureTestingModule({ imports: [EmailCampaignsComponent], providers: [provideHttpClient(), provideHttpClientTesting()] });
-    TestBed.overrideComponent(EmailCampaignsComponent, { remove: { imports: [ZohoCampaignsComponent] }, add: { imports: [ZohoStub] } });
     http = TestBed.inject(HttpTestingController);
     fixture = TestBed.createComponent(EmailCampaignsComponent);
     comp = fixture.componentInstance;
     fixture.detectChanges();
     http.expectOne(r => /\/mail\/campaigns$/.test(r.url)).flush({ campaigns: [] });
-    comp.zoho = { canCompose: true, canSend: false, connection: { connected: false } };
+    // The Amazon SES connection and this person's permissions (Mail Settings → Campaigns).
+    http.expectOne(r => r.url.endsWith('/mail/ses/settings')).flush({ canCompose: false, canSend: false, canConfigure: false, ses: { configured: false } });
+    comp.delivery = { canCompose: true, canSend: false, ses: { configured: false } };
     (comp as any).setSelected({ id: 5, name: 'Autumn', status: 'draft', version: 1, html: ORIGINAL, lists: [] });
     fixture.detectChanges();
   });
@@ -38,8 +34,8 @@ describe('EmailCampaignsComponent: Choose Template', () => {
   const flushContacts = (contacts: any[] = []) => http.match(r => r.method === 'GET' && /\/mail\/campaigns\/\d+\/contacts$/.test(r.url)).forEach(r => r.flush({ contacts }));
   afterEach(() => {
     flushContacts();
-    // Choosing a template never saves, sends or contacts Zoho by itself.
-    http.expectNone(r => r.method !== 'GET' && !/\/(duplicate|refresh|web-org)$/.test(r.url));
+    // Choosing a template never saves or sends by itself.
+    http.expectNone(r => r.method !== 'GET' && !/\/(duplicate|refresh)$/.test(r.url));
     http.verify();
   });
 
@@ -351,7 +347,7 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     comp.campaigns = LIST.map(c => ({ ...c }));
     fixture.detectChanges();
     const menuFor = (i: number) => { (el().querySelectorAll('.ec-kebab')[i] as HTMLButtonElement).click(); fixture.detectChanges(); return Array.from(el().querySelectorAll('.ec-item .ec-menu button')).map(b => b.textContent!.trim()); };
-    expect(menuFor(2)).withContext('submitted to Zoho').toEqual(['Open', 'Duplicate']);
+    expect(menuFor(2)).withContext('sent').toEqual(['Open', 'Duplicate']);
     expect(menuFor(0)).toEqual(['Open', 'Duplicate', 'Delete']);
     spyOn(window, 'confirm').and.returnValue(false);
     (Array.from(el().querySelectorAll('.ec-item .ec-menu button')).find(b => b.textContent!.trim() === 'Delete') as HTMLButtonElement).click();
@@ -456,23 +452,23 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     expect(comp.form.html).toBe('<p>Unsaved</p>');
   });
 
-  // ---- Zoho list contacts ----
+  // ---- Recipients ----
   it('Recipients load the contact lists from the server, and again after visiting Contact lists or opening Recipients', () => {
-    comp.zoho = { canCompose: true, canSend: true, connection: { connected: true, missingScopes: [] } };
+    comp.delivery = { canCompose: true, canSend: true, ses: { configured: true } };
     comp.loadAudiences();
-    http.expectOne(r => r.url.endsWith('/audiences')).flush({ lists: [], topics: [], mailLists: [{ id: 3, name: 'Trade show', reachable: 2, total: 2 }] });
+    http.expectOne(r => r.url.endsWith('/audiences')).flush({ mailLists: [{ id: 3, name: 'Trade show', reachable: 2, total: 2 }] });
     expect(comp.mailListOptions.map(l => l.name)).toEqual(['Trade show']);
     comp.view = 'lists';
     comp.showCampaigns();
-    http.expectOne(r => r.url.endsWith('/audiences')).flush({ lists: [], topics: [], mailLists: [{ id: 3, name: 'Trade show' }, { id: 4, name: 'New list' }] });
+    http.expectOne(r => r.url.endsWith('/audiences')).flush({ mailLists: [{ id: 3, name: 'Trade show' }, { id: 4, name: 'New list' }] });
     expect(comp.mailListOptions.map(l => l.name)).toEqual(['Trade show', 'New list']);
     comp.goStep(2);
-    http.expectOne(r => r.url.endsWith('/audiences')).flush({ lists: [], topics: [], mailLists: [] });
+    http.expectOne(r => r.url.endsWith('/audiences')).flush({ mailLists: [] });
   });
 
   it('Recipients: contact lists here with their reachable counts; choosing one is saved with the campaign', () => {
-    comp.audiences = { lists: [], topics: [], mailLists: [{ id: 3, name: 'Trade show', reachable: 24, total: 25, inZoho: false }, { id: 4, name: 'All gone', reachable: 0, total: 2 }] };
-    comp.zoho = { canCompose: true, canSend: true, connection: { connected: true, missingScopes: [] } };
+    comp.audiences = { mailLists: [{ id: 3, name: 'Trade show', reachable: 24, total: 25 }, { id: 4, name: 'All gone', reachable: 0, total: 2 }] };
+    comp.delivery = { canCompose: true, canSend: true, ses: { configured: true } };
     comp.step = 2;
     fixture.detectChanges();
     const rows = Array.from(el().querySelectorAll('.ec-list-row')) as HTMLElement[];
@@ -483,7 +479,7 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     fixture.detectChanges();
     expect(el().textContent).toContain('0 can be emailed of 76 · 76 without marketing consent');
     expect(el().querySelector('.ec-consent-note')!.textContent).toContain('Leads → Consent…');
-    comp.audiences = { lists: [], topics: [], mailLists: [{ id: 3, name: 'Trade show', reachable: 24, total: 25, inZoho: false }, { id: 4, name: 'All gone', reachable: 0, total: 2 }] };
+    comp.audiences = { mailLists: [{ id: 3, name: 'Trade show', reachable: 24, total: 25 }, { id: 4, name: 'All gone', reachable: 0, total: 2 }] };
     fixture.detectChanges();
     rows.splice(0, rows.length, ...(Array.from(el().querySelectorAll('.ec-list-row')) as HTMLElement[]));
     expect((rows[1].querySelector('input') as HTMLInputElement).disabled).withContext('nobody to email').toBeTrue();
@@ -497,160 +493,20 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     expect(req.request.body.mailListIds).toEqual([3]);
     req.flush({ campaign: { id: 5, name: 'Autumn', status: 'draft', version: 2, html: ORIGINAL, lists: [], mailListIds: [3], mailLists: [{ id: 3, name: 'Trade show', reachable: 24 }] } });
     http.expectOne(r => /\/mail\/campaigns$/.test(r.url)).flush({ campaigns: [] });
-    expect(comp.sendRecipients()).toContain('Lists Trade show (24), put into Zoho for this send');
+    expect(comp.sendRecipients()).toContain('Lists Trade show (24)');
   });
 
-  it('while the lists are put into Zoho, the campaign shows the progress and checks again until sent', fakeAsync(() => {
-    (comp as any).setSelected({ id: 9, name: 'Autumn', status: 'submitting', submitStage: 'upload', version: 3, html: ORIGINAL, lists: [], upload: { total: 7219, done: 1200 } });
-    fixture.detectChanges();
-    expect(el().querySelector('.ec-upload')!.textContent).toContain('Putting your lists into Zoho: 1,200 of 7,219 contacts');
-    tick(4000);
-    http.expectOne(r => r.method === 'POST' && r.url.endsWith('/campaigns/9/refresh')).flush({ campaign: { id: 9, name: 'Autumn', status: 'submitting', submitStage: 'upload', version: 3, html: ORIGINAL, lists: [], upload: { total: 7219, done: 7219 } } });
-    tick(4000);
-    http.expectOne(r => r.method === 'POST' && r.url.endsWith('/campaigns/9/refresh')).flush({ campaign: { id: 9, name: 'Autumn', status: 'submitted', version: 3, html: ORIGINAL, lists: [], report: { pending: true } } });
-    http.expectOne(r => /\/mail\/campaigns$/.test(r.url)).flush({ campaigns: [] });
-    expect(comp.selected.status).toBe('submitted');
-    discardPeriodicTasks();
-    (comp as any).ngOnDestroy();
-    flush();
-    http.match(() => true).forEach(r => r.flush({}));
-  }));
-
-  it('a Zoho list chosen earlier has View contacts for roles that can send; viewing does not change the choice', () => {
-    comp.audiences = { lists: [{ key: 'L1', name: 'Customers', contacts: 2 }], topics: [] };
-    comp.form.listKeys.add('L1');
-    comp.zoho = { canCompose: true, canSend: false, connection: { connected: true, missingScopes: [] } };
-    fixture.detectChanges();
-    expect(button('View contacts')).withContext('Members cannot see addresses').toBeUndefined();
-    comp.zoho = { ...comp.zoho, canSend: true };
-    fixture.detectChanges();
-    button('View contacts').click();
-    fixture.detectChanges();
-    expect(comp.form.listKeys.has('L1')).withContext('viewing does not change the choice').toBeTrue();
-    const req = http.expectOne(r => r.url.endsWith('/mail/campaigns/audiences/L1/contacts'));
-    expect(req.request.params.get('status')).toBe('subscribed');
-    req.flush({ contacts: [{ email: 'kim@client.io', name: 'Kim Lee', company: 'Acme', phone: null }], page: 1, hasMore: false });
-    fixture.detectChanges();
-    expect(el().querySelector('[role=dialog]')!.textContent).toContain('kim@client.io');
-    expect(el().querySelector('[role=dialog]')!.textContent).toContain('Customers');
-    (el().querySelector('app-zoho-list-contacts .zc-close') as HTMLButtonElement).click();
-    fixture.detectChanges();
-    expect(el().querySelector('[role=dialog]')).toBeNull();
-  });
-
-  // ---- Contacts picked inside a list ----
-  it('picked contacts show as one line with a count (never listed); Clear removes them and keeps unsaved edits', () => {
-    comp.zoho = { canCompose: true, canSend: true, connection: { connected: true, missingScopes: [], canSyncContacts: true } };
-    (comp as any).setSelected({ id: 5, name: 'Autumn', status: 'approved', approved: true, version: 3, html: ORIGINAL, lists: [] });
-    comp.audiences = { lists: [{ key: 'L1', name: 'Customers', contacts: 2000 }], topics: [] };
-    const picks = Array.from({ length: 1000 }, (_, i) => ({ id: i + 1, email: `p${i}@a.io`, sourceListKey: 'L1', eligible: true }));
-    flushContacts(picks);
-    comp.form.subject = 'Unsaved subject';
-    comp.step = 2;
-    fixture.detectChanges();
-    expect(el().querySelector('.ec-picks')!.textContent).toContain('1,000 contacts picked from this list');
-    expect(el().textContent).not.toContain('p999@a.io');
-    expect(el().textContent).not.toContain('Your leads');
-    spyOn(window, 'confirm').and.returnValue(true);
-    (Array.from(el().querySelectorAll('.ec-picks button')).find(b => b.textContent!.trim() === 'Clear') as HTMLButtonElement).click();
-    const req = http.expectOne(r => r.method === 'POST' && r.url.endsWith('/campaigns/5/contacts/remove'));
-    expect(req.request.body.ids.length).toBe(1000);
-    req.flush({ contacts: [], campaign: { id: 5, name: 'Autumn', status: 'draft', approved: false, version: 4, html: ORIGINAL, lists: [] } });
-    http.expectOne(r => /\/mail\/campaigns$/.test(r.url)).flush({ campaigns: [] });
-    fixture.detectChanges();
-    expect(el().querySelector('.ec-picks')).toBeNull();
-    expect(comp.selected.status).toBe('draft');
-    expect(comp.form.subject).withContext('the form is not reloaded').toBe('Unsaved subject');
-  });
-
-  it('with Amazon SES chosen: SES wording, Send needs SES set up, and a campaign sent with one service keeps it', () => {
-    comp.zoho = { canCompose: true, canSend: true, connection: { connected: false } };
-    comp.delivery = { provider: 'ses', ses: { configured: true } };
-    expect(comp.viaSes).toBeTrue();
-    expect(comp.sendReady).withContext('Zoho is not needed').toBeTrue();
-    expect(comp.statusLabel('submitted', { status: 'submitted', provider: 'ses' })).toBe('Sent with Amazon SES');
-    expect(comp.statusLabel('submitted', { status: 'submitted', provider: 'zoho' })).toBe('Submitted to Zoho');
-    expect(comp.sendsWithSes({ provider: 'zoho' })).withContext('sent before with Zoho').toBeFalse();
-    (comp as any).setSelected({ id: 9, name: 'Nov', status: 'approved', approved: true, version: 1, html: ORIGINAL, lists: [], provider: null });
-    comp.step = 4;
-    fixture.detectChanges();
-    const send = button('Send with Amazon SES');
-    expect(send).toBeTruthy();
-    expect(send.disabled).toBeFalse();
-    comp.delivery = { provider: 'ses', ses: { configured: false } };
-    fixture.detectChanges();
-    expect(button('Send with Amazon SES').disabled).toBeTrue();
-    expect(el().textContent).toContain('Amazon SES, which is not set up yet');
-  });
-
-  it('a send Zoho is holding shows "Waiting for Zoho" (not an error) and offers no Send', () => {
-    comp.zoho = { canCompose: true, canSend: true, connection: { connected: true } };
-    const held = { id: 6, name: 'Kerala', status: 'needs_review', submitStage: 'send', providerCode: 'ZOHO_HELD', approved: true, zohoPrepared: true, version: 2, html: ORIGINAL, lists: [] };
-    (comp as any).setSelected(held);
-    fixture.detectChanges();
-    expect(comp.statusLabel(held.status, held)).toBe('Waiting for Zoho');
-    expect(comp.tone(held.status, held)).toBe('warn');
-    expect(comp.statusLabel('needs_review', { status: 'needs_review', providerCode: '500' })).toBe('Unknown — check');
-    expect(el().textContent).toContain("Waiting for Zoho — please don't send it again.");
-    expect(el().textContent).not.toContain('Outcome unknown.');
-    expect(el().querySelector('.note.error')).toBeNull();
-    expect(button('Send through Zoho')).toBeUndefined();
-    // What Zoho shows for the recipients: the specific reason it holds the send.
-    (comp as any).setSelected({ ...held, zohoReadiness: { total: 70, active: 0, notActive: 68, unsubscribed: 2, bounced: 0, names: { confirmations: 1 } } });
-    fixture.detectChanges();
-    const ready = Array.from(el().querySelectorAll('.ec-ready > div')).map(d => d.textContent!.replace(/\s+/g, ' ').trim());
-    expect(ready).toEqual(['Contacts in Zoho lists70', 'Active (can be emailed)0', 'Not active yet (review or confirmation)68', 'Unsubscribed2', 'Asked by Zoho to confirm by email1']);
-    expect(comp.readinessItems({ zohoReadiness: { active: 5, capped: true } })[0]).toEqual({ label: 'Active (can be emailed)', value: '5+', tone: 'good' });
-    expect(comp.readinessItems({ zohoReadiness: { zohoCampaign: { when: 'before-send', total: 0, lists: [] } } })).toEqual([{ label: 'Recipients on the Zoho campaign (before sending)', value: '0', tone: 'bad' }]);
-    (comp as any).setSelected(held);
-    fixture.detectChanges();
-    // Open in Zoho: this campaign's page in the account's Zoho region, in a new tab.
-    expect(el().textContent).toContain('Open Zoho Campaigns ↗');
-    comp.zoho = { canCompose: true, canSend: true, connection: { connected: true, webUrl: 'https://campaigns.zoho.in' } };
-    (comp as any).setSelected({ ...held, zohoCampaignId: '1178368000002566702' });
-    fixture.detectChanges();
-    const link = el().querySelector('a.ec-open-zoho') as HTMLAnchorElement;
-    expect(link.textContent).toContain('Open in Zoho to send');
-    expect(link.getAttribute('href')).toBe('https://campaigns.zoho.in/campaigns/home.do#emailcampaign/1178368000002566702/cmpdetails');
-    expect(link.target).toBe('_blank');
-    link.addEventListener('click', ev => ev.preventDefault());
-    link.click();
-    expect(comp.openedInZoho).toBe(6);
-    // Coming back to Marketech.ai checks Zoho at once.
-    window.dispatchEvent(new Event('focus'));
-    http.expectOne(r => r.method === 'POST' && r.url.endsWith('/campaigns/6/refresh')).flush({ campaign: { ...held, zohoCampaignId: '1178368000002566702' } });
-    http.match(r => /\/mail\/campaigns$/.test(r.url)).forEach(r => r.flush({ campaigns: [] }));
-    expect(comp.zohoCampaignUrl({ zohoCampaignId: 'x/../evil' })).toBe('https://campaigns.zoho.in/campaigns/home.do');
-    // Without the org number Zoho shows its sign-in page: pasting one Zoho address saves it, and links use it.
-    fixture.detectChanges();
-    const orgInput = el().querySelector('#ec-zoho-org') as HTMLInputElement;
-    expect(orgInput).toBeTruthy();
-    comp.zohoOrgInput = 'https://campaigns.zoho.in/campaigns/org831854179/home.do#campaigns';
-    comp.saveZohoOrg();
-    const save = http.expectOne(r => r.method === 'PUT' && r.url.endsWith('/mail/zoho/web-org'));
-    expect(save.request.body).toEqual({ value: 'https://campaigns.zoho.in/campaigns/org831854179/home.do#campaigns' });
-    save.flush({ webOrg: '831854179' });
-    fixture.detectChanges();
-    expect(el().querySelector('#ec-zoho-org')).toBeNull();
-    expect((el().querySelector('a.ec-open-zoho') as HTMLAnchorElement).getAttribute('href')).toBe('https://campaigns.zoho.in/campaigns/org831854179/home.do#emailcampaign/1178368000002566702/cmpdetails');
-    button('Check Zoho now').click();
-    http.expectOne(r => r.method === 'POST' && r.url.endsWith('/campaigns/6/refresh')).flush({ campaign: { ...held, status: 'submitted', providerCode: null } });
-    http.match(r => /\/mail\/campaigns$/.test(r.url)).forEach(r => r.flush({ campaigns: [] }));
-    fixture.detectChanges();
-    expect(el().textContent).not.toContain('Waiting for Zoho');
-  });
-
-  it('sent campaigns can be deleted by those who send, after a confirmation that Zoho keeps its copy', () => {
+  it('sent campaigns can be deleted by those who send, after a confirmation that the stop-list is kept', () => {
     const sent = { id: 7, name: 'Spring', status: 'submitted' };
-    comp.zoho = { canCompose: true, canSend: false, connection: { connected: true } };
+    comp.delivery = { canCompose: true, canSend: false, ses: { configured: true } };
     expect(comp.canDelete(sent)).toBeFalse();
     expect(comp.canDelete({ id: 8, status: 'needs_review' })).toBeFalse();
-    comp.zoho = { canCompose: true, canSend: true, connection: { connected: true } };
+    comp.delivery = { canCompose: true, canSend: true, ses: { configured: true } };
     expect(comp.canDelete(sent)).toBeTrue();
     let asked = '';
     spyOn(window, 'confirm').and.callFake((m?: string) => { asked = m || ''; return true; });
     comp.removeCampaign(sent);
-    expect(asked).toContain('stay in Zoho Campaigns');
+    expect(asked).toContain('kept in the stop-list');
     http.expectOne(r => r.method === 'DELETE' && r.url.endsWith('/campaigns/7')).flush({ deleted: true });
     http.expectOne(r => /\/mail\/campaigns$/.test(r.url)).flush({ campaigns: [] });
   });
@@ -664,18 +520,18 @@ describe('EmailCampaignsComponent: Choose Template', () => {
   });
 
   it('the send confirmation popup names the lists and the selected contacts; Cancel sends nothing', () => {
-    (comp as any).setSelected({ id: 5, name: 'Autumn', status: 'approved', approved: true, version: 3, html: ORIGINAL, lists: [{ key: 'L1', name: 'Customers' }], contactCount: 2 });
+    (comp as any).setSelected({ id: 5, name: 'Autumn', status: 'approved', approved: true, version: 3, html: ORIGINAL, mailLists: [{ id: 1, name: 'Customers', reachable: 5 }], contactCount: 2 });
     comp.send();
     fixture.detectChanges();
     const dialog = () => el().querySelector('[role=dialog][aria-labelledby=ec-send-title]') as HTMLElement | null;
-    expect(dialog()!.textContent).toContain('Zoho lists Customers and 2 selected contacts (added to Zoho first)');
+    expect(dialog()!.textContent).toContain('Lists Customers (5) and 2 selected contacts');
     (Array.from(dialog()!.querySelectorAll('button')).find(b => b.textContent!.trim() === 'Cancel') as HTMLButtonElement).click();
     fixture.detectChanges();
     expect(dialog()).withContext('Cancel closes the popup').toBeNull();
     http.expectNone(r => r.url.endsWith('/send'));
     (comp as any).setSelected({ id: 5, name: 'Autumn', status: 'approved', approved: true, version: 3, html: ORIGINAL, lists: [], contactCount: 1 });
     comp.send();
-    expect(comp.sendConfirm!.recipients).toBe('1 selected contact (added to Zoho first)');
+    expect(comp.sendConfirm!.recipients).toBe('1 selected contact');
   });
 
   it('Send now in the popup sends once, with confirm: true', () => {
@@ -691,7 +547,7 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     expect(comp.sendConfirm).toBeNull();
   });
 
-  it('merge tags (as in Zoho): subject and editor insert Zoho tags with the default value typed in', () => {
+  it('merge tags: subject and editor insert name tags with the default value typed in', () => {
     const typeFallback = (scope: Element, v: string) => {
       const inp = scope.querySelector('.ec-merge-ask input') as HTMLInputElement;
       inp.value = v; inp.dispatchEvent(new Event('input'));
@@ -717,7 +573,7 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     const openPanel = () => { button('Personalize').click(); fixture.detectChanges(); };
     const choose = (label: string) => { openPanel(); (Array.from(el().querySelectorAll('.ec-personalize-panel button')).find(x => x.querySelector('b')!.textContent!.trim() === label) as HTMLButtonElement).click(); fixture.detectChanges(); };
     openPanel();
-    expect(Array.from(el().querySelectorAll('.ec-personalize-panel b')).map(x => x.textContent!.trim())).toEqual(['First name', 'Last name', 'View in browser link', 'Update profile link', 'Forward to a friend link', 'Your company address']);
+    expect(Array.from(el().querySelectorAll('.ec-personalize-panel b')).map(x => x.textContent!.trim())).toEqual(['First name', 'Last name'], 'only tags filled in when sending with Amazon SES');
     expect(el().querySelector('.ec-personalize-panel')!.textContent).toContain('e.g. “Hi Priya,”');
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); fixture.detectChanges();
     expect(el().querySelector('.ec-personalize-panel')).withContext('Escape closes it').toBeNull();
@@ -731,15 +587,10 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     button('Insert').click();
     fixture.detectChanges();
     expect(comp.form.html).toBe('<p>Hello $[FNAME|there]$,</p>');
-    // A link goes in straight away as a link Zoho fills in.
-    const b2 = el().querySelector('textarea[aria-label="Email HTML"]') as HTMLTextAreaElement;
-    b2.focus(); b2.setSelectionRange(0, 0);
-    choose('View in browser link');
-    expect(comp.form.html.startsWith('<a href="$[LI:VIEWINBROWSER]$">View in browser</a>')).withContext(comp.form.html).toBeTrue();
     expect(el().querySelector('.ec-merge-ask')).toBeNull();
   });
 
-  it('sender (as in Zoho): addresses grouped by domain, verified ones marked, name filled in, new address checked', () => {
+  it('sender: addresses grouped by domain, ones used before marked, name filled in, new address checked', () => {
     comp.campaigns = [
       { id: 1, fromEmail: 'News@Acme.com.au', fromName: 'Acme News', status: 'submitted' },
       { id: 2, fromEmail: 'sales@acme.com.au', fromName: '', status: 'draft' },
@@ -755,16 +606,16 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     sel().value = 'news@acme.com.au'; sel().dispatchEvent(new Event('change')); fixture.detectChanges();
     expect(comp.form.fromEmail).toBe('news@acme.com.au');
     expect(comp.form.fromName).toBe('Acme News');
-    expect(el().textContent).toContain('Verified: Zoho has already sent a campaign from this address');
+    expect(el().textContent).toContain('A campaign was already sent from this address');
     sel().value = 'hello@beta.io'; sel().dispatchEvent(new Event('change')); fixture.detectChanges();
     expect(comp.form.fromName).withContext('a typed name is kept').toBe('Acme News');
-    expect(el().textContent).toContain('Not used with Zoho yet');
+    expect(el().textContent).toContain('Not used for a campaign yet');
 
     sel().value = '__add'; sel().dispatchEvent(new Event('change')); fixture.detectChanges();
     const box = el().querySelector('.ec-sender-add input') as HTMLInputElement;
     box.value = 'boss@yahoo.com'; box.dispatchEvent(new Event('input'));
     button('Use address').click(); fixture.detectChanges();
-    expect(el().textContent).toContain('Zoho does not send from Gmail, Yahoo');
+    expect(el().textContent).toContain('Gmail, Yahoo, Outlook and other public mailboxes');
     expect(comp.form.fromEmail).toBe('hello@beta.io');
     box.value = ' Team@NewCo.com '; box.dispatchEvent(new Event('input'));
     button('Use address').click(); fixture.detectChanges();
@@ -773,7 +624,7 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     expect(sel().value).toBe('team@newco.com');
   });
 
-  it('Sample email: creates a campaign with the ready-made layout, Zoho merge tags and [bracketed] parts to fill in', () => {
+  it('Sample email: creates a campaign with the ready-made layout, merge tags and [bracketed] parts to fill in', () => {
     try { localStorage.setItem('tradesage_workspace', JSON.stringify({ name: 'Acme <Packaging>' })); } catch { /* storage blocked */ }
     comp.form = null; comp.selected = null; fixture.detectChanges();
     comp.newCampaign('sample');
@@ -781,7 +632,8 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     const b = req.request.body;
     expect(b.name).toBe('Sample campaign');
     expect(b.subject).toBe('A quick idea for $[FNAME|you]$');
-    for (const tag of ['Hi $[FNAME|there]$,', '$[LI:UNSUBSCRIBE]$', '$[LI:VIEWINBROWSER]$', '$[HF:ORGADDRESS]$', '$[LI:UPDATEPROFILE]$', '[Your name]', 'https://example.com']) expect(b.html).toContain(tag);
+    for (const tag of ['Hi $[FNAME|there]$,', '$[LI:UNSUBSCRIBE]$', '[Your company address]', '[Your name]', 'https://example.com']) expect(b.html).toContain(tag);
+    for (const tag of ['$[LI:VIEWINBROWSER]$', '$[HF:ORGADDRESS]$', '$[LI:UPDATEPROFILE]$']) expect(b.html).not.toContain(tag);
     expect(b.html).toContain('Acme &lt;Packaging&gt;');
     expect(b.html).not.toContain('<Packaging>');
     req.flush({ campaign: { id: 8, name: 'Sample campaign', status: 'draft', version: 1, html: b.html, subject: b.subject, lists: [] } });
@@ -807,45 +659,8 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     expect(comp.step).toBe(4);
   });
 
-  it('Zoho contacts can be picked only while the campaign can change and the connection allows it', () => {
-    comp.zoho = { canCompose: true, canSend: true, connection: { connected: true, missingScopes: [], canSyncContacts: true } };
-    expect(comp.canPickFromZoho).toBeTrue();
-    comp.zoho = { ...comp.zoho, connection: { connected: true, missingScopes: [], canSyncContacts: false } };
-    expect(comp.canPickFromZoho).withContext('reconnect needed').toBeFalse();
-    comp.zoho = { canCompose: true, canSend: false, connection: { connected: true, missingScopes: [], canSyncContacts: true } };
-    expect(comp.canPickFromZoho).withContext('role cannot read addresses').toBeFalse();
-    comp.zoho = { canCompose: true, canSend: true, connection: { connected: true, missingScopes: [], canSyncContacts: true } };
-    comp.selected = { ...comp.selected, status: 'submitted' };
-    expect(comp.canPickFromZoho).withContext('already sent').toBeFalse();
-  });
-
-  it('contacts picked from a Zoho list earlier show on its row, part-ticked; Zoho lists not in use are not shown', () => {
-    comp.audiences = { lists: [{ key: 'L1', name: 'Customers', contacts: 5 }, { key: 'L2', name: 'Other', contacts: 3 }], topics: [] };
-    comp.zoho = { canCompose: true, canSend: true, connection: { connected: true, missingScopes: [] } };
-    comp.onContacts([{ id: 1, email: 'kim@client.io', name: 'Kim', source: 'zoho_list', sourceListKey: 'L1', eligible: true, reasons: [] }]);
-    fixture.detectChanges();
-    const boxes = () => Array.from(el().querySelectorAll('.ec-list-row input')) as HTMLInputElement[];
-    expect([boxes()[0].indeterminate, boxes()[0].checked]).toEqual([true, false]);
-    expect(boxes().length).withContext('L2 is not used by this campaign').toBe(1);
-    expect(el().textContent).toContain('· 1 selected');
-    expect(el().querySelector('.ec-picks')!.textContent).toContain('1 contact picked from this list');
-    boxes()[0].click();
-    fixture.detectChanges();
-    expect([boxes()[0].indeterminate, boxes()[0].checked]).toEqual([false, true]);
-    expect(el().querySelector('.ec-picks')).toBeNull();
-    expect(el().textContent).not.toContain('· 1 selected');
-  });
-
-  it('the send confirmation does not count contacts already covered by a ticked list', () => {
-    (comp as any).setSelected({ id: 5, name: 'Autumn', status: 'approved', approved: true, version: 3, html: ORIGINAL, lists: [{ key: 'L1', name: 'Customers' }] });
-    comp.onContacts([{ id: 1, sourceListKey: 'L1', eligible: true }, { id: 2, leadId: 4, eligible: true }]);
-    comp.send();
-    expect(comp.sendConfirm!.recipients).toContain('Zoho lists Customers and 1 selected contact (added to Zoho first)');
-  });
-
-  // ---- Duplicate ----
-  const FULL = { id: 5, name: 'Autumn', status: 'submitted', version: 2, html: ORIGINAL, lists: [] };
-  const COPY = { id: 6, name: 'Autumn (copy)', status: 'draft', version: 1, html: ORIGINAL, lists: [] };
+  const FULL = { id: 5, name: 'Autumn', status: 'submitted', version: 2, html: ORIGINAL };
+  const COPY = { id: 6, name: 'Autumn (copy)', status: 'draft', version: 1, html: ORIGINAL };
 
   it('Duplicate on a sent campaign opens the copy as a draft and reports contacts left out', () => {
     (comp as any).setSelected(FULL);
@@ -871,7 +686,7 @@ describe('EmailCampaignsComponent: Choose Template', () => {
   });
 
   it('roles that cannot write campaigns have no Duplicate action', () => {
-    comp.zoho = { canCompose: false, canSend: false, connection: { connected: false } };
+    comp.delivery = { canCompose: false, canSend: false, ses: { configured: false } };
     fixture.detectChanges();
     expect(button('Duplicate')).toBeUndefined();
   });
@@ -883,7 +698,7 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     http.expectOne(r => r.method === 'GET' && r.url.endsWith('/campaigns/7')).flush({ campaign: c });
   };
 
-  it('opening a sent campaign reads its latest figures from Zoho', () => {
+  it('opening a sent campaign reads its latest figures', () => {
     openSent({ ...SENT, lastCheckedAt: null });
     http.expectOne(r => r.method === 'POST' && r.url.endsWith('/campaigns/7/refresh')).flush({ campaign: { ...SENT, report: { emails_sent_count: '10' } } });
     http.expectOne(r => /\/mail\/campaigns$/.test(r.url)).flush({ campaigns: [] });
@@ -896,7 +711,7 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     expect(el().querySelector('.ec-view-card app-email-preview')).toBeTruthy();
   });
 
-  it('figures read in the last few minutes are not read again (unless Zoho had none yet), and drafts never are', () => {
+  it('figures read in the last few minutes are not read again (unless there were none yet), and drafts never are', () => {
     openSent({ ...SENT, lastCheckedAt: new Date(Date.now() - 60000).toISOString(), report: null });
     http.expectOne(r => r.url.endsWith('/refresh')).flush({ campaign: { ...SENT, report: { emails_sent_count: '2' } } });
     http.expectOne(r => /\/mail\/campaigns$/.test(r.url)).flush({ campaigns: [] });
@@ -907,7 +722,7 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     http.expectNone(r => r.url.endsWith('/refresh'));
   });
 
-  it('if Zoho cannot be reached the campaign stays open with its last figures, and a late answer cannot replace another campaign', () => {
+  it('if the figures cannot be read the campaign stays open with its last ones, and a late answer cannot replace another campaign', () => {
     openSent({ ...SENT, lastCheckedAt: null, report: { emails_sent_count: '3' } });
     http.expectOne(r => r.url.endsWith('/refresh')).flush({ error: 'x' }, { status: 502, statusText: 'x' });
     expect(comp.selected.report.emails_sent_count).toBe('3');

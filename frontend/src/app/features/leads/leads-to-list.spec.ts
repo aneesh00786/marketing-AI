@@ -1,18 +1,18 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
-import { LeadsToZohoComponent } from './leads-to-zoho.component';
+import { LeadsToListComponent } from './leads-to-list.component';
 
-describe('LeadsToZohoComponent (Add to contact list): country filter', () => {
-  let fixture: ComponentFixture<LeadsToZohoComponent>;
+describe('LeadsToListComponent (Add to contact list): country filter', () => {
+  let fixture: ComponentFixture<LeadsToListComponent>;
   let http: HttpTestingController;
   const el = () => fixture.nativeElement as HTMLElement;
   afterEach(() => http.verify());
 
   it('lists countries with counts and searches the chosen one; each lead shows its country', () => {
-    TestBed.configureTestingModule({ imports: [LeadsToZohoComponent], providers: [provideHttpClient(), provideHttpClientTesting()] });
+    TestBed.configureTestingModule({ imports: [LeadsToListComponent], providers: [provideHttpClient(), provideHttpClientTesting()] });
     http = TestBed.inject(HttpTestingController);
-    fixture = TestBed.createComponent(LeadsToZohoComponent);
+    fixture = TestBed.createComponent(LeadsToListComponent);
     fixture.detectChanges();
     http.expectOne(r => r.url.endsWith('/contact-lists')).flush({ lists: [] });
     const first = http.expectOne(r => r.url.endsWith('/lead-options'));

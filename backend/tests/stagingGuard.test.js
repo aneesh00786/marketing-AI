@@ -7,14 +7,14 @@ const { stagingProblems, enforceStaging } = require('../lib/stagingGuard');
 const STAGING = { DEPLOYMENT_ENV: 'staging', DB_NAME: 'tradesage_staging', PRODUCTION_DB_NAME: 'tradesage', PRODUCTION_APP_HOST: 'app.marketech.example', PRODUCTION_DB_HOSTNAME: 'prod-db-1', APP_BASE_URL: 'https://staging.marketech.example', FRONTEND_URL: 'https://staging.marketech.example' };
 
 /** Fake database answering the guard's three queries. */
-function fakeDb({ host = 'staging-db', openDb = 'tradesage_staging', accounts = [], overdue = [], tables = 0, mailboxes = [], zoho = [], batches = [], outreach = [], automation = [] } = {}) {
+function fakeDb({ host = 'staging-db', openDb = 'tradesage_staging', accounts = [], overdue = [], tables = 0, mailboxes = [], ses = [], batches = [], outreach = [], automation = [] } = {}) {
   return async (sql) => {
     if (sql.includes('@@hostname')) return [{ host, db: openDb }];
     if (sql.includes('information_schema.TABLES')) return [{ n: tables }];
     if (sql.includes('FROM social_accounts')) return accounts;
     if (sql.includes('FROM publishing_jobs')) return overdue;
     if (sql.includes('FROM mail_configurations')) return mailboxes;
-    if (sql.includes('FROM mail_provider_connections')) return zoho;
+    if (sql.includes('FROM mail_delivery_settings')) return ses;
     if (sql.includes('FROM mail_draft_batches')) return batches;
     if (sql.includes('FROM outreach_campaigns')) return outreach;
     if (sql.includes('FROM automation_workflows')) return automation;
@@ -79,19 +79,19 @@ test('against a real database holding non-demo accounts, the staging worker refu
   assert.deepEqual(exits, [1]);
 });
 
-test('copied production mailboxes, Zoho, queued sends and active automations block staging; allowed ones do not', async () => {
-  const db = fakeDb({ mailboxes: [{ id: 1, sender_email: 'sales@customer.com' }, { id: 2, sender_email: 'qa@staging.test' }], zoho: [{ id: 4 }], batches: [{ id: 7 }], outreach: [{ id: 8 }], automation: [{ id: 9 }] });
+test('copied production mailboxes, Amazon SES keys, queued sends and active automations block staging; allowed ones do not', async () => {
+  const db = fakeDb({ mailboxes: [{ id: 1, sender_email: 'sales@customer.com' }, { id: 2, sender_email: 'qa@staging.test' }], ses: [{ id: 4 }], batches: [{ id: 7 }], outreach: [{ id: 8 }], automation: [{ id: 9 }] });
   const r = await stagingProblems({ env: STAGING, query: db });
   const text = r.problems.join(' | ');
   assert.match(text, /2 mailbox\(es\) with stored passwords/);
-  assert.match(text, /1 connected Zoho Campaigns account/);
+  assert.match(text, /1 workspace\(s\) with Amazon SES keys/);
   assert.match(text, /1 product email batch\(es\) queued or sending/);
   assert.match(text, /1 outreach campaign\(s\) running/);
   assert.match(text, /1 automation workflow\(s\) active/);
   assert.match(text, /stagingNeutralize/);
-  const allowed = await stagingProblems({ env: { ...STAGING, STAGING_ALLOWED_MAILBOXES: 'QA@staging.test', STAGING_ALLOW_ZOHO: '1' }, query: db });
+  const allowed = await stagingProblems({ env: { ...STAGING, STAGING_ALLOWED_MAILBOXES: 'QA@staging.test', STAGING_ALLOW_SES: '1' }, query: db });
   assert.match(allowed.problems.join(' | '), /1 mailbox\(es\)/, 'only the non-allowlisted mailbox remains');
-  assert.doesNotMatch(allowed.problems.join(' | '), /Zoho/);
+  assert.doesNotMatch(allowed.problems.join(' | '), /Amazon SES/);
 });
 
 test('a production ZeptoMail token on staging is refused unless explicitly allowed', async () => {

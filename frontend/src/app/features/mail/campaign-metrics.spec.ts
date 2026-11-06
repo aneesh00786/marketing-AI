@@ -25,23 +25,22 @@ describe('CampaignMetricsComponent', () => {
   });
   afterEach(() => http.verify());
 
-  it('missing Zoho figures are "Unavailable", never 0; rates are computed only from reported figures', () => {
+  it('missing figures are "Unavailable", never 0; rates are computed only from reported figures', () => {
     init({ report: { emails_sent_count: '200', delivered_count: '190', opens_count: '57', bounces_count: '10', hardbounce_count: '6', softbounce_count: '4' } });
     expect(sum('Sent').querySelector('b')!.textContent).toBe('200');
     expect(sum('Delivered').textContent).toContain('95.0%');
-    expect(sum('Unopened').querySelector('b')!.textContent).withContext('delivered − opened when Zoho gives no figure').toBe('133');
+    expect(sum('Unopened').querySelector('b')!.textContent).withContext('delivered − opened when no figure is given').toBe('133');
     expect(tile('Delivery rate').querySelector('b')!.textContent).toBe('95.0%');
     expect(tile('Open rate').querySelector('b')!.textContent).toBe('30.0%');
     expect(sum('Clicked').querySelector('b')!.textContent).toBe('—');
     expect(tile('Click rate').querySelector('b')!.textContent).toBe('Unavailable');
     expect(sum('Unsubscribes').querySelector('b')!.textContent).toBe('—');
     expect(sum('Marked spam').querySelector('b')!.textContent).toBe('—');
-    expect(sum('Forwards').querySelector('b')!.textContent).toBe('—');
     expect(tile('Bounced').textContent).toContain('Hard 6 · Soft 4');
     expect(el().textContent).toContain('estimate');
   });
 
-  it('uses Zoho\'s own percentages when reported', () => {
+  it('uses the reported percentages when given', () => {
     init({ report: { emails_sent_count: 100, delivered_count: 90, delivered_percent: '91.5', open_percent: '40%', opens_count: 36 } });
     expect(tile('Delivery rate').querySelector('b')!.textContent).toBe('91.5%');
     expect(tile('Open rate').querySelector('b')!.textContent).toBe('40%');
@@ -57,12 +56,12 @@ describe('CampaignMetricsComponent', () => {
     expect(el().textContent).not.toContain('recipient activity');
   });
 
-  it('recipient activity: only for mail.send roles; a popup loads people from Zoho with full details, tabs and paging', () => {
+  it('recipient activity: only for mail.send roles; a popup loads people with full details, tabs and paging', () => {
     init({ report: {}, canViewRecipients: false });
     expect(el().textContent).toContain('visible to owners, admins, marketing managers and approvers');
     expect(Array.from(el().querySelectorAll('button')).some(b => b.textContent!.includes('View recipients'))).toBeFalse();
     fixture.destroy();
-    init({ report: { emails_sent_count: '2', opens_count: '1', forwards_count: '0' }, canViewRecipients: true });
+    init({ report: { emails_sent_count: '2', opens_count: '1' }, canViewRecipients: true });
     (Array.from(el().querySelectorAll('button')).find(b => b.textContent!.includes('View recipients')) as HTMLButtonElement).click();
     let req = http.expectOne(r => r.url.endsWith('/mail/campaigns/7/recipients'));
     expect(req.request.params.get('activity')).toBe('sent');
@@ -108,12 +107,12 @@ describe('CampaignMetricsComponent', () => {
     req.flush({ available: true, recipients: [], hasMore: false });
     fixture.detectChanges();
     expect(pop().textContent).toContain('No one in this group on this page');
-    // Tabs switch the group; Delivered reads Zoho's sent list; Forwards has no list.
+    // Tabs switch the group; Delivered and Not sent have their own lists.
     (Array.from(pop().querySelectorAll('.cm-tabs button')).find(b => b.textContent!.includes('Delivered')) as HTMLButtonElement).click();
-    http.expectOne(r => r.params.get('activity') === 'sent' && r.params.get('page') === '1').flush({ available: true, recipients: [], hasMore: false });
-    (Array.from(pop().querySelectorAll('.cm-tabs button')).find(b => b.textContent!.includes('Forwards')) as HTMLButtonElement).click();
+    http.expectOne(r => r.params.get('activity') === 'delivered' && r.params.get('page') === '1').flush({ available: true, recipients: [], hasMore: false });
+    (Array.from(pop().querySelectorAll('.cm-tabs button')).find(b => b.textContent!.includes('Not sent')) as HTMLButtonElement).click();
+    http.expectOne(r => r.params.get('activity') === 'failed').flush({ available: true, recipients: [], hasMore: false });
     fixture.detectChanges();
-    expect(pop().textContent).toContain('does not say who forwarded');
     comp.selectActivity('clicked');
     http.expectOne(r => r.params.get('activity') === 'clicked').flush({ error: 'x' }, { status: 403, statusText: 'x' });
     fixture.detectChanges();
@@ -123,7 +122,7 @@ describe('CampaignMetricsComponent', () => {
     expect(el().querySelector('.cm-pop')).toBeNull();
   });
 
-  it('insights: devices, email apps, browsers, locations and lists from Zoho; zero entries are left out', () => {
+  it('insights: devices, email apps, browsers, locations and lists, when reported; zero entries are left out', () => {
     init({ report: { emails_sent_count: '2', insights: { sentAt: '04 Nov 2026, 11:33 AM', sentTimeZone: 'IST', topic: 'Marketing',
       devices: [{ label: 'Computer · Others', value: 1 }], emailClients: [], browsers: [{ label: 'Chrome', value: 1 }],
       locations: [{ label: 'India', value: 1 }, { label: 'United States of America', value: 1 }],
@@ -133,7 +132,7 @@ describe('CampaignMetricsComponent', () => {
     expect(text).toContain('Marketing');
     expect(text).toContain('Chrome');
     expect(text).toContain('United States of America');
-    expect(text).toContain('not identified any email app');
+    expect(text).toContain('No email app identified yet');
     expect(text).toContain('Selected contacts');
     expect(text).toContain('34 contact(s) · 1 bounced');
   });
@@ -210,12 +209,12 @@ describe('CampaignMetricsComponent', () => {
     });
   });
 
-  it('summary row matches Zoho\'s report (plus Bounced) with Zoho\'s percentages; Refresh asks the page', () => {
+  it('summary row with the reported percentages; Refresh asks the page', () => {
     init({ report: { emails_sent_count: '2', delivered_count: '2', delivered_percent: '100.0', opens_count: '1', open_percent: '50.0', unopened: '1', unopened_percent: '50.0',
       unique_clicks_count: '0', unique_clicked_percent: '0.0', unsub_count: '0', unsubscribe_percent: '0.0', spams_count: '0', spam_percent: '0.0', forwards_count: '0', forward_percent: '0.0' } });
     expect(comp.summary.map(x => [x.label, x.value, x.sub])).toEqual([
       ['Sent', '2', null], ['Delivered', '2', '100%'], ['Opened', '1', '50%'], ['Unopened', '1', '50%'],
-      ['Clicked', '0', '0%'], ['Bounced', '—', null], ['Unsubscribes', '0', '0%'], ['Marked spam', '0', '0%'], ['Forwards', '0', '0%']
+      ['Clicked', '0', '0%'], ['Bounced', '—', null], ['Unsubscribes', '0', '0%'], ['Marked spam', '0', '0%']
     ]);
     let asked = 0;
     comp.refresh.subscribe(() => asked++);
@@ -223,14 +222,14 @@ describe('CampaignMetricsComponent', () => {
     expect(asked).toBe(1);
   });
 
-  it('while Zoho is still sending: the row shows how many it goes to and 0 so far; no charts yet', () => {
+  it('while it is still sending: the row shows how many it goes to and 0 so far; no charts yet', () => {
     init({ report: { pending: true, recipients_count: 2, insights: { lists: [] } }, canViewRecipients: true });
-    expect(el().querySelector('.cm-sending')!.textContent).toContain('Zoho is sending this campaign to 2 contact(s)');
+    expect(el().querySelector('.cm-sending')!.textContent).toContain('Amazon SES is sending this campaign to 2 contact(s)');
     expect(comp.summary.map(x => [x.label, x.value])).toEqual([['Sending to', '2'], ['Delivered', '0'], ['Opened', '0'], ['Unopened', '0'], ['Clicked', '0'],
-      ['Bounced', '0'], ['Unsubscribes', '0'], ['Marked spam', '0'], ['Forwards', '0']]);
+      ['Bounced', '0'], ['Unsubscribes', '0'], ['Marked spam', '0']]);
     expect(el().textContent).not.toContain('Campaign reach');
     expect(el().querySelector('.cm-grid')).toBeNull();
-    expect(el().textContent).not.toContain('No figures from Zoho yet');
+    expect(el().textContent).not.toContain('No figures yet');
   });
 
   it('num() and rate() never invent values', () => {

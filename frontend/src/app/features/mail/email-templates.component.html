@@ -97,7 +97,7 @@
             <div class="tpl-ai-socials">
               <label *ngFor="let so of aiSocials"><span>{{ so.label }}</span><input class="hud-input" [name]="'so-' + so.key" maxlength="500" [(ngModel)]="ai.socials[so.key]" [placeholder]="so.placeholder" /></label>
             </div>
-            <label><span>Footer address <small class="muted">(optional; else your Zoho organization address)</small></span>
+            <label><span>Footer address <small class="muted">(optional; else a [Your company address] placeholder to fill in)</small></span>
               <textarea class="hud-input" name="address" rows="2" maxlength="300" [(ngModel)]="ai.address" placeholder="Company name, street, city"></textarea></label>
           </div>
 
@@ -259,7 +259,7 @@
       </section>
 
       <div class="checks">
-        <div *ngIf="editing.placeholders?.length"><b>Placeholders:</b> {{ editing.placeholders.join(', ') }} — filled per email before sending (supported: {{ tokenList }}; campaigns: Zoho merge tags such as $[LI:UNSUBSCRIBE]$).</div>
+        <div *ngIf="editing.placeholders?.length"><b>Placeholders:</b> {{ editing.placeholders.join(', ') }} — filled per email before sending (supported: {{ tokenList }}; campaigns: merge tags such as $[LI:UNSUBSCRIBE]$).</div>
         <ul class="warnings" *ngIf="editing.warnings?.length">
           <li *ngFor="let w of editing.warnings">{{ w }}</li>
         </ul>

@@ -131,16 +131,16 @@ test('message detail and read/unread: workspace-scoped, received mail only, noth
   assert.equal((await h.api('GET', '/api/v1/emails/inbox')).status, 401);
 });
 
-test('campaign log: AI campaigns with send/reply/bounce counts and Zoho campaigns with their report', async () => {
+test('campaign log: AI campaigns with send/reply/bounce counts and email campaigns with their report', async () => {
   const r = await h.api('GET', '/api/v1/mail/activity/campaigns', { token: A.token });
   assert.equal(r.status, 200);
   assert.ok(!r.data.campaigns.some(c => c.name === 'B campaign'));
   const ai = r.data.campaigns.find(c => c.type === 'ai');
   assert.deepEqual([ai.name, ai.recipients, ai.sent, ai.failed, ai.replied, ai.bounced], ['Spring sequence', 3, 2, 1, 1, 1]);
-  const zoho = r.data.campaigns.find(c => c.type === 'zoho');
-  assert.deepEqual([zoho.name, zoho.sent, zoho.opened, zoho.bounced, zoho.unsubscribed, zoho.recipients], ['Newsletter', 120, 40, 2, 1, null]);
-  const onlyZoho = await h.api('GET', '/api/v1/mail/activity/campaigns?type=zoho', { token: A.token });
-  assert.deepEqual(onlyZoho.data.campaigns.map(c => c.type), ['zoho']);
+  const email = r.data.campaigns.find(c => c.type === 'email');
+  assert.deepEqual([email.name, email.sent, email.opened, email.bounced, email.unsubscribed, email.recipients], ['Newsletter', 120, 40, 2, 1, null]);
+  const onlyEmail = await h.api('GET', '/api/v1/mail/activity/campaigns?type=email', { token: A.token });
+  assert.deepEqual(onlyEmail.data.campaigns.map(c => c.type), ['email']);
 });
 
 test('logs list only what was sent: no draft, approved-but-unsent or failed campaigns; date range filters sends', async () => {
@@ -155,17 +155,17 @@ test('logs list only what was sent: no draft, approved-but-unsent or failed camp
     const r = (await run('INSERT INTO outreach_recipients (workspace_id, campaign_id, email, status, unsubscribe_token, created_at, updated_at) VALUES (?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())', [C.workspaceId, sentAi, `x${i}@lead.io`, 'active', tokenStr()])).lastID;
     await run("INSERT INTO outreach_sends (workspace_id, campaign_id, recipient_id, step_id, step_order, status, sent_at, created_at) VALUES (?, ?, ?, ?, 1, 'sent', ?, UTC_TIMESTAMP())", [C.workspaceId, sentAi, r, step, when]);
   }
-  // Zoho: submitted 3 days ago, plus draft, approved and failed (never sent)
+  // Email campaigns: sent 3 days ago, plus draft, approved and failed (never sent)
   await run("INSERT INTO mail_campaigns (workspace_id, name, subject, status, version, submitted_at, created_at, updated_at) VALUES (?, 'Submitted news', 'N', 'submitted', 1, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())", [C.workspaceId, at(3)]);
   for (const st of ['draft', 'approved', 'failed']) {
-    await run("INSERT INTO mail_campaigns (workspace_id, name, subject, status, version, created_at, updated_at) VALUES (?, ?, 'N', ?, 1, UTC_TIMESTAMP(), UTC_TIMESTAMP())", [C.workspaceId, `Zoho ${st}`, st]);
+    await run("INSERT INTO mail_campaigns (workspace_id, name, subject, status, version, created_at, updated_at) VALUES (?, ?, 'N', ?, 1, UTC_TIMESTAMP(), UTC_TIMESTAMP())", [C.workspaceId, `Email ${st}`, st]);
   }
   const log = async qs => (await h.api('GET', `/api/v1/mail/activity/campaigns${qs}`, { token: C.token })).data.campaigns;
   const all = await log('');
   assert.deepEqual(all.map(c => c.name).sort(), ['Sent sequence', 'Submitted news']);
   assert.equal(all.find(c => c.name === 'Sent sequence').sent, 2);
   const today = await log(`?from=${day(0)}&to=${day(0)}`);
-  assert.deepEqual(today.map(c => [c.name, c.sent]), [['Sent sequence', 1]], 'only sends in the range are counted; Zoho submitted earlier is left out');
+  assert.deepEqual(today.map(c => [c.name, c.sent]), [['Sent sequence', 1]], 'only sends in the range are counted; the email campaign sent earlier is left out');
   const earlier = await log(`?from=${day(5)}&to=${day(2)}`);
   assert.deepEqual(earlier.map(c => c.name).sort(), ['Sent sequence', 'Submitted news']);
   assert.equal((await log(`?from=${day(1)}&to=${day(1)}`)).length, 0);
