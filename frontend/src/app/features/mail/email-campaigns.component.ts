@@ -152,7 +152,7 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
   tone(s: string): string {
     if (s === 'submitted') return 'good';
     if (s === 'approved') return 'info';
-    if (s === 'failed') return 'bad';
+    if (s === 'failed' || s === 'needs_review') return 'bad';
     if (s === 'submitting') return 'warn';
     return '';
   }
@@ -160,7 +160,7 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
   /** Drafts and unsent ones: those who compose. Sent ones: those who send (it removes the history here). */
   canDelete(c: any): boolean {
     if (['draft', 'approved', 'failed'].includes(c.status)) return this.canCompose;
-    return c.status === 'submitted' && this.canSend;
+    return (c.status === 'submitted' || c.status === 'needs_review') && this.canSend;
   }
 
   toggleMenu(id: number, ev: Event): void { ev.stopPropagation(); this.menuFor = this.menuFor === id ? null : id; }
@@ -614,7 +614,8 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
   }
 
   statusLabel(s: string): string {
-    return ({ draft: 'Draft', approved: 'Approved', submitting: 'Sending…', submitted: 'Sent', failed: 'Not sent' } as any)[s] || s;
+    // needs_review: an old campaign from the Zoho days whose outcome was never settled.
+    return ({ draft: 'Draft', approved: 'Approved', submitting: 'Sending…', submitted: 'Sent', failed: 'Not sent', needs_review: 'Unknown (old)' } as any)[s] || s;
   }
 
   private err(e: any): string {

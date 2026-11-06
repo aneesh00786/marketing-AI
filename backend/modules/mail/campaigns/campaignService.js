@@ -224,10 +224,11 @@ async function duplicate(ctx, id) {
  */
 async function remove(ctx, id) {
   const row = await requireRow(ctx, id);
-  const sent = row.status === 'submitted';
+  // needs_review: an old campaign from the Zoho days whose outcome was never settled; deleted like a sent one.
+  const sent = row.status === 'submitted' || row.status === 'needs_review';
   if (!EDITABLE.includes(row.status) && !sent) throw httpError(409, 'A campaign that is being sent cannot be deleted. Wait until it finishes.', 'NOT_DELETABLE');
   if (sent && !ctx.auth.capabilities.has('mail.send')) throw httpError(403, 'Only people who can send campaigns can delete a sent campaign.', 'FORBIDDEN');
-  await run("DELETE FROM mail_campaigns WHERE id = ? AND workspace_id = ? AND status IN ('draft', 'approved', 'failed', 'submitted')", [row.id, ws(ctx)]);
+  await run("DELETE FROM mail_campaigns WHERE id = ? AND workspace_id = ? AND status IN ('draft', 'approved', 'failed', 'submitted', 'needs_review')", [row.id, ws(ctx)]);
   await audit(ctx, sent ? 'mail.campaign_deleted_after_send' : 'mail.campaign_deleted', { resourceType: 'mail_campaign', resourceId: row.id });
   return { deleted: true };
 }
