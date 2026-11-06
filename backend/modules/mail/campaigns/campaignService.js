@@ -92,13 +92,31 @@ async function requireRow(ctx, rawId) {
 const THUMB_CHARS = 40000;
 
 /** opts.thumbs: also return the start of each campaign's HTML for the list thumbnails (capped). */
+/**
+ * A sent SES campaign's figures, recomputed from Marketech.ai's own records (opens, clicks, SES events
+ * arrive any time after sending), at most every 30 seconds; campaigns sent in the last 60 days only.
+ * The stored report_json is kept current for older readers.
+ */
+async function withLiveReport(row) {
+  if (row.provider !== 'ses' || !['submitted', 'submitting', 'failed'].includes(row.status)) return row;
+  const checked = row.last_checked_at ? new Date(row.last_checked_at instanceof Date ? row.last_checked_at : `${String(row.last_checked_at).replace(' ', 'T')}Z`).getTime() : 0;
+  if (Date.now() - checked < 30000) return row;
+  const sentAt = row.submitted_at ? new Date(row.submitted_at instanceof Date ? row.submitted_at : `${String(row.submitted_at).replace(' ', 'T')}Z`).getTime() : Date.now();
+  if (row.status === 'submitted' && Date.now() - sentAt > 60 * 86400000 && row.report_json) return row;
+  const report = await sesCampaigns().report(row);
+  await run('UPDATE mail_campaigns SET report_json = ?, last_checked_at = UTC_TIMESTAMP() WHERE id = ?', [JSON.stringify(report), row.id]);
+  return { ...row, report_json: JSON.stringify(report), last_checked_at: new Date() };
+}
+
 async function list(ctx, { thumbs = false } = {}) {
   const rows = await all('SELECT * FROM mail_campaigns WHERE workspace_id = ? ORDER BY id DESC LIMIT 200', [ws(ctx)]);
-  return rows.map(r => ({ ...present(r), ...(thumbs ? { thumbHtml: String(r.html_content || '').slice(0, THUMB_CHARS) } : {}) }));
+  const live = [];
+  for (const r of rows) live.push(await withLiveReport(r));
+  return live.map(r => ({ ...present(r), ...(thumbs ? { thumbHtml: String(r.html_content || '').slice(0, THUMB_CHARS) } : {}) }));
 }
 
 async function getOne(ctx, id) {
-  const row = await requireRow(ctx, id);
+  const row = await withLiveReport(await requireRow(ctx, id));
   const { n } = await get('SELECT COUNT(*) AS n FROM mail_campaign_contacts WHERE workspace_id = ? AND campaign_id = ?', [ws(ctx), row.id]);
   return { ...present(row, { full: true }), contactCount: Number(n), mailLists: await mailListsOf(ws(ctx), parse(row.mail_list_ids_json, [])) };
 }

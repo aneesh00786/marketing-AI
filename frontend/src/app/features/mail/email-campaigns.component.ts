@@ -17,7 +17,6 @@ import { SAMPLE_SUBJECT, sampleCampaignHtml } from './sample-email';
 import { CONTACT_FIELDS, ContactField, contactTag, fallbackExample, fallbackQuestion } from './merge-tags';
 
 /** A sent campaign's figures are re-read when it is opened, at most this often. */
-const REPORT_MAX_AGE_MS = 5 * 60 * 1000;
 const UPLOAD_POLL_MS = 4000;
 /** After sending: check soon, then less often (seconds), about 15 minutes in all. */
 const REPORT_POLL_S = [10, 20, 30, 60, 60, 120, 120, 300, 300];
@@ -393,13 +392,9 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
 
   /** Quietly updates the figures; on an error the last ones stay on screen. */
   private refreshReport(c: any): void {
+    // The server computes the figures when the campaign is read; they are then kept current while it is open.
     if (c.status !== 'submitted') return;
-    // Recent figures are reused, unless there were none yet (delivery reports arrive within minutes).
-    if (c.report && c.lastCheckedAt && Date.now() - new Date(c.lastCheckedAt).getTime() < REPORT_MAX_AGE_MS) return;
-    this.http.post<any>(`${this.base}/${c.id}/refresh`, {}).subscribe({
-      next: r => { if (this.selected?.id === c.id) { this.selected = r.campaign; if (!r.campaign.report || r.campaign.report.pending) this.pollReport(c.id, 2); } this.load(); },
-      error: () => {}
-    });
+    this.pollReport(c.id, REPORT_POLL_S.length);
   }
 
   /** After sending, re-reads the figures a few times while the campaign stays open. */
@@ -408,7 +403,8 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
     clearTimeout(this.reportPoll);
     // After the schedule, keep checking each minute (up to an hour) while it is still sending.
     const stillSending = !!this.selected?.report?.pending || !this.selected?.report;
-    if (step >= REPORT_POLL_S.length + 45 || (step >= REPORT_POLL_S.length && !stillSending)) return;
+    // Opens and clicks keep arriving after sending: keep the figures current each minute for an hour.
+    if (step >= REPORT_POLL_S.length + 60 || (step >= REPORT_POLL_S.length + 45 && !stillSending)) return;
     this.reportPoll = setTimeout(() => {
       if (this.selected?.id !== id || this.selected.status !== 'submitted') return;
       this.http.post<any>(`${this.base}/${id}/refresh`, {}).subscribe({

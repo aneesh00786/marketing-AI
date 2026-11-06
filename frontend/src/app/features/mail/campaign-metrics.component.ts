@@ -137,8 +137,8 @@ export class CampaignMetricsComponent implements OnChanges {
       { label: 'Delivery rate', value: pct(r.delivered_percent, rate(delivered, sent)) },
       { label: 'Bounced', value: show(bounced), hint: hard !== null || soft !== null ? `Hard ${show(hard)} · Soft ${show(soft)}` : undefined, activity: 'hard_bounced' },
       { label: 'Not sent', value: show(num(r.unsent_count)), hint: 'Not accepted by Amazon SES, or stopped before sending', activity: 'failed' },
-      { label: 'Open rate', value: pct(r.open_percent, rate(opens, delivered)), hint: 'Unique opens ÷ delivered. An estimate, not proof of reading.' },
-      { label: 'Click rate', value: rate(clicks, delivered) ?? 'Unavailable', hint: 'Unique clickers ÷ delivered' }
+      { label: 'Open rate', value: pct(r.open_percent, rate(opens, delivered)), hint: `${show(opens)} unique · ${show(num(r.open_events))} total opens. Unique opens ÷ delivered; an estimate, not proof of reading.` },
+      { label: 'Click rate', value: pct(r.unique_clicked_percent, rate(clicks, delivered)), hint: `${show(clicks)} unique · ${show(num(r.click_events))} total clicks. Unique clickers ÷ delivered.` }
     ].map(m => ({ ...m, unavailable: m.value === 'Unavailable' }));
   }
 

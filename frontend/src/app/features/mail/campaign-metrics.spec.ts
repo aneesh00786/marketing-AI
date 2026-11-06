@@ -241,4 +241,12 @@ describe('CampaignMetricsComponent', () => {
     expect(rate(null, 10)).toBeNull();
     expect(rate(1, 3)).toBe('33.3%');
   });
+
+  it('shows unique and total opens and clicks separately', () => {
+    comp.report = { emails_sent_count: 10, delivered_count: 8, opens_count: 3, open_events: 7, open_percent: 37.5, unique_clicks_count: 2, click_events: 5, unique_clicked_percent: 25 };
+    const open = comp.metrics.find(m => m.label === 'Open rate')!;
+    const click = comp.metrics.find(m => m.label === 'Click rate')!;
+    expect([open.value, open.hint]).toEqual(['37.5%', '3 unique · 7 total opens. Unique opens ÷ delivered; an estimate, not proof of reading.']);
+    expect([click.value, click.hint]).toEqual(['25%', '2 unique · 5 total clicks. Unique clickers ÷ delivered.']);
+  });
 });

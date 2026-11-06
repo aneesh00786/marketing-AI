@@ -388,7 +388,7 @@ test('SMTP with tracking on: safe links are rewritten to opaque click URLs, sens
   for (const kept of ['reset-password?user=1', 'welcome?token=abc', 'u:p@evil.example.io', 'mailto:help@acme.io', '/api/v1/mail/unsubscribe/', 'javascript:alert(1)', 'shop.example.io/private']) {
     assert.ok(sentHtml.includes(kept), `left unchanged: ${kept}`);
   }
-  assert.match(sentHtml, /<img src="https:\/\/app\.marketech\.test\/api\/v1\/mail\/t\/o\/[a-f0-9]{32}\.gif"[^>]*><\/body>/);
+  assert.match(sentHtml, /<body[^>]*><img src="https:\/\/app\.marketech\.test\/api\/v1\/mail\/t\/o\/[a-f0-9]{32}\.gif"[^>]*>/, "pixel at the top of the body (Gmail clips long email)");
   const stored = await db().get('SELECT html_body FROM emails WHERE id = ?', [r.data.emailId]);
   assert.equal(stored.html_body, SMTP_HTML, 'the saved copy has no tracking added');
 

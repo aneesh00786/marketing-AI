@@ -698,10 +698,9 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     http.expectOne(r => r.method === 'GET' && r.url.endsWith('/campaigns/7')).flush({ campaign: c });
   };
 
-  it('opening a sent campaign reads its latest figures', () => {
-    openSent({ ...SENT, lastCheckedAt: null });
-    http.expectOne(r => r.method === 'POST' && r.url.endsWith('/campaigns/7/refresh')).flush({ campaign: { ...SENT, report: { emails_sent_count: '10' } } });
-    http.expectOne(r => /\/mail\/campaigns$/.test(r.url)).flush({ campaigns: [] });
+  it('opening a sent campaign shows the figures computed when it is read, then keeps them current each minute', fakeAsync(() => {
+    openSent({ ...SENT, report: { emails_sent_count: '10', opens_count: '1' } });
+    http.expectNone(r => r.url.endsWith('/refresh'));
     expect(comp.selected.report.emails_sent_count).toBe('10');
     fixture.detectChanges();
     expect((el().querySelector('.ec-wizard') as HTMLElement).hidden).withContext('steps are not shown once sent').toBeTrue();
@@ -709,29 +708,31 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     (Array.from(el().querySelectorAll('.ec-sentinfo button')).find(b => b.textContent!.includes('View email')) as HTMLButtonElement).click();
     fixture.detectChanges();
     expect(el().querySelector('.ec-view-card app-email-preview')).toBeTruthy();
-  });
+    // A minute later the figures are read again (opens and clicks keep arriving).
+    tick(60000);
+    http.expectOne(r => r.method === 'POST' && r.url.endsWith('/campaigns/7/refresh')).flush({ campaign: { ...SENT, report: { emails_sent_count: '10', opens_count: '2' } } });
+    expect(comp.selected.report.opens_count).toBe('2');
+    comp.ngOnDestroy();
+    discardPeriodicTasks();
+    flush();
+  }));
 
-  it('figures read in the last few minutes are not read again (unless there were none yet), and drafts never are', () => {
-    openSent({ ...SENT, lastCheckedAt: new Date(Date.now() - 60000).toISOString(), report: null });
-    http.expectOne(r => r.url.endsWith('/refresh')).flush({ campaign: { ...SENT, report: { emails_sent_count: '2' } } });
-    http.expectOne(r => /\/mail\/campaigns$/.test(r.url)).flush({ campaigns: [] });
-    openSent({ ...SENT, lastCheckedAt: new Date(Date.now() - 60000).toISOString(), report: { emails_sent_count: '2' } });
-    http.expectNone(r => r.url.endsWith('/refresh'));
-    comp.open(comp.campaigns[0] || { id: 5 });
-    http.expectOne(r => r.url.endsWith('/campaigns/5')).flush({ campaign: { id: 5, name: 'Autumn', status: 'draft', version: 1, html: ORIGINAL, lists: [] } });
-    http.expectNone(r => r.url.endsWith('/refresh'));
-  });
-
-  it('if the figures cannot be read the campaign stays open with its last ones, and a late answer cannot replace another campaign', () => {
-    openSent({ ...SENT, lastCheckedAt: null, report: { emails_sent_count: '3' } });
+  it('drafts are never refreshed; a failed refresh keeps the last figures, and a late answer cannot replace another campaign', fakeAsync(() => {
+    openSent({ ...SENT, report: { emails_sent_count: '3' } });
+    tick(60000);
     http.expectOne(r => r.url.endsWith('/refresh')).flush({ error: 'x' }, { status: 502, statusText: 'x' });
     expect(comp.selected.report.emails_sent_count).toBe('3');
-    openSent({ ...SENT, lastCheckedAt: null });
+    tick(60000);
     const late = http.expectOne(r => r.url.endsWith('/refresh'));
     comp.open({ id: 5 });
     http.expectOne(r => r.url.endsWith('/campaigns/5')).flush({ campaign: { id: 5, name: 'Autumn', status: 'draft', version: 1, html: ORIGINAL, lists: [] } });
     late.flush({ campaign: { ...SENT, name: 'Stale' } });
-    http.expectOne(r => /\/mail\/campaigns$/.test(r.url)).flush({ campaigns: [] });
     expect(comp.selected.id).toBe(5);
-  });
+    tick(600000);
+    http.expectNone(r => r.url.endsWith('/refresh'));
+    comp.ngOnDestroy();
+    discardPeriodicTasks();
+    flush();
+  }));
+
 });

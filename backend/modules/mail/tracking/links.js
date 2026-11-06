@@ -85,7 +85,8 @@ function rewriteLinks(html, { clickUrl, ownOrigin = null, maxLinks = 100 }) {
 function addPixel(html, pixelUrl) {
   const img = `<img src="${pixelUrl}" width="1" height="1" alt="" style="display:block;width:1px;height:1px;border:0;margin:0;padding:0" />`;
   const s = String(html || '');
-  return /<\/body\s*>/i.test(s) ? s.replace(/<\/body\s*>(?![\s\S]*<\/body\s*>)/i, `${img}</body>`) : `${s}${img}`;
+  // At the top of the body: Gmail clips long email (about 102 KB) and never loads anything after the cut.
+  return /<body\b[^>]*>/i.test(s) ? s.replace(/<body\b[^>]*>/i, m => `${m}${img}`) : `${img}${s}`;
 }
 
 // 1x1 transparent GIF.

@@ -547,3 +547,65 @@ test('consent: contacts need no recorded consent (Zoho-imported or not); a lead 
   assert.deepEqual((await recipients.reachable(ws.workspaceId, list.id)).map(r => r.email).sort(), ['con@shop.io', 'zed@shop.io']);
   assert.equal(await recipients.withoutConsent(ws.workspaceId, list.id), 1);
 });
+
+test('opens: Opened counts only real opens (the open image); a click alone does not count as an open', async () => {
+  const ws = await sesWorkspace('SES click open');
+  const c = await sentCampaign(ws, [{ name: 'Cleo', email: 'cleo@shop.io' }]);
+  await runJobs(ws);
+  const raw = S.sent[0].raw.replace(/=\r?\n/g, '').replace(/=3D/g, '=');
+  const htmlPart = raw.slice(raw.indexOf('Content-Type: text/html'));
+  assert.ok(htmlPart.indexOf('/api/v1/mail/t/o/') < htmlPart.indexOf('/api/v1/mail/t/c/'), 'the open image comes before the links (Gmail clips long email)');
+  assert.equal((await h.api('GET', raw.match(/\/api\/v1\/mail\/t\/c\/[a-f0-9]{32}/)[0])).status, 302);
+  let rep = (await capi(ws, 'POST', `/${c.id}/refresh`, {})).data.campaign.report;
+  assert.deepEqual([rep.unique_clicks_count, rep.opens_count], [1, 0]);
+  assert.equal((await h.api('GET', raw.match(/\/api\/v1\/mail\/t\/o\/[a-f0-9]{32}\.gif/)[0])).status, 200);
+  rep = (await capi(ws, 'POST', `/${c.id}/refresh`, {})).data.campaign.report;
+  assert.deepEqual([rep.unique_clicks_count, rep.opens_count, rep.unopened], [1, 1, 0]);
+});
+
+/** The HTML part of a sent MIME email, quoted-printable decoded (as a mail client reads it). */
+function htmlOf(raw) {
+  const part = raw.split(/\r?\n--/).find(p => /Content-Type: text\/html/i.test(p)) || '';
+  const body = part.split(/\r?\n\r?\n/).slice(1).join('\n');
+  const qp = /quoted-printable/i.test(part);
+  return qp ? Buffer.from(body.replace(/=\r?\n/g, '').replace(/=([0-9A-F]{2})/gi, (_, x) => String.fromCharCode(parseInt(x, 16))), 'latin1').toString('utf8') : body;
+}
+
+test('open tracking end to end: a unique pixel per recipient, loaded like Gmail\'s image proxy, counted once, shown without a manual refresh', async () => {
+  const ws = await sesWorkspace('SES opens e2e');
+  const c = await sentCampaign(ws, [{ name: 'Olga', email: 'olga@shop.io' }, { name: 'Pete', email: 'pete@shop.io' }]);
+  await runJobs(ws);
+  const pixels = S.sent.map(s => (htmlOf(s.raw).match(/<img src="(https:\/\/app\.marketech\.test\/api\/v1\/mail\/t\/o\/[a-f0-9]{32}\.gif)"/) || [])[1]);
+  assert.ok(pixels.every(Boolean), 'every email has the pixel, on the public https base URL');
+  assert.notEqual(pixels[0], pixels[1], 'each recipient has their own');
+  assert.ok(htmlOf(S.sent[0].raw).indexOf('/mail/t/o/') < htmlOf(S.sent[0].raw).indexOf('/mail/t/c/'), 'at the top of the body, before Gmail\'s clipping point');
+  const olgaPixel = new URL(pixels[S.sent.findIndex(s => s.to === 'olga@shop.io')]).pathname;
+
+  // Images blocked: nothing loads, nothing is counted.
+  let rep = (await capi(ws, 'GET', `/${c.id}`)).data.campaign.report;
+  assert.deepEqual([rep.opens_count, rep.open_events, rep.unopened], [0, 0, 2]);
+
+  // Gmail's image proxy: no cookies, no login, its own user agent.
+  const res = await h.api('GET', olgaPixel, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 5.1; rv:11.0) Gecko Firefox/11.0 (via ggpht.com GoogleImageProxy)' } });
+  assert.equal(res.status, 200, 'no redirect, no login');
+  assert.equal(res.headers.get('content-type'), 'image/gif');
+  assert.equal(Number(res.headers.get('content-length')), require('../modules/mail/tracking/links').PIXEL_GIF.length, 'the 1x1 GIF');
+  assert.match(res.headers.get('cache-control'), /no-store/, 'not cached, so later opens reach the server');
+  // Loaded again at once (proxy retry, reload): unique opens are not inflated.
+  await h.api('GET', olgaPixel);
+  // An invalid token: the same image, nothing recorded.
+  const bad = await h.api('GET', `/api/v1/mail/t/o/${'f'.repeat(32)}.gif`);
+  assert.deepEqual([bad.status, bad.headers.get('content-type')], [200, 'image/gif']);
+
+  // The campaign shows it on the next read (no Refresh needed), for the right person.
+  await db().run('UPDATE mail_campaigns SET last_checked_at = UTC_TIMESTAMP() - INTERVAL 1 MINUTE WHERE id = ?', [c.id]);
+  const listed = (await capi(ws, 'GET', '')).data.campaigns.find(x => x.id === c.id).report;
+  assert.deepEqual([listed.opens_count, listed.unopened, listed.open_percent], [1, 1, 50]);
+  const opened = (await capi(ws, 'GET', `/${c.id}/recipients?activity=opened`)).data.recipients.map(r => r.email);
+  assert.deepEqual(opened, ['olga@shop.io']);
+  const t = await db().get("SELECT t.workspace_id, t.campaign_id, t.open_events FROM mail_message_tracking t JOIN mail_campaign_recipients r ON r.id = t.campaign_recipient_id WHERE r.email = 'olga@shop.io' AND r.campaign_id = ?", [c.id]);
+  assert.deepEqual([t.workspace_id, t.campaign_id, t.open_events], [ws.workspaceId, c.id, 1]);
+  // Another workspace's campaigns are untouched.
+  const other = await sesWorkspace('SES opens other');
+  assert.deepEqual((await capi(other, 'GET', '')).data.campaigns, []);
+});

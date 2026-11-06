@@ -54,7 +54,10 @@ function withinRecordBudget(ip, max = 120, windowMs = 60 * 1000) {
 // ---------------------------------------------------------------- public
 
 publicRouter.get('/o/:token([a-f0-9]{32}).gif', publicCeiling, wrap(async (req, res) => {
-  if (withinRecordBudget(req.ip)) await svc.recordOpen(req.params.token, req.get('user-agent')).catch(err => console.error('[mail-tracking] open:', err.message));
+  if (withinRecordBudget(req.ip)) {
+    const r = await svc.recordOpen(req.params.token, req.get('user-agent')).catch(err => { console.error('[mail-tracking] open:', err.message); return null; });
+    console.info(`[mail-tracking] open pixel ${req.params.token.slice(0, 8)}… recorded=${!!r?.recorded} ua=${String(req.get('user-agent') || '').slice(0, 60)}`);
+  }
   res.set({ 'Content-Type': 'image/gif', 'Cache-Control': 'no-store, no-cache, must-revalidate, private', 'Pragma': 'no-cache', 'Referrer-Policy': 'no-referrer', 'X-Robots-Tag': 'noindex' });
   res.send(links.PIXEL_GIF); // always the same pixel, tracked or not, so nothing is revealed
 }));
