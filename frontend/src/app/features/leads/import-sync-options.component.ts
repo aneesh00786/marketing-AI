@@ -22,7 +22,7 @@ import { CONSENT_METHOD_LABELS, ImportSync } from './import-sync';
     <fieldset class="iso-box">
       <legend>Marketing consent <span class="iso-opt">(optional)</span></legend>
       <label class="iso-check"><input type="checkbox" [(ngModel)]="sync.consent" /> These contacts agreed to receive marketing emails, and I have proof</label>
-      <p class="iso-help" *ngIf="!sync.consent">Campaigns go only to people with recorded consent. Record it only if these people agreed to marketing emails.</p>
+      <p class="iso-help" *ngIf="!sync.consent">Record consent only if these people agreed to marketing emails. Campaigns skip anyone whose consent is withdrawn.</p>
       <div class="iso-grid" *ngIf="sync.consent">
         <label>How they agreed
           <select class="hud-input" [(ngModel)]="sync.method"><option *ngFor="let m of methods" [value]="m.value">{{ m.label }}</option></select></label>

@@ -44,7 +44,7 @@ describe('ImportSyncOptionsComponent', () => {
 
   it('marks consent optional; consent shows how, when, proof and the confirmation', () => {
     const { fixture, el } = make(false);
-    expect(el.textContent).toContain('Campaigns go only to people with recorded consent');
+    expect(el.textContent).toContain('Record consent only if these people agreed to marketing emails');
     expect(el.textContent).not.toContain('Contact list');
     fixture.componentInstance.sync.consent = true;
     fixture.detectChanges();
