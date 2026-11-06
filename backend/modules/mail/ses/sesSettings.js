@@ -61,8 +61,12 @@ async function snsToken(workspaceId) {
 
 const mask = id => (id ? `${String(id).slice(0, 4)}…${String(id).slice(-4)}` : null);
 
+/** The AWS region of an SNS topic ARN (arn:aws:sns:<region>:<account>:<name>). */
+const topicRegion = arn => (/^arn:aws[a-z-]*:sns:([a-z0-9-]+):/.exec(String(arn || '')) || [])[1] || null;
+
 async function getSettings(ctx) {
   const r = await row(ws(ctx));
+  const last = await get('SELECT MAX(received_at) AS at, COUNT(*) AS n FROM mail_ses_notifications WHERE workspace_id = ?', [ws(ctx)]).catch(() => null);
   const cfg = await sesConfig(ws(ctx)).catch(() => null);
   const base = publicBase();
   return {
@@ -82,6 +86,11 @@ async function getSettings(ctx) {
       // Where SNS sends SES events (delivered, bounces, complaints) for this workspace.
       notificationUrl: base && ctx.auth.capabilities.has('mail.configure') ? `${base}/api/v1/mail/t/webhooks/ses/${await snsToken(ws(ctx))}` : null,
       snsTopicArn: r?.ses_sns_topic_arn || null,
+      // SES only publishes events to an SNS topic in its own region: a topic elsewhere never gets any.
+      snsTopicRegion: topicRegion(r?.ses_sns_topic_arn),
+      snsRegionMismatch: !!(r?.ses_sns_topic_arn && topicRegion(r.ses_sns_topic_arn) && (r?.ses_region || cfg?.region) && topicRegion(r.ses_sns_topic_arn) !== (r?.ses_region || cfg?.region)),
+      lastEventAt: last?.at || null,
+      eventsReceived: Number(last?.n) || 0,
       lastCheckedAt: r?.ses_last_checked_at || null,
       lastError: r?.ses_last_error || null
     }
@@ -94,7 +103,8 @@ const saveSchema = z.object({
   secretAccessKey: z.string().trim().min(16).max(128).optional(),
   configurationSet: z.string().trim().regex(/^[A-Za-z0-9_-]{1,64}$/, 'Configuration set names use letters, digits, - and _.').or(z.literal('')).optional(),
   maxPerSecond: z.number().int().min(1).max(500).nullable().optional(),
-  clearKeys: z.literal(true).optional()
+  clearKeys: z.literal(true).optional(),
+  forgetSnsTopic: z.literal(true).optional()
 }).strict();
 
 async function saveSettings(ctx, input) {
@@ -104,7 +114,10 @@ async function saveSettings(ctx, input) {
   const sets = [];
   const params = [];
   const set = (col, val) => { sets.push(`${col} = ?`); params.push(val); };
+  const before = await row(ws(ctx));
   if (v.region !== undefined) set('ses_region', v.region);
+  // A new region needs a new SNS topic (SES publishes only to topics in its own region); so does "forget".
+  if (v.forgetSnsTopic || (v.region !== undefined && before?.ses_region && v.region !== before.ses_region)) set('ses_sns_topic_arn', null);
   if (v.accessKeyId !== undefined) set('ses_access_key_id', v.accessKeyId);
   if (v.secretAccessKey !== undefined) set('ses_secret_ciphertext', secretBox.encrypt(v.secretAccessKey));
   if (v.configurationSet !== undefined) set('ses_configuration_set', v.configurationSet || null);
@@ -114,7 +127,7 @@ async function saveSettings(ctx, input) {
     set('updated_by', ctx.auth.userId || null);
     await run(`UPDATE mail_delivery_settings SET ${sets.join(', ')}, updated_at = UTC_TIMESTAMP() WHERE workspace_id = ?`, [...params, ws(ctx)]);
   }
-  await audit(ctx, 'mail.delivery_settings_saved', { resourceType: 'mail_provider', resourceId: 'ses', metadata: { keysChanged: !!(v.accessKeyId || v.secretAccessKey || v.clearKeys), region: v.region || null } });
+  await audit(ctx, 'mail.delivery_settings_saved', { resourceType: 'mail_provider', resourceId: 'ses', metadata: { keysChanged: !!(v.accessKeyId || v.secretAccessKey || v.clearKeys), region: v.region || null, snsTopicForgotten: !!v.forgetSnsTopic } });
   return getSettings(ctx);
 }
 

@@ -129,10 +129,14 @@ async function handle(token, rawBody) {
   let m;
   try { m = JSON.parse(String(rawBody || '')); } catch { return { status: 400, body: 'Bad request' }; }
   if (!m || typeof m !== 'object' || !m.Type || !m.MessageId || !m.TopicArn) return { status: 400, body: 'Bad request' };
-  if (!(await verifySignature(m).catch(() => false))) return { status: 403, body: 'Signature not valid' };
+  const refuse = (status, body) => {
+    console.warn(`[ses-sns] ${JSON.stringify({ refused: body, workspaceId: settings.workspace_id, type: m.Type, topicArn: String(m.TopicArn).slice(0, 255), confirmedTopicArn: settings.ses_sns_topic_arn || null })}`);
+    return { status, body };
+  };
+  if (!(await verifySignature(m).catch(() => false))) return refuse(403, 'Signature not valid');
   const ts = Date.parse(m.Timestamp);
-  if (!Number.isFinite(ts) || Math.abs(Date.now() - ts) > MAX_AGE_MS) return { status: 403, body: 'Too old' };
-  if (settings.ses_sns_topic_arn && settings.ses_sns_topic_arn !== m.TopicArn) return { status: 403, body: 'Unknown topic' };
+  if (!Number.isFinite(ts) || Math.abs(Date.now() - ts) > MAX_AGE_MS) return refuse(403, 'Too old');
+  if (settings.ses_sns_topic_arn && settings.ses_sns_topic_arn !== m.TopicArn) return refuse(403, 'Unknown topic');
   const workspaceId = settings.workspace_id;
 
   if (m.Type === 'SubscriptionConfirmation') {
@@ -152,6 +156,7 @@ async function handle(token, rawBody) {
   let ev;
   try { ev = JSON.parse(m.Message); } catch { return { status: 200, body: 'Ignored' }; }
   const r = await applySesEvent(workspaceId, ev, m.MessageId);
+  console.info(`[ses-sns] ${JSON.stringify({ workspaceId, event: ev.eventType || ev.notificationType || null, applied: !!r.applied })}`);
   await run('UPDATE mail_ses_notifications SET event_type = ? WHERE workspace_id = ? AND sns_message_id = ?', [String(ev.eventType || ev.notificationType || '').slice(0, 30) || null, workspaceId, String(m.MessageId).slice(0, 100)]);
   return { status: 200, body: r.applied ? 'Recorded' : 'Ignored' };
 }

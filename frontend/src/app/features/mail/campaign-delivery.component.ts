@@ -59,7 +59,13 @@ import { apiRoot } from '../../core/api-base';
         Marketech.ai confirms the subscription by itself.</li>
       <li>In Amazon SES, create a configuration set with an event destination to that SNS topic, publishing <b>Delivery, Bounce, Complaint, Reject and Delivery delay</b> (open and click tracking can stay off), and enter its name above.</li>
     </ol>
-    <p class="cd-result" [class.ok]="!!s.ses.snsTopicArn">{{ s.ses.snsTopicArn ? 'Subscription confirmed: ' + s.ses.snsTopicArn : 'No SNS subscription confirmed yet.' }}</p>
+    <p class="cd-result" [class.ok]="!!s.ses.snsTopicArn && !s.ses.snsRegionMismatch">{{ s.ses.snsTopicArn ? 'Subscription confirmed: ' + s.ses.snsTopicArn : 'No SNS subscription confirmed yet.' }}</p>
+    <p class="cd-result" *ngIf="s.ses.snsRegionMismatch" role="alert">This topic is in {{ s.ses.snsTopicRegion }}, but Amazon SES sends from {{ s.ses.region }}. SES only reports to a topic in its own region, so no delivery reports will arrive. Create the topic and configuration set in {{ s.ses.region }}, click "Use a new topic", then add the subscription again.</p>
+    <p class="cd-result" *ngIf="s.ses.configured && !s.ses.configurationSet" role="status">No configuration set entered: SES sends no delivery, bounce or complaint reports without one.</p>
+    <p class="cd-result" [class.ok]="s.ses.eventsReceived > 0" *ngIf="s.ses.snsTopicArn">{{ s.ses.eventsReceived ? 'Last delivery report received: ' + (s.ses.lastEventAt | date:'medium') + ' (' + s.ses.eventsReceived + ' in total).' : 'No delivery reports received yet. They arrive a few seconds after an email is sent.' }}</p>
+    <div class="cd-actions" *ngIf="s.ses.snsTopicArn && s.canConfigure">
+      <button type="button" class="btn btn-secondary btn-sm" (click)="forgetTopic()" [disabled]="busy">Use a new topic</button>
+    </div>
   </div>
   <p class="note error" *ngIf="error" role="alert">{{ error }}</p>
 </section>
@@ -133,6 +139,12 @@ export class CampaignDeliveryComponent implements OnInit {
   clearKeys(): void {
     if (!confirm('Remove this workspace\'s Amazon SES keys?')) return;
     this.put({ clearKeys: true }, 'Amazon SES keys removed.');
+  }
+
+  /** Forgets the confirmed SNS topic, so a new topic's subscription can be confirmed. */
+  forgetTopic(): void {
+    if (!confirm('Forget this SNS topic? Reports are accepted again once a new topic\'s subscription is confirmed.')) return;
+    this.put({ forgetSnsTopic: true }, 'SNS topic forgotten. Add the subscription on the new topic now.');
   }
 
   test(): void {

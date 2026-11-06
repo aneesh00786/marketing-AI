@@ -83,4 +83,21 @@ describe('CampaignDeliveryComponent (Mail Settings → Campaigns)', () => {
     expect(result.textContent).toContain('sandbox');
     expect(result.classList.contains('ok')).toBeFalse();
   });
+
+  it('warns when the SNS topic is in another region than SES, shows reports received, and can forget the topic', () => {
+    flushProfile();
+    http.expectOne(r => r.url.endsWith(url)).flush(SETTINGS({ ses: { configured: true, source: 'workspace', region: 'ap-southeast-4', hasSecret: true, configurationSet: 'marketech-events',
+      snsTopicArn: 'arn:aws:sns:us-east-1:1:t', snsTopicRegion: 'us-east-1', snsRegionMismatch: true, eventsReceived: 0, lastEventAt: null } }));
+    fixture.detectChanges();
+    expect(el().textContent).toContain('This topic is in us-east-1, but Amazon SES sends from ap-southeast-4');
+    expect(el().textContent).toContain('No delivery reports received yet.');
+    spyOn(window, 'confirm').and.returnValue(true);
+    comp.forgetTopic();
+    const put = http.expectOne(r => r.method === 'PUT' && r.url.endsWith(url));
+    expect(put.request.body).toEqual({ forgetSnsTopic: true });
+    put.flush(SETTINGS({ ses: { configured: true, source: 'workspace', region: 'ap-southeast-4', hasSecret: true, configurationSet: 'marketech-events' } }));
+    fixture.detectChanges();
+    expect(el().textContent).toContain('No SNS subscription confirmed yet.');
+    expect(el().textContent).not.toContain('This topic is in');
+  });
 });

@@ -392,3 +392,32 @@ test('Send again: refused people are tried again; anyone sent or with an unclear
   assert.deepEqual(rec.map(x => [x.email, x.status]), [['a@shop.io', 'sent'], ['b@shop.io', 'sent'], ['c@shop.io', 'unknown']]);
   assert.equal((await row(c.id)).status, 'submitted');
 });
+
+test('SNS topic: a topic in another region than SES is flagged; "Use a new topic" (or a new region) lets a new topic be confirmed; reports received are counted', async () => {
+  const ws = await sesWorkspace('SES topic');
+  const url = (await sapi(ws, 'GET', '/settings')).data.ses.notificationUrl.replace('https://app.marketech.test', '');
+  const post = msg => h.api('POST', url, { rawBody: JSON.stringify(msg), headers: { 'content-type': 'text/plain; charset=UTF-8' } });
+  const confirm = topic => post(signed({ Type: 'SubscriptionConfirmation', TopicArn: topic, Token: 'tok', Message: 'confirm', SubscribeURL: 'https://sns.us-east-1.amazonaws.com/?Action=ConfirmSubscription&TopicArn=x&Token=tok' }));
+  // Confirmed a us-east-1 topic, then SES moved to ap-southeast-4: flagged, and the new topic is refused (logged).
+  assert.equal((await confirm(TOPIC)).status, 200);
+  await db().run("UPDATE mail_delivery_settings SET ses_region = 'ap-southeast-4' WHERE workspace_id = ?", [ws.workspaceId]);
+  let s = (await sapi(ws, 'GET', '/settings')).data.ses;
+  assert.deepEqual([s.snsTopicRegion, s.snsRegionMismatch, s.eventsReceived], ['us-east-1', true, 0]);
+  const MEL = 'arn:aws:sns:ap-southeast-4:123456789012:marketech-ses-events';
+  const warns = [];
+  const warn = console.warn;
+  console.warn = (...a) => warns.push(a.join(' '));
+  try { assert.equal((await confirm(MEL)).status, 403); } finally { console.warn = warn; }
+  assert.ok(warns.some(w => w.includes('Unknown topic') && w.includes(MEL)), 'the refusal is logged with both topics');
+  // "Use a new topic": the new topic is confirmed and matches the SES region.
+  assert.equal((await sapi(ws, 'PUT', '/settings', { forgetSnsTopic: true })).data.ses.snsTopicArn, null);
+  assert.equal((await confirm(MEL)).status, 200);
+  s = (await sapi(ws, 'GET', '/settings')).data.ses;
+  assert.deepEqual([s.snsTopicArn, s.snsRegionMismatch], [MEL, false]);
+  assert.equal((await post(signed({ Type: 'Notification', TopicArn: MEL, Message: JSON.stringify({ eventType: 'Delivery', mail: { messageId: 'none' } }) }))).status, 200);
+  s = (await sapi(ws, 'GET', '/settings')).data.ses;
+  assert.equal(s.eventsReceived, 1);
+  assert.ok(s.lastEventAt);
+  // Changing the SES region forgets the topic too (it has to be in the new region).
+  assert.equal((await sapi(ws, 'PUT', '/settings', { region: 'eu-west-1' })).data.ses.snsTopicArn, null);
+});
