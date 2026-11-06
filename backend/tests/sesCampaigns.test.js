@@ -251,3 +251,76 @@ test('SES checks before approval: an unverified sender, no unsubscribe link and 
   assert.equal(aud.status, 200);
   assert.ok(aud.data.mailLists.some(l => l.id === listId));
 });
+
+// ------------------------------------------------------------------ $[LI:VIEWINBROWSER]$ and $[HF:ORGADDRESS]$
+
+const TAGGED = {
+  ...CAMPAIGN, name: 'Tagged',
+  html: '<p style="text-align:right"><a href="$[LI:VIEWINBROWSER]$">View in browser</a></p><p>Hello $[FNAME|there]$,</p><p>Our offer.</p><p>$[HF:ORGADDRESS]$</p><p><a href="$[LI:UNSUBSCRIBE]$">Unsubscribe</a></p>'
+};
+const setAddress = (ws, address) => h.api('PUT', '/api/v1/business-profile', { token: ws.token, body: { address } });
+
+test('merge tags: each recipient gets their own View in browser link and the business address; nothing unresolved is sent', async () => {
+  const ws = await sesWorkspace('SES tags');
+  const saved = await setAddress(ws, 'Level 2, 10 Marine Drive\nKochi 682031 & Co');
+  assert.equal(saved.status, 200, JSON.stringify(saved.data));
+  assert.equal(saved.data.businessProfile.address, 'Level 2, 10 Marine Drive\nKochi 682031 & Co', 'saving only the address creates the profile');
+  const people = [{ name: 'Priya Nair', email: 'priya@shop.io' }, { name: 'Sam Lee', email: 'sam@shop.io' }, { name: 'Ann Roy', email: 'ann@shop.io' }];
+  const listId = await consentedList(ws, people);
+  const c = (await capi(ws, 'POST', '', { ...TAGGED, mailListIds: [listId] })).data.campaign;
+  const v = (await capi(ws, 'POST', `/${c.id}/validate`, {})).data.validation;
+  assert.equal(v.ready, true, JSON.stringify(v.problems));
+  await capi(ws, 'POST', `/${c.id}/approve`, {});
+  assert.equal((await capi(ws, 'POST', `/${c.id}/send`, { confirm: true })).status, 200);
+  await runJobs(ws);
+  assert.equal(S.sent.length, 3);
+  const decode = raw => raw.replace(/=\r?\n/g, '').replace(/=3D/g, '=');
+  const views = S.sent.map(x => {
+    const raw = decode(x.raw);
+    assert.ok(!/\$\[/.test(raw), `no merge tag left for ${x.to}`);
+    assert.match(raw, /Level 2, 10 Marine Drive<br \/>Kochi 682031 &amp; Co/, 'the address, with its line break, escaped');
+    return { to: x.to, url: /https:\/\/app\.marketech\.test(\/api\/v1\/mail\/view\/[a-f0-9]{32})/.exec(raw)[1] };
+  });
+  assert.equal(new Set(views.map(x => x.url)).size, 3, 'a unique View in browser link per recipient');
+  // Each link shows that person's email: their name, their unsubscribe link, no open pixel.
+  for (const vw of views) {
+    const page = await h.api('GET', vw.url);
+    assert.equal(page.status, 200);
+    assert.match(page.headers.get('content-security-policy'), /sandbox/);
+    const first = people.find(p => p.email === vw.to).name.split(' ')[0];
+    assert.match(page.data, new RegExp(`Hello ${first},`));
+    assert.ok(page.data.includes(`e=${encodeURIComponent(vw.to)}`), 'their own unsubscribe link');
+    assert.ok(!/\/api\/v1\/mail\/t\/o\//.test(page.data), 'viewing it is not counted as an open');
+    assert.ok(!/\$\[/.test(page.data));
+  }
+  assert.equal((await h.api('GET', `/api/v1/mail/view/${'0'.repeat(32)}`)).status, 404);
+});
+
+test('merge tags: without a business address the campaign cannot be approved, and a send stops before emailing anyone', async () => {
+  const ws = await sesWorkspace('SES no address');
+  const listId = await consentedList(ws, [{ name: 'Ann', email: 'ann@noaddr.io' }]);
+  const c = (await capi(ws, 'POST', '', { ...TAGGED, mailListIds: [listId] })).data.campaign;
+  const v = (await capi(ws, 'POST', `/${c.id}/validate`, {})).data.validation;
+  assert.equal(v.ready, false);
+  assert.ok(v.problems.some(p => /Add your business address in Mail Settings → Campaigns/.test(p)), JSON.stringify(v.problems));
+  assert.equal((await capi(ws, 'POST', `/${c.id}/approve`, {})).status, 400);
+  // Approved before the address was removed: the worker still emails nobody with an unfilled tag.
+  await db().run("UPDATE mail_campaigns SET status = 'approved', approved_version = version, approved_by = ? WHERE id = ?", [ws.userId, c.id]);
+  const row = await db().get('SELECT * FROM mail_campaigns WHERE id = ?', [c.id]);
+  await sesCampaigns().start({ auth: { workspaceId: ws.workspaceId, userId: ws.userId } }, row);
+  await runJobs(ws);
+  const after = await db().get('SELECT * FROM mail_campaigns WHERE id = ?', [c.id]);
+  assert.deepEqual([after.status, after.provider_code], ['failed', 'UNRESOLVED_TAGS']);
+  assert.match(after.provider_message, /\$\[HF:ORGADDRESS\]\$/);
+  assert.equal(S.sent.length, 0, 'nobody was emailed');
+});
+
+test('merge tags: a tag that cannot be filled in (e.g. from an old template) is refused at approval', async () => {
+  const ws = await sesWorkspace('SES bad tag');
+  await setAddress(ws, '1 Main St');
+  const listId = await consentedList(ws, [{ name: 'Ann', email: 'ann@badtag.io' }]);
+  const c = (await capi(ws, 'POST', '', { ...TAGGED, html: `${TAGGED.html}<a href="$[LI:UPDATEPROFILE]$">Update</a>`, mailListIds: [listId] })).data.campaign;
+  const v = (await capi(ws, 'POST', `/${c.id}/validate`, {})).data.validation;
+  assert.ok(v.problems.some(p => /These merge tags cannot be filled in: \$\[LI:UPDATEPROFILE\]\$/.test(p)), JSON.stringify(v.problems));
+  assert.ok(!v.problems.some(p => /VIEWINBROWSER|ORGADDRESS/.test(p)), 'the supported tags are fine');
+});

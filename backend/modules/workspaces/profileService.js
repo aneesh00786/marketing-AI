@@ -15,6 +15,8 @@ const updateSchema = z.object({
   websiteUrl: z.string().trim().max(255).nullable().optional(),
   description: z.string().trim().max(5000).nullable().optional(),
   brandVoice: z.string().trim().max(255).nullable().optional(),
+  // Postal address shown in campaign footers ($[HF:ORGADDRESS]$).
+  address: z.string().trim().max(500).nullable().optional(),
   products: z.array(z.any()).max(100).optional()
 }).strict();
 
@@ -24,6 +26,7 @@ const COLUMNS = {
   websiteUrl: 'website_url',
   description: 'description',
   brandVoice: 'brand_voice',
+  address: 'address',
   products: 'products_json'
 };
 
@@ -64,7 +67,11 @@ async function updateProfile(ctx, input) {
       return { created: false, fields, profile: present(await latestProfile(tx, ws(ctx))) };
     }
     if (!v.businessName) {
-      throw Object.assign(new Error('Enter the business name to create the business profile.'), { status: 400, code: 'VALIDATION_ERROR' });
+      // Saving only the address (Mail Settings) creates the profile under the workspace's name.
+      const w = await tx.get('SELECT name FROM workspaces WHERE id = ?', [ws(ctx)]);
+      if (!w?.name || fields.some(k => k !== 'address')) throw Object.assign(new Error('Enter the business name to create the business profile.'), { status: 400, code: 'VALIDATION_ERROR' });
+      v.businessName = w.name;
+      fields.unshift('businessName');
     }
     await tx.run(
       `INSERT INTO business_profiles (workspace_id, ${fields.map(k => COLUMNS[k]).join(', ')}, created_at)

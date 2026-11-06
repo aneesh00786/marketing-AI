@@ -17,6 +17,15 @@ import { apiRoot } from '../../core/api-base';
   template: `
 <section class="cd" *ngIf="s; else loadingTpl">
   <div class="cd-card">
+    <h3>Business address</h3>
+    <p class="mx-desc">Shown in campaign footers wherever the email uses <code>$[HF:ORGADDRESS]$</code> ("Your company address"). Anti-spam laws usually require a postal address in marketing email.</p>
+    <textarea class="hud-input cd-address" name="address" rows="3" maxlength="500" [(ngModel)]="address" [disabled]="!s.canConfigure || addressBusy" placeholder="e.g. Level 2, 10 Marine Drive&#10;Kochi, Kerala 682031, India"></textarea>
+    <div class="cd-actions" *ngIf="s.canConfigure">
+      <button type="button" class="btn btn-secondary btn-sm" (click)="saveAddress()" [disabled]="addressBusy || address.trim() === savedAddress">{{ addressBusy ? 'Saving…' : 'Save address' }}</button>
+    </div>
+  </div>
+
+  <div class="cd-card">
     <h3>Amazon SES connection</h3>
     <p class="mx-desc">Campaigns are sent with your Amazon SES account: Marketech.ai emails each person, with delivered, opened, clicked, bounced and complaint reports.</p>
     <p class="mx-desc" *ngIf="s.ses.source === 'server'">Using the server's Amazon SES account (backend .env). Enter keys here to use this workspace's own account instead.</p>
@@ -69,7 +78,27 @@ export class CampaignDeliveryComponent implements OnInit {
 
   constructor(private http: HttpClient) {}
 
-  ngOnInit(): void { this.load(); }
+  ngOnInit(): void { this.load(); this.loadAddress(); }
+
+  /** The workspace's business address (business profile), filled into $[HF:ORGADDRESS]$. */
+  address = '';
+  savedAddress = '';
+  addressBusy = false;
+  loadAddress(): void {
+    this.http.get<any>(`${apiRoot()}/api/v1/business-profile`).subscribe({
+      next: r => { this.savedAddress = String(r.businessProfile?.address || '').trim(); this.address = this.savedAddress; },
+      error: () => {}
+    });
+  }
+  saveAddress(): void {
+    const value = this.address.trim();
+    if (this.addressBusy || value === this.savedAddress) return;
+    this.addressBusy = true;
+    this.http.put<any>(`${apiRoot()}/api/v1/business-profile`, { address: value || null }).subscribe({
+      next: r => { this.addressBusy = false; this.savedAddress = String(r.businessProfile?.address || '').trim(); this.address = this.savedAddress; this.toast.emit('Business address saved.'); },
+      error: e => { this.addressBusy = false; this.toast.emit(this.err(e)); }
+    });
+  }
 
   private apply(r: any): void {
     this.s = r;

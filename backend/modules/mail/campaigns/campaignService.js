@@ -32,8 +32,6 @@ const PUBLIC_DOMAINS = /@(gmail|googlemail|yahoo|ymail|hotmail|outlook|live|msn|
 // Merge tags such as $[FNAME|there]$ and $[LI:UNSUBSCRIBE]$ are not placeholders.
 const MERGE_TAG_RE = /\$\[[^\]\n]{1,80}\]\$/g;
 const UNSUB_TAG_RE = /\$\[LI:(UNSUBSCRIBE|ORG_OPTOUT)\]\$/i;
-// The merge tags filled per recipient when sending (ses/sesCampaigns.personalize and the unsubscribe link).
-const SUPPORTED_TAG_RE = /^\$\[(?:(?:FNAME|LNAME|UD:CONTACT_EMAIL|EMAIL)(?:\|[^\]]*)?|LI:(?:UNSUBSCRIBE|ORG_OPTOUT))\]\$$/i;
 
 const fields = {
   name: z.string().trim().min(1, 'Enter a campaign name.').max(150),
@@ -301,9 +299,13 @@ async function validateRow(ctx, row, { checkSes = true } = {}) {
   if (usesNames(row.subject, html)) warnings.push('Personalized with merge tags: each person sees their own name, and leads without a contact person see their business name (e.g. "Big Red Packaging team"). Anyone without a name sees the tag\'s default value.');
   if (contacts.length > eligible) warnings.push(`${contacts.length - eligible} selected contact(s) cannot be emailed and will be skipped.`);
   if (html && !UNSUB_TAG_RE.test(html)) problems.push('Add an unsubscribe link: tick "Add unsubscribe link" (Email content). Marketing email must let people unsubscribe.');
-  // Only these merge tags are filled per recipient; others (e.g. from older templates) would be sent empty.
-  const unsupported = [...new Set([...`${row.subject || ''} ${html}`.matchAll(MERGE_TAG_RE)].map(m => m[0]).filter(t => !SUPPORTED_TAG_RE.test(t)))];
-  if (unsupported.length) problems.push(`These merge tags cannot be filled in: ${unsupported.slice(0, 5).join(', ')}. Remove them or replace them with text (for example your company address).`);
+  // The email as a recipient gets it: every merge tag must be filled in (nothing like $[...]$ left).
+  const hasOrgTag = /\$\[HF:ORGADDRESS\]\$/i.test(html);
+  const orgAddress = hasOrgTag ? await sesCampaigns().orgAddressOf(ws(ctx)) : null;
+  if (hasOrgTag && !orgAddress) problems.push('Add your business address in Mail Settings → Campaigns: the email uses $[HF:ORGADDRESS]$ (your postal address, which anti-spam laws ask for).');
+  const sample = sesCampaigns().renderFor(row, { email: 'someone@example.com', first_name: 'Priya', last_name: 'Nair' },
+    { orgAddress: orgAddress || (hasOrgTag ? 'address' : null), unsubscribeUrl: 'https://example.invalid/u', viewUrl: 'https://example.invalid/v' });
+  if (sample.unresolved.length) problems.push(`These merge tags cannot be filled in: ${sample.unresolved.slice(0, 5).join(', ')}. Remove them or replace them with text.`);
   if (/href=["']https?:\/\/(www\.)?example\.(com|org|net)\b/i.test(html)) problems.push('Replace the sample link (example.com) with your own web page.');
   if (/<img[^>]+src=["'](?!https:\/\/|data:)/i.test(html)) warnings.push('Some images do not use https:// URLs; they may not show in mail clients.');
   if (!publicBaseUrl()) problems.push('The server needs a public https APP_BASE_URL: unsubscribe links and open/click tracking point to Marketech.ai.');

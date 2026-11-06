@@ -573,7 +573,7 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     const openPanel = () => { button('Personalize').click(); fixture.detectChanges(); };
     const choose = (label: string) => { openPanel(); (Array.from(el().querySelectorAll('.ec-personalize-panel button')).find(x => x.querySelector('b')!.textContent!.trim() === label) as HTMLButtonElement).click(); fixture.detectChanges(); };
     openPanel();
-    expect(Array.from(el().querySelectorAll('.ec-personalize-panel b')).map(x => x.textContent!.trim())).toEqual(['First name', 'Last name'], 'only tags filled in when sending with Amazon SES');
+    expect(Array.from(el().querySelectorAll('.ec-personalize-panel b')).map(x => x.textContent!.trim())).toEqual(['First name', 'Last name', 'View in browser link', 'Your company address'], 'only tags filled in when sending with Amazon SES');
     expect(el().querySelector('.ec-personalize-panel')!.textContent).toContain('e.g. “Hi Priya,”');
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); fixture.detectChanges();
     expect(el().querySelector('.ec-personalize-panel')).withContext('Escape closes it').toBeNull();
@@ -632,8 +632,8 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     const b = req.request.body;
     expect(b.name).toBe('Sample campaign');
     expect(b.subject).toBe('A quick idea for $[FNAME|you]$');
-    for (const tag of ['Hi $[FNAME|there]$,', '$[LI:UNSUBSCRIBE]$', '[Your company address]', '[Your name]', 'https://example.com']) expect(b.html).toContain(tag);
-    for (const tag of ['$[LI:VIEWINBROWSER]$', '$[HF:ORGADDRESS]$', '$[LI:UPDATEPROFILE]$']) expect(b.html).not.toContain(tag);
+    for (const tag of ['Hi $[FNAME|there]$,', '$[LI:UNSUBSCRIBE]$', '$[LI:VIEWINBROWSER]$', '$[HF:ORGADDRESS]$', '[Your name]', 'https://example.com']) expect(b.html).toContain(tag);
+    expect(b.html).not.toContain('$[LI:UPDATEPROFILE]$');
     expect(b.html).toContain('Acme &lt;Packaging&gt;');
     expect(b.html).not.toContain('<Packaging>');
     req.flush({ campaign: { id: 8, name: 'Sample campaign', status: 'draft', version: 1, html: b.html, subject: b.subject, lists: [] } });

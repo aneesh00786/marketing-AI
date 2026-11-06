@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 /**
  * Campaigns sent with Amazon SES: write → recipients → approve → send. Marketech.ai sends each
  * email itself:
@@ -42,10 +43,42 @@ function personalize(text, p, { html }) {
       const t = tag.toUpperCase();
       const v = t === 'FNAME' ? p.first_name : t === 'LNAME' ? p.last_name : p.email;
       return val(v || def || '');
-    })
-    // Any other merge tag: its default value, or nothing.
-    .replace(/\$\[[^\]|\n]{1,60}\|([^\]\n]{0,80})\]\$/g, (m, def) => val(def || ''))
-    .replace(/\$\[[^\]\n]{1,80}\]\$/g, '');
+    });
+}
+
+/** Any merge tag still in a text ($[...]$): nothing may be sent with one. */
+const LEFTOVER_TAG_RE = /\$\[[^\]\n]{1,80}\]\$/g;
+const leftoverTags = text => [...new Set(String(text || '').match(LEFTOVER_TAG_RE) || [])];
+
+/** The workspace's business address (business profile), for $[HF:ORGADDRESS]$; null when not set. */
+async function orgAddressOf(workspaceId) {
+  const r = await get("SELECT address FROM business_profiles WHERE workspace_id = ? ORDER BY id DESC LIMIT 1", [workspaceId]);
+  const a = String(r?.address || '').trim();
+  return a || null;
+}
+
+/** "View in browser" page of one recipient (opaque token). */
+const viewUrlOf = token => (publicBase() && token ? `${publicBase()}/api/v1/mail/view/${token}` : null);
+
+/**
+ * One recipient's email as sent: the unsubscribe and "View in browser" links ($[LI:UNSUBSCRIBE]$,
+ * $[LI:VIEWINBROWSER]$, as links or as text), the business address ($[HF:ORGADDRESS]$, line breaks
+ * kept) and the name tags. unresolved: any merge tag still left (subject or body); nothing is sent then.
+ */
+function renderFor(row, r, { orgAddress = null, unsubscribeUrl = null, viewUrl = null } = {}) {
+  let html = String(row.html_content || '');
+  const linkTag = (names, url) => {
+    if (!url) return;
+    const re = new RegExp(`href\\s*=\\s*(["'])\\$\\[LI:(?:${names})\\]\\$\\1`, 'gi');
+    html = html.replace(re, (_m, q) => `href=${q}${escapeHtml(url)}${q}`)
+      .replace(new RegExp(`\\$\\[LI:(?:${names})\\]\\$`, 'gi'), escapeHtml(url));
+  };
+  linkTag('UNSUBSCRIBE|ORG_OPTOUT', unsubscribeUrl);
+  linkTag('VIEWINBROWSER', viewUrl);
+  if (orgAddress) html = html.replace(/\$\[HF:ORGADDRESS\]\$/gi, () => escapeHtml(orgAddress).replace(/\r?\n/g, '<br />'));
+  html = personalize(html, r, { html: true });
+  const subject = personalize(row.subject, r, { html: false }).replace(/[\r\n]+/g, ' ').slice(0, 255);
+  return { html, subject, unresolved: [...new Set([...leftoverTags(subject), ...leftoverTags(html)])] };
 }
 
 const textOf = html => String(html || '').replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ').replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div|h\d|li|tr)>/gi, '\n')
@@ -83,9 +116,9 @@ async function prepare(ctx, row) {
   const list = [...people.values()];
   for (let i = 0; i < list.length; i += 200) {
     const part = list.slice(i, i + 200);
-    await run(`INSERT IGNORE INTO mail_campaign_recipients (workspace_id, campaign_id, version, email, first_name, last_name, contact_id, lead_id, status, created_at, updated_at)
-      VALUES ${part.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, 'queued', UTC_TIMESTAMP(), UTC_TIMESTAMP())").join(', ')}`,
-    part.flatMap(p => [workspaceId, row.id, row.version, p.email, p.first_name, p.last_name, p.contact_id, p.lead_id]));
+    await run(`INSERT IGNORE INTO mail_campaign_recipients (workspace_id, campaign_id, version, email, first_name, last_name, contact_id, lead_id, view_token, status, created_at, updated_at)
+      VALUES ${part.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', UTC_TIMESTAMP(), UTC_TIMESTAMP())").join(', ')}`,
+    part.flatMap(p => [workspaceId, row.id, row.version, p.email, p.first_name, p.last_name, p.contact_id, p.lead_id, crypto.randomBytes(16).toString('hex')]));
   }
   const n = await get('SELECT COUNT(*) AS n FROM mail_campaign_recipients WHERE campaign_id = ? AND version = ?', [row.id, row.version]);
   return Number(n?.n) || 0;
@@ -131,15 +164,24 @@ function publicBase() {
 }
 
 /** One email: personalized, own unsubscribe link, tracking, sent through SES. */
-async function sendOne(cfg, row, r, unsubToken) {
+const unsubscribeUrlOf = (unsubToken, email) => (publicBase() ? `${publicBase()}/api/v1/mail/unsubscribe/c/${unsubToken}?e=${encodeURIComponent(email)}` : null);
+
+async function sendOne(cfg, row, r, unsubToken, orgAddress) {
   const tracking = require('../tracking/trackingService');
-  const svc = require('../campaigns/campaignService');
-  const base = publicBase();
-  const unsubscribeUrl = base ? `${base}/api/v1/mail/unsubscribe/c/${unsubToken}?e=${encodeURIComponent(r.email)}` : null;
-  let html = String(row.html_content || ''); // sanitized when it was saved
-  if (unsubscribeUrl) html = html.replace(/href\s*=\s*(["'])\$\[LI:(?:UNSUBSCRIBE|ORG_OPTOUT)\]\$\1/gi, (_m, q) => `href=${q}${unsubscribeUrl}${q}`);
-  html = personalize(html, r, { html: true });
-  const subject = personalize(row.subject, r, { html: false }).replace(/[\r\n]+/g, ' ').slice(0, 255);
+  const unsubscribeUrl = unsubscribeUrlOf(unsubToken, r.email);
+  if (!r.view_token) {
+    r.view_token = crypto.randomBytes(16).toString('hex');
+    await run('UPDATE mail_campaign_recipients SET view_token = ? WHERE id = ? AND view_token IS NULL', [r.view_token, r.id]);
+  }
+  const rendered = renderFor(row, r, { orgAddress, unsubscribeUrl, viewUrl: viewUrlOf(r.view_token) });
+  // A merge tag left in the final email would show as $[...]$: this person is not emailed.
+  if (rendered.unresolved.length) {
+    const msg = `Not sent: merge tag(s) could not be filled in: ${rendered.unresolved.slice(0, 5).join(', ')}`;
+    await run("UPDATE mail_campaign_recipients SET status = 'failed', error_code = 'UNRESOLVED_TAGS', error = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?", [msg.slice(0, 255), r.id]);
+    return { ok: false, err: Object.assign(new Error(msg), { code: 'UNRESOLVED_TAGS', providerCode: 'UNRESOLVED_TAGS' }) };
+  }
+  let html = rendered.html;
+  const subject = rendered.subject;
   const t = await tracking.begin(row.workspace_id, { consentOk: true, opens: true, clicks: true });
   if (t) {
     await run('UPDATE mail_message_tracking SET campaign_id = ?, campaign_recipient_id = ? WHERE id = ?', [row.id, r.id, t.id]);
@@ -174,6 +216,7 @@ async function runSendJob(job) {
   const perSecond = Math.max(1, Math.min(500, cfg.maxPerSecond || 1));
   const gap = Math.ceil(1000 / perSecond);
   const unsubToken = svc.unsubscribeTokenOf(row);
+  const orgAddress = await orgAddressOf(row.workspace_id);
   const started = Date.now();
   let sent = 0;
   while (sent < PART && Date.now() - started < PART_MS) {
@@ -187,7 +230,7 @@ async function runSendJob(job) {
       UNION SELECT 1 FROM leads WHERE workspace_id = ? AND LOWER(TRIM(email)) = ? AND marketing_consent = 'withdrawn' LIMIT 1`, [row.workspace_id, r.email, row.workspace_id, r.email]);
     if (stopped) { await run("UPDATE mail_campaign_recipients SET status = 'skipped', error = 'Unsubscribed, bounced or consent withdrawn before sending' WHERE id = ?", [r.id]); continue; }
     const t0 = Date.now();
-    const res = await sendOne(cfg, row, r, unsubToken);
+    const res = await sendOne(cfg, row, r, unsubToken, orgAddress);
     sent++;
     if (!res.ok) {
       const code = String(res.err.providerCode || '');
@@ -198,6 +241,8 @@ async function runSendJob(job) {
         await enqueue(row, part + 1, new Date(Date.now() + 60000));
         return { throttled: true, sent };
       }
+      // The email itself cannot be completed (e.g. no business address): stop before emailing anyone else.
+      if (code === 'UNRESOLVED_TAGS') return stop(row, 'UNRESOLVED_TAGS', `${res.err.message}. Fix the email (or add your business address in Mail Settings → Campaigns), then Send again.`);
       if (STOP_CODES.has(code) || res.err.code === 'SES_UNREACHABLE') {
         await run("UPDATE mail_campaign_recipients SET status = 'queued', error_code = NULL, error = NULL WHERE id = ? AND status = 'failed'", [r.id]);
         return stop(row, code || res.err.code, `${res.err.message} Nothing more was sent; Send again continues with the people not yet emailed.`);
@@ -311,4 +356,20 @@ async function activity(row, activityName, page, pageSize) {
   };
 }
 
-module.exports = { prepare, start, runSendJob, kick, report, activity, counts, personalize, buildRaw, ACTIVITY_SQL };
+/**
+ * The public "View in browser" page of one recipient: their email as sent (name, address, unsubscribe
+ * link), without the open pixel (viewing it is not an open). Null when the token is unknown, or the
+ * campaign has changed or been deleted since.
+ */
+async function viewPage(token) {
+  if (!/^[a-f0-9]{32}$/.test(String(token || ''))) return null;
+  const r = await get('SELECT * FROM mail_campaign_recipients WHERE view_token = ?', [token]);
+  if (!r) return null;
+  const row = await get('SELECT * FROM mail_campaigns WHERE id = ? AND workspace_id = ?', [r.campaign_id, r.workspace_id]);
+  if (!row || row.version !== r.version) return null;
+  const svc = require('../campaigns/campaignService');
+  const rendered = renderFor(row, r, { orgAddress: await orgAddressOf(row.workspace_id), unsubscribeUrl: unsubscribeUrlOf(svc.unsubscribeTokenOf(row), r.email), viewUrl: viewUrlOf(token) });
+  return { html: rendered.html, subject: rendered.subject };
+}
+
+module.exports = { prepare, start, runSendJob, kick, report, activity, counts, personalize, renderFor, orgAddressOf, viewPage, leftoverTags, buildRaw, ACTIVITY_SQL };

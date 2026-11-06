@@ -24,9 +24,26 @@ describe('CampaignDeliveryComponent (Mail Settings → Campaigns)', () => {
     fixture.detectChanges();
   });
   afterEach(() => http.verify());
+  /** The business address is loaded with the page. */
+  const flushProfile = (address: string | null = null) => http.expectOne(r => r.method === 'GET' && r.url.endsWith('/api/v1/business-profile')).flush({ businessProfile: address === null ? null : { address } });
+
+  it('the business address is loaded, edited and saved for $[HF:ORGADDRESS]$', () => {
+    flushProfile('1 Main St');
+    http.expectOne(r => r.url.endsWith(url)).flush(SETTINGS());
+    fixture.detectChanges();
+    expect(comp.address).toBe('1 Main St');
+    comp.address = 'Level 2, 10 Marine Drive\nKochi';
+    comp.saveAddress();
+    const put = http.expectOne(r => r.method === 'PUT' && r.url.endsWith('/api/v1/business-profile'));
+    expect(put.request.body).toEqual({ address: 'Level 2, 10 Marine Drive\nKochi' });
+    put.flush({ businessProfile: { address: 'Level 2, 10 Marine Drive\nKochi' } });
+    expect(comp.savedAddress).toBe('Level 2, 10 Marine Drive\nKochi');
+    comp.saveAddress();
+    http.expectNone(r => r.method === 'PUT');
+  });
 
   it('says what is missing until the Amazon SES connection is set up', () => {
-    http.expectOne(r => r.url.endsWith(url)).flush(SETTINGS());
+    flushProfile(); http.expectOne(r => r.url.endsWith(url)).flush(SETTINGS());
     fixture.detectChanges();
     expect(el().querySelectorAll('input[type=radio]').length).withContext('Amazon SES is the only sender: nothing to choose').toBe(0);
     expect(el().textContent).toContain('Not set up yet: region, access key ID, secret access key are missing.');
@@ -38,7 +55,7 @@ describe('CampaignDeliveryComponent (Mail Settings → Campaigns)', () => {
   });
 
   it('saves the connection without ever sending an empty secret; the secret is never shown back', () => {
-    http.expectOne(r => r.url.endsWith(url)).flush(SETTINGS());
+    flushProfile(); http.expectOne(r => r.url.endsWith(url)).flush(SETTINGS());
     comp.form = { region: 'ap-south-1', accessKeyId: 'AKIATESTKEY0000001', secretAccessKey: 's3cret/abcdefghijklmnop', configurationSet: 'marketech-events', maxPerSecond: 14 };
     comp.save();
     const put = http.expectOne(r => r.method === 'PUT' && r.url.endsWith(url));
@@ -55,7 +72,7 @@ describe('CampaignDeliveryComponent (Mail Settings → Campaigns)', () => {
   });
 
   it('the test shows the account state; the SNS endpoint is shown with the steps', () => {
-    http.expectOne(r => r.url.endsWith(url)).flush(SETTINGS({ ses: { configured: true, source: 'workspace', region: 'us-east-1', hasSecret: true } }));
+    flushProfile(); http.expectOne(r => r.url.endsWith(url)).flush(SETTINGS({ ses: { configured: true, source: 'workspace', region: 'us-east-1', hasSecret: true } }));
     fixture.detectChanges();
     expect(el().textContent).toContain('https://app.test/api/v1/mail/t/webhooks/ses/abc');
     expect(el().textContent).toContain('No SNS subscription confirmed yet.');

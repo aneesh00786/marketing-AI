@@ -1,7 +1,8 @@
 /**
  * Campaign merge tags: the contact's first and last name, each with a default value used when the
  * contact has none ($[FNAME|Customer]$; a blank default is written $[LNAME||]$). Marketech.ai fills
- * them in for each recipient when it sends with Amazon SES, with the unsubscribe link ($[LI:UNSUBSCRIBE]$).
+ * them in for each recipient when it sends with Amazon SES, with the unsubscribe and "View in browser"
+ * links ($[LI:UNSUBSCRIBE]$, $[LI:VIEWINBROWSER]$) and the business address ($[HF:ORGADDRESS]$).
  */
 /** No "full name": the space between two tags would stay even without a last name ("Hi Priya ,"). */
 export type ContactField = 'first' | 'last';
@@ -13,11 +14,15 @@ export const CONTACT_FIELDS: { key: ContactField; label: string; fallback: strin
   { key: 'last', label: 'Last name', fallback: '', help: 'e.g. “Dear Ms Nair,”' }
 ];
 
-/** Link tags filled per recipient (besides the unsubscribe link, which has its own checkbox): none. */
-export const LINK_TAGS: LinkTag[] = [];
+/** Link tags filled per recipient (besides the unsubscribe link, which has its own checkbox). */
+export const LINK_TAGS: LinkTag[] = [
+  { key: 'viewinbrowser', label: 'View in browser link', tag: '$[LI:VIEWINBROWSER]$', text: 'View in browser', help: 'Opens this person\'s email as a web page' }
+];
 
-/** Organization tags: none (write your company address as text; anti-spam law often requires it). */
-export const INFO_TAGS: { key: string; label: string; tag: string; help: string }[] = [];
+/** Organization details filled in from Mail Settings → Campaigns. */
+export const INFO_TAGS: { key: string; label: string; tag: string; help: string }[] = [
+  { key: 'orgaddress', label: 'Your company address', tag: '$[HF:ORGADDRESS]$', help: 'Your business address (Mail Settings → Campaigns); often required by anti-spam law' }
+];
 
 /** A default value cannot contain the characters that end or split a tag. */
 export function cleanFallback(v: string): string {
