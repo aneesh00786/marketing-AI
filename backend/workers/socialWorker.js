@@ -31,6 +31,7 @@ const HANDLERS = {
   sync_inbox: job => inboxService.syncAccountInbox(job),
   zoho_contact_sync: job => require('../modules/mail/contacts/zohoImport').runImportJob(job),
   zoho_campaign_upload: job => require('../modules/mail/contacts/zohoUpload').runUploadJob(job),
+  ses_campaign_send: job => require('../modules/mail/ses/sesCampaigns').runSendJob(job),
   check_account: async job => {
     const { accountId } = JSON.parse(job.payload_json || '{}');
     return accountService.checkAccountHealth({ auth: { workspaceId: job.workspace_id, actorType: 'worker' } }, accountId);

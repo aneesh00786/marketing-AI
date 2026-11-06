@@ -276,4 +276,4 @@ async function kickUpload(workspaceId, campaignId) {
   return true;
 }
 
-module.exports = { listReadiness, saveReadiness, runUploadJob, cleanupTempLists, uploadLists, kickUpload, waitForZohoContacts };
+module.exports = { reachable, listReadiness, saveReadiness, runUploadJob, cleanupTempLists, uploadLists, kickUpload, waitForZohoContacts };

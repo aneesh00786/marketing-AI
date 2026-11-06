@@ -563,6 +563,26 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     expect(comp.form.subject).withContext('the form is not reloaded').toBe('Unsaved subject');
   });
 
+  it('with Amazon SES chosen: SES wording, Send needs SES set up, and a campaign sent with one service keeps it', () => {
+    comp.zoho = { canCompose: true, canSend: true, connection: { connected: false } };
+    comp.delivery = { provider: 'ses', ses: { configured: true } };
+    expect(comp.viaSes).toBeTrue();
+    expect(comp.sendReady).withContext('Zoho is not needed').toBeTrue();
+    expect(comp.statusLabel('submitted', { status: 'submitted', provider: 'ses' })).toBe('Sent with Amazon SES');
+    expect(comp.statusLabel('submitted', { status: 'submitted', provider: 'zoho' })).toBe('Submitted to Zoho');
+    expect(comp.sendsWithSes({ provider: 'zoho' })).withContext('sent before with Zoho').toBeFalse();
+    (comp as any).setSelected({ id: 9, name: 'Nov', status: 'approved', approved: true, version: 1, html: ORIGINAL, lists: [], provider: null });
+    comp.step = 4;
+    fixture.detectChanges();
+    const send = button('Send with Amazon SES');
+    expect(send).toBeTruthy();
+    expect(send.disabled).toBeFalse();
+    comp.delivery = { provider: 'ses', ses: { configured: false } };
+    fixture.detectChanges();
+    expect(button('Send with Amazon SES').disabled).toBeTrue();
+    expect(el().textContent).toContain('Amazon SES, which is not set up yet');
+  });
+
   it('a send Zoho is holding shows "Waiting for Zoho" (not an error) and offers no Send', () => {
     comp.zoho = { canCompose: true, canSend: true, connection: { connected: true } };
     const held = { id: 6, name: 'Kerala', status: 'needs_review', submitStage: 'send', providerCode: 'ZOHO_HELD', approved: true, zohoPrepared: true, version: 2, html: ORIGINAL, lists: [] };

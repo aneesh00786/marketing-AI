@@ -59,6 +59,9 @@ export class CampaignMetricsComponent implements OnChanges {
   @Input() campaignId: number | null = null;
   @Input() report: any = null;
   @Input() zohoStatus: string | null = null;
+  /** 'ses': figures come from Marketech.ai's own records (SES events); otherwise from Zoho. */
+  @Input() provider: string | null = null;
+  get source(): string { return this.provider === 'ses' ? 'Amazon SES' : 'Zoho'; }
   @Input() status: string | null = null;
   @Input() lastCheckedAt: string | null = null;
   /** Owner, Admin, Marketing Manager and Approver (mail.send); the server enforces it too. */

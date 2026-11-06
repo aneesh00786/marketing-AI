@@ -18,6 +18,9 @@ const { sanitizeEmailHtml } = require('../../../lib/emailHtml');
 const { workerAuthorizationProblem } = require('../../../lib/workerAuthorization');
 const zoho = require('../zoho/zohoService');
 const contactsSvc = require('./campaignContacts');
+// Amazon SES: the workspace's other campaign sender (Mail Settings); Zoho Campaigns is the default.
+const sesSettings = require('../ses/sesSettings');
+const sesCampaigns = () => require('../ses/sesCampaigns');
 
 /**
  * Email campaigns written, approved and managed in Marketech.ai; Zoho Campaigns only delivers them.
@@ -88,6 +91,8 @@ function present(row, { full = false } = {}) {
     approvedAt: row.approved_at,
     submitStage: row.submit_stage,
     zohoPrepared: !!row.zoho_campaign_key && row.zoho_key_version === row.version,
+    // The service it was sent with ('zoho' or 'ses'); null before sending.
+    provider: row.provider || null,
     // Zoho's numeric id (opens the campaign in Zoho), for this version only.
     zohoCampaignId: row.zoho_key_version === row.version ? row.zoho_campaign_id || null : null,
     // What Zoho showed for the recipients (active = emailable now), when last checked. Counts only.
@@ -313,12 +318,19 @@ function topicProblem(row, topics) {
 
 /** Mailing lists and topics of the connected Zoho account, to choose recipients from. */
 async function zohoAudiences(ctx) {
+  const provider = await sesSettings.campaignProvider(ws(ctx));
+  if (provider === 'ses') {
+    // Amazon SES sends to Marketech.ai contact lists and selected contacts; there are no Zoho lists or topics.
+    const all_ = await require('../contacts/listService').lists(ctx);
+    const mailLists = all_.lists.map(l => ({ id: l.id, name: l.name, reachable: l.reachable, total: l.total, noConsent: l.noConsent || 0, inZoho: l.inZoho }));
+    return { provider, lists: [], mailLists, topics: [], note: 'Campaigns are sent with Amazon SES to your contact lists and selected contacts.' };
+  }
   await zoho.assertReady(ws(ctx));
   const lists = (await contactsSvc.fetchLists(ws(ctx))).filter(l => !contactsSvc.isSyncList(l.name));
   const topics = await fetchTopics(ws(ctx));
   const all_ = await require('../contacts/listService').lists(ctx);
   const mailLists = all_.lists.map(l => ({ id: l.id, name: l.name, reachable: l.reachable, total: l.total, noConsent: l.noConsent || 0, inZoho: l.inZoho }));
-  return { lists, mailLists, topics, note: 'Lists and consent are managed in Zoho Campaigns. Contacts you select are added to a new Zoho list when the campaign is sent.' };
+  return { provider, lists, mailLists, topics, note: 'Lists and consent are managed in Zoho Campaigns. Contacts you select are added to a new Zoho list when the campaign is sent.' };
 }
 
 function publicBaseUrl() {
@@ -333,6 +345,9 @@ function publicBaseUrl() {
 async function validateRow(ctx, row, { checkZoho = true } = {}) {
   const problems = [];
   const warnings = [];
+  // A campaign already sent (partly) with one service stays with it; otherwise the workspace's choice.
+  const provider = row.provider || await sesSettings.campaignProvider(ws(ctx));
+  const viaSes = provider === 'ses';
   const html = row.html_content || '';
   if (!String(row.subject || '').trim()) problems.push('Add a subject.');
   if (!row.from_email) problems.push('Add the sender email (an address verified in Zoho Campaigns).');
@@ -357,7 +372,8 @@ async function validateRow(ctx, row, { checkZoho = true } = {}) {
       : 'Nobody in the chosen lists can be emailed (all unsubscribed or bounced). Choose other lists.') : contacts.length ? 'None of the selected contacts can be emailed. Choose others or a list.' : 'Choose at least one contact list.');
   }
   if (noConsent && (listPeople || eligible || keys.length)) warnings.push(`${noConsent.toLocaleString('en-US')} contact(s) in the chosen lists have no recorded marketing consent and are left out of this campaign. Record consent on their leads (how and when it was given) to include them.`);
-  if (listPeople) {
+  if (listPeople && viaSes) warnings.push(`${listPeople.toLocaleString('en-US')} contact(s) from ${mailLists.map(l => `"${l.name}"`).join(', ')} will be emailed one by one with Amazon SES.`);
+  else if (listPeople) {
     const fresh = mailLists.reduce((n, l) => n + l.newToZoho, 0);
     warnings.push(`${listPeople.toLocaleString('en-US')} contact(s) from ${mailLists.map(l => `"${l.name}"`).join(', ')} are put into Zoho for this send; the temporary Zoho list is deleted once Zoho reports it sent.`);
     if (fresh) {
@@ -365,8 +381,9 @@ async function validateRow(ctx, row, { checkZoho = true } = {}) {
       warnings.push(`${fresh.toLocaleString('en-US')} of them are not in Zoho yet and will add to your Zoho plan's contact count${limit ? ` (limit ${limit.toLocaleString('en-US')})` : ''}. They stay in Zoho after the send.`);
     }
   }
-  if (eligible) warnings.push(`${eligible} selected contact(s) will be added to a new Zoho list when you send.`);
-  if (usesNames(row.subject, html)) {
+  if (eligible) warnings.push(viaSes ? `${eligible} selected contact(s) will be emailed with Amazon SES.` : `${eligible} selected contact(s) will be added to a new Zoho list when you send.`);
+  if (usesNames(row.subject, html) && viaSes) warnings.push('Personalized with merge tags: each person sees their own name, and leads without a contact person see their business name (e.g. "Big Red Packaging team"). Anyone without a name sees the tag\'s default value.');
+  else if (usesNames(row.subject, html)) {
     warnings.push('Personalized with merge tags: each person sees their own name, and leads without a contact person see their business name (e.g. "Big Red Packaging team"). Anyone with no name in Zoho sees the tag\'s default value. Zoho does not fill merge tags in test emails; send to a list named "Test List" to check.');
     if (eligible && checkZoho) {
       const conn = await zoho.connectionRow(ws(ctx)).catch(() => null);
@@ -374,13 +391,27 @@ async function validateRow(ctx, row, { checkZoho = true } = {}) {
     }
   }
   if (contacts.length > eligible) warnings.push(`${contacts.length - eligible} selected contact(s) cannot be emailed and will be skipped.`);
-  if (html && !UNSUB_TAG_RE.test(html)) warnings.push('No unsubscribe link: tick "Add unsubscribe link" (Email content). Without it Zoho adds its default footer or holds the campaign, and unsubscribes are not kept in Marketech.ai.');
+  if (html && !UNSUB_TAG_RE.test(html) && viaSes) problems.push('Add an unsubscribe link: tick "Add unsubscribe link" (Email content). Marketing email sent with Amazon SES must let people unsubscribe.');
+  else if (html && !UNSUB_TAG_RE.test(html)) warnings.push('No unsubscribe link: tick "Add unsubscribe link" (Email content). Without it Zoho adds its default footer or holds the campaign, and unsubscribes are not kept in Marketech.ai.');
   if (/href=["']https?:\/\/(www\.)?example\.(com|org|net)\b/i.test(html)) problems.push('Replace the sample link (example.com) with your own web page.');
   if (/<img[^>]+src=["'](?!https:\/\/|data:)/i.test(html)) warnings.push('Some images do not use https:// URLs; they may not show in Zoho.');
-  if (!publicBaseUrl()) problems.push('The server needs a public https APP_BASE_URL: Zoho imports the content from a Marketech.ai link.');
-  warnings.push('Sending limits depend on your Zoho plan and policies; Marketech.ai cannot read them. The sender address must be verified in Zoho.');
+  if (!publicBaseUrl()) problems.push(viaSes ? 'The server needs a public https APP_BASE_URL: unsubscribe links and open/click tracking point to Marketech.ai.' : 'The server needs a public https APP_BASE_URL: Zoho imports the content from a Marketech.ai link.');
+  warnings.push(viaSes ? 'Sent with Amazon SES at your account\'s sending rate. The sender address (or its domain) must be verified in Amazon SES, and the account must be out of the SES sandbox to email anyone.'
+    : 'Sending limits depend on your Zoho plan and policies; Marketech.ai cannot read them. The sender address must be verified in Zoho.');
 
-  if (checkZoho) {
+  if (viaSes) {
+    if (keys.length) problems.push('Zoho lists cannot be used with Amazon SES. Untick them (Recipients) and use contact lists instead.');
+    const cfg = await sesSettings.sesConfig(ws(ctx)).catch(() => null);
+    if (!cfg) problems.push('Amazon SES is not set up: add the region and access keys in Mail Settings → Campaign sending.');
+    else if (checkZoho && row.from_email && !PUBLIC_DOMAINS.test(row.from_email)) {
+      try {
+        const v = await require('../ses/sesClient').identityVerified(cfg, row.from_email);
+        if (!v.verified) problems.push(`${row.from_email} is not verified in Amazon SES. Verify the address or its domain in the SES console, or use a verified sender.`);
+      } catch (err) {
+        problems.push(err.message);
+      }
+    }
+  } else if (checkZoho) {
     try {
       await (contacts.length ? zoho.assertContactSync : zoho.assertReady)(ws(ctx));
       const available = new Set((await contactsSvc.fetchLists(ws(ctx))).map(l => l.key));
@@ -462,6 +493,18 @@ async function send(ctx, id, { confirm } = {}) {
   );
   if (!claim.changes) throw httpError(409, 'This campaign is being submitted right now.', 'SUBMIT_IN_PROGRESS');
   await audit(ctx, 'mail.campaign_submit_started', { resourceType: 'mail_campaign', resourceId: row.id, metadata: { version: row.version } });
+
+  // Amazon SES: Marketech.ai sends each email itself (worker), to the same recipients and rules.
+  // A campaign that already went (partly) with one service is never continued with the other.
+  const provider = row.provider || await sesSettings.campaignProvider(ws(ctx));
+  if (provider === 'ses') {
+    try {
+      await sesCampaigns().start(ctx, { ...row, submitted_by: ctx.auth.userId });
+    } catch (err) {
+      return fail(ctx, row, 'sync', err);
+    }
+    return getOne(ctx, row.id);
+  }
 
   // Marketech.ai lists are put into Zoho first: that takes a while for large lists, so the
   // worker does it (with progress), then delivers. Nothing is emailed before the upload finishes.
@@ -722,6 +765,13 @@ async function findCreated(ctx, row) {
  */
 async function refresh(ctx, id) {
   const row = await requireRow(ctx, id);
+  if (row.provider === 'ses') {
+    // Figures from Marketech.ai's own records (SES events arrive through SNS); a waiting part is started.
+    if (row.status === 'submitting') await sesCampaigns().kick(ws(ctx), row.id).catch(() => false);
+    const report = await sesCampaigns().report(row);
+    await run('UPDATE mail_campaigns SET report_json = ?, last_checked_at = UTC_TIMESTAMP() WHERE id = ?', [JSON.stringify(report), row.id]);
+    return getOne(ctx, row.id);
+  }
   if (row.status === 'needs_review' && row.submit_stage === 'create' && !row.zoho_campaign_key) {
     const hit = await findCreated(ctx, row);
     if (hit) {
@@ -1054,8 +1104,17 @@ function lastReportTime(v) {
 
 async function recipientActivity(ctx, id, { activity, page = 1 } = {}) {
   const action = RECIPIENT_ACTIONS[activity];
-  if (!action) throw httpError(400, `Unknown activity. Use one of: ${Object.keys(RECIPIENT_ACTIONS).join(', ')}.`, 'VALIDATION_ERROR');
+  if (!action && !sesCampaigns().ACTIVITY_SQL[activity]) throw httpError(400, `Unknown activity. Use one of: ${Object.keys(RECIPIENT_ACTIONS).join(', ')}.`, 'VALIDATION_ERROR');
   const row = await requireRow(ctx, id);
+  if (row.provider === 'ses') {
+    const p = Math.max(1, Math.min(1000, parseInt(page, 10) || 1));
+    if (!['submitted', 'submitting', 'failed'].includes(row.status)) return { available: false, reason: 'not_sent', recipients: [], page: 1, pageSize: PAGE_SIZE };
+    const r = await sesCampaigns().activity(row, activity, p, PAGE_SIZE);
+    const recipients = (await withLeadDetails(ws(ctx), r.recipients)).map(x => ({ ...x, name: x.name || x.contactName || null }));
+    await audit(ctx, 'mail.campaign_recipients_viewed', { resourceType: 'mail_campaign', resourceId: row.id, metadata: { activity, page: p, count: recipients.length, provider: 'ses' } });
+    return { available: true, recipients, page: p, pageSize: PAGE_SIZE, hasMore: r.hasMore };
+  }
+  if (!action) throw httpError(400, `Unknown activity. Use one of: ${Object.keys(RECIPIENT_ACTIONS).join(', ')}.`, 'VALIDATION_ERROR');
   if (!row.zoho_campaign_key || !['submitted', 'needs_review'].includes(row.status)) {
     return { available: false, reason: 'not_sent', recipients: [], page: 1, pageSize: PAGE_SIZE };
   }
@@ -1123,4 +1182,4 @@ async function listContacts(ctx, listKey, { status = 'subscribed', page = 1 } = 
   return { contacts, page: p, pageSize: contactsSvc.PAGE_SIZE, hasMore };
 }
 
-module.exports = { recipientHistory, unsubscribeFromCampaign, campaignUnsubscribeUrl, deliver, failSubmission: (...a) => fail(...a), list, getOne, create, update, duplicate, remove, getContacts, setContactLeads, addContactsFromZoho, removeContacts, leadOptions, zohoAudiences, listContacts, validate, approve, send, refresh, resolve, contentByToken, recipientActivity, RECIPIENT_ACTIONS, contactsIn, toZohoMergeTags };
+module.exports = { unsubscribeTokenOf: row => unsubToken(row), recipientHistory, unsubscribeFromCampaign, campaignUnsubscribeUrl, deliver, failSubmission: (...a) => fail(...a), list, getOne, create, update, duplicate, remove, getContacts, setContactLeads, addContactsFromZoho, removeContacts, leadOptions, zohoAudiences, listContacts, validate, approve, send, refresh, resolve, contentByToken, recipientActivity, RECIPIENT_ACTIONS, contactsIn, toZohoMergeTags };

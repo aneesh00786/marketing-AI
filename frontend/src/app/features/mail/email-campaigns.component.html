@@ -6,7 +6,8 @@
     </div>
     <div class="mx-actions">
       <!-- Zoho connection: a small status chip; the details and setup open in a popup -->
-      <button type="button" class="ec-zoho-chip" (click)="zohoOpen = true" [class.ok]="zohoReady" [class.warn]="zoho && !zohoReady"
+      <span class="ec-zoho-chip ok" *ngIf="viaSes" [class.ok]="sendReady" [class.warn]="!sendReady" title="Campaigns are sent with Amazon SES (Mail Settings → Campaign sending)"><span class="ec-zoho-dot" aria-hidden="true"></span>{{ sendReady ? 'Amazon SES' : 'Amazon SES not set up' }}</span>
+      <button type="button" class="ec-zoho-chip" *ngIf="!viaSes" (click)="zohoOpen = true" [class.ok]="zohoReady" [class.warn]="zoho && !zohoReady"
               [title]="zohoReady ? 'Zoho Campaigns is connected. Click to manage the connection.' : 'Zoho Campaigns must be connected before a campaign can be sent.'">
         <span class="ec-zoho-dot" aria-hidden="true"></span>{{ !zoho ? 'Checking Zoho…' : zohoReady ? 'Zoho connected' : 'Zoho not connected' }}
         <app-icon name="settings" [size]="14"></app-icon>
@@ -26,7 +27,11 @@
     </div>
   </header>
 
-  <div class="mx-callout warn ec-zoho-callout" *ngIf="zoho && !zohoReady" role="status">
+  <div class="mx-callout warn ec-zoho-callout" *ngIf="viaSes && delivery && !delivery.ses?.configured" role="status">
+    <app-icon name="info" [size]="16"></app-icon>
+    <span>Campaigns are sent with Amazon SES, which is not set up yet{{ zoho?.canConfigure ? ': add it in Mail Settings → Campaign sending' : '. Ask an Owner or Admin to set it up' }}.</span>
+  </div>
+  <div class="mx-callout warn ec-zoho-callout" *ngIf="!viaSes && zoho && !zohoReady" role="status">
     <app-icon name="info" [size]="16"></app-icon>
     <span>You can write and approve campaigns now. To send them, Zoho Campaigns must be connected{{ zoho?.canConfigure ? '' : ' by an Owner or Admin' }}.</span>
     <button type="button" class="btn btn-secondary btn-sm" (click)="zohoOpen = true">{{ zoho?.canConfigure ? 'Set up Zoho' : 'Details' }}</button>
@@ -181,7 +186,7 @@
       <p class="muted small ec-temp-note" *ngIf="selected.status === 'submitted' && selected.tempListsPending">The temporary Zoho list(s) for this send are removed once Zoho reports it sent{{ zoho?.connection?.canDeleteLists === false ? ' (reconnect Zoho to allow this)' : '' }}.</p>
 
       <!-- Results exist only once Zoho has the campaign -->
-      <app-campaign-metrics *ngIf="!['draft', 'approved'].includes(selected.status)" [campaignId]="selected.id" [report]="selected.report" [zohoStatus]="selected.zohoStatus" [lastCheckedAt]="selected.lastCheckedAt" [status]="selected.status" [canViewRecipients]="canSend" [refreshing]="busy === 'refresh'" (refresh)="refresh()" [campaignSubject]="selected.subject"></app-campaign-metrics>
+      <app-campaign-metrics *ngIf="!['draft', 'approved'].includes(selected.status)" [campaignId]="selected.id" [report]="selected.report" [zohoStatus]="selected.zohoStatus" [lastCheckedAt]="selected.lastCheckedAt" [status]="selected.status" [provider]="selected.provider" [canViewRecipients]="canSend" [refreshing]="busy === 'refresh'" (refresh)="refresh()" [campaignSubject]="selected.subject"></app-campaign-metrics>
 
       <!-- Once sent: what went out, in one line; the results above are the page -->
       <div class="ec-sentinfo" *ngIf="isSent">
@@ -257,7 +262,7 @@
 
           <fieldset class="lists ec-rcard">
             <legend><app-icon name="leads" [size]="15"></app-icon>Contact lists</legend>
-            <div class="ec-lists-empty" *ngIf="!zohoReady">
+            <div class="ec-lists-empty" *ngIf="!sendReady && !viaSes">
               <span class="ec-lists-icon" aria-hidden="true"><app-icon name="leads" [size]="18"></app-icon></span>
               <span>Connect Zoho Campaigns to send.</span>
               <button type="button" class="btn btn-secondary btn-sm" (click)="zohoOpen = true"><app-icon name="link" [size]="14"></app-icon>{{ zoho?.canConfigure ? 'Set up Zoho' : 'Details' }}</button>
@@ -347,8 +352,8 @@
         <ng-container *ngIf="step === 4">
           <button *ngIf="editable && dirty" class="btn btn-secondary btn-sm" (click)="save()" [disabled]="busy === 'save'"><app-icon name="save" [size]="15"></app-icon>Save changes</button>
           <button *ngIf="canSend && selected.status === 'draft'" class="btn btn-primary btn-sm" (click)="approve()" [disabled]="busy === 'approve' || dirty" [title]="dirty ? 'Save your changes first' : ''"><app-icon name="check" [size]="15"></app-icon>Approve</button>
-          <button *ngIf="canSend && selected.approved && (selected.status === 'approved' || selected.status === 'failed')" class="btn btn-primary btn-sm" (click)="send()" [disabled]="busy === 'send' || !zohoReady || dirty"
-                  [title]="!zohoReady ? 'Connect Zoho Campaigns first' : dirty ? 'Save your changes first' : ''"><app-icon name="send" [size]="15"></app-icon>Send through Zoho…</button>
+          <button *ngIf="canSend && selected.approved && (selected.status === 'approved' || selected.status === 'failed')" class="btn btn-primary btn-sm" (click)="send()" [disabled]="busy === 'send' || !(sendsWithSes(selected) ? !!delivery?.ses?.configured : zohoReady) || dirty"
+                  [title]="!(sendsWithSes(selected) ? !!delivery?.ses?.configured : zohoReady) ? (sendsWithSes(selected) ? 'Set up Amazon SES first (Mail Settings)' : 'Connect Zoho Campaigns first') : dirty ? 'Save your changes first' : ''"><app-icon name="send" [size]="15"></app-icon>{{ sendsWithSes(selected) ? 'Send with Amazon SES…' : 'Send through Zoho…' }}</button>
         </ng-container>
       </footer>
       </div>
@@ -381,7 +386,7 @@
   <div class="zc-backdrop ec-pop" *ngIf="sendConfirm" (click)="sendConfirm = null">
     <div class="zc-card ec-pop-card ec-send-card" role="dialog" aria-modal="true" aria-labelledby="ec-send-title" (click)="$event.stopPropagation()">
       <header class="zc-head">
-        <div><h3 id="ec-send-title">Send this campaign now?</h3><p class="mx-desc">Zoho starts sending as soon as you confirm. This cannot be undone.</p></div>
+        <div><h3 id="ec-send-title">Send this campaign now?</h3><p class="mx-desc">{{ sendsWithSes(selected) ? 'Marketech.ai starts sending with Amazon SES as soon as you confirm, one email per person.' : 'Zoho starts sending as soon as you confirm.' }} This cannot be undone.</p></div>
         <button type="button" class="zc-close" (click)="sendConfirm = null" aria-label="Close"><app-icon name="x" [size]="18"></app-icon></button>
       </header>
       <dl class="ec-summary">

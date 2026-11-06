@@ -2,12 +2,13 @@ import { Component, ElementRef, EventEmitter, OnInit, Output, Input, ViewChild }
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../services/api.service';
+import { CampaignDeliveryComponent } from './campaign-delivery.component';
 import { MarketingDeliveryComponent } from './marketing-delivery.component';
 import { MailTrackingSettingsComponent } from './mail-tracking-settings.component';
 import { ZohoAppSettingsComponent } from './zoho-app-settings.component';
 import { ZohoCampaignsComponent } from './zoho-campaigns.component';
 
-export type SettingsTab = 'sending' | 'replies' | 'marketing' | 'tracking' | 'zoho';
+export type SettingsTab = 'sending' | 'replies' | 'marketing' | 'tracking' | 'campaign-sending' | 'zoho';
 
 const BLANK = {
   provider: 'custom_smtp', smtp_host: '', smtp_port: 587, smtp_secure: false, smtp_user: '', smtp_pass: '',
@@ -28,7 +29,7 @@ const BLANK = {
 @Component({
   selector: 'app-mail-settings',
   standalone: true,
-  imports: [CommonModule, FormsModule, MarketingDeliveryComponent, MailTrackingSettingsComponent, ZohoAppSettingsComponent, ZohoCampaignsComponent],
+  imports: [CommonModule, FormsModule, CampaignDeliveryComponent, MarketingDeliveryComponent, MailTrackingSettingsComponent, ZohoAppSettingsComponent, ZohoCampaignsComponent],
   templateUrl: './mail-settings.component.html',
   styleUrls: ['../command/command-center.component.css', './mail-ui.css', './mail-settings.component.css']
 })
@@ -46,6 +47,7 @@ export class MailSettingsComponent implements OnInit {
     { id: 'replies', label: 'Replies (IMAP)' },
     { id: 'marketing', label: 'Marketing email' },
     { id: 'tracking', label: 'Tracking & privacy' },
+    { id: 'campaign-sending', label: 'Campaign sending' },
     { id: 'zoho', label: 'Zoho Campaigns' }
   ];
   tab: SettingsTab = 'sending';

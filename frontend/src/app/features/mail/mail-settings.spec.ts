@@ -55,7 +55,7 @@ describe('MailSettingsComponent', () => {
 
   it('each setting has its own tab: Sending, Replies, Marketing, Tracking, Zoho; only the open one is shown', async () => {
     init(r => r.flush({ config: CONFIG }));
-    expect(tabs().map(t => t.textContent!.trim())).toEqual(['Sending', 'Replies (IMAP)', 'Marketing email', 'Tracking & privacy', 'Zoho Campaigns']);
+    expect(tabs().map(t => t.textContent!.trim())).toEqual(['Sending', 'Replies (IMAP)', 'Marketing email', 'Tracking & privacy', 'Campaign sending', 'Zoho Campaigns']);
     expect(tabs()[0].getAttribute('aria-selected')).toBe('true');
     await fixture.whenStable();
     expect((el().querySelector('input[name=smtp_host]') as HTMLInputElement).value).toBe('smtp.acme.io');
@@ -82,7 +82,7 @@ describe('MailSettingsComponent', () => {
     fixture.detectChanges();
     tick();
     expect(comp.tab).toBe('zoho');
-    expect(tabs().map(t => t.tabIndex)).toEqual([-1, -1, -1, -1, 0]);
+    expect(tabs().map(t => t.tabIndex)).toEqual([-1, -1, -1, -1, -1, 0]);
   }));
 
   it('saving the mailbox tells the shell and reloads the marketing approval (a new account clears it)', () => {

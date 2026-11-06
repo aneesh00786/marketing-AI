@@ -99,6 +99,8 @@
 
     <app-marketing-delivery *ngSwitchCase="'marketing'" [refreshKey]="version" (toast)="toast.emit($event)"></app-marketing-delivery>
 
+    <app-campaign-delivery *ngSwitchCase="'campaign-sending'" (toast)="toast.emit($event)"></app-campaign-delivery>
+
     <app-mail-tracking-settings *ngSwitchCase="'tracking'" [startOpen]="true" (toast)="toast.emit($event)"></app-mail-tracking-settings>
 
     <!-- Zoho Campaigns: the API credentials first, then the connection they are used for -->

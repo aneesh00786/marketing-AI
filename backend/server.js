@@ -138,6 +138,8 @@ app.use('/api', apiGate({
     /^\/api\/v1\/mail\/t\/o\/[a-f0-9]{32}\.gif$/,
     /^\/api\/v1\/mail\/t\/c\/[a-f0-9]{32}$/,
     /^\/api\/v1\/mail\/t\/webhooks\/zeptomail\/[a-f0-9]{32}$/,
+    // Amazon SES events through Amazon SNS (SNS-signature-verified; opaque per-workspace token).
+    /^\/api\/v1\/mail\/t\/webhooks\/ses\/[a-f0-9]{32}$/,
     /^\/api\/v1\/social\/webhooks\/[a-z_]+$/,
     // Uploaded social media files, downloaded by platforms such as Instagram (opaque, unguessable ids).
     /^\/api\/v1\/social\/media-files\/[A-Za-z0-9_-]{43}$/,
@@ -179,6 +181,10 @@ app.use('/api/v1/mail/product-emails', require('./lib/features').requireProductE
 app.use('/api/v1/mail/unsubscribe', productEmailRoutes.unsubscribe);
 // Email delivery/open/click tracking for Mail Center emails (public pixel, links and webhook; authenticated views).
 const mailTrackingRoutes = require('./modules/mail/tracking/routes');
+// Amazon SES: SNS events (public, before the tracking router) and the campaign sending settings.
+const sesRoutes = require('./modules/mail/ses/routes');
+app.use('/api/v1/mail/t/webhooks/ses', sesRoutes.webhook);
+app.use('/api/v1/mail/ses', sesRoutes.router);
 app.use('/api/v1/mail/t', mailTrackingRoutes.publicRouter);
 app.use('/api/v1/mail/tracking', mailTrackingRoutes.router);
 // Mail Center charts, email log and campaign log (read-only).

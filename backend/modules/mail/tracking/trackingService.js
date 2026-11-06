@@ -77,9 +77,10 @@ async function zeptoWebhookActive(workspaceId) {
  * Returns a handle used by the send path, or null if tracking could not be started (the send goes
  * ahead untracked).
  */
-async function begin(workspaceId, { draftId = null, consentOk = true } = {}) {
+async function begin(workspaceId, { draftId = null, consentOk = true, opens: forceOpens, clicks: forceClicks } = {}) {
   try {
-    const policy = await workspacePolicy(workspaceId);
+    // Campaigns (Amazon SES) always report opens and clicks, like Zoho; other emails follow the workspace policy.
+    const policy = typeof forceOpens === 'boolean' ? { opens: forceOpens, clicks: !!forceClicks } : await workspacePolicy(workspaceId);
     const opens = policy.opens && consentOk;
     const clicks = policy.clicks && consentOk;
     const token = links.newToken();
@@ -208,7 +209,8 @@ async function applyToSummary(trackingId, type, occurred, ev) {
 async function recordOpen(token, userAgent) {
   // Only SMTP emails carry our pixel. A ZeptoMail email's token is its client_reference at ZeptoMail,
   // so it must not be usable to record opens here.
-  const t = await get("SELECT id, workspace_id, track_opens FROM mail_message_tracking WHERE tracking_token = ? AND provider = 'smtp'", [token]);
+  // Amazon SES campaign emails carry the same pixel (Marketech.ai tracks their opens itself).
+  const t = await get("SELECT id, workspace_id, track_opens FROM mail_message_tracking WHERE tracking_token = ? AND provider IN ('smtp', 'ses')", [token]);
   if (!t || !t.track_opens) return { recorded: false };
   const now = new Date();
   const r = await recordEvent(t.workspace_id, t.id, { type: 'opened', source: 'smtp_pixel', occurredAt: now, basis: `${token}|open|${Math.floor(now.getTime() / 60000)}`, clientHint: links.clientHint(userAgent) });

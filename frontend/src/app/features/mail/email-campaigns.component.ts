@@ -91,6 +91,19 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
   get canCompose(): boolean { return !!this.zoho?.canCompose; }
   get canSend(): boolean { return !!this.zoho?.canSend; }
   get zohoReady(): boolean { return !!this.zoho?.connection?.connected && !(this.zoho?.connection?.missingScopes || []).length; }
+  /** Which service sends this workspace's campaigns (Mail Settings → Campaign sending). */
+  delivery: any = null;
+  get viaSes(): boolean { return this.delivery?.provider === 'ses'; }
+  /** A campaign sent (partly) with one service stays with it; otherwise the workspace's choice. */
+  sendsWithSes(c: any): boolean { return c?.provider ? c.provider === 'ses' : this.viaSes; }
+  /** Ready to send with the workspace's service: Amazon SES set up, or Zoho connected. */
+  get sendReady(): boolean { return this.viaSes ? !!this.delivery?.ses?.configured : this.zohoReady; }
+  loadDelivery(): void {
+    this.http.get<any>(`${apiRoot()}/api/v1/mail/ses/settings`).subscribe({
+      next: r => { this.delivery = r; if (this.sendReady && this.canCompose && !this.audiences) this.loadAudiences(); },
+      error: () => { this.delivery = { provider: 'zoho' }; }
+    });
+  }
   get canSyncContacts(): boolean { return this.zoho?.connection?.canSyncContacts !== false; }
   /** Contacts can be picked inside a Zoho list only while this campaign's recipients can change. */
   get canPickFromZoho(): boolean { return this.editable && this.canSend && this.canSyncContacts; }
@@ -99,7 +112,8 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
 
   onZohoStatus(s: any): void {
     this.zoho = s;
-    if (this.zohoReady && this.canCompose && !this.audiences) this.loadAudiences();
+    if (!this.delivery) this.loadDelivery();
+    if (this.sendReady && this.canCompose && !this.audiences) this.loadAudiences();
   }
 
   load(): void {
@@ -113,7 +127,7 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
   /** Back from Contact lists: lists may have been created or changed there. */
   showCampaigns(): void {
     this.view = 'campaigns';
-    if (this.zohoReady && this.canCompose) this.loadAudiences();
+    if (this.sendReady && this.canCompose) this.loadAudiences();
   }
 
   loadAudiences(): void {
@@ -240,7 +254,7 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
     this.step = n;
     // Arriving at Review runs the checks, so problems show without an extra click.
     if (n === 4 && this.selected && !this.validation && this.busy !== 'validate') this.validate();
-    if (n === 2 && this.zohoReady && this.canCompose) this.loadAudiences();
+    if (n === 2 && this.sendReady && this.canCompose) this.loadAudiences();
   }
   /** Campaigns, or Zoho Campaigns → Contact lists. */
   view: 'campaigns' | 'lists' = 'campaigns';
@@ -453,6 +467,10 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
   /** "Putting your lists into Zoho: 1,200 of 7,219" while the worker uploads. */
   get uploadText(): string {
     const c = this.selected;
+    if (c?.status === 'submitting' && c.submitStage === 'ses_send') {
+      const u = c.upload;
+      return u?.total ? `Sending with Amazon SES: ${Number(u.done).toLocaleString('en-US')} of ${Number(u.total).toLocaleString('en-US')} emails.` : 'Sending with Amazon SES…';
+    }
     if (c?.status !== 'submitting' || c.submitStage !== 'upload') return c?.status === 'submitting' ? 'Sending through Zoho…' : '';
     const u = c.upload;
     if (!u || !u.total) return 'Getting your lists ready for Zoho…';
@@ -612,7 +630,11 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
     this.http.post<any>(`${this.base}/${this.selected.id}/send`, { confirm: true }).subscribe({
       next: r => {
         this.busy = ''; this.sendConfirm = null; this.setSelected(r.campaign); this.load();
-        if (r.campaign.status === 'submitting') { this.watchUpload(r.campaign.id); this.toast.emit('Putting your lists into Zoho. The campaign is sent as soon as that finishes.'); return; }
+        if (r.campaign.status === 'submitting') {
+          this.watchUpload(r.campaign.id);
+          this.toast.emit(r.campaign.submitStage === 'ses_send' ? 'Sending with Amazon SES. Progress and results show here as it goes.' : 'Putting your lists into Zoho. The campaign is sent as soon as that finishes.');
+          return;
+        }
         this.pollReport(r.campaign.id); this.toast.emit('Zoho accepted the campaign. Results are shown below and update on their own while Zoho sends.');
       },
       error: e => { this.busy = ''; this.sendConfirm = null; this.toast.emit(this.err(e)); this.open(this.selected); this.load(); }
@@ -730,6 +752,8 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
 
   statusLabel(s: string, c?: any): string {
     if (this.waitingForZoho(c)) return 'Waiting for Zoho';
+    if (c?.provider === 'ses' && s === 'submitted') return 'Sent with Amazon SES';
+    if (c?.provider === 'ses' && s === 'submitting') return 'Sending…';
     return ({ draft: 'Draft', approved: 'Approved', submitting: 'Submitting…', submitted: 'Submitted to Zoho', failed: 'Not sent', needs_review: 'Unknown — check' } as any)[s] || s;
   }
 
