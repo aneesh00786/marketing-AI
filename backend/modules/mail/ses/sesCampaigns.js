@@ -355,15 +355,16 @@ async function report(row) {
     WHERE r.campaign_id = ? AND r.version = ? AND r.status = 'sent' AND s.reason = 'unsubscribed' AND s.created_at >= r.sent_at`, [row.id, row.version]);
   const n = k => Number(t?.[k]) || 0;
   const sent = c.sent;
-  // Rates of opens and clicks are of the emails delivered (of those sent until delivery reports arrive).
-  const base = n('delivered') || sent;
+  // Engagement rates are of the emails delivered only; without delivery reports they are not given.
+  const base = n('delivered');
+  const ofDelivered = v => (base ? pct(v, base) : null);
   const out = {
     provider: 'ses',
     recipients_count: c.total,
     emails_sent_count: sent,
     delivered_count: n('delivered'), delivered_percent: pct(n('delivered'), sent),
-    opens_count: n('opened'), open_percent: pct(n('opened'), base), unopened: Math.max(0, base - n('opened')), unopened_percent: pct(Math.max(0, base - n('opened')), base),
-    unique_clicks_count: n('clicked'), unique_clicked_percent: pct(n('clicked'), base),
+    opens_count: n('opened'), open_percent: ofDelivered(n('opened')), unopened: Math.max(0, base - n('opened')), unopened_percent: ofDelivered(Math.max(0, base - n('opened'))),
+    unique_clicks_count: n('clicked'), unique_clicked_percent: ofDelivered(n('clicked')), click_through_percent: ofDelivered(n('clicked')),
     bounces_count: n('hard') + n('soft'), bounce_percent: pct(n('hard') + n('soft'), sent), hardbounce_count: n('hard'), softbounce_count: n('soft'),
     unsub_count: Number(unsub?.n) || 0, unsubscribe_percent: pct(Number(unsub?.n) || 0, sent),
     spams_count: n('complaints'), spam_percent: pct(n('complaints'), sent), complaints_count: n('complaints'),

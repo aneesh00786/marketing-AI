@@ -155,7 +155,7 @@
     <p class="muted small zl-range" *ngIf="!v.loading && v.contacts.length">{{ viewRange }}</p>
     <div class="zl-ctable" *ngIf="!v.loading && v.contacts.length">
       <table aria-label="Contacts">
-        <thead><tr><th class="zl-sno">#</th><th>Contact</th><th>Business</th><th>Email</th><th>Phone</th><th>Location</th><th>Status</th><th>Consent</th><th>Lead</th><th *ngIf="canManage"><span class="sr-only">Actions</span></th></tr></thead>
+        <thead><tr><th class="zl-sno">#</th><th>Contact</th><th>Business</th><th>Email</th><th>Phone</th><th>Location</th><th>Status</th><th>Lead</th><th *ngIf="canManage"><span class="sr-only">Actions</span></th></tr></thead>
         <tbody>
           <tr *ngFor="let c of v.contacts; let i = index">
             <td class="zl-sno">{{ (v.page - 1) * v.pageSize + i + 1 }}</td>
@@ -164,8 +164,7 @@
             <td class="zl-email">{{ c.email }}</td>
             <td class="zl-nowrap">{{ c.phone || '—' }}</td>
             <td>{{ c.location || '—' }}</td>
-            <td><span class="zl-status" [class.cl-bad]="c.status !== 'subscribed'">{{ statusLabel(c.status) }}</span></td>
-            <td><span class="zl-status cl-consent" [class.cl-bad]="c.consent === 'withdrawn' || c.consent === 'none'">{{ consentLabel(c.consent) }}</span></td>
+            <td><span class="zl-status" [class.cl-bad]="c.status !== 'subscribed' || c.consent === 'withdrawn'">{{ c.consent === 'withdrawn' && c.status === 'subscribed' ? 'Withdrew consent' : statusLabel(c.status) }}</span></td>
             <td><span class="zl-status" *ngIf="c.leadStatus; else noLead">{{ c.leadStatus }}</span><ng-template #noLead><span class="muted small">—</span></ng-template></td>
             <td *ngIf="canManage" class="zl-nowrap"><button type="button" class="btn btn-secondary btn-sm" [disabled]="removing === c.id" (click)="remove(c)">{{ removing === c.id ? 'Removing…' : 'Remove' }}</button></td>
           </tr>

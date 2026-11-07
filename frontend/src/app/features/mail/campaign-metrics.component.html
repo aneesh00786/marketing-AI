@@ -9,8 +9,11 @@
   <p class="cm-sending" *ngIf="pending" role="status"><span class="cm-dot" aria-hidden="true"></span>Amazon SES is sending this campaign{{ report.recipients_count ? ' to ' + (report.recipients_count | number) + ' contact(s)' : '' }}. Figures fill in on their own as it goes.</p>
 
   <!-- Summary row -->
-  <div class="cm-summary" *ngIf="report">
-    <ng-container *ngFor="let s of summary; trackBy: trackLabel">
+  <ng-container *ngIf="report">
+  <div class="cm-group" *ngFor="let g of groups">
+  <h4 class="cm-group-title">{{ g.title }} <small>{{ g.sub }}</small></h4>
+  <div class="cm-summary">
+    <ng-container *ngFor="let s of summaryOf(g.key); trackBy: trackLabel">
       <button type="button" class="cm-sum cm-link" *ngIf="canOpen(s.activity) && !s.unavailable; else plainSum" [class.on]="isOpen(s.activity)"
         (click)="openActivity(s.activity!)" [attr.aria-pressed]="isOpen(s.activity)" [attr.aria-label]="'Show who: ' + s.label + ', ' + s.value">
         <ng-container *ngTemplateOutlet="sumBody; context: { $implicit: s }"></ng-container>
@@ -18,6 +21,9 @@
       <ng-template #plainSum><div class="cm-sum" [class.na]="s.unavailable"><ng-container *ngTemplateOutlet="sumBody; context: { $implicit: s }"></ng-container></div></ng-template>
     </ng-container>
   </div>
+  </div>
+  <p class="cm-note cm-open-note">Opens are counted only when the email's images load. Gmail, Outlook and many company mail systems hide images until the reader allows them, and never load them in the spam folder, so real opens are missed. Some apps (Apple Mail) load images without anyone reading. Clicks are counted from Marketech.ai's own links and are the more reliable sign of interest. A click is never counted as an open.</p>
+  </ng-container>
   <ng-template #sumBody let-s>
     <b>{{ s.value }}</b>
     <span>{{ s.label }}</span>
@@ -70,7 +76,7 @@
     <b>{{ m.value }}</b>
     <small *ngIf="m.hint">{{ m.hint }}</small>
   </ng-template>
-  <p class="cm-note" *ngIf="report && !pending">Totals from Amazon SES delivery reports and Marketech.ai's open and click tracking, when last refreshed. Sent means Amazon SES accepted the email; Delivered means the recipient's mail server accepted it (inbox or spam folder). Opens are an estimate: image blocking, caching and privacy features distort them.</p>
+  <p class="cm-note" *ngIf="report && !pending">Delivery figures come from Amazon SES delivery reports; engagement (opens, clicks) from Marketech.ai's own tracking. Sent means Amazon SES accepted the email; Delivered means the recipient's mail server accepted it (inbox or spam folder). Opens are an estimate: image blocking, caching and privacy features distort them.</p>
 
   <ng-container *ngIf="sent">
     <div class="cm-recips-open" *ngIf="canViewRecipients">

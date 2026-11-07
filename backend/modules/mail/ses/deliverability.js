@@ -250,7 +250,7 @@ async function dashboard(workspaceId, { days = 30 } = {}) {
     recv.set(k, e);
   }
   const receivers = [...recv.values()].sort((a, b) => b.sent - a.sent)
-    .map(e => ({ ...e, deliveryRate: rate(e.delivered, e.sent), bounceRate: rate(e.bounced, e.sent), complaintRate: rate(e.complaints, e.delivered || e.sent), openRate: rate(e.opened, e.delivered || e.sent) }));
+    .map(e => ({ ...e, deliveryRate: rate(e.delivered, e.sent), bounceRate: rate(e.bounced, e.sent), complaintRate: rate(e.complaints, e.delivered || e.sent), openRate: rate(e.opened, e.delivered) }));
 
   const domains = await all(`SELECT DISTINCT LOWER(SUBSTRING_INDEX(from_email, '@', -1)) AS domain FROM mail_campaigns
     WHERE workspace_id = ? AND from_email IS NOT NULL AND from_email <> '' AND status IN ('approved', 'submitting', 'submitted', 'failed') ORDER BY domain LIMIT 20`, [workspaceId]);
@@ -265,7 +265,7 @@ async function dashboard(workspaceId, { days = 30 } = {}) {
     },
     rates: {
       delivery: rate(delivered, sent), bounce: rate(n('hard'), sent), complaint: rate(n('complaints'), delivered || sent),
-      unsubscribe: rate(num(unsub?.n), delivered || sent), rejection: rate(rejected, attempted), open: rate(n('opened'), delivered || sent)
+      unsubscribe: rate(num(unsub?.n), delivered || sent), rejection: rate(rejected, attempted), open: rate(n('opened'), delivered), clickThrough: rate(n('clicked'), delivered)
     },
     daily: series, receivers, warmups, health: await health(workspaceId),
     gmailReputation: { available: false, reason: 'Gmail shares domain reputation only in Google Postmaster Tools (postmaster.google.com) after you verify your sending domain there and send enough Gmail volume; it is not available to Marketech.ai.' },

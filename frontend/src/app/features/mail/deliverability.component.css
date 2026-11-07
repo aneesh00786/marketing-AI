@@ -62,3 +62,6 @@
 .dv-warm-head span { color: var(--text-muted); }
 .dv-meter { height: 8px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
 .dv-meter div { height: 100%; background: var(--s1); border-radius: 999px; }
+
+.dv-section { margin: 0; font-size: 0.95rem; }
+.dv-card h3 small, .dv-section small { font-weight: 400; font-size: 0.78rem; }

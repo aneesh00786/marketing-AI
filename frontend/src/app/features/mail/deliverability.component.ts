@@ -39,6 +39,7 @@ type Level = 'good' | 'warning' | 'critical' | 'none';
       <b>{{ d.health.level === 'critical' ? '⛔ Sending paused' : '⚠ Watch out' }}</b> {{ d.health.message }}
     </div>
 
+    <h3 class="dv-section">Delivery <small class="dv-muted">reported by Amazon SES</small></h3>
     <div class="dv-stats">
       <div class="dv-stat" *ngFor="let t of tiles" [attr.data-level]="t.level">
         <span>{{ t.label }}</span>
@@ -52,6 +53,16 @@ type Level = 'good' | 'warning' | 'critical' | 'none';
         <small>Only in <a href="https://postmaster.google.com" target="_blank" rel="noopener">Google Postmaster Tools</a>: verify your sending domain there to see it.</small>
       </div>
     </div>
+
+    <section class="dv-card">
+      <h3>Engagement <small class="dv-muted">tracked by Marketech.ai, of delivered emails</small></h3>
+      <div class="dv-stats">
+        <div class="dv-stat" data-level="none"><span>Unique opens</span><strong>{{ d.totals.opened }}</strong><small>Open rate {{ fmt(d.rates.open) }}</small></div>
+        <div class="dv-stat" data-level="none"><span>Unique clicks</span><strong>{{ d.totals.clicked }}</strong><small>Clicked a link at least once</small></div>
+        <div class="dv-stat" data-level="none"><span>Click-through rate</span><strong>{{ fmt(d.rates.clickThrough) }}</strong><small>Unique clicks ÷ delivered</small></div>
+      </div>
+      <p class="dv-note">Opens are counted only when the email's images load: Gmail, Outlook and company mail systems often hide images until the reader allows them (and never load them in spam), so real opens are missed; Apple Mail can load them without anyone reading. Clicks are the more reliable signal. A click is never counted as an open.</p>
+    </section>
 
     <figure class="dv-card">
       <figcaption><strong>Emails accepted by Amazon SES per day</strong><span class="dv-muted">Hover a day for delivered, bounces and complaints</span></figcaption>

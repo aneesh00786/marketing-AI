@@ -91,8 +91,8 @@ describe('ContactListsComponent (lists kept in Marketech.ai)', () => {
     req.flush({ contacts: [{ id: 5, email: 'kim@shop.io', name: 'Kim Lee', company: 'Shop', phone: '0400', location: 'Sydney', status: 'unsubscribed', consent: 'none', leadStatus: 'Contacted' }], page: 1, pageSize: 50, hasMore: false });
     fixture.detectChanges();
     const cells = Array.from(el().querySelectorAll('.zl-ctable tbody td')).map(td => td.textContent!.trim());
-    expect(cells.slice(0, 9)).toEqual(['1', 'Kim Lee', 'Shop', 'kim@shop.io', '0400', 'Sydney', 'Unsubscribed', 'Not recorded', 'Contacted']);
-    expect(['granted', 'withdrawn', 'none'].map(x => comp.consentLabel(x))).toEqual(['Given', 'Withdrawn', 'Not recorded']);
+    expect(cells.slice(0, 8)).toEqual(['1', 'Kim Lee', 'Shop', 'kim@shop.io', '0400', 'Sydney', 'Unsubscribed', 'Contacted']);
+    expect(Array.from(el().querySelectorAll('.zl-ctable th')).map(th => th.textContent!.trim())).not.toContain('Consent');
     comp.viewing!.q = 'kim';
     comp.view(comp.viewing!.list, 'subscribed', 1, 'kim');
     req = http.expectOne(r => r.url.endsWith('/contact-lists/1/contacts') && r.params.get('status') === 'subscribed' && r.params.get('q') === 'kim');

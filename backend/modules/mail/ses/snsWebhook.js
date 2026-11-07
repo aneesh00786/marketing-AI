@@ -72,7 +72,14 @@ async function applySesEvent(workspaceId, ev, snsMessageId) {
   const kind = ev.eventType || ev.notificationType;
   const messageId = ev.mail?.messageId;
   if (!kind || !messageId) return { ignored: 'not an SES event' };
-  if (['Send', 'Open', 'Click', 'Subscription', 'AmazonSnsSubscriptionSucceeded'].includes(kind)) return { ignored: kind };
+  // SES's own open and click tracking (if turned on in the configuration set) is not counted:
+  // Marketech.ai tracks opens and clicks itself, so counting both would double them. It is noted, so
+  // Settings can say to turn it off.
+  if (kind === 'Open' || kind === 'Click') {
+    await run('UPDATE mail_delivery_settings SET ses_engagement_seen_at = UTC_TIMESTAMP() WHERE workspace_id = ?', [workspaceId]).catch(() => null);
+    return { ignored: kind };
+  }
+  if (['Send', 'Subscription', 'AmazonSnsSubscriptionSucceeded'].includes(kind)) return { ignored: kind };
   const t = await get("SELECT id, workspace_id FROM mail_message_tracking WHERE workspace_id = ? AND provider = 'ses' AND provider_message_id = ?", [workspaceId, String(messageId).slice(0, 255)]);
   if (!t) return { ignored: 'unknown message' };
   const tracking = require('../tracking/trackingService');

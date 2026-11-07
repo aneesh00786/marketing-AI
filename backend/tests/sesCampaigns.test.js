@@ -583,7 +583,7 @@ test('open tracking end to end: a unique pixel per recipient, loaded like Gmail\
 
   // Images blocked: nothing loads, nothing is counted.
   let rep = (await capi(ws, 'GET', `/${c.id}`)).data.campaign.report;
-  assert.deepEqual([rep.opens_count, rep.open_events, rep.unopened], [0, 0, 2]);
+  assert.deepEqual([rep.opens_count, rep.open_events], [0, 0]);
 
   // Gmail's image proxy: no cookies, no login, its own user agent.
   const res = await h.api('GET', olgaPixel, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 5.1; rv:11.0) Gecko Firefox/11.0 (via ggpht.com GoogleImageProxy)' } });
@@ -600,7 +600,7 @@ test('open tracking end to end: a unique pixel per recipient, loaded like Gmail\
   // The campaign shows it on the next read (no Refresh needed), for the right person.
   await db().run('UPDATE mail_campaigns SET last_checked_at = UTC_TIMESTAMP() - INTERVAL 1 MINUTE WHERE id = ?', [c.id]);
   const listed = (await capi(ws, 'GET', '')).data.campaigns.find(x => x.id === c.id).report;
-  assert.deepEqual([listed.opens_count, listed.unopened, listed.open_percent], [1, 1, 50]);
+  assert.deepEqual([listed.opens_count, listed.open_percent], [1, null], 'no delivery reports yet: no rate (rates are of delivered emails)');
   const opened = (await capi(ws, 'GET', `/${c.id}/recipients?activity=opened`)).data.recipients.map(r => r.email);
   assert.deepEqual(opened, ['olga@shop.io']);
   const t = await db().get("SELECT t.workspace_id, t.campaign_id, t.open_events FROM mail_message_tracking t JOIN mail_campaign_recipients r ON r.id = t.campaign_recipient_id WHERE r.email = 'olga@shop.io' AND r.campaign_id = ?", [c.id]);
@@ -608,4 +608,29 @@ test('open tracking end to end: a unique pixel per recipient, loaded like Gmail\
   // Another workspace's campaigns are untouched.
   const other = await sesWorkspace('SES opens other');
   assert.deepEqual((await capi(other, 'GET', '')).data.campaigns, []);
+});
+
+test('engagement: unique clicks per recipient, click-through rate of delivered emails, clicks never counted as opens; SES\'s own Open/Click events are ignored and flagged', async () => {
+  const ws = await sesWorkspace('SES engagement');
+  const c = await sentCampaign(ws, ['a', 'b', 'c', 'd'].map(k => ({ name: k, email: `${k}@shop.io` })));
+  await runJobs(ws);
+  const linkOf = to => htmlOf(S.sent.find(s => s.to === to).raw).match(/\/api\/v1\/mail\/t\/c\/[a-f0-9]{32}/)[0];
+  // a clicks twice (a quick double click counts once), b once; nobody's images load.
+  for (const p of [linkOf('a@shop.io'), linkOf('a@shop.io'), linkOf('b@shop.io')]) assert.equal((await h.api('GET', p)).status, 302);
+  // Delivery reports for three of the four.
+  await db().run("UPDATE mail_message_tracking t JOIN mail_campaign_recipients r ON r.id = t.campaign_recipient_id SET t.delivered_at = UTC_TIMESTAMP() WHERE r.campaign_id = ? AND r.email <> 'd@shop.io'", [c.id]);
+  // SES's own Open and Click events (its tracking on in the configuration set): ignored, flagged in Settings.
+  const url = (await sapi(ws, 'GET', '/settings')).data.ses.notificationUrl.replace('https://app.marketech.test', '');
+  const post = msg => h.api('POST', url, { rawBody: JSON.stringify(msg), headers: { 'content-type': 'text/plain; charset=UTF-8' } });
+  const msgId = S.sent.find(s => s.to === 'c@shop.io').id;
+  for (const kind of ['Open', 'Click']) {
+    assert.equal((await post(signed({ Type: 'Notification', Message: JSON.stringify({ eventType: kind, mail: { messageId: msgId, timestamp: new Date().toISOString() } }) }))).data, 'Ignored');
+  }
+  assert.equal((await sapi(ws, 'GET', '/settings')).data.ses.sesEngagementTracking, true);
+  const rep = (await capi(ws, 'POST', `/${c.id}/refresh`, {})).data.campaign.report;
+  assert.deepEqual([rep.emails_sent_count, rep.delivered_count, rep.unique_clicks_count, rep.opens_count, rep.open_events], [4, 3, 2, 0, 0], 'clicks are not opens; SES events counted nowhere');
+  assert.equal(rep.click_events, 2, 'total clicks counted separately (a double click within 10 seconds is one)');
+  assert.equal(rep.click_through_percent, 66.7, 'unique clicks ÷ delivered');
+  const other = await sesWorkspace('SES engagement other');
+  assert.equal((await sapi(other, 'GET', '/settings')).data.ses.sesEngagementTracking, false);
 });

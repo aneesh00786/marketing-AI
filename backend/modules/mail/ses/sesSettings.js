@@ -91,6 +91,8 @@ async function getSettings(ctx) {
       snsRegionMismatch: !!(r?.ses_sns_topic_arn && topicRegion(r.ses_sns_topic_arn) && (r?.ses_region || cfg?.region) && topicRegion(r.ses_sns_topic_arn) !== (r?.ses_region || cfg?.region)),
       lastEventAt: last?.at || null,
       eventsReceived: Number(last?.n) || 0,
+      // SES's own open/click tracking published events in the last 30 days (they are ignored; turn it off).
+      sesEngagementTracking: !!(r?.ses_engagement_seen_at && Date.now() - new Date(r.ses_engagement_seen_at instanceof Date ? r.ses_engagement_seen_at : `${String(r.ses_engagement_seen_at).replace(' ', 'T')}Z`).getTime() < 30 * 86400000),
       warmupEnabled: r?.ses_warmup_enabled === undefined || r?.ses_warmup_enabled === null ? true : !!Number(r.ses_warmup_enabled),
       lastCheckedAt: r?.ses_last_checked_at || null,
       lastError: r?.ses_last_error || null

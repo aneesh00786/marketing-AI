@@ -6,16 +6,16 @@ import { CallButtonComponent } from '../../shared/calling/call-button.component'
 import { ComposeRequestService } from '../../core/compose-request.service';
 
 export interface Metric { label: string; value: string; hint?: string; unavailable?: boolean; activity?: string }
-export interface SummaryItem { label: string; value: string; sub: string | null; activity?: string; unavailable: boolean }
+export interface SummaryItem { label: string; value: string; sub: string | null; activity?: string; unavailable: boolean; group?: 'delivery' | 'engagement' }
 export interface BarRow { label: string; value: number; pct: number; activity?: string }
 
 /** Popup tabs: each opens the list of those recipients. */
 const ACTIVITIES = [
   { key: 'sent', label: 'Sent', api: 'sent', help: 'Accepted by Amazon SES for sending. Not proof that it arrived.' },
   { key: 'delivered', label: 'Delivered', api: 'delivered', help: 'Accepted by the recipient\'s mail server. It may be in the inbox or the spam folder: no provider reports which.' },
-  { key: 'opened', label: 'Opened', api: 'opened', help: 'Opened the email at least once (an estimate: image blocking and privacy features affect it).' },
-  { key: 'unopened', label: 'Unopened', api: 'unopened', help: 'Delivered, but no open recorded yet. Good candidates for a follow-up.' },
-  { key: 'clicked', label: 'Clicked', api: 'clicked', help: 'Clicked a link in the email: your most interested contacts.' },
+  { key: 'opened', label: 'Opened', api: 'opened', help: 'The email\'s images loaded at least once. Counted only when images load: blocked images hide real opens, and some apps load images without anyone reading.' },
+  { key: 'unopened', label: 'No open recorded', api: 'unopened', help: 'Delivered, but the email\'s images have not loaded. They may still have read it with images off.' },
+  { key: 'clicked', label: 'Clicked', api: 'clicked', help: 'Clicked a link in the email at least once: your most interested contacts.' },
   { key: 'hard_bounced', label: 'Hard bounced', api: 'hard_bounced', help: 'Addresses that do not exist or refuse mail. They are added to the stop-list and not emailed again.' },
   { key: 'soft_bounced', label: 'Soft bounced', api: 'soft_bounced', help: 'Temporary problems such as a full mailbox.' },
   { key: 'unsubscribed', label: 'Unsubscribed', api: 'unsubscribed', help: 'Asked not to get these emails any more.' },
@@ -97,30 +97,41 @@ export class CampaignMetricsComponent implements OnChanges {
       const to = num(this.report.recipients_count);
       const zero = (label: string, activity?: string): SummaryItem => ({ label, value: '0', sub: 'so far', activity, unavailable: false });
       return [
-        { label: 'Sending to', value: to === null ? '…' : to.toLocaleString('en-US'), sub: 'in progress', activity: 'sent', unavailable: false },
-        zero('Delivered', 'delivered'), zero('Opened', 'opened'), zero('Unopened', 'unopened'), zero('Clicked', 'clicked'),
-        zero('Bounced', 'hard_bounced'), zero('Unsubscribes', 'unsubscribed'), zero('Marked spam', 'spam')
+        { label: 'Sending to', value: to === null ? '…' : to.toLocaleString('en-US'), sub: 'in progress', activity: 'sent', unavailable: false, group: 'delivery' },
+        { ...zero('Delivered', 'delivered'), group: 'delivery' }, { ...zero('Bounced', 'hard_bounced'), group: 'delivery' },
+        { ...zero('Complaints', 'spam'), group: 'delivery' }, { ...zero('Unsubscribed', 'unsubscribed'), group: 'delivery' },
+        { ...zero('Unique opens', 'opened'), group: 'engagement' }, { ...zero('Unique clicks', 'clicked'), group: 'engagement' }
       ];
     }
     const r = this.report || {};
     const sent = num(r.emails_sent_count);
     const delivered = num(r.delivered_count);
     const opened = num(r.opens_count);
-    const unopened = num(r.unopened) ?? (delivered !== null && opened !== null ? Math.max(0, delivered - opened) : null);
+    const clicks = num(r.unique_clicks_count);
+    // Engagement rates are of delivered emails only (no delivery reports: not given).
+    const ofDelivered = (part: number | null) => (delivered ? rate(part, delivered) : null);
     const share = (reportedPct: any, part: number | null, whole: number | null) => (num(reportedPct) !== null ? `${num(reportedPct)}%` : rate(part, whole));
-    const item = (label: string, v: number | null, sub: string | null, activity?: string): SummaryItem =>
-      ({ label, value: v === null ? '—' : v.toLocaleString('en-US'), sub: v === null ? null : sub, activity, unavailable: v === null });
+    const item = (label: string, v: number | null, sub: string | null, activity: string | undefined, group: 'delivery' | 'engagement'): SummaryItem =>
+      ({ label, value: v === null ? '—' : v.toLocaleString('en-US'), sub: v === null ? null : sub, activity, unavailable: v === null, group });
+    const ctr = ofDelivered(clicks);
     return [
-      item('Sent', sent, null, 'sent'),
-      item('Delivered', delivered, share(r.delivered_percent, delivered, sent), 'delivered'),
-      item('Opened', opened, share(r.open_percent, opened, delivered), 'opened'),
-      item('Unopened', unopened, share(r.unopened_percent, unopened, delivered), 'unopened'),
-      item('Clicked', num(r.unique_clicks_count), share(r.unique_clicked_percent, num(r.unique_clicks_count), delivered), 'clicked'),
-      item('Bounced', num(r.bounces_count), share(r.bounce_percent, num(r.bounces_count), sent), 'hard_bounced'),
-      item('Unsubscribes', num(r.unsub_count), share(r.unsubscribe_percent, num(r.unsub_count), delivered), 'unsubscribed'),
-      item('Marked spam', num(r.spams_count) ?? num(r.complaints_count), share(r.spam_percent, num(r.spams_count), delivered), 'spam')
+      item('Sent', sent, 'accepted by SES', 'sent', 'delivery'),
+      item('Delivered', delivered, share(r.delivered_percent, delivered, sent), 'delivered', 'delivery'),
+      item('Bounced', num(r.bounces_count), share(r.bounce_percent, num(r.bounces_count), sent), 'hard_bounced', 'delivery'),
+      item('Complaints', num(r.complaints_count) ?? num(r.spams_count), share(r.spam_percent, num(r.complaints_count) ?? num(r.spams_count), delivered), 'spam', 'delivery'),
+      item('Unsubscribed', num(r.unsub_count), share(r.unsubscribe_percent, num(r.unsub_count), delivered), 'unsubscribed', 'delivery'),
+      item('Unique opens', opened, ofDelivered(opened) ?? 'needs delivery reports', 'opened', 'engagement'),
+      item('Unique clicks', clicks, ofDelivered(clicks) ?? 'needs delivery reports', 'clicked', 'engagement'),
+      { label: 'Click-through rate', value: ctr ?? '—', sub: ctr ? 'unique clicks ÷ delivered' : 'needs delivery reports', unavailable: !ctr, group: 'engagement' }
     ];
   }
+
+  readonly groups: { key: 'delivery' | 'engagement'; title: string; sub: string }[] = [
+    { key: 'delivery', title: 'Delivery', sub: 'reported by Amazon SES' },
+    { key: 'engagement', title: 'Engagement', sub: 'tracked by Marketech.ai' }
+  ];
+
+  summaryOf(group: 'delivery' | 'engagement'): SummaryItem[] { return this.summary.filter(s => s.group === group); }
 
   get metrics(): Metric[] {
     const r = this.report || {};
@@ -137,8 +148,8 @@ export class CampaignMetricsComponent implements OnChanges {
       { label: 'Delivery rate', value: pct(r.delivered_percent, rate(delivered, sent)) },
       { label: 'Bounced', value: show(bounced), hint: hard !== null || soft !== null ? `Hard ${show(hard)} · Soft ${show(soft)}` : undefined, activity: 'hard_bounced' },
       { label: 'Not sent', value: show(num(r.unsent_count)), hint: 'Not accepted by Amazon SES, or stopped before sending', activity: 'failed' },
-      { label: 'Open rate', value: pct(r.open_percent, rate(opens, delivered)), hint: `${show(opens)} unique · ${show(num(r.open_events))} total opens. Unique opens ÷ delivered; an estimate, not proof of reading.` },
-      { label: 'Click rate', value: pct(r.unique_clicked_percent, rate(clicks, delivered)), hint: `${show(clicks)} unique · ${show(num(r.click_events))} total clicks. Unique clickers ÷ delivered.` }
+      { label: 'Open rate', value: pct(r.open_percent, rate(opens, delivered)), hint: `${show(opens)} unique · ${show(num(r.open_events))} total opens. Unique opens ÷ delivered; counted only when images load.` },
+      { label: 'Click-through rate', value: pct(r.click_through_percent ?? r.unique_clicked_percent, rate(clicks, delivered)), hint: `${show(clicks)} unique · ${show(num(r.click_events))} total clicks. Unique clickers ÷ delivered.` }
     ].map(m => ({ ...m, unavailable: m.value === 'Unavailable' }));
   }
 

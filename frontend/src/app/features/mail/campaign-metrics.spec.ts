@@ -29,15 +29,18 @@ describe('CampaignMetricsComponent', () => {
     init({ report: { emails_sent_count: '200', delivered_count: '190', opens_count: '57', bounces_count: '10', hardbounce_count: '6', softbounce_count: '4' } });
     expect(sum('Sent').querySelector('b')!.textContent).toBe('200');
     expect(sum('Delivered').textContent).toContain('95.0%');
-    expect(sum('Unopened').querySelector('b')!.textContent).withContext('delivered − opened when no figure is given').toBe('133');
+    expect(sum('Unique opens').querySelector('b')!.textContent).toBe('57');
+    expect(sum('Unique opens').textContent).withContext('of delivered').toContain('30.0%');
     expect(tile('Delivery rate').querySelector('b')!.textContent).toBe('95.0%');
     expect(tile('Open rate').querySelector('b')!.textContent).toBe('30.0%');
-    expect(sum('Clicked').querySelector('b')!.textContent).toBe('—');
-    expect(tile('Click rate').querySelector('b')!.textContent).toBe('Unavailable');
-    expect(sum('Unsubscribes').querySelector('b')!.textContent).toBe('—');
-    expect(sum('Marked spam').querySelector('b')!.textContent).toBe('—');
+    expect(sum('Unique clicks').querySelector('b')!.textContent).toBe('—');
+    expect(tile('Click-through rate').querySelector('b')!.textContent).toBe('Unavailable');
+    expect(sum('Unsubscribed').querySelector('b')!.textContent).toBe('—');
+    expect(sum('Complaints').querySelector('b')!.textContent).toBe('—');
     expect(tile('Bounced').textContent).toContain('Hard 6 · Soft 4');
-    expect(el().textContent).toContain('estimate');
+    expect(el().textContent).toContain('Opens are counted only when the email\'s images load');
+    expect(el().textContent).toContain('A click is never counted as an open');
+    expect(Array.from(el().querySelectorAll('.cm-group-title')).map(h => h.textContent!.trim())).toEqual(['Delivery reported by Amazon SES', 'Engagement tracked by Marketech.ai']);
   });
 
   it('uses the reported percentages when given', () => {
@@ -188,9 +191,9 @@ describe('CampaignMetricsComponent', () => {
     it('figures open their list too; those with no list, or nothing reported, stay plain', () => {
       init({ report: { ...REPORT, unsub_count: undefined }, canViewRecipients: true });
       expect(tile('Open rate').tagName).toBe('DIV');
-      expect(sum('Unsubscribes').tagName).withContext('Unavailable').toBe('DIV');
+      expect(sum('Unsubscribed').tagName).withContext('Unavailable').toBe('DIV');
       expect(sum('Delivered').tagName).withContext('every reported figure opens its people').toBe('BUTTON');
-      expect(sum('Opened').tagName).toBe('BUTTON');
+      expect(sum('Unique opens').tagName).toBe('BUTTON');
       expect(row('Delivered').tagName).toBe('BUTTON');
       (tile('Bounced') as HTMLElement).click();
       const req = recipients();
@@ -213,8 +216,8 @@ describe('CampaignMetricsComponent', () => {
     init({ report: { emails_sent_count: '2', delivered_count: '2', delivered_percent: '100.0', opens_count: '1', open_percent: '50.0', unopened: '1', unopened_percent: '50.0',
       unique_clicks_count: '0', unique_clicked_percent: '0.0', unsub_count: '0', unsubscribe_percent: '0.0', spams_count: '0', spam_percent: '0.0', forwards_count: '0', forward_percent: '0.0' } });
     expect(comp.summary.map(x => [x.label, x.value, x.sub])).toEqual([
-      ['Sent', '2', null], ['Delivered', '2', '100%'], ['Opened', '1', '50%'], ['Unopened', '1', '50%'],
-      ['Clicked', '0', '0%'], ['Bounced', '—', null], ['Unsubscribes', '0', '0%'], ['Marked spam', '0', '0%']
+      ['Sent', '2', 'accepted by SES'], ['Delivered', '2', '100%'], ['Bounced', '—', null], ['Complaints', '0', '0%'], ['Unsubscribed', '0', '0%'],
+      ['Unique opens', '1', '50.0%'], ['Unique clicks', '0', '0.0%'], ['Click-through rate', '0.0%', 'unique clicks ÷ delivered']
     ]);
     let asked = 0;
     comp.refresh.subscribe(() => asked++);
@@ -225,8 +228,8 @@ describe('CampaignMetricsComponent', () => {
   it('while it is still sending: the row shows how many it goes to and 0 so far; no charts yet', () => {
     init({ report: { pending: true, recipients_count: 2, insights: { lists: [] } }, canViewRecipients: true });
     expect(el().querySelector('.cm-sending')!.textContent).toContain('Amazon SES is sending this campaign to 2 contact(s)');
-    expect(comp.summary.map(x => [x.label, x.value])).toEqual([['Sending to', '2'], ['Delivered', '0'], ['Opened', '0'], ['Unopened', '0'], ['Clicked', '0'],
-      ['Bounced', '0'], ['Unsubscribes', '0'], ['Marked spam', '0']]);
+    expect(comp.summary.map(x => [x.label, x.value])).toEqual([['Sending to', '2'], ['Delivered', '0'], ['Bounced', '0'], ['Complaints', '0'], ['Unsubscribed', '0'],
+      ['Unique opens', '0'], ['Unique clicks', '0']]);
     expect(el().textContent).not.toContain('Campaign reach');
     expect(el().querySelector('.cm-grid')).toBeNull();
     expect(el().textContent).not.toContain('No figures yet');
@@ -245,8 +248,8 @@ describe('CampaignMetricsComponent', () => {
   it('shows unique and total opens and clicks separately', () => {
     comp.report = { emails_sent_count: 10, delivered_count: 8, opens_count: 3, open_events: 7, open_percent: 37.5, unique_clicks_count: 2, click_events: 5, unique_clicked_percent: 25 };
     const open = comp.metrics.find(m => m.label === 'Open rate')!;
-    const click = comp.metrics.find(m => m.label === 'Click rate')!;
-    expect([open.value, open.hint]).toEqual(['37.5%', '3 unique · 7 total opens. Unique opens ÷ delivered; an estimate, not proof of reading.']);
+    const click = comp.metrics.find(m => m.label === 'Click-through rate')!;
+    expect([open.value, open.hint]).toEqual(['37.5%', '3 unique · 7 total opens. Unique opens ÷ delivered; counted only when images load.']);
     expect([click.value, click.hint]).toEqual(['25%', '2 unique · 5 total clicks. Unique clickers ÷ delivered.']);
   });
 });

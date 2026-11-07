@@ -175,8 +175,6 @@ export class ContactListsComponent implements OnInit, OnDestroy {
     return `Showing ${from.toLocaleString('en-US')}–${(from + v.contacts.length - 1).toLocaleString('en-US')}`;
   }
 
-  /** Marketing consent as campaigns use it (see backend contacts/consent.js). */
-  consentLabel(s: string): string { return ({ granted: 'Given', withdrawn: 'Withdrawn', none: 'Not recorded' } as any)[s] || '—'; }
   statusLabel(s: string): string { return ({ subscribed: 'Subscribed', unsubscribed: 'Unsubscribed', bounced: 'Bounced' } as any)[s] || s; }
 
   remove(c: any): void {
