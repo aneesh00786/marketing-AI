@@ -10,6 +10,8 @@ const { all } = require('../db/database');
 const { capabilitiesForRole } = require('./permissions');
 
 const GRANTABLE = {
+  // A Member writes email but does not send it; this lets one member send as well.
+  'mail.send': { requires: 'mail.compose', label: 'Send email' },
   'mail.send_transactional': { requires: 'mail.send', label: 'Send transactional email (Compose)' }
 };
 

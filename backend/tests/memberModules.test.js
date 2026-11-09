@@ -120,3 +120,27 @@ test('CRM access can be assigned only by the platform admin', async () => {
 
   await db().run("UPDATE workspace_members SET status = 'Removed' WHERE workspace_id = 1 AND user_id IN (?, ?)", [adminUser.userId, teammate.userId]);
 });
+
+test('Permissions: "Make calls" is set by the platform admin only and works without CRM access; "Send email" can be given to a Member', async () => {
+  await db().run("INSERT IGNORE INTO workspaces (id, name, slug, owner_email, plan, status, created_at) VALUES (1, 'Platform', 'platform-test', 'owner@example.test', 'Starter', 'Active', UTC_TIMESTAMP())");
+  const { createToken } = require('../services/authService');
+  const adminUser = await h.createWorkspace({ name: 'Platform admin 2' });
+  await db().run("INSERT INTO workspace_members (workspace_id, user_id, role, status) VALUES (1, ?, 'Workspace Owner', 'Active') ON DUPLICATE KEY UPDATE role = VALUES(role), status = 'Active'", [adminUser.userId]);
+  const admin = { token: createToken({ userId: adminUser.userId, workspaceId: 1, email: adminUser.email, role: 'Workspace Owner' }) };
+  const caller = await h.addMember(1, 'Member');
+
+  assert.equal((await api(caller, 'GET', '/api/v1/calling/status')).data.canCall, false);
+  assert.equal((await api(owner, 'PUT', `/api/v1/workspace/members/${guest.userId}/calling`, { enabled: true })).status, 403, 'only the platform admin');
+  assert.equal((await api(admin, 'PUT', `/api/v1/workspace/members/${caller.userId}/calling`, { enabled: true })).status, 200);
+  assert.equal((await api(caller, 'GET', '/api/v1/calling/status')).data.canCall, true);
+  assert.equal((await api(caller, 'GET', '/api/v1/global-crm/contacts')).status, 403, 'calling does not open the CRM');
+  const row = (await api(admin, 'GET', '/api/v1/workspace/members')).data.members.find(m => m.userId === caller.userId);
+  assert.deepEqual([row.canCall, row.callGrant], [true, true]);
+  await api(admin, 'PUT', `/api/v1/workspace/members/${caller.userId}/calling`, { enabled: false });
+  assert.equal((await api(caller, 'GET', '/api/v1/calling/status')).data.canCall, false);
+
+  assert.equal(row.grants['mail.send'], 'eligible');
+  assert.equal((await api(admin, 'PUT', `/api/v1/workspace/members/${caller.userId}/grants/mail.send`, {})).status, 200);
+  assert.ok((await api(caller, 'GET', '/api/v1/auth/me')).data.capabilities.includes('mail.send'), 'a Member can now send');
+  await db().run("UPDATE workspace_members SET status = 'Removed' WHERE workspace_id = 1 AND user_id IN (?, ?)", [adminUser.userId, caller.userId]);
+});

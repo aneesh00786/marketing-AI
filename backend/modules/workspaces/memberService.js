@@ -95,11 +95,20 @@ async function listMembers(ctx) {
   const crmRows = platformAdmin && members.length
     ? await all(`SELECT user_id, role FROM crm_user_access WHERE user_id IN (${members.map(() => '?').join(',')})`, members.map(m => m.user_id)).catch(() => [])
     : [];
+  // "Make calls" (company Telnyx account): shown to and changed by the platform admin only.
+  const callRows = platformAdmin && members.length
+    ? await all(`SELECT user_id FROM user_calling_access WHERE user_id IN (${members.map(() => '?').join(',')})`, members.map(m => m.user_id)).catch(() => [])
+    : [];
   return {
     members: members.map(m => ({ userId: m.user_id, email: m.email, displayName: m.display_name, role: m.role, status: m.status, joinedAt: m.created_at, isYou: m.user_id === ctx.auth.userId,
       modules: modulesView(m.role, m.module_access_json),
       ...(manage ? { grants: grantsOf(m.user_id) } : {}),
-      ...(platformAdmin ? { crmRole: m.user_id === ctx.auth.userId ? 'manager' : (crmRows.find(r => r.user_id === m.user_id)?.role || null) } : {}) })),
+      ...(platformAdmin ? {
+        crmRole: m.user_id === ctx.auth.userId ? 'manager' : (crmRows.find(r => r.user_id === m.user_id)?.role || null),
+        // Calls: the admin themself, a "Make calls" grant, or CRM manage access (sales / support / manager).
+        canCall: m.user_id === ctx.auth.userId || callRows.some(r => r.user_id === m.user_id) || ['sales', 'support', 'manager'].includes(crmRows.find(r => r.user_id === m.user_id)?.role),
+        callGrant: callRows.some(r => r.user_id === m.user_id)
+      } : {}) })),
     modules: moduleAccess.registry(),
     fullAccessRoles: moduleAccess.FULL_ACCESS_ROLES,
     crmRoles: platformAdmin ? Object.keys(crmAccess.CRM_ROLES) : null,
@@ -259,7 +268,7 @@ async function grantCapability(ctx, rawUserId, capability) {
   const m = await requireGrantTarget(ctx, rawUserId, capability);
   const e = grants.eligibility(m.role, capability);
   if (e === 'role') throw httpError(409, `The ${m.role} role already includes this permission.`, 'ALREADY_IN_ROLE');
-  if (e !== 'eligible') throw httpError(409, `The ${m.role} role cannot send mail, so this permission cannot be granted.`, 'NOT_ELIGIBLE');
+  if (e !== 'eligible') throw httpError(409, `The ${m.role} role cannot be given "${grants.GRANTABLE[capability].label}" (it needs ${grants.GRANTABLE[capability].requires} first).`, 'NOT_ELIGIBLE');
   const ins = await run('INSERT IGNORE INTO workspace_member_capability_grants (workspace_id, user_id, capability, granted_by, granted_at) VALUES (?, ?, ?, ?, UTC_TIMESTAMP())',
     [ws(ctx), m.user_id, capability, ctx.auth.userId]);
   if (ins.changes) await audit(ctx, 'workspace.capability_granted', { resourceType: 'workspace_member', resourceId: m.user_id, metadata: { capability, role: m.role } });
@@ -341,6 +350,16 @@ async function setModules(ctx, rawUserId, input) {
     [list === null ? null : JSON.stringify(list), ws(ctx), m.user_id]);
   await audit(ctx, 'workspace.member_modules_changed', { resourceType: 'workspace_member', resourceId: m.user_id, metadata: { modules: list === null ? 'all' : list } });
   return { userId: m.user_id, modules: modulesView(m.role, list === null ? null : JSON.stringify(list)) };
+}
+
+/** "Make calls" (charged to the company's Telnyx account): only the platform admin turns it on or off. */
+async function setCalling(ctx, rawUserId, input) {
+  const v = z.object({ enabled: z.boolean() }).strict().parse(input || {});
+  if (!await isPlatformAdmin(ctx.auth.userId)) throw httpError(403, 'Only the platform admin can allow calls.', 'PLATFORM_ADMIN_ONLY');
+  const m = await requireOtherMember(ctx, rawUserId);
+  await require('../../lib/callingAccess').setCalling(m.user_id, v.enabled, ctx.auth.userId);
+  await audit(ctx, v.enabled ? 'workspace.calling_granted' : 'workspace.calling_revoked', { resourceType: 'workspace_member', resourceId: m.user_id });
+  return { userId: m.user_id, callGrant: v.enabled };
 }
 
 /** CRM access (platform-wide data): only the platform admin may grant or remove it, for members of this workspace. */
@@ -456,6 +475,7 @@ async function decline(ctx, input) {
 }
 
 module.exports = {
+  setCalling,
   publicPreview,
   signUpWithInvitation,
   setModules,

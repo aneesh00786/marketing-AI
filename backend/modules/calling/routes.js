@@ -1,5 +1,4 @@
 const express = require('express');
-const { accessFor } = require('../crm/crmAccess');
 const { rateLimit } = require('../../lib/rateLimit');
 const svc = require('./callingService');
 const logs = require('./callLogService');
@@ -7,7 +6,8 @@ const { z } = require('zod');
 
 /**
  * Browser calling. Mounted at /api/v1/calling. Calls are charged to the company's Telnyx account,
- * so they need a CRM grant with crm.manage; see callingService.js.
+ * so they need "Make calls" (Members → Permissions), CRM manage access or the platform admin;
+ * see lib/callingAccess.js.
  */
 const router = express.Router();
 
@@ -18,7 +18,8 @@ const wrap = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch
   next(err);
 });
 
-const canCall = async req => !!(await accessFor(req.auth.userId))?.capabilities.includes('crm.manage');
+// The platform admin, "Make calls" (Members → Permissions) or CRM manage access (lib/callingAccess.js).
+const canCall = req => require('../../lib/callingAccess').canCall(req.auth.userId);
 
 router.use((req, res, next) => {
   if (!req.auth || !req.auth.userId) return res.status(401).json({ success: false, error: 'Authentication required.', code: 'UNAUTHENTICATED' });

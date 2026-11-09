@@ -2,6 +2,7 @@ import { Component, EventEmitter, OnInit, Output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
+import { firstValueFrom } from 'rxjs';
 import { apiRoot } from '../../core/api-base';
 
 /**
@@ -89,6 +90,76 @@ export class MembersComponent implements OnInit {
       next: () => { this.busy = ''; this.editing = null; this.toast.emit(`Section access updated for ${m.displayName || m.email}.`); this.load(); },
       error: e => { this.busy = ''; this.toast.emit(this.err(e)); }
     });
+  }
+
+  // ---------------------------------------------------------------- Permissions (one panel per member)
+
+  /** The member whose permissions are being edited: sections, calls, email grants and CRM access. */
+  perm: { userId: number; modules: Set<string>; calls: boolean; crmRole: string | null; grants: Record<string, string> } | null = null;
+
+  editPermissions(m: any): void {
+    if (this.perm?.userId === m.userId) { this.perm = null; return; }
+    this.perm = { userId: m.userId, modules: new Set(m.modules?.keys || []), calls: !!m.callGrant, crmRole: m.crmRole || null, grants: { ...(m.grants || {}) } };
+  }
+
+  crmAllowsCalls(role: string | null): boolean { return ['sales', 'support', 'manager'].includes(role || ''); }
+
+  grantOn(m: any, cap: string): boolean {
+    const g = this.perm?.grants[cap];
+    return g === 'role' || g === 'granted';
+  }
+
+  /** Transactional email needs the person to be able to send email in the first place (from the role). */
+  grantPossible(cap: string): boolean {
+    return cap !== 'mail.send_transactional' || this.perm?.grants['mail.send_transactional'] !== 'not_eligible';
+  }
+
+  grantHelp(m: any, cap: string): string {
+    const g = this.perm?.grants[cap];
+    if (g === 'role') return `Included in the ${m.role} role.`;
+    if (g === 'not_eligible') return cap === 'mail.send' ? `The ${m.role} role cannot write email.` : `Needs a role that sends email (Marketing Manager, Approver).`;
+    return cap === 'mail.send' ? 'Send email themselves, not only write drafts.' : 'Compose email that can reach people who opted out of marketing.';
+  }
+
+  toggleGrant(cap: string): void {
+    if (!this.perm) return;
+    const g = this.perm.grants[cap];
+    if (g === 'granted') this.perm.grants[cap] = 'eligible';
+    else if (g === 'eligible') {
+      if (cap === 'mail.send_transactional' && !confirm('Transactional email can reach contacts who opted out of marketing. Allow it?')) return;
+      this.perm.grants[cap] = 'granted';
+    }
+  }
+
+  /** Saves only what changed, one request per kind (each is checked and audited by the server). */
+  async savePermissions(m: any): Promise<void> {
+    const p = this.perm;
+    if (!p) return;
+    this.busy = 'perm';
+    const base = `${this.base}/members/${m.userId}`;
+    try {
+      if (!m.modules?.fullAccessRole) {
+        const keys = (this.data.modules || []).map((x: any) => x.key).filter((k: string) => p.modules.has(k));
+        const before = (m.modules?.keys || []).join(',');
+        if (keys.join(',') !== before) await firstValueFrom(this.http.put<any>(`${base}/modules`, { modules: keys }));
+      }
+      for (const cap of Object.keys(p.grants)) {
+        const was = m.grants?.[cap];
+        if (was === p.grants[cap] || !['granted', 'eligible'].includes(p.grants[cap])) continue;
+        const url = `${base}/grants/${encodeURIComponent(cap)}`;
+        await firstValueFrom(p.grants[cap] === 'granted' ? this.http.put<any>(url, {}) : this.http.delete<any>(url));
+      }
+      if (this.data.crmRoles && (m.crmRole || null) !== p.crmRole && !m.isYou) await firstValueFrom(this.http.put<any>(`${base}/crm`, { role: p.crmRole }));
+      if (this.data.crmRoles && !!m.callGrant !== p.calls && !m.isYou) await firstValueFrom(this.http.put<any>(`${base}/calling`, { enabled: p.calls }));
+      this.busy = '';
+      this.perm = null;
+      this.toast.emit(`Permissions saved for ${m.displayName || m.email}.`);
+      this.load();
+    } catch (e: any) {
+      this.busy = '';
+      this.toast.emit(this.err(e));
+      this.load();
+    }
   }
 
   /** Platform admin only: CRM access (platform-wide data). */

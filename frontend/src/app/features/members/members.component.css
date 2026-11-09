@@ -34,3 +34,10 @@ tr.access-edit td { background: rgba(79, 70, 229, .04); }
 .row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .invite-form .modules label.mod { flex-direction: row; color: var(--text); }
 .mod.on { border-color: var(--accent, #4f46e5); background: var(--accent-soft); }
+
+/* Permissions */
+.perm-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+.perm-chip { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: var(--surface-hover); color: var(--text-muted); }
+.perm-chip.on { background: var(--accent-soft); color: var(--text); }
+.perm-h { margin: 14px 0 6px; font-size: 0.85rem; }
+.mod.off { opacity: 0.55; }

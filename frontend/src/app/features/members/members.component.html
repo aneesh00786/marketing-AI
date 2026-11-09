@@ -21,7 +21,7 @@
       </label>
       <button class="btn btn-primary" type="submit" [disabled]="busy === 'invite' || !inviteForm.email.trim() || (!fullAccess(inviteForm.role) && !inviteModules.size)">{{ busy === 'invite' ? 'Inviting…' : 'Send invitation' }}</button>
       <fieldset class="modules" *ngIf="data.modules?.length">
-        <legend>Sections they can open</legend>
+        <legend>Permissions: sections they can open</legend>
         <p class="muted small" *ngIf="fullAccess(inviteForm.role)">{{ inviteForm.role }}s always have access to every section.</p>
         <ng-container *ngIf="!fullAccess(inviteForm.role)">
           <label class="mod" *ngFor="let mod of data.modules" [class.on]="inviteModules.has(mod.key)" [title]="mod.description">
@@ -47,7 +47,7 @@
     <h3 class="sub">Members ({{ data.members.length }})</h3>
     <div class="table-wrap">
       <table class="tbl">
-        <thead><tr><th>Member</th><th>Role</th><th>Status</th><th>Joined</th><th>Section access</th><th *ngIf="data.crmRoles" title="Platform-wide CRM (only you, as platform admin, can assign it)">CRM</th><th *ngFor="let g of data.grantable" [title]="g.label">{{ grantHeading(g.capability) }}</th><th *ngIf="data.canManage"></th></tr></thead>
+        <thead><tr><th>Member</th><th>Role</th><th>Status</th><th>Joined</th><th>Permissions</th><th *ngIf="data.canManage"></th></tr></thead>
         <tbody>
           <ng-container *ngFor="let m of data.members">
           <tr [class.dim]="m.status !== 'Active'">
@@ -61,42 +61,60 @@
             <td><span class="tag" [class.ok]="m.status === 'Active'">{{ m.status }}</span></td>
             <td>{{ m.joinedAt | date:'mediumDate' }}</td>
             <td class="access">
-              <span class="muted small">{{ accessText(m.modules) }}</span>
-              <button *ngIf="canEdit(m) && !m.modules?.fullAccessRole" class="btn btn-secondary btn-sm" type="button" (click)="editAccess(m)" [attr.aria-expanded]="editing?.userId === m.userId">{{ editing?.userId === m.userId ? 'Close' : 'Edit access' }}</button>
-            </td>
-            <td *ngIf="data.crmRoles">
-              <select *ngIf="!m.isYou && canEdit(m); else crmText" class="hud-input sm" [ngModel]="m.crmRole || ''" (ngModelChange)="setCrm(m, $event)" [attr.aria-label]="'CRM access of ' + m.email">
-                <option value="">No access</option>
-                <option *ngFor="let r of data.crmRoles" [value]="r">{{ r | titlecase }}</option>
-              </select>
-              <ng-template #crmText><span class="muted small">{{ m.crmRole ? (m.crmRole | titlecase) : 'No access' }}</span></ng-template>
-            </td>
-            <!-- Per-member permission grants (Owners/Admins only): only for roles that can already send mail. -->
-            <td *ngFor="let g of data.grantable">
-              <ng-container [ngSwitch]="m.grants?.[g.capability]">
-                <span *ngSwitchCase="'role'" class="muted small">Included in role</span>
-                <label *ngSwitchCase="'granted'" class="grant"><input type="checkbox" checked [disabled]="!canEdit(m) || busy === 'grant'" (change)="setGrant(m, g, false)" [attr.aria-label]="g.label + ' for ' + m.email" /> Granted</label>
-                <label *ngSwitchCase="'eligible'" class="grant"><input type="checkbox" [disabled]="!canEdit(m) || busy === 'grant'" (change)="setGrant(m, g, true)" [attr.aria-label]="g.label + ' for ' + m.email" /> Not granted</label>
-                <span *ngSwitchDefault class="muted small" title="This role cannot send mail">—</span>
-              </ng-container>
+              <div class="perm-chips">
+                <span class="perm-chip">{{ accessText(m.modules) }}</span>
+                <span class="perm-chip on" *ngIf="m.canCall">📞 Calls</span>
+                <span class="perm-chip on" *ngIf="m.grants?.['mail.send'] === 'role' || m.grants?.['mail.send'] === 'granted'">✉ Sends email</span>
+                <span class="perm-chip on" *ngIf="m.grants?.['mail.send_transactional'] === 'role' || m.grants?.['mail.send_transactional'] === 'granted'">Transactional email</span>
+                <span class="perm-chip on" *ngIf="m.crmRole">CRM: {{ m.crmRole | titlecase }}</span>
+              </div>
+              <button *ngIf="canEdit(m)" class="btn btn-secondary btn-sm" type="button" (click)="editPermissions(m)" [attr.aria-expanded]="perm?.userId === m.userId">{{ perm?.userId === m.userId ? 'Close' : 'Edit permissions' }}</button>
             </td>
             <td *ngIf="data.canManage" class="right">
               <button *ngIf="canEdit(m)" class="btn btn-danger btn-sm" type="button" (click)="remove(m)">Remove</button>
             </td>
           </tr>
-          <tr *ngIf="editing?.userId === m.userId" class="access-edit">
-            <td [attr.colspan]="6 + (data.crmRoles ? 1 : 0) + data.grantable.length">
-              <b>Sections {{ m.displayName || m.email }} can open</b>
-              <div class="mods">
-                <label class="mod" *ngFor="let mod of data.modules" [class.on]="editing!.modules.has(mod.key)" [title]="mod.description">
-                  <input type="checkbox" [checked]="editing!.modules.has(mod.key)" (change)="toggle(editing!.modules, mod.key)" /> {{ mod.label }}
+          <tr *ngIf="perm?.userId === m.userId" class="access-edit">
+            <td [attr.colspan]="data.canManage ? 6 : 5">
+              <b>Permissions for {{ m.displayName || m.email }}</b>
+
+              <h4 class="perm-h">Sections they can open</h4>
+              <p class="muted small" *ngIf="m.modules?.fullAccessRole">{{ m.role }}s always open every section.</p>
+              <div class="mods" *ngIf="!m.modules?.fullAccessRole">
+                <label class="mod" *ngFor="let mod of data.modules" [class.on]="perm!.modules.has(mod.key)" [title]="mod.description">
+                  <input type="checkbox" [checked]="perm!.modules.has(mod.key)" (change)="toggle(perm!.modules, mod.key)" /> {{ mod.label }}
                   <small class="muted">{{ mod.description }}</small>
                 </label>
               </div>
+
+              <h4 class="perm-h">What they can do</h4>
+              <div class="mods">
+                <!-- Calls: charged to the company's Telnyx account, so only the platform admin changes it -->
+                <label class="mod" [class.on]="perm!.calls" *ngIf="data.crmRoles">
+                  <input type="checkbox" [checked]="perm!.calls" (change)="perm!.calls = !perm!.calls" [disabled]="m.isYou || crmAllowsCalls(perm!.crmRole)" /> 📞 Make calls
+                  <small class="muted">{{ crmAllowsCalls(perm!.crmRole) ? 'Included with their CRM access.' : 'The call button next to phone numbers (company phone line).' }}</small>
+                </label>
+                <ng-container *ngFor="let g of data.grantable">
+                  <label class="mod" [class.on]="grantOn(m, g.capability)" [class.off]="perm!.grants[g.capability] === 'not_eligible'">
+                    <input type="checkbox" [checked]="grantOn(m, g.capability)" (change)="toggleGrant(g.capability)" [disabled]="perm!.grants[g.capability] === 'role' || perm!.grants[g.capability] === 'not_eligible' || !grantPossible(g.capability)" />
+                    {{ g.capability === 'mail.send' ? '✉ Send email' : '✉ Send transactional email' }}
+                    <small class="muted">{{ grantHelp(m, g.capability) }}</small>
+                  </label>
+                </ng-container>
+              </div>
+
+              <ng-container *ngIf="data.crmRoles">
+                <h4 class="perm-h">CRM access <small class="muted">(platform-wide contacts, companies and deals)</small></h4>
+                <select class="hud-input sm" [(ngModel)]="perm!.crmRole" [disabled]="m.isYou" aria-label="CRM access">
+                  <option [ngValue]="null">No access</option>
+                  <option *ngFor="let r of data.crmRoles" [ngValue]="r">{{ r | titlecase }}</option>
+                </select>
+              </ng-container>
+
               <div class="row-actions">
-                <button class="btn btn-primary btn-sm" type="button" (click)="saveAccess(m)" [disabled]="busy === 'modules'">{{ busy === 'modules' ? 'Saving…' : 'Save access' }}</button>
-                <button class="btn btn-secondary btn-sm" type="button" (click)="editing = null">Cancel</button>
-                <span class="muted small">Takes effect immediately. Their role ({{ m.role }}) still decides what they can do inside each section.</span>
+                <button class="btn btn-primary btn-sm" type="button" (click)="savePermissions(m)" [disabled]="busy === 'perm'">{{ busy === 'perm' ? 'Saving…' : 'Save permissions' }}</button>
+                <button class="btn btn-secondary btn-sm" type="button" (click)="perm = null">Cancel</button>
+                <span class="muted small">Takes effect immediately (they refresh the page). Their role ({{ m.role }}) still decides what they can do inside each section.</span>
               </div>
             </td>
           </tr>
@@ -109,7 +127,7 @@
       <h3 class="sub">Pending invitations ({{ data.invitations.length }})</h3>
       <div class="table-wrap" *ngIf="data.invitations.length; else noInvites">
         <table class="tbl">
-          <thead><tr><th>Email</th><th>Role</th><th>Section access</th><th>Invited by</th><th>Expires</th><th></th></tr></thead>
+          <thead><tr><th>Email</th><th>Role</th><th>Sections</th><th>Invited by</th><th>Expires</th><th></th></tr></thead>
           <tbody>
             <tr *ngFor="let i of data.invitations">
               <td>{{ i.email }}</td>

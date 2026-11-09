@@ -16,50 +16,56 @@ const data = (o: any = {}) => ({
   ...o
 });
 
-describe('MembersComponent: transactional email grants', () => {
+describe('MembersComponent: permissions panel', () => {
   let fixture: ComponentFixture<MembersComponent>;
   let http: HttpTestingController;
   const el = () => fixture.nativeElement as HTMLElement;
-  const row = (email: string) => Array.from(el().querySelectorAll('tbody tr')).find(r => r.textContent!.includes(email)) as HTMLElement;
-
-  function init(d: any): void {
-    fixture = TestBed.createComponent(MembersComponent);
-    fixture.detectChanges();
-    http.expectOne(r => r.url.endsWith('/workspace/members')).flush(d);
-    fixture.detectChanges();
-  }
+  const c = () => fixture.componentInstance;
+  const SEND = 'mail.send';
+  const permData = () => data({
+    grantable: [{ capability: SEND, label: 'Send email', requires: 'mail.compose' }, { capability: CAP, label: 'Send transactional email (Compose)', requires: 'mail.send' }],
+    modules: [{ key: 'leads', label: 'Leads', description: '' }], fullAccessRoles: ['Workspace Owner', 'Workspace Admin'], crmRoles: ['viewer', 'sales', 'support', 'manager'],
+    members: [
+      { userId: 1, email: 'own@x.io', role: 'Workspace Owner', status: 'Active', isYou: true, canCall: true, modules: { all: true, fullAccessRole: true, keys: ['leads'] }, grants: { [SEND]: 'role', [CAP]: 'role' } },
+      { userId: 4, email: 'mem@x.io', role: 'Member', status: 'Active', canCall: false, callGrant: false, crmRole: null, modules: { all: true, fullAccessRole: false, keys: ['leads'] }, grants: { [SEND]: 'eligible', [CAP]: 'not_eligible' } }
+    ]
+  });
 
   beforeEach(() => {
     TestBed.configureTestingModule({ imports: [MembersComponent], providers: [provideHttpClient(), provideHttpClientTesting()] });
     http = TestBed.inject(HttpTestingController);
+    fixture = TestBed.createComponent(MembersComponent);
+    fixture.detectChanges();
+    http.expectOne(r => r.url.endsWith('/workspace/members')).flush(permData());
+    fixture.detectChanges();
   });
   afterEach(() => http.verify());
 
-  it('shows the grant state per member: included in role, grantable, granted, not eligible', () => {
-    init(data());
-    expect(el().querySelector('thead')!.textContent).toContain('Transactional email');
-    expect(row('own@x.io').textContent).toContain('Included in role');
-    expect((row('mm@x.io').querySelector('input[type=checkbox]') as HTMLInputElement).checked).toBeFalse();
-    expect((row('ap@x.io').querySelector('input[type=checkbox]') as HTMLInputElement).checked).toBeTrue();
-    expect(row('mem@x.io').querySelector('input[type=checkbox]')).toBeNull();
+  it('one Permissions column with what each member can do', () => {
+    expect(el().querySelector('thead')!.textContent).toContain('Permissions');
+    expect(el().querySelector('thead')!.textContent).not.toContain('CRM');
+    const owner = Array.from(el().querySelectorAll('tbody tr')).find(r => r.textContent!.includes('own@x.io'))!;
+    expect(owner.textContent).toContain('📞 Calls');
+    expect(owner.textContent).toContain('Sends email');
   });
 
-  it('granting asks first, then calls the grant API; revoking calls DELETE', () => {
-    init(data());
-    spyOn(window, 'confirm').and.returnValue(true);
-    (row('mm@x.io').querySelector('input[type=checkbox]') as HTMLInputElement).dispatchEvent(new Event('change'));
-    const put = http.expectOne(r => r.method === 'PUT' && r.url.endsWith(`/workspace/members/2/grants/${CAP}`));
-    put.flush({ granted: true });
-    http.expectOne(r => r.url.endsWith('/workspace/members')).flush(data());
+  it('Make calls and Send email are saved through their own APIs, only when changed', async () => {
+    const m = c().data.members[1];
+    c().editPermissions(m);
     fixture.detectChanges();
-    (row('ap@x.io').querySelector('input[type=checkbox]') as HTMLInputElement).dispatchEvent(new Event('change'));
-    http.expectOne(r => r.method === 'DELETE' && r.url.endsWith(`/workspace/members/3/grants/${CAP}`)).flush({ granted: false });
-    http.expectOne(r => r.url.endsWith('/workspace/members')).flush(data());
-  });
-
-  it('members who cannot manage see no grant column', () => {
-    init(data({ canManage: false, grantable: [], members: data().members.map((m: any) => ({ ...m, grants: undefined })) }));
-    expect(el().querySelector('thead')!.textContent).not.toContain('Transactional email');
+    expect(el().textContent).toContain('📞 Make calls');
+    c().perm!.calls = true;
+    c().toggleGrant(SEND);
+    const done = c().savePermissions(m);
+    await Promise.resolve();
+    const g = http.expectOne(r => r.method === 'PUT' && r.url.endsWith('/members/4/grants/mail.send'));
+    g.flush({});
+    await Promise.resolve(); await Promise.resolve();
+    const call = http.expectOne(r => r.method === 'PUT' && r.url.endsWith('/members/4/calling'));
+    expect(call.request.body).toEqual({ enabled: true });
+    call.flush({});
+    await done;
+    http.expectOne(r => r.url.endsWith('/workspace/members')).flush(permData());
   });
 });
 
