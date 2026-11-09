@@ -219,9 +219,9 @@ test('if the browser could not capture the audio, the call says so instead of wa
   const u = await staff('sales');
   const id = await begin(u, { transcribe: true });
   assert.equal((await end(u, id, { durationSeconds: 30, answered: true, audioCaptured: false })).data.status, 'failed');
-  const r = await audio(u, id, 'agent');
-  assert.equal(r.data.code, 'TRANSCRIPTION_FAILED');
-  assert.match(r.data.error, /did not capture the call audio/);
+  const call = (await crm(u, 'GET', `/calls/${id}`)).data.call;
+  assert.equal(call.transcriptStatus, 'failed');
+  assert.match(call.transcriptError, /did not capture the call audio/);
 });
 
 test('a transcription failure is clear, does not leak, and leaves the call logged', async () => {
@@ -363,4 +363,18 @@ test('a second upload after a failed transcription says why it failed, not "alre
   assert.ok(!JSON.stringify(again.data).includes(KEY), 'no credential in the stored reason');
   const call = (await crm(u, 'GET', `/calls/${id}`)).data.call;
   assert.match(call.transcriptError, /HTTP 500/);
+});
+
+test('audio that arrives after the call was ended as "not captured" (a duplicate end) is still transcribed', async () => {
+  const u = await staff('sales');
+  const id = await begin(u, { transcribe: true });
+  await end(u, id, { durationSeconds: 30, answered: true, audioCaptured: false });
+  // The second end of the same call (with the audio) is ignored, but the audio itself is used.
+  await end(u, id, { durationSeconds: 31, answered: true, audioCaptured: true });
+  telnyx.sttReply = [{ text: 'Hello there.' }];
+  assert.equal((await audio(u, id, 'agent')).status, 200);
+  telnyx.sttReply = [{ text: 'Hi, yes please.' }];
+  const r = await audio(u, id, 'customer');
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.status, 'done');
 });

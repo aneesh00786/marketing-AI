@@ -13,6 +13,7 @@ const TIMEOUT_MS = 120000;
 const PAGE_SIZE = 25;
 const AUDIO_TYPES = { 'audio/webm': 'webm', 'audio/ogg': 'ogg', 'audio/mp4': 'mp4' };
 const TRACKS = { agent: 'agent_segments', customer: 'customer_segments' };
+const NOT_CAPTURED = 'The browser did not capture the call audio.';
 
 const NAME_SQL = "COALESCE(NULLIF(u.display_name, ''), u.email)";
 const SELECT = `SELECT l.*, ${NAME_SQL} AS caller_name, c.full_name AS contact_name
@@ -74,7 +75,7 @@ async function endLog(ctx, rawId, input) {
   const row = await requireOwnLog(ctx, rawId);
   const wanted = row.transcribe && v.answered;
   const status = !wanted ? 'none' : v.audioCaptured === false ? 'failed' : 'pending';
-  const why = wanted && v.audioCaptured === false ? 'The browser did not capture the call audio.' : null;
+  const why = wanted && v.audioCaptured === false ? NOT_CAPTURED : null;
   const ended = await run('UPDATE crm_call_logs SET duration_seconds = ?, answered = ?, transcript_status = ?, transcript_error = ?, ended_at = UTC_TIMESTAMP() WHERE id = ? AND ended_at IS NULL', [v.durationSeconds, v.answered ? 1 : 0, status, why, row.id]);
   // A call made for a scheduled lead follow-up is linked to it (and completes it when answered).
   if (ended.changes && row.lead_id && row.followup_id) {
@@ -124,6 +125,13 @@ async function addTrack(ctx, rawId, track, { buffer, contentType, apiKey }) {
   if (!row.transcribe) throw httpError(409, 'This call was not set to be transcribed ("Transcribe this call" was off when it started).', 'NOT_TRANSCRIBED');
   if (!row.ended_at) throw httpError(409, 'End the call before sending its audio.', 'CALL_NOT_ENDED');
   if (row.transcript_status === 'none') throw httpError(409, 'This call was not answered, so there is nothing to transcribe.', 'NOT_ANSWERED');
+  // Audio that does arrive is used: an earlier "not captured" (e.g. a duplicate end of the same call
+  // reported before the audio was ready) is reopened while nothing of the call has been transcribed.
+  if (row.transcript_status === 'failed' && row.transcript_error === NOT_CAPTURED && row.agent_segments === null && row.customer_segments === null) {
+    await run("UPDATE crm_call_logs SET transcript_status = 'pending', transcript_error = NULL WHERE id = ? AND transcript_status = 'failed'", [row.id]);
+    row.transcript_status = 'pending';
+    row.transcript_error = null;
+  }
   if (row.transcript_status === 'failed') {
     throw httpError(409, `Transcribing this call already failed${row.transcript_error ? `: ${row.transcript_error}` : '.'} The audio is not kept, so it cannot be sent again.`, 'TRANSCRIPTION_FAILED');
   }

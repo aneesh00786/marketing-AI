@@ -54,6 +54,7 @@ export class CallService {
   private sdk: Promise<void> | null = null;
   private captures: Capture[] = [];
   private callLogId: number | null = null;
+  private savedLogs = new Set<number>();
 
   constructor(private http: HttpClient) {}
 
@@ -139,6 +140,8 @@ export class CallService {
     this.connectTimer = setTimeout(() => this.finish('ended', 'Could not reach the calling service. Try again.'), CONNECT_TIMEOUT_MS);
 
     client.on('telnyx.ready', () => {
+      // "ready" comes again after a reconnect: one session places one call, never a second one.
+      if (this.call || client !== this.client) return;
       this.clearConnectTimer();
       this.state = 'ringing';
       this.message = 'Calling…';
@@ -151,8 +154,11 @@ export class CallService {
 
     client.on('telnyx.notification', (n: any) => {
       if (n?.type !== 'callUpdate' || !n.call) return;
+      // Only this session's current call; late updates from a finished call are ignored.
+      if (client !== this.client || !this.inCall) return;
+      if (this.call && n.call.id && this.call.id && n.call.id !== this.call.id) return;
       const s = n.call.state;
-      if (s === 'ringing' || s === 'early') {
+      if ((s === 'ringing' || s === 'early') && this.state !== 'active') {
         this.state = 'ringing';
         this.message = 'Ringing…';
       } else if (s === 'active' && this.state !== 'active') {
@@ -263,7 +269,11 @@ export class CallService {
     this.state = state;
     this.message = message;
     this.callLogId = null;
-    if (logId) void this.save(logId, this.seconds, answered, this.transcribe, captures);
+    // Each call is saved once, whatever Telnyx reports afterwards.
+    if (logId && !this.savedLogs.has(logId)) {
+      this.savedLogs.add(logId);
+      void this.save(logId, this.seconds, answered, this.transcribe, captures);
+    }
   }
 
   hangup(): void { this.finish('ended', 'Call ended'); }
