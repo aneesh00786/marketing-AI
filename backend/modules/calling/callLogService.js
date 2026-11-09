@@ -47,10 +47,12 @@ function present(r) {
   };
 }
 
-/** Both sides as one conversation, in time order. */
+/** Both sides as one conversation, in time order (lines without timings keep their order, the caller's first). */
 function conversation(r) {
-  const side = (speaker, column) => parse(r[column]).map(s => ({ speaker, start: s.start, text: s.text }));
-  return [...side('agent', 'agent_segments'), ...side('customer', 'customer_segments')].sort((a, b) => a.start - b.start);
+  const side = (speaker, column) => parse(r[column]).map((s, i) => ({ speaker, start: s.start, end: s.end, text: s.text, i }));
+  return [...side('agent', 'agent_segments'), ...side('customer', 'customer_segments')]
+    .sort((a, b) => a.start - b.start || (a.speaker === b.speaker ? a.i - b.i : a.speaker === 'agent' ? -1 : 1))
+    .map(({ i, ...line }) => line);
 }
 
 async function createLog(ctx, { phone, name, contactId, transcribe, campaignId = null, email = null, leadId = null, leadWorkspaceId = null, followupId = null }) {
@@ -84,12 +86,45 @@ async function endLog(ctx, rawId, input) {
   return { status };
 }
 
-async function transcribeAudio(buffer, contentType, apiKey) {
+/**
+ * Model: TELNYX_TRANSCRIPTION_MODEL, else deepgram/nova-3, which returns timed sentences (so the two
+ * sides can be shown as one conversation) and handles mixed languages (TELNYX_TRANSCRIPTION_LANGUAGE,
+ * default "multi"). Deepgram only takes mp3/wav, so the browser's webm is converted with FFmpeg in
+ * memory (nothing written to disk). Without FFmpeg, or if Deepgram refuses the audio, the call is
+ * transcribed with openai/whisper-large-v3-turbo instead (text only, no timings).
+ */
+const TIMED_MODEL = 'deepgram/nova-3';
+
+/** webm/ogg/mp4 audio → 16 kHz mono mp3, through FFmpeg pipes (null when FFmpeg is not available). */
+function toMp3(buffer) {
+  const video = require('../../lib/videoTools');
+  if (!video.available()) return Promise.resolve(null);
+  return new Promise(resolve => {
+    const { spawn } = require('child_process');
+    let p;
+    try {
+      p = spawn(video.binary(), ['-hide_banner', '-loglevel', 'error', '-i', 'pipe:0', '-vn', '-ac', '1', '-ar', '16000', '-b:a', '48k', '-f', 'mp3', 'pipe:1']);
+    } catch { return resolve(null); }
+    const out = [];
+    const t = setTimeout(() => { p.kill('SIGKILL'); resolve(null); }, 60000);
+    p.stdout.on('data', d => out.push(d));
+    p.on('error', () => { clearTimeout(t); resolve(null); });
+    p.on('close', code => { clearTimeout(t); const b = Buffer.concat(out); resolve(code === 0 && b.length ? b : null); });
+    p.stdin.on('error', () => null);
+    p.stdin.end(buffer);
+  });
+}
+
+async function telnyxTranscribe({ buffer, type, name, model, apiKey, deepgram }) {
   const form = new FormData();
-  form.append('file', new Blob([buffer], { type: contentType }), `call.${AUDIO_TYPES[contentType]}`);
-  form.append('model', process.env.TELNYX_TRANSCRIPTION_MODEL || DEFAULT_MODEL);
+  form.append('file', new Blob([buffer], { type }), name);
+  form.append('model', model);
   form.append('response_format', 'verbose_json');
   form.append('timestamp_granularities[]', 'segment');
+  if (deepgram) {
+    form.append('language', process.env.TELNYX_TRANSCRIPTION_LANGUAGE || 'multi');
+    form.append('model_config', JSON.stringify({ smart_format: true, punctuate: true, utterances: true }));
+  }
   let res;
   try {
     res = await fetch(TELNYX_TRANSCRIBE_URL, { method: 'POST', headers: { Authorization: `Bearer ${apiKey}` }, body: form, signal: AbortSignal.timeout(TIMEOUT_MS) });
@@ -102,16 +137,54 @@ async function transcribeAudio(buffer, contentType, apiKey) {
     // Never pass on anything that could be a credential (the key itself or key-like tokens).
     const detail = String(body?.errors?.[0]?.detail || body?.errors?.[0]?.title || body?.error?.message || '')
       .split(apiKey || '\u0000').join('[key]').replace(/\bKEY[0-9A-Za-z_-]{10,}/g, '[key]').replace(/\s+/g, ' ').slice(0, 200);
-    console.error(`[calling] Telnyx transcription returned HTTP ${res.status}${detail ? `: ${detail}` : ''}`);
+    console.error(`[calling] Telnyx transcription (${model}) returned HTTP ${res.status}${detail ? `: ${detail}` : ''}`);
     const hint = res.status === 401 || res.status === 403 ? ' Check that TELNYX_WEBRTC_API_KEY may use Telnyx AI (speech to text).' : '';
-    throw httpError(502, `Telnyx could not transcribe this call (HTTP ${res.status}${detail ? `: ${detail}` : ''}).${hint}`, 'TRANSCRIPTION_FAILED');
+    throw Object.assign(httpError(502, `Telnyx could not transcribe this call (HTTP ${res.status}${detail ? `: ${detail}` : ''}).${hint}`, 'TRANSCRIPTION_FAILED'), { providerStatus: res.status });
   }
   const data = await res.json().catch(() => null);
   if (!data) throw httpError(502, 'Telnyx could not transcribe this call.', 'TRANSCRIPTION_FAILED');
-  const clean = s => String(s || '').trim();
-  const segments = (Array.isArray(data.segments) ? data.segments : [])
-    .map(s => ({ start: Number(s.start) || 0, end: Number(s.end) || 0, text: clean(s.text) })).filter(s => s.text);
-  return segments.length || !clean(data.text) ? segments : [{ start: 0, end: 0, text: clean(data.text) }];
+  return data;
+}
+
+/** Timed lines: the model's segments, else its words grouped into sentences, else the text split into sentences. */
+function linesOf(data) {
+  const clean = v => String(v || '').replace(/\s+/g, ' ').trim();
+  const segs = (Array.isArray(data.segments) ? data.segments : []).map(x => ({ start: Number(x.start) || 0, end: Number(x.end) || 0, text: clean(x.text) })).filter(x => x.text);
+  if (segs.length) return segs;
+  const words = Array.isArray(data.words) ? data.words : [];
+  if (words.length) {
+    const out = [];
+    let cur = null;
+    for (const w of words) {
+      const text = clean(w.punctuated_word || w.word);
+      if (!text) continue;
+      const start = Number(w.start) || 0;
+      // A new line after a sentence end or a pause of more than a second.
+      if (!cur || /[.?!]$/.test(cur.text) || start - cur.end > 1) { cur = { start, end: Number(w.end) || start, text }; out.push(cur); }
+      else { cur.text += ` ${text}`; cur.end = Number(w.end) || cur.end; }
+    }
+    return out;
+  }
+  const text = clean(data.text);
+  // No timings at all: one line per sentence, in order.
+  return text ? (text.match(/[^.?!]+[.?!]*/g) || [text]).map(t => ({ start: 0, end: 0, text: t.trim() })).filter(x => x.text) : [];
+}
+
+async function transcribeAudio(buffer, contentType, apiKey) {
+  const model = process.env.TELNYX_TRANSCRIPTION_MODEL || TIMED_MODEL;
+  if (model.startsWith('deepgram/')) {
+    const mp3 = await toMp3(buffer);
+    if (mp3) {
+      try {
+        return linesOf(await telnyxTranscribe({ buffer: mp3, type: 'audio/mpeg', name: 'call.mp3', model, apiKey, deepgram: true }));
+      } catch (err) {
+        // Deepgram refused this audio or setting: try the general model below; anything else is reported.
+        if (!(err.providerStatus >= 400 && err.providerStatus < 500) || err.providerStatus === 401 || err.providerStatus === 403) throw err;
+      }
+    }
+  }
+  const fallback = model.startsWith('deepgram/') ? DEFAULT_MODEL : model;
+  return linesOf(await telnyxTranscribe({ buffer, type: contentType, name: `call.${AUDIO_TYPES[contentType]}`, model: fallback, apiKey, deepgram: false }));
 }
 
 /** Takes one side of a finished call. The audio goes to Telnyx and is then dropped. */
@@ -182,4 +255,4 @@ async function removeTranscript(ctx, rawId) {
   return getCall(ctx, row.id);
 }
 
-module.exports = { createLog, endLog, addTrack, listCalls, getCall, removeTranscript, present, conversation, SELECT, TRACKS };
+module.exports = { linesOf, transcribeAudio, createLog, endLog, addTrack, listCalls, getCall, removeTranscript, present, conversation, SELECT, TRACKS };

@@ -378,3 +378,54 @@ test('audio that arrives after the call was ended as "not captured" (a duplicate
   assert.equal(r.status, 200, JSON.stringify(r.data));
   assert.equal(r.data.status, 'done');
 });
+
+test('timed conversation: webm is converted to mp3 for deepgram/nova-3 (mixed languages); a refusal falls back to Whisper', async () => {
+  const { execFileSync } = require('child_process');
+  let webm;
+  try {
+    webm = execFileSync(process.env.FFMPEG_PATH || 'ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1', '-c:a', 'libopus', '-f', 'webm', 'pipe:1']);
+  } catch { return; } // FFmpeg (with Opus) is not installed here: nothing to check
+  const logs = require('../modules/calling/callLogService');
+  const prev = process.env.FFMPEG_TEST_AVAILABLE;
+  process.env.FFMPEG_TEST_AVAILABLE = '1';
+  const sent = [];
+  let refuse = false;
+  const mock = h.mockFetch([{
+    match: u => u === 'https://api.telnyx.com/v2/ai/audio/transcriptions',
+    respond: async (url, init) => {
+      const f = init.body;
+      sent.push({ model: f.get('model'), type: f.get('file').type, language: f.get('language'), config: f.get('model_config') });
+      if (refuse && f.get('model').startsWith('deepgram/')) return h.json(400, { errors: [{ detail: 'Unsupported language' }] });
+      return h.json(200, f.get('model').startsWith('deepgram/')
+        ? { text: 'Hi. How are you?', segments: [{ id: 0, start: 0.4, end: 0.9, text: 'Hi.' }, { id: 1, start: 5.2, end: 6, text: 'How are you?' }] }
+        : { text: 'Hi. How are you?' });
+    }
+  }]);
+  try {
+    const lines = await logs.transcribeAudio(webm, 'audio/webm', KEY);
+    assert.deepEqual(lines.map(l => [l.start, l.text]), [[0.4, 'Hi.'], [5.2, 'How are you?']]);
+    assert.deepEqual([sent[0].model, sent[0].type, sent[0].language], ['deepgram/nova-3', 'audio/mpeg', 'multi']);
+    assert.deepEqual(JSON.parse(sent[0].config), { smart_format: true, punctuate: true, utterances: true });
+    refuse = true;
+    const fallback = await logs.transcribeAudio(webm, 'audio/webm', KEY);
+    assert.equal(sent.at(-1).model, 'openai/whisper-large-v3-turbo');
+    assert.equal(sent.at(-1).type, 'audio/webm');
+    assert.deepEqual(fallback.map(l => l.text), ['Hi.', 'How are you?'], 'text only: one line per sentence');
+  } finally {
+    mock.restore();
+    if (prev === undefined) delete process.env.FFMPEG_TEST_AVAILABLE; else process.env.FFMPEG_TEST_AVAILABLE = prev;
+  }
+});
+
+test('conversation lines: words become sentences by punctuation and pauses; both sides interleave by time', () => {
+  const logs = require('../modules/calling/callLogService');
+  const lines = logs.linesOf({ words: [
+    { word: 'hello', punctuated_word: 'Hello.', start: 0.1, end: 0.5 }, { word: 'this', start: 0.8, end: 1 }, { word: 'is', start: 1, end: 1.1 },
+    { word: 'aisha', punctuated_word: 'Aisha', start: 1.1, end: 1.5 }, { word: 'yes', punctuated_word: 'Yes', start: 4, end: 4.3 }] });
+  assert.deepEqual(lines.map(l => l.text), ['Hello.', 'this is Aisha', 'Yes']);
+  const convo = logs.conversation({
+    agent_segments: JSON.stringify([{ start: 0, text: 'Hi, this is Aneesh.' }, { start: 6, text: 'Great, thanks.' }]),
+    customer_segments: JSON.stringify([{ start: 2.5, text: 'Hello, this is Aisha.' }, { start: 8, text: 'Bye.' }])
+  });
+  assert.deepEqual(convo.map(l => `${l.speaker}: ${l.text}`), ['agent: Hi, this is Aneesh.', 'customer: Hello, this is Aisha.', 'agent: Great, thanks.', 'customer: Bye.']);
+});
