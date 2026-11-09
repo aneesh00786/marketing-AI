@@ -465,7 +465,16 @@ async function personHistory(workspaceId, { email, phone, leadId = null } = {}) 
     match.push(`(l.campaign_id IN (SELECT id FROM mail_campaigns WHERE workspace_id = ?) AND (${who}))`);
     params.push(workspaceId, ...(hasAddr ? [addr] : []), ...(tail ? [tail] : []));
   }
-  if (leadId) { match.push('(l.lead_workspace_id = ? AND l.lead_id = ?)'); params.push(workspaceId, leadId); }
+  if (leadId) {
+    match.push('(l.lead_workspace_id = ? AND l.lead_id = ?)'); params.push(workspaceId, leadId);
+    // Calls to this lead's number made by members of this workspace before calls were linked to leads
+    // (e.g. with the 📞 in the Leads list): matched on the last 9 digits of the number.
+    if (tail) {
+      match.push(`(l.lead_id IS NULL AND l.campaign_id IS NULL AND RIGHT(REGEXP_REPLACE(l.phone, '[^0-9]', ''), 9) = ?
+        AND l.user_id IN (SELECT user_id FROM workspace_members WHERE workspace_id = ? AND status = 'Active'))`);
+      params.push(tail, workspaceId);
+    }
+  }
   const calls = match.length ? await all(`${logs.SELECT} WHERE ${match.join(' OR ')} ORDER BY l.started_at DESC, l.id DESC LIMIT 50`, params) : [];
   const text = v => String(v || '').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
   return {

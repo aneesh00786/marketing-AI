@@ -137,3 +137,12 @@ test('the notification list: my overdue and newly assigned follow-ups, only on l
   const after = (await call(C, 'GET', '/api/v1/leads/followups/mine')).data;
   assert.equal(after.overdue.length, 0, 'not shown once the lead is no longer visible');
 });
+
+test('an earlier call to the lead\'s number by a workspace member (not linked to the lead) still shows in its history', async () => {
+  const r = await call(A, 'POST', '/api/v1/leads', { name: 'Old Caller', phone: '+91 96337 57951' });
+  const old = await db().run("INSERT INTO crm_call_logs (user_id, phone, name, transcribe, transcript_status, answered, duration_seconds, started_at, ended_at) VALUES (?, '+919633757951', 'Old Caller', 0, 'none', 1, 42, UTC_TIMESTAMP(), UTC_TIMESTAMP())", [A.userId]);
+  const stranger = await h.createWorkspace({ name: 'Not a member' });
+  await db().run("INSERT INTO crm_call_logs (user_id, phone, name, transcribe, transcript_status, answered, duration_seconds, started_at) VALUES (?, '+919633757951', 'x', 0, 'none', 1, 5, UTC_TIMESTAMP())", [stranger.userId]);
+  const calls = (await call(A, 'GET', `/api/v1/leads/${r.data.lead.id}/timeline?types=call`)).data.items;
+  assert.deepEqual(calls.map(c => c.id), [old.lastID], 'only calls by members of this workspace');
+});
