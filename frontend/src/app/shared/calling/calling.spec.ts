@@ -264,6 +264,8 @@ describe('Browser calling', () => {
       connect(true);
       (FakeClient.last.call as any).remoteStream = null;
       FakeClient.last.state('active');
+      tick(3500); // the customer's audio is looked for a few times
+      expect(calls.transcriptError).toContain('did not provide the call audio');
       calls.hangup();
       flushMicrotasks();
       const end = logUrl('/end');
@@ -280,9 +282,10 @@ describe('Browser calling', () => {
       flushMicrotasks();
       logUrl('/end').flush({ status: 'pending' });
       flushMicrotasks();
-      logUrl('/audio/agent').flush({ error: 'x' }, { status: 502, statusText: 'x' });
+      logUrl('/audio/agent').flush({ error: 'Telnyx could not transcribe this call (HTTP 403).' }, { status: 502, statusText: 'x' });
       flushMicrotasks();
       expect(calls.transcriptState).toBe('failed');
+      expect(calls.transcriptError).toContain('HTTP 403');
     }));
   });
 

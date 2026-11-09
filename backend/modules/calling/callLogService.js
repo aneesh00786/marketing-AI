@@ -94,8 +94,14 @@ async function transcribeAudio(buffer, contentType, apiKey) {
     throw httpError(502, 'Telnyx could not be reached, so this call was not transcribed.', 'TELNYX_UNREACHABLE');
   }
   if (!res.ok) {
-    console.error(`[calling] Telnyx transcription returned HTTP ${res.status}`);
-    throw httpError(502, 'Telnyx could not transcribe this call.', 'TRANSCRIPTION_FAILED');
+    // Telnyx explains a refusal in errors[0].detail (e.g. an unsupported model or a key without AI access).
+    const body = await res.json().catch(() => null);
+    // Never pass on anything that could be a credential (the key itself or key-like tokens).
+    const detail = String(body?.errors?.[0]?.detail || body?.errors?.[0]?.title || body?.error?.message || '')
+      .split(apiKey || '\u0000').join('[key]').replace(/\bKEY[0-9A-Za-z_-]{10,}/g, '[key]').replace(/\s+/g, ' ').slice(0, 200);
+    console.error(`[calling] Telnyx transcription returned HTTP ${res.status}${detail ? `: ${detail}` : ''}`);
+    const hint = res.status === 401 || res.status === 403 ? ' Check that TELNYX_WEBRTC_API_KEY may use Telnyx AI (speech to text).' : '';
+    throw httpError(502, `Telnyx could not transcribe this call (HTTP ${res.status}${detail ? `: ${detail}` : ''}).${hint}`, 'TRANSCRIPTION_FAILED');
   }
   const data = await res.json().catch(() => null);
   if (!data) throw httpError(502, 'Telnyx could not transcribe this call.', 'TRANSCRIPTION_FAILED');

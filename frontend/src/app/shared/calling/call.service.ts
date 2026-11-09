@@ -41,6 +41,8 @@ export class CallService {
   /** A call from a lead (Leads → Follow-ups): kept with that lead and, if any, the follow-up it is for. */
   lead: { leadId: number; followupId?: number | null } | null = null;
   transcriptState: '' | 'saving' | 'saved' | 'failed' = '';
+  /** Why the transcript could not be made (shown under the call). */
+  transcriptError = '';
 
   private base = `${apiRoot()}/api/v1/calling`;
   private client: any = null;
@@ -109,6 +111,7 @@ export class CallService {
     this.seconds = 0;
     this.muted = false;
     this.transcriptState = '';
+    this.transcriptError = '';
     this.callLogId = null;
     try {
       if (!navigator.mediaDevices?.getUserMedia) throw new Error('This browser cannot make calls here. Calling needs a secure (https) page.');
@@ -181,13 +184,28 @@ export class CallService {
     return { track, finished, stop: () => { if (recorder.state !== 'inactive') recorder.stop(); } };
   }
 
-  private startCapture(): void {
-    const remote: MediaStream | null = this.call?.remoteStream || (this.audio?.srcObject as MediaStream | null) || null;
-    if (typeof MediaRecorder === 'undefined' || !this.stream || !remote) return;
+  /**
+   * Starts recording both sides for the transcript. The customer's audio can arrive a moment after
+   * the call connects, so it is looked for a few times before giving up (with the reason kept).
+   */
+  private startCapture(attempt = 0): void {
+    if (this.state !== 'active') return;
+    const remoteStream = (): MediaStream | null => {
+      const s = this.call?.remoteStream || (this.audio?.srcObject as MediaStream | null) || null;
+      return s && (typeof s.getAudioTracks !== 'function' || s.getAudioTracks().length) ? s : null;
+    };
+    const remote = remoteStream();
+    if (typeof MediaRecorder === 'undefined') { this.transcriptError = 'This browser cannot record call audio, so the call cannot be transcribed.'; return; }
+    if (!this.stream || !remote) {
+      if (attempt < 10) { setTimeout(() => this.startCapture(attempt + 1), 300); return; }
+      this.transcriptError = 'The browser did not provide the call audio, so nothing could be transcribed.';
+      return;
+    }
     try {
       this.captures = [this.capture('agent', this.stream), this.capture('customer', remote)];
-    } catch {
+    } catch (e: any) {
       this.captures = [];
+      this.transcriptError = `Recording the call audio failed in this browser (${e?.message || 'unknown error'}).`;
     }
   }
 
@@ -198,15 +216,25 @@ export class CallService {
       const url = `${this.base}/logs/${logId}`;
       await firstValueFrom(this.http.post(`${url}/end`, { durationSeconds, answered, ...(wanted ? { audioCaptured } : {}) }));
       if (!wanted || !answered) return;
-      if (!audioCaptured) { this.transcriptState = 'failed'; return; }
+      if (!audioCaptured) {
+        this.transcriptState = 'failed';
+        this.transcriptError ||= 'The call audio was not captured, so nothing could be transcribed.';
+        return;
+      }
       this.transcriptState = 'saving';
       for (const c of captures) {
         const blob = await c.finished;
+        if (!blob.size) throw { transcriptReason: 'No audio was recorded for one side of the call.' };
         await firstValueFrom(this.http.post(`${url}/audio/${c.track}`, blob, { headers: { 'Content-Type': blob.type } }));
       }
       this.transcriptState = 'saved';
-    } catch {
-      if (wanted && answered) this.transcriptState = 'failed';
+    } catch (e: any) {
+      if (wanted && answered) {
+        this.transcriptState = 'failed';
+        this.transcriptError = e?.transcriptReason
+          || (e?.status === 413 ? 'The call audio was larger than the web server allows (raise nginx client_max_body_size to 60m).' : '')
+          || e?.error?.error || (e?.status === 0 ? 'The audio could not be uploaded (network error).' : `The audio upload failed (HTTP ${e?.status || '?'}).`);
+      }
     }
   }
 
