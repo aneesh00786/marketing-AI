@@ -144,7 +144,8 @@
                 <div class="lf-row"><input class="hud-input" type="search" [(ngModel)]="transcriptSearch[i.id]" placeholder="Search the transcript" aria-label="Search the transcript" />
                   <button class="btn btn-secondary btn-sm" type="button" (click)="copyTranscript(i)">Copy</button>
                   <button class="btn btn-secondary btn-sm" type="button" (click)="downloadTranscript(i)">Download</button></div>
-                <p *ngFor="let l of shownLines(i)" [class.them]="l.speaker !== 'agent'"><small class="lf-muted">{{ l.start * 1000 | date:'mm:ss':'UTC' }}</small> <b>{{ l.speaker === 'agent' ? (i.callerName || 'Agent') : (lead.name || 'Customer') }}:</b> {{ l.text }}</p>
+                <small class="lf-muted" *ngIf="i.transcriptModel">Transcribed with {{ i.transcriptModel }}</small>
+                <p *ngFor="let l of shownLines(i)" [class.them]="l.speaker !== 'agent'"><small class="lf-muted" *ngIf="timed(i)">{{ l.start * 1000 | date:'mm:ss':'UTC' }} </small><b>{{ l.speaker === 'agent' ? (i.callerName || 'Agent') : (lead.name || 'Customer') }}:</b> {{ l.text }}</p>
               </details>
               <ng-template #noText><div class="lf-muted" *ngIf="i.answered">{{ transcriptNote(i) }}</div></ng-template>
             </ng-container>

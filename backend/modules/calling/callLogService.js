@@ -42,6 +42,7 @@ function present(r) {
     transcribed: !!r.transcribe,
     transcriptStatus: r.transcript_status,
     transcriptError: r.transcript_error || null,
+    transcriptModel: r.transcript_model || null,
     startedAt: r.started_at,
     endedAt: r.ended_at
   };
@@ -170,21 +171,48 @@ function linesOf(data) {
   return text ? (text.match(/[^.?!]+[.?!]*/g) || [text]).map(t => ({ start: 0, end: 0, text: t.trim() })).filter(x => x.text) : [];
 }
 
+/** English (or not set / mixed): distil-whisper, which takes webm and returns timings, can stand in for Deepgram. */
+const englishCalls = () => /^(|multi|en(-[a-z]{2})?)$/i.test(String(process.env.TELNYX_TRANSCRIPTION_LANGUAGE || '').trim());
+const TIMED_WEBM_MODEL = 'distil-whisper/distil-large-v2';
+
+/**
+ * One side of a call → timed lines, plus which model made them and why (stored with the call):
+ * 1. deepgram/nova-3 on the audio converted to mp3 (needs FFmpeg);
+ * 2. otherwise distil-whisper/distil-large-v2 on the webm itself (timed, English);
+ * 3. otherwise openai/whisper-large-v3-turbo (any language, text only).
+ */
 async function transcribeAudio(buffer, contentType, apiKey) {
   const model = process.env.TELNYX_TRANSCRIPTION_MODEL || TIMED_MODEL;
+  const refusedByModel = err => err.providerStatus >= 400 && err.providerStatus < 500 && err.providerStatus !== 401 && err.providerStatus !== 403;
+  const original = { buffer, type: contentType, name: `call.${AUDIO_TYPES[contentType]}` };
+  let why = '';
   if (model.startsWith('deepgram/')) {
     const mp3 = await toMp3(buffer);
     if (mp3) {
       try {
-        return linesOf(await telnyxTranscribe({ buffer: mp3, type: 'audio/mpeg', name: 'call.mp3', model, apiKey, deepgram: true }));
+        const lines = linesOf(await telnyxTranscribe({ buffer: mp3, type: 'audio/mpeg', name: 'call.mp3', model, apiKey, deepgram: true }));
+        return Object.assign(lines, { model });
       } catch (err) {
-        // Deepgram refused this audio or setting: try the general model below; anything else is reported.
-        if (!(err.providerStatus >= 400 && err.providerStatus < 500) || err.providerStatus === 401 || err.providerStatus === 403) throw err;
+        if (!refusedByModel(err)) throw err;
+        why = `${model} refused the audio`;
+      }
+    } else {
+      why = 'FFmpeg is not installed on the server';
+      console.warn(`[calling] ${why}: ${model} needs mp3, so a fallback model is used (install FFmpeg for timed transcripts)`);
+    }
+    if (englishCalls()) {
+      try {
+        const lines = linesOf(await telnyxTranscribe({ ...original, model: TIMED_WEBM_MODEL, apiKey, deepgram: false }));
+        return Object.assign(lines, { model: `${TIMED_WEBM_MODEL} (${why})` });
+      } catch (err) {
+        if (!refusedByModel(err)) throw err;
+        why += `; ${TIMED_WEBM_MODEL} refused it too`;
       }
     }
   }
   const fallback = model.startsWith('deepgram/') ? DEFAULT_MODEL : model;
-  return linesOf(await telnyxTranscribe({ buffer, type: contentType, name: `call.${AUDIO_TYPES[contentType]}`, model: fallback, apiKey, deepgram: false }));
+  const lines = linesOf(await telnyxTranscribe({ ...original, model: fallback, apiKey, deepgram: false }));
+  return Object.assign(lines, { model: why ? `${fallback} (${why}; no timings)` : fallback });
 }
 
 /** Takes one side of a finished call. The audio goes to Telnyx and is then dropped. */
@@ -216,7 +244,7 @@ async function addTrack(ctx, rawId, track, { buffer, contentType, apiKey }) {
     await run("UPDATE crm_call_logs SET transcript_status = 'failed', transcript_error = ? WHERE id = ?", [String(err.message || 'Transcription failed.').slice(0, 300), row.id]);
     throw err;
   }
-  await run(`UPDATE crm_call_logs SET ${column} = ? WHERE id = ?`, [JSON.stringify(segments), row.id]);
+  await run(`UPDATE crm_call_logs SET ${column} = ?, transcript_model = ? WHERE id = ?`, [JSON.stringify(segments), String(segments.model || '').slice(0, 120) || null, row.id]);
   await run("UPDATE crm_call_logs SET transcript_status = 'done' WHERE id = ? AND agent_segments IS NOT NULL AND customer_segments IS NOT NULL AND transcript_status = 'pending'", [row.id]);
   await crmAudit(ctx, 'calling.transcript_added', { resourceType: 'call', resourceId: row.id, metadata: { track } });
   const fresh = await get('SELECT transcript_status FROM crm_call_logs WHERE id = ?', [row.id]);

@@ -236,6 +236,9 @@ export class LeadFollowupsComponent implements OnInit {
     URL.revokeObjectURL(a.href);
   }
 
+  /** Times are shown only when the transcript has them (a model without timings gives 00:00 everywhere). */
+  timed(c: any): boolean { return (c.conversation || []).some((l: any) => Number(l.start) > 0); }
+
   transcriptSearch: Record<number, string> = {};
   shownLines(c: any): any[] {
     const q = (this.transcriptSearch[c.id] || '').trim().toLowerCase();

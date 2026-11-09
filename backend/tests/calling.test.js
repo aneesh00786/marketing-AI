@@ -193,7 +193,7 @@ test('both sides become one conversation in time order, and the audio is not sto
   assert.equal(c.transcriptStatus, 'done');
   assert.deepEqual(c.transcript.map(l => [l.speaker, l.text]), [['agent', 'Hello.'], ['customer', 'Hi there.'], ['agent', 'Thanks.']]);
   const sent = telnyx.transcribed[0];
-  assert.deepEqual([sent.auth, sent.model, sent.format, sent.granularity, sent.name, sent.type], [`Bearer ${KEY}`, 'openai/whisper-large-v3-turbo', 'verbose_json', 'segment', 'call.webm', 'audio/webm']);
+  assert.deepEqual([sent.auth, sent.model, sent.format, sent.granularity, sent.name, sent.type], [`Bearer ${KEY}`, 'distil-whisper/distil-large-v2', 'verbose_json', 'segment', 'call.webm', 'audio/webm']);
   const cols = await h.db().all("SELECT COLUMN_NAME AS c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'crm_call_logs' AND DATA_TYPE LIKE '%blob%'");
   assert.deepEqual(cols, [], 'nowhere to keep audio');
 });
@@ -379,7 +379,7 @@ test('audio that arrives after the call was ended as "not captured" (a duplicate
   assert.equal(r.data.status, 'done');
 });
 
-test('timed conversation: webm is converted to mp3 for deepgram/nova-3 (mixed languages); a refusal falls back to Whisper', async () => {
+test('timed conversation: webm is converted to mp3 for deepgram/nova-3; a refusal falls back to timed distil-whisper, other languages to Whisper', async () => {
   const { execFileSync } = require('child_process');
   let webm;
   try {
@@ -406,11 +406,19 @@ test('timed conversation: webm is converted to mp3 for deepgram/nova-3 (mixed la
     assert.deepEqual(lines.map(l => [l.start, l.text]), [[0.4, 'Hi.'], [5.2, 'How are you?']]);
     assert.deepEqual([sent[0].model, sent[0].type, sent[0].language], ['deepgram/nova-3', 'audio/mpeg', 'multi']);
     assert.deepEqual(JSON.parse(sent[0].config), { smart_format: true, punctuate: true, utterances: true });
+    assert.equal(lines.model, 'deepgram/nova-3');
     refuse = true;
     const fallback = await logs.transcribeAudio(webm, 'audio/webm', KEY);
-    assert.equal(sent.at(-1).model, 'openai/whisper-large-v3-turbo');
+    assert.equal(sent.at(-1).model, 'distil-whisper/distil-large-v2', 'timed fallback that takes webm');
     assert.equal(sent.at(-1).type, 'audio/webm');
-    assert.deepEqual(fallback.map(l => l.text), ['Hi.', 'How are you?'], 'text only: one line per sentence');
+    assert.match(fallback.model, /distil-whisper.*refused/);
+    // A language other than English: the multi-language model (text only, one line per sentence).
+    process.env.TELNYX_TRANSCRIPTION_LANGUAGE = 'ml';
+    const other = await logs.transcribeAudio(webm, 'audio/webm', KEY);
+    delete process.env.TELNYX_TRANSCRIPTION_LANGUAGE;
+    assert.equal(sent.at(-1).model, 'openai/whisper-large-v3-turbo');
+    assert.deepEqual(other.map(l => l.text), ['Hi.', 'How are you?']);
+    assert.match(other.model, /no timings/);
   } finally {
     mock.restore();
     if (prev === undefined) delete process.env.FFMPEG_TEST_AVAILABLE; else process.env.FFMPEG_TEST_AVAILABLE = prev;
