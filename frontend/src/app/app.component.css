@@ -768,3 +768,9 @@ button.dropdown-item:disabled { opacity: 0.6; cursor: default; }
 .consent-badge { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--surface-muted, rgba(100, 116, 139, 0.12)); color: var(--text-muted); }
 .consent-badge.consent-ok { background: var(--success-soft, rgba(22, 163, 74, 0.12)); color: var(--success-text, #15803d); }
 .consent-badge.consent-off { background: var(--danger-soft, rgba(220, 38, 38, 0.12)); color: var(--danger-text, #b91c1c); }
+
+/* Change password */
+.pw-modal { max-width: 420px; }
+.pw-form label { display: flex; flex-direction: column; gap: 6px; font-size: 0.82rem; color: var(--text-muted); font-weight: 500; }
+.pw-form .helper-text, .pw-form .lead-warn { margin: 0; }
+.pw-actions { display: flex; justify-content: flex-end; gap: 8px; }

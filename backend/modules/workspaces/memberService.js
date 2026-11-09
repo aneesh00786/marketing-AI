@@ -125,10 +125,10 @@ async function sendInvitationEmail(ctx, inv, token) {
   // The pool reads DATETIME as UTC (timezone 'Z').
   const expires = (inv.expires_at instanceof Date ? inv.expires_at : new Date(`${String(inv.expires_at).replace(' ', 'T')}Z`)).toUTCString();
   const text = `${who} invited you to join the workspace "${workspace?.name}" on Marketech.ai as ${inv.role}.\n\n`
-    + `Accept the invitation: ${link}\n\nSign in (or create an account) with ${inv.email}, then open the link. It expires on ${expires} and works once.`;
+    + `Accept the invitation: ${link}\n\nNew to Marketech.ai? The link lets you choose a password and join. Already have an account with ${inv.email}? Sign in and accept. The link expires on ${expires} and works once.`;
   const html = `<p>${esc(who)} invited you to join the workspace <strong>${esc(workspace?.name)}</strong> on Marketech.ai as <strong>${esc(inv.role)}</strong>.</p>`
     + `<p><a href="${esc(link)}">Accept the invitation</a></p>`
-    + `<p style="color:#64748b;font-size:13px">Sign in (or create an account) with ${esc(inv.email)}, then open the link. It expires on ${esc(expires)} and works once.</p>`;
+    + `<p style="color:#64748b;font-size:13px">New to Marketech.ai? The link lets you choose a password and join. Already have an account with ${esc(inv.email)}? Sign in and accept. The link expires on ${esc(expires)} and works once.</p>`;
   try {
     await emailService.sendRealEmail(ws(ctx), { to: inv.email, subject: `Invitation to join ${workspace?.name} on Marketech.ai`, html, text });
     return { emailed: true, emailError: null };
@@ -271,6 +271,62 @@ async function revokeCapability(ctx, rawUserId, capability) {
   return { userId: m.user_id, capability, granted: false };
 }
 
+// ---------------------------------------------------------------- joining from the invitation link (no session)
+
+/**
+ * What the invitation link shows before signing in: the workspace, the invited email and whether
+ * that email already has an account (then they sign in; otherwise they set a password here).
+ * Only the holder of the link's token learns this.
+ */
+async function publicPreview(input) {
+  const { token } = z.object({ token: z.string() }).strict().parse(input || {});
+  const inv = await findByToken(token).catch(() => null);
+  const problem = invitationProblem(inv, inv ? String(inv.email).toLowerCase() : '');
+  if (!inv) return { valid: false, reason: problem[1] };
+  const account = await get('SELECT id FROM users WHERE email = ?', [String(inv.email).toLowerCase()]);
+  return {
+    valid: !problem,
+    reason: problem ? problem[1] : null,
+    invitation: { email: inv.email, role: inv.role, workspaceName: inv.workspace_name, invitedBy: inv.inviter_name || inv.inviter_email || null, expiresAt: inv.expires_at },
+    accountExists: !!account
+  };
+}
+
+/**
+ * New person: creates their account with the password they choose and joins the workspace in one
+ * step (no workspace of their own is created). The email is the invited one; the link's token is
+ * the proof they received it. An existing account must sign in and accept instead.
+ */
+async function signUpWithInvitation(input, meta = {}) {
+  const v = z.object({ token: z.string(), password: z.string().max(200), displayName: z.string().trim().max(100).optional() }).strict().parse(input || {});
+  const t = tokenSchema.parse(v.token);
+  const password = require('../../services/passwordService').checkNewPassword(v.password);
+  const result = await withTransaction(async tx => {
+    const row = await tx.get('SELECT i.*, (i.expires_at < UTC_TIMESTAMP()) AS is_expired FROM workspace_invitations i WHERE i.token_hash = ? FOR UPDATE', [hashToken(t)]);
+    const wsRow = row ? await tx.get('SELECT name, status FROM workspaces WHERE id = ?', [row.workspace_id]) : null;
+    const inv = row ? { ...row, workspace_name: wsRow?.name, workspace_status: wsRow?.status } : null;
+    const email = inv ? String(inv.email).toLowerCase() : '';
+    const problem = invitationProblem(inv, email);
+    if (problem) return { error: problem };
+    if (await tx.get('SELECT id FROM users WHERE email = ?', [email])) {
+      return { error: [409, 'An account with this email already exists. Sign in with it to accept the invitation.', 'ACCOUNT_EXISTS'] };
+    }
+    const display = v.displayName || email.split('@')[0];
+    const user = await tx.run(
+      "INSERT INTO users (email, password_hash, display_name, email_verified_at, status, created_at, updated_at) VALUES (?, ?, ?, UTC_TIMESTAMP(), 'Active', UTC_TIMESTAMP(), UTC_TIMESTAMP())",
+      [email, authService.hashPassword(password), display]);
+    await tx.run("INSERT INTO workspace_members (workspace_id, user_id, role, module_access_json, status, created_at) VALUES (?, ?, ?, ?, 'Active', UTC_TIMESTAMP())",
+      [inv.workspace_id, user.lastID, inv.role, inv.module_access_json ?? null]);
+    await tx.run("UPDATE workspace_invitations SET status = 'accepted', accepted_by = ?, responded_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP() WHERE id = ?", [user.lastID, inv.id]);
+    return { userId: user.lastID, inv };
+  });
+  if (result.error) throw httpError(...result.error);
+  await audit({ auth: { userId: result.userId, workspaceId: result.inv.workspace_id }, requestId: meta.requestId, ip: meta.ip }, 'workspace.invitation_accepted',
+    { resourceType: 'workspace_invitation', resourceId: result.inv.id, metadata: { role: result.inv.role, newAccount: true } });
+  const user = await get('SELECT * FROM users WHERE id = ?', [result.userId]);
+  return authService.sessionFor(user, result.inv.workspace_id);
+}
+
 // ---------------------------------------------------------------- section (module) access
 
 /** Sets which sections a member can open. Owners and Admins always have all of them. */
@@ -398,5 +454,7 @@ async function decline(ctx, input) {
 }
 
 module.exports = {
+  publicPreview,
+  signUpWithInvitation,
   setModules,
   setCrmAccess, listMembers, invite, resend, cancel, changeRole, removeMember, grantCapability, revokeCapability, myInvitations, preview, accept, decline, hashToken, OWNER };

@@ -40,6 +40,13 @@ export class ApiService {
   }
 
   // Invitations sent to the signed-in account. Accepting needs the token from the invitation link.
+  // Joining from an invitation link without an account, and passwords.
+  invitationPreview(token: string): Observable<any> { return this.http.post(`${this.baseUrl}/invitations/public-preview`, { token }); }
+  invitationSignup(data: { token: string; password: string; displayName: string }): Observable<any> { return this.http.post(`${this.baseUrl}/invitations/signup`, data); }
+  forgotPassword(email: string): Observable<any> { return this.http.post(`${this.baseUrl}/auth/forgot-password`, { email }); }
+  resetPassword(token: string, password: string): Observable<any> { return this.http.post(`${this.baseUrl}/auth/reset-password`, { token, password }); }
+  changePassword(currentPassword: string, newPassword: string): Observable<any> { return this.http.post(`${this.baseUrl}/auth/change-password`, { currentPassword, newPassword }); }
+
   getMyInvitations(): Observable<any> {
     return this.http.get(`${this.baseUrl}/invitations`);
   }

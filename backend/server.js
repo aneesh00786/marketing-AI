@@ -6,6 +6,7 @@ const os = require('os');
 
 const { initDatabase, get, all, run, queryTraivoMySQL } = require('./db/database');
 const authService = require('./services/authService');
+const passwordService = require('./services/passwordService');
 const { audit } = require('./lib/audit');
 const telnyxService = require('./services/telnyxService');
 const marketingService = require('./services/marketingService');
@@ -107,7 +108,10 @@ const authLimiter = rateLimit({
   keyFn: req => `${req.ip}:${String(req.body?.email || '').toLowerCase()}`,
   message: 'Too many sign-in attempts. Please wait and try again.'
 });
-app.use(['/api/v1/auth/login', '/api/auth/login', '/api/v1/auth/register', '/api/auth/register'], authLimiter);
+app.use(['/api/v1/auth/login', '/api/auth/login', '/api/v1/auth/register', '/api/auth/register', '/api/v1/auth/reset-password', '/api/v1/auth/change-password'], authLimiter);
+// Reset emails: a few per address and per IP, so the form cannot be used to flood someone's inbox.
+app.use('/api/v1/auth/forgot-password', rateLimit({ windowMs: 60 * 60 * 1000, max: 5, keyFn: req => `forgot:${String(req.body?.email || '').toLowerCase()}`, message: 'Too many reset requests for this email. Please wait an hour.' }));
+app.use('/api/v1/auth/forgot-password', rateLimit({ windowMs: 60 * 60 * 1000, max: 20, keyFn: req => `forgot-ip:${req.ip}`, message: 'Too many reset requests. Please wait an hour.' }));
 // Email tracking (/api/v1/mail/t/...) has its own limits: recipients' link clicks must never be refused,
 // and provider webhooks arrive in bursts from a few IP addresses.
 const globalApiLimit = rateLimit({ windowMs: 60 * 1000, max: 300, keyFn: req => req.headers.authorization || req.ip });
@@ -118,6 +122,10 @@ app.use('/api', apiGate({
     '/api/v1/auth/register', '/api/auth/register',
     // Sign-out checks the session itself, so it can always clear the cookie (even an expired one).
     '/api/v1/auth/logout', '/api/auth/logout',
+    // Forgot / reset password (no session; a reset needs the emailed single-use token).
+    '/api/v1/auth/forgot-password', '/api/v1/auth/reset-password',
+    // Joining from an invitation link before having an account (the link's token is the proof).
+    '/api/v1/invitations/public-preview', '/api/v1/invitations/signup',
     '/api/status',
     // Telephony provider webhooks (carrier-originated, no user session).
     '/api/v1/telnyx/inbound', '/api/telnyx/inbound',
@@ -311,6 +319,33 @@ app.post(['/api/v1/auth/login', '/api/auth/login'], async (req, res) => {
     res.json({ success: true, ...withModuleFlags(result) });
   } catch (err) {
     res.status(err.status === 403 || err.status === 400 ? err.status : 401).json({ success: false, code: err.code, error: err.message });
+  }
+});
+
+// Passwords: forgot (always the same answer), reset with the emailed link, change while signed in.
+app.post('/api/v1/auth/forgot-password', async (req, res) => {
+  try {
+    await passwordService.requestReset(req.body?.email, req.ip);
+    res.json({ success: true, message: 'If an account exists for that email, we have sent a link to reset the password.' });
+  } catch (err) {
+    res.status(err.status === 400 ? 400 : 500).json({ success: false, code: err.code, error: err.status === 400 ? err.message : 'Could not process the request. Please try again.' });
+  }
+});
+
+app.post('/api/v1/auth/reset-password', async (req, res) => {
+  try {
+    res.json({ success: true, ...(await passwordService.resetPassword(req.body?.token, req.body?.password)), message: 'Password changed. Sign in with your new password.' });
+  } catch (err) {
+    res.status(err.status && err.status < 500 ? err.status : 500).json({ success: false, code: err.code, error: err.status && err.status < 500 ? err.message : 'Could not reset the password. Please try again.' });
+  }
+});
+
+app.post('/api/v1/auth/change-password', async (req, res) => {
+  try {
+    const session = await passwordService.changePassword(req.auth, req.body?.currentPassword, req.body?.newPassword);
+    res.json({ success: true, ...withModuleFlags(session), message: 'Password changed. Other devices have been signed out.' });
+  } catch (err) {
+    res.status(err.status && err.status < 500 ? err.status : 500).json({ success: false, code: err.code, error: err.status && err.status < 500 ? err.message : 'Could not change the password. Please try again.' });
   }
 });
 

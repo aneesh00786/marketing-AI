@@ -91,6 +91,15 @@ router.put('/api/v1/workspace/members/:userId/modules', member, requireCapabilit
 router.put('/api/v1/workspace/members/:userId/crm', member, requireCapability('members.manage'), wrap(async (req, res) => res.json({ success: true, ...(await members.setCrmAccess(req, req.params.userId, req.body)) })));
 router.delete('/api/v1/workspace/members/:userId', member, requireCapability('members.manage'), wrap(async (req, res) => res.json({ success: true, ...(await members.removeMember(req, req.params.userId)) })));
 
+// From the invitation link before signing in (public: the link's token is the proof). A new person
+// sets their password and joins in one step; an existing account signs in and accepts below.
+const joinLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 30, keyFn: req => `invitations.join:${req.ip}`, message: 'Too many attempts. Please wait a few minutes.' });
+router.post('/api/v1/invitations/public-preview', joinLimit, wrap(async (req, res) => res.json({ success: true, ...(await members.publicPreview(req.body)) })));
+router.post('/api/v1/invitations/signup', joinLimit, wrap(async (req, res) => {
+  const session = await members.signUpWithInvitation(req.body, { requestId: req.requestId, ip: req.ip });
+  res.json({ success: true, ...session, workspace: describe(session.workspace), workspaces: session.workspaces.map(describe) });
+}));
+
 // The invited person (any signed-in account; the invitation's email must match theirs).
 router.get('/api/v1/invitations', member, wrap(async (req, res) => res.json({ success: true, invitations: await members.myInvitations(req) })));
 router.post('/api/v1/invitations/preview', member, answerLimit, wrap(async (req, res) => res.json({ success: true, ...(await members.preview(req, req.body)) })));

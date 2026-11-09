@@ -148,6 +148,30 @@ export class AppComponent implements OnInit, OnDestroy {
     return group.items.some(i => this.showNavItem(i.route));
   }
 
+  /** Change password (user menu). */
+  pwForm: { current: string; next: string; confirm: string; busy: boolean; error: string | null } | null = null;
+
+  openChangePassword(): void {
+    this.pwForm = { current: '', next: '', confirm: '', busy: false, error: null };
+  }
+
+  changePassword(): void {
+    const f = this.pwForm;
+    if (!f) return;
+    f.error = null;
+    if (f.next !== f.confirm) { f.error = 'The two new passwords do not match.'; return; }
+    if (f.next.length < 10) { f.error = 'The new password must be at least 10 characters.'; return; }
+    f.busy = true;
+    this.apiService.changePassword(f.current, f.next).subscribe({
+      next: (res: any) => {
+        this.auth.setSession(res);
+        this.pwForm = null;
+        this.showToast('Password changed. Your other devices have been signed out.');
+      },
+      error: (err: any) => { f.busy = false; f.error = err?.error?.error || 'Could not change the password.'; }
+    });
+  }
+
   /** Sections a member may open (Members > Section access). Unknown yet (null): everything. */
   myModules: Set<string> | null = null;
   private readonly ROUTE_MODULE: Partial<Record<string, string>> = {
@@ -627,6 +651,12 @@ export class AppComponent implements OnInit, OnDestroy {
     const params = new URLSearchParams(window.location.search);
     // Invitation link (/?invite=<token>): kept for this tab until the invitation is answered,
     // so it survives signing in or registering first.
+    // Password reset link (/?reset=<token>): kept for this tab; the sign-in screen asks for the new password.
+    const reset = params.get('reset');
+    if (reset && /^[A-Za-z0-9_-]{40,64}$/.test(reset)) {
+      try { sessionStorage.setItem('marketech_reset_token', reset); } catch { /* storage unavailable */ }
+      window.history.replaceState({}, '', window.location.pathname);
+    }
     const invite = params.get('invite');
     if (invite && /^[A-Za-z0-9_-]{40,64}$/.test(invite)) {
       try { sessionStorage.setItem(this.INVITE_KEY, invite); } catch { /* storage unavailable */ }

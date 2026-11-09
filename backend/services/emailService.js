@@ -417,7 +417,9 @@ async function sendRealEmail(workspaceId, {
   track = null,
   // Who may receive it (lib/mailSuppression.js). Marketing email is always checked as marketing;
   // a caller may only make a transactional send stricter, never a marketing one looser.
-  suppressionPolicy = null
+  suppressionPolicy = null,
+  // false: not saved in the workspace's Sent mail (e.g. password reset links, which only the recipient may see).
+  record = true
 }) {
   const recipient = String(to || '').trim();
   if (!isValidRecipient(recipient)) throw mailError('A valid recipient email address is required (placeholder domains such as example.com are not accepted).', 400, 'INVALID_RECIPIENT');
@@ -521,6 +523,11 @@ async function sendRealEmail(workspaceId, {
     if (tracker) await tracker.failed(lastError?.code || 'MAIL_NOT_CONFIGURED', lastError ? 'The email was not sent.' : 'Mail is not configured for this workspace.');
     if (lastError) throw mailError(`Email was not sent: ${lastError.message}`, lastError.status === 400 ? 400 : 502, lastError.code || 'MAIL_SEND_FAILED');
     throw mailError('Email was not sent: mail is not configured for this workspace. Add SMTP or ZeptoMail settings in Mail Settings.', 503, 'MAIL_NOT_CONFIGURED');
+  }
+
+  if (!record) {
+    if (tracker) await tracker.accepted({ provider, messageId, emailId: null });
+    return { success: true, emailId: null, messageId, isRealSmtp: true, smtpStatus, recipient, subject, deliveryDetails };
   }
 
   let insertRes;

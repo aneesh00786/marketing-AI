@@ -145,6 +145,7 @@
               <app-icon [name]="theme.isDark ? 'sun' : 'moon'" [size]="16"></app-icon>
               <span class="grow">{{ theme.isDark ? 'Light theme' : 'Dark theme' }}</span>
             </button>
+            <button class="dropdown-item" (click)="openMenu = null; openChangePassword()"><app-icon name="settings" [size]="16"></app-icon><span class="grow">Change password</span></button>
             <button class="dropdown-item" (click)="logout(true)" title="Ends every sign-in of your account, on every device"><app-icon name="logout" [size]="16"></app-icon><span class="grow">Sign out everywhere</span></button>
             <button class="dropdown-item danger" (click)="logout()"><app-icon name="logout" [size]="16"></app-icon><span class="grow">Sign out</span></button>
           </div>
@@ -1282,3 +1283,24 @@
 
 <!-- Marketing consent for one lead (Leads screen) -->
 <app-lead-consent *ngIf="consentLead" [lead]="consentLead" (close)="consentLead = null" (saved)="onConsentSaved($event)"></app-lead-consent>
+
+<!-- Change password (signed in) -->
+<div class="modal-backdrop" *ngIf="pwForm" (click)="pwForm = null">
+  <form class="modal-card pw-modal" (click)="$event.stopPropagation()" (ngSubmit)="changePassword()" role="dialog" aria-modal="true" aria-labelledby="pw-title">
+    <div class="modal-header">
+      <h3 id="pw-title">Change password</h3>
+      <button type="button" class="icon-btn" (click)="pwForm = null" aria-label="Close"><app-icon name="x"></app-icon></button>
+    </div>
+    <div class="modal-body pw-form">
+      <label>Current password<input class="hud-input" type="password" name="pwCurrent" [(ngModel)]="pwForm.current" required autocomplete="current-password" /></label>
+      <label>New password<input class="hud-input" type="password" name="pwNew" [(ngModel)]="pwForm.next" required autocomplete="new-password" /></label>
+      <label>Confirm new password<input class="hud-input" type="password" name="pwConfirm" [(ngModel)]="pwForm.confirm" required autocomplete="new-password" /></label>
+      <p class="helper-text">At least 10 characters. Your other devices will be signed out; you stay signed in here.</p>
+      <p class="lead-warn" *ngIf="pwForm.error" role="alert">{{ pwForm.error }}</p>
+      <div class="pw-actions">
+        <button type="button" class="btn btn-secondary" (click)="pwForm = null">Cancel</button>
+        <button type="submit" class="btn btn-primary" [disabled]="pwForm.busy">{{ pwForm.busy ? 'Saving…' : 'Change password' }}</button>
+      </div>
+    </div>
+  </form>
+</div>

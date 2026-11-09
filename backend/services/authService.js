@@ -140,6 +140,8 @@ async function sessionFor(user, workspaceId) {
   const workspaces = await listMemberships(user.id);
   const membership = workspaces.find(w => w.id === id);
   if (!membership) throw authError('You are not an active member of that workspace.', 403, 'NOT_A_MEMBER');
+  // Remembered so the next sign-in opens this workspace (before migration 052 there is no column: ignored).
+  await run('UPDATE users SET last_workspace_id = ? WHERE id = ?', [id, user.id]).catch(() => null);
   const token = createToken({ userId: user.id, email: user.email, workspaceId: id, role: membership.role, sv: user.session_version });
   return {
     token,
@@ -192,8 +194,9 @@ async function registerUser(email, password, displayName, workspaceName = 'My Wo
 }
 
 /**
- * Signs in. Without workspaceId the first active membership is used (unchanged behaviour); with
- * it, the user must be an active member of that workspace.
+ * Signs in. Without workspaceId the workspace the user last opened is used (when they are still an
+ * active member of it), otherwise their first active membership; with it, the user must be an
+ * active member of that workspace.
  */
 async function loginUser(email, password, workspaceId = null) {
   const cleanEmail = (email || '').toLowerCase().trim();
@@ -212,7 +215,8 @@ async function loginUser(email, password, workspaceId = null) {
   if (!workspaces.length) {
     throw new Error('This account is not a member of any active workspace.');
   }
-  const target = workspaceId === null || workspaceId === undefined || workspaceId === '' ? workspaces[0].id : workspaceId;
+  const last = workspaces.find(w => w.id === Number(user.last_workspace_id));
+  const target = workspaceId === null || workspaceId === undefined || workspaceId === '' ? (last || workspaces[0]).id : workspaceId;
   return sessionFor(user, target);
 }
 
@@ -322,5 +326,7 @@ module.exports = {
   createWorkspaceForOwner,
   platformAccessSession,
   listMemberships,
+  sessionFor,
+  authError,
   getUserMe
 };
