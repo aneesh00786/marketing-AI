@@ -38,8 +38,9 @@ describe('Browser calling', () => {
   });
   afterEach(() => { delete (window as any).TelnyxWebRTC; http.verify(); });
 
-  function dial(): void {
+  function dial(transcribe = false): void {
     calls.prepare('+91 98765 43210', 'Ann');
+    calls.transcribe = transcribe; // on by default; these tests are about the call itself
     calls.start();
     flushMicrotasks();
     token().flush(SESSION);
@@ -201,11 +202,12 @@ describe('Browser calling', () => {
       (FakeClient.last.call as any).remoteStream = { remote: true };
     }
 
-    it('the box is off for every new call', () => {
+    it('the box is ticked for every new call, even if the last one was unticked', () => {
       calls.prepare('+919876543210');
-      calls.transcribe = true;
+      expect(calls.transcribe).toBeTrue();
+      calls.transcribe = false;
       calls.prepare('+919876543211');
-      expect(calls.transcribe).toBeFalse();
+      expect(calls.transcribe).toBeTrue();
     });
 
     it('without the box ticked nothing is recorded; the call is still logged', fakeAsync(() => {
@@ -311,19 +313,19 @@ describe('Browser calling', () => {
       expect(calls.state).toBe('idle');
     }));
 
-    it('offers transcription off by default, with a reminder to tell the customer', fakeAsync(() => {
+    it('offers transcription on by default, with a reminder to tell the customer; it can be unticked', fakeAsync(() => {
       const { f, el } = panel();
       calls.prepare('+919876543210', 'Ann');
       f.detectChanges();
       tick();
       const box = el.querySelector('.sp-consent input') as HTMLInputElement;
-      expect(box.checked).toBeFalse();
-      expect(el.textContent).not.toContain('Tell the customer');
+      expect(box.checked).toBeTrue();
+      expect(el.textContent).toContain('Tell the customer before you start');
       box.click();
       f.detectChanges();
       tick();
-      expect(calls.transcribe).toBeTrue();
-      expect(el.textContent).toContain('Tell the customer before you start');
+      expect(calls.transcribe).toBeFalse();
+      expect(el.textContent).not.toContain('Tell the customer');
     }));
 
     it('shows the timer, mute, keypad and hang up during a call', fakeAsync(() => {

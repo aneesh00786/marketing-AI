@@ -400,7 +400,7 @@
             <td data-label="Company" class="company-cell">{{ dash(ld.companyName) }}<div class="lead-sub lead-address" *ngIf="ld.address" [title]="ld.address">📍 {{ ld.address }}</div></td>
             <td data-label="Country" class="one-line">{{ dash(ld.country) }}</td>
             <td data-label="Email" class="one-line"><a *ngIf="ld.email" [href]="'mailto:' + ld.email" [title]="ld.email">{{ ld.email }}</a><ng-container *ngIf="!ld.email">—</ng-container></td>
-            <td data-label="Phone" class="one-line"><span class="phone-line">{{ dash(ld.phone) }}<app-call-button [phone]="ld.phone" [name]="ld.name"></app-call-button></span></td>
+            <td data-label="Phone" class="one-line"><span class="phone-line">{{ dash(ld.phone) }}<app-call-button [phone]="ld.phone" [name]="ld.name" [leadId]="ld.id"></app-call-button></span></td>
             <td data-label="Product" class="product-cell">
               <span class="chip" *ngIf="ld.productName">{{ ld.productName }}</span>
               <span class="lead-muted" *ngIf="!ld.productName && !ld.productMissing">No product selected</span>

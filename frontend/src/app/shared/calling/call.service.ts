@@ -18,7 +18,7 @@ const AUDIO_BITS_PER_SECOND = 32000;
  * the app. The server gives a short-lived token only to users allowed to call, and it checks the
  * number; the Telnyx key never reaches the browser.
  *
- * Every call is logged. Audio is captured only when the caller ticks "Transcribe this call": each
+ * Every call is logged. Audio is captured only while "Transcribe this call" is ticked (the default): each
  * side is recorded separately, so the transcript can say who spoke, sent to the server when the
  * call ends, and dropped. It is never saved in the browser.
  */
@@ -33,8 +33,8 @@ export class CallService {
   message = '';
   seconds = 0;
   muted = false;
-  /** Off for every new call: the caller turns it on after telling the customer. */
-  transcribe = false;
+  /** On for every new call (the caller tells the customer first, or unticks it). */
+  transcribe = true;
   contactId: number | null = null;
   /** A follow-up from a campaign's results: the call is kept with that campaign and person. */
   followUp: { campaignId: number; email: string } | null = null;
@@ -78,7 +78,7 @@ export class CallService {
     this.contactId = contactId;
     this.followUp = followUp;
     this.lead = lead;
-    this.transcribe = false;
+    this.transcribe = true;
     this.transcriptState = '';
     this.state = 'idle';
     this.message = '';

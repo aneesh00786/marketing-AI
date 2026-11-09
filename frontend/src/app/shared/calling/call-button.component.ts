@@ -30,6 +30,8 @@ export class CallButtonComponent {
   /** A follow-up from a campaign's results (keeps the call with that campaign and person). */
   @Input() campaignId: number | null | undefined = null;
   @Input() email: string | null | undefined = null;
+  /** A lead (Leads list): the call is kept with that lead, in its Follow-ups history. */
+  @Input() leadId: number | null | undefined = null;
 
   constructor(private calls: CallService) {}
 
@@ -40,6 +42,7 @@ export class CallButtonComponent {
   open(ev: Event): void {
     ev.stopPropagation();
     this.calls.prepare(String(this.phone), this.name || '', this.contactId ?? null,
-      this.campaignId && this.email ? { campaignId: this.campaignId, email: this.email } : null);
+      this.campaignId && this.email ? { campaignId: this.campaignId, email: this.email } : null,
+      this.leadId ? { leadId: this.leadId } : null);
   }
 }

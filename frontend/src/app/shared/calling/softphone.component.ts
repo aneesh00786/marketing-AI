@@ -30,7 +30,7 @@ import { CallService } from './call.service';
       </label>
       <p class="sp-note" *ngIf="calls.inCall && calls.transcribe">Transcribing this call. Tell the customer.</p>
       <p class="sp-note" *ngIf="calls.transcriptState === 'saving'" role="status">Saving the transcript…</p>
-      <p class="sp-note good" *ngIf="calls.transcriptState === 'saved'" role="status">Transcript saved in CRM → Calls.</p>
+      <p class="sp-note good" *ngIf="calls.transcriptState === 'saved'" role="status">Transcript saved{{ calls.lead ? ' with this lead (Leads → the lead → Follow-ups)' : ' in CRM → Calls' }}.</p>
       <p class="sp-note bad" *ngIf="calls.transcriptState === 'failed'" role="status">The transcript could not be made: {{ calls.transcriptError || 'unknown reason' }} The call is still in the log.</p>
 
       <div class="sp-keys" *ngIf="showKeys && calls.state === 'active'" role="group" aria-label="Keypad">
