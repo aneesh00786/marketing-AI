@@ -271,7 +271,8 @@ export class CampaignMetricsComponent implements OnChanges {
   transcriptNote(c: any): string {
     if (!c.answered) return 'Not answered.';
     if (!c.transcribed) return 'Not transcribed ("Transcribe this call" was not ticked).';
-    return { pending: 'The transcript is being prepared…', failed: 'The transcript could not be made.' }[c.transcriptStatus as string] || 'No speech was recognised.';
+    if (c.transcriptStatus === 'failed') return `The transcript could not be made${c.transcriptError ? ': ' + c.transcriptError : '.'}`;
+    return { pending: 'The transcript is being prepared…' }[c.transcriptStatus as string] || 'No speech was recognised.';
   }
 
   /** Follow up one recipient by email: Compose opens with them and a subject filled in (nothing is sent yet). */

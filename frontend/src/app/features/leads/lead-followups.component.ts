@@ -217,7 +217,8 @@ export class LeadFollowupsComponent implements OnInit {
 
   transcriptNote(c: any): string {
     if (!c.transcribed) return 'Not transcribed ("Transcribe this call" was not ticked).';
-    return ({ pending: 'Transcribing…', failed: 'The transcript could not be made (the audio is not kept, so it cannot be retried).', none: 'No transcript.' } as any)[c.transcriptStatus] || 'No transcript.';
+    if (c.transcriptStatus === 'failed') return `The transcript could not be made${c.transcriptError ? ': ' + c.transcriptError : '.'} (The audio is not kept, so it cannot be retried.)`;
+    return ({ pending: 'Transcribing…', none: 'No transcript.' } as any)[c.transcriptStatus] || 'No transcript.';
   }
 
   copyTranscript(c: any): void {

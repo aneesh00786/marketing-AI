@@ -219,7 +219,9 @@ test('if the browser could not capture the audio, the call says so instead of wa
   const u = await staff('sales');
   const id = await begin(u, { transcribe: true });
   assert.equal((await end(u, id, { durationSeconds: 30, answered: true, audioCaptured: false })).data.status, 'failed');
-  assert.equal((await audio(u, id, 'agent')).data.code, 'ALREADY_TRANSCRIBED');
+  const r = await audio(u, id, 'agent');
+  assert.equal(r.data.code, 'TRANSCRIPTION_FAILED');
+  assert.match(r.data.error, /did not capture the call audio/);
 });
 
 test('a transcription failure is clear, does not leak, and leaves the call logged', async () => {
@@ -345,4 +347,20 @@ test('a follow-up call from a campaign is linked to it; the recipient\'s history
   assert.equal(hist.data.calls.find(c => c.id === earlier).answered, false);
   assert.equal((await h.api('GET', `/api/v1/mail/campaigns/${camp.lastID}/recipient-history?email=nope`, { token: u.token })).status, 400);
   assert.equal((await h.api('GET', `/api/v1/mail/campaigns/${camp.lastID}/recipient-history?email=ann%40acme.io`, { token: other.token })).status, 404, 'another workspace');
+});
+
+test('a second upload after a failed transcription says why it failed, not "already transcribed"', async () => {
+  const u = await staff('sales');
+  const id = await begin(u, { transcribe: true });
+  await end(u, id);
+  telnyx.sttFail = true;
+  assert.equal((await audio(u, id, 'agent')).status, 502);
+  telnyx.sttFail = false;
+  const again = await audio(u, id, 'agent');
+  assert.equal(again.status, 409);
+  assert.equal(again.data.code, 'TRANSCRIPTION_FAILED');
+  assert.match(again.data.error, /already failed: Telnyx could not transcribe this call \(HTTP 500/);
+  assert.ok(!JSON.stringify(again.data).includes(KEY), 'no credential in the stored reason');
+  const call = (await crm(u, 'GET', `/calls/${id}`)).data.call;
+  assert.match(call.transcriptError, /HTTP 500/);
 });

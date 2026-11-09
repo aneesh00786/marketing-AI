@@ -40,6 +40,7 @@ function present(r) {
     durationSeconds: r.duration_seconds,
     transcribed: !!r.transcribe,
     transcriptStatus: r.transcript_status,
+    transcriptError: r.transcript_error || null,
     startedAt: r.started_at,
     endedAt: r.ended_at
   };
@@ -73,7 +74,8 @@ async function endLog(ctx, rawId, input) {
   const row = await requireOwnLog(ctx, rawId);
   const wanted = row.transcribe && v.answered;
   const status = !wanted ? 'none' : v.audioCaptured === false ? 'failed' : 'pending';
-  const ended = await run('UPDATE crm_call_logs SET duration_seconds = ?, answered = ?, transcript_status = ?, ended_at = UTC_TIMESTAMP() WHERE id = ? AND ended_at IS NULL', [v.durationSeconds, v.answered ? 1 : 0, status, row.id]);
+  const why = wanted && v.audioCaptured === false ? 'The browser did not capture the call audio.' : null;
+  const ended = await run('UPDATE crm_call_logs SET duration_seconds = ?, answered = ?, transcript_status = ?, transcript_error = ?, ended_at = UTC_TIMESTAMP() WHERE id = ? AND ended_at IS NULL', [v.durationSeconds, v.answered ? 1 : 0, status, why, row.id]);
   // A call made for a scheduled lead follow-up is linked to it (and completes it when answered).
   if (ended.changes && row.lead_id && row.followup_id) {
     await require('../leads/followups/activityService').linkCallToFollowup(row.lead_workspace_id, row.lead_id, row.followup_id, row.id, v.answered, row.user_id);
@@ -119,13 +121,18 @@ async function addTrack(ctx, rawId, track, { buffer, contentType, apiKey }) {
   if (!AUDIO_TYPES[type]) throw httpError(415, 'Unsupported audio format.', 'UNSUPPORTED_AUDIO');
   if (!Buffer.isBuffer(buffer) || !buffer.length) throw httpError(400, 'No audio was received.', 'VALIDATION_ERROR');
   const row = await requireOwnLog(ctx, rawId);
-  if (!row.transcribe) throw httpError(409, 'This call was not set to be transcribed.', 'NOT_TRANSCRIBED');
-  if (row.transcript_status !== 'pending' || row[column] !== null) throw httpError(409, 'This call has already been transcribed.', 'ALREADY_TRANSCRIBED');
+  if (!row.transcribe) throw httpError(409, 'This call was not set to be transcribed ("Transcribe this call" was off when it started).', 'NOT_TRANSCRIBED');
+  if (!row.ended_at) throw httpError(409, 'End the call before sending its audio.', 'CALL_NOT_ENDED');
+  if (row.transcript_status === 'none') throw httpError(409, 'This call was not answered, so there is nothing to transcribe.', 'NOT_ANSWERED');
+  if (row.transcript_status === 'failed') {
+    throw httpError(409, `Transcribing this call already failed${row.transcript_error ? `: ${row.transcript_error}` : '.'} The audio is not kept, so it cannot be sent again.`, 'TRANSCRIPTION_FAILED');
+  }
+  if (row.transcript_status === 'done' || row[column] !== null) throw httpError(409, 'This side of the call has already been transcribed.', 'ALREADY_TRANSCRIBED');
   let segments;
   try {
     segments = await transcribeAudio(buffer, type, apiKey);
   } catch (err) {
-    await run("UPDATE crm_call_logs SET transcript_status = 'failed' WHERE id = ?", [row.id]);
+    await run("UPDATE crm_call_logs SET transcript_status = 'failed', transcript_error = ? WHERE id = ?", [String(err.message || 'Transcription failed.').slice(0, 300), row.id]);
     throw err;
   }
   await run(`UPDATE crm_call_logs SET ${column} = ? WHERE id = ?`, [JSON.stringify(segments), row.id]);
