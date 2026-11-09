@@ -1,4 +1,5 @@
 import { Component, EventEmitter, HostListener, Input, OnDestroy, OnInit, Output } from '@angular/core';
+import { CrmPhoneInputComponent, phoneProblem } from '../crm/crm-phone-input.component';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
@@ -20,7 +21,7 @@ type Status = 'all' | 'subscribed' | 'unsubscribed' | 'bounced';
 @Component({
   selector: 'app-contact-lists',
   standalone: true,
-  imports: [CommonModule, FormsModule, IconComponent, CountryFilterComponent],
+  imports: [CommonModule, FormsModule, IconComponent, CountryFilterComponent, CrmPhoneInputComponent],
   templateUrl: './contact-lists.component.html',
   styleUrls: ['../command/command-center.component.css', './mail-ui.css', './contact-lists-shared.css', './contact-lists.component.css']
 })
@@ -113,6 +114,7 @@ export class ContactListsComponent implements OnInit, OnDestroy {
     if (!d.name.trim() && !d.company.trim()) return 'Enter a name or business.';
     if (!EMAIL_RE.test(d.email.trim())) return 'Enter a valid email address.';
     if (this.form!.manual.some(m => m.email === d.email.trim().toLowerCase())) return 'This email is already added below.';
+    if (phoneProblem(d.phone)) return phoneProblem(d.phone);
     return '';
   }
   addManual(): void {

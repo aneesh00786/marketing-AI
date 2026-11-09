@@ -300,11 +300,11 @@ async function createLeadFromThread(ctx, threadId, { name, email, phone, notes }
     [workspaceId, thread.content_item_id]
   ) : null;
   const ins = await run(
-    `INSERT INTO leads (workspace_id, name, email, phone, product_id, product_interest, notes, status, ai_category, ai_suggestion, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'New', ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+    `INSERT INTO leads (workspace_id, name, email, phone, product_id, product_interest, notes, status, ai_category, ai_suggestion, created_by_user_id, owner_user_id, lead_source, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'New', ?, ?, ?, ?, 'social', UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
     [workspaceId, leadName, email || null, phone || null, product?.id || null, `Social (${thread.provider_key})`,
       `${notes ? `${notes}\n` : ''}From ${thread.account_name} comment: "${String(thread.preview_text || '').slice(0, 400)}"`,
-      thread.ai_category === 'lead' ? 'Warm' : 'Cold', thread.ai_summary || null]
+      thread.ai_category === 'lead' ? 'Warm' : 'Cold', thread.ai_summary || null, ctx.auth.userId || null, ctx.auth.userId || null]
   );
   await run('UPDATE engagement_threads SET lead_id = ?, updated_at = UTC_TIMESTAMP() WHERE workspace_id = ? AND id = ?', [ins.lastID, workspaceId, threadId]);
   await audit(ctx, 'social.inbox.lead_created', { resourceType: 'engagement_thread', resourceId: threadId, metadata: { leadId: ins.lastID } });

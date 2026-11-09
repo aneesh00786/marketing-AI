@@ -8,6 +8,7 @@ import { CampaignWizardComponent } from './campaign-wizard.component';
 import { BrandKitComponent } from './brand-kit.component';
 import { StudioUsageComponent } from './studio-usage.component';
 import { apiRoot } from '../../core/api-base';
+import { CrmPhoneInputComponent, phoneProblem } from '../crm/crm-phone-input.component';
 
 type Section = 'overview' | 'generator' | 'brand' | 'accounts' | 'campaigns' | 'calendar' | 'library' | 'media' | 'queue' | 'analytics' | 'inbox' | 'strategist' | 'settings';
 
@@ -27,7 +28,7 @@ const METRIC_LABELS: Record<string, string> = {
 @Component({
   selector: 'app-social-hub',
   standalone: true,
-  imports: [CommonModule, FormsModule, MediaLibraryComponent, PostComposerComponent, CampaignWizardComponent, BrandKitComponent, StudioUsageComponent],
+  imports: [CommonModule, FormsModule, CrmPhoneInputComponent, MediaLibraryComponent, PostComposerComponent, CampaignWizardComponent, BrandKitComponent, StudioUsageComponent],
   templateUrl: './social-hub.component.html',
   styleUrls: ['./social-shared.css', './social-hub.component.css']
 })
@@ -1050,7 +1051,10 @@ export class SocialHubComponent implements OnInit, OnDestroy {
     this.api.updateThread(this.activeThread.thread.id, { assignedUserId: userId ? Number(userId) : null }).subscribe({ next: () => this.notify('Assigned.'), error: e => this.fail(e) });
   }
 
+  get leadPhoneProblem(): string { return phoneProblem(this.leadForm.phone); }
+
   createLead(): void {
+    if (this.leadPhoneProblem) { this.notify(this.leadPhoneProblem); return; }
     const body: any = {};
     if (this.leadForm.email) body.email = this.leadForm.email;
     if (this.leadForm.phone) body.phone = this.leadForm.phone;

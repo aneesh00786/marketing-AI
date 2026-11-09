@@ -2,7 +2,11 @@ import { Component, OnInit, OnDestroy, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import * as XLSX from 'xlsx';
-import { parseLeadSheet } from './features/leads/lead-sheet';
+import { readWorkbook, SheetData, LeadSheetRow } from './features/leads/lead-sheet';
+import { LeadImportMapperComponent } from './features/leads/lead-import-mapper.component';
+import { LeadAccessComponent } from './features/leads/lead-access.component';
+import { LeadFollowupsComponent } from './features/leads/lead-followups.component';
+import { CrmPhoneInputComponent, phoneProblem } from './features/crm/crm-phone-input.component';
 import { ImportSync, importSyncBody, importSyncProblem, newImportSync } from './features/leads/import-sync';
 import { ImportSyncOptionsComponent } from './features/leads/import-sync-options.component';
 import { LeadsToListComponent } from './features/leads/leads-to-list.component';
@@ -34,7 +38,7 @@ import { findTokens, fillTokens, defaultTokenValues } from './features/mail/temp
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [CommonModule, FormsModule, LoginComponent, SocialHubComponent, CommandCenterComponent, IconComponent, DashboardComponent, LeadDiscoveryComponent, CrmComponent, PlatformAdminComponent, CallButtonComponent, SoftphoneComponent, MembersComponent, TemplatePickerComponent, MailCenterComponent, EmailPreviewComponent, ImportSyncOptionsComponent, LeadsToListComponent, CountryFilterComponent],
+  imports: [CommonModule, FormsModule, LoginComponent, LeadImportMapperComponent, LeadAccessComponent, LeadFollowupsComponent, CrmPhoneInputComponent, SocialHubComponent, CommandCenterComponent, IconComponent, DashboardComponent, LeadDiscoveryComponent, CrmComponent, PlatformAdminComponent, CallButtonComponent, SoftphoneComponent, MembersComponent, TemplatePickerComponent, MailCenterComponent, EmailPreviewComponent, ImportSyncOptionsComponent, LeadsToListComponent, CountryFilterComponent],
   templateUrl: './app.component.html',
   styleUrls: ['./app.component.css']
 })
@@ -395,6 +399,11 @@ export class AppComponent implements OnInit, OnDestroy {
     if (pendingDrafts.length) out.push({ icon: 'drafts', title: `${pendingDrafts.length} draft${pendingDrafts.length > 1 ? 's' : ''} awaiting approval`, detail: pendingDrafts[0].subject || 'Review before sending', route: 'emails', mailSection: 'approvals', tone: 'warning' });
     const hot = this.leads.filter(l => l.category === 'Hot');
     if (hot.length) out.push({ icon: 'leads', title: `${hot.length} hot lead${hot.length > 1 ? 's' : ''}`, detail: hot[0].name || 'High purchase intent', route: 'leads', tone: 'info' });
+    const mf = this.myFollowups;
+    if (mf?.overdue.length) out.push({ icon: 'calendar', title: `${mf.overdue.length} overdue follow-up${mf.overdue.length > 1 ? 's' : ''}`, detail: `${mf.overdue[0].title} · ${mf.overdue[0].leadName}`, route: 'leads', tone: 'danger', leadId: mf.overdue[0].leadId } as any);
+    if (mf?.upcoming.length) out.push({ icon: 'calendar', title: `${mf.upcoming.length} follow-up${mf.upcoming.length > 1 ? 's' : ''} due today`, detail: `${mf.upcoming[0].title} · ${mf.upcoming[0].leadName}`, route: 'leads', tone: 'warning', leadId: mf.upcoming[0].leadId } as any);
+    if (mf?.newlyAssigned.length) out.push({ icon: 'leads', title: `${mf.newlyAssigned.length} follow-up${mf.newlyAssigned.length > 1 ? 's' : ''} assigned to you`, detail: `${mf.newlyAssigned[0].title} · ${mf.newlyAssigned[0].leadName}`, route: 'leads', tone: 'info', leadId: mf.newlyAssigned[0].leadId } as any);
+    if (mf?.failedTranscripts.length) out.push({ icon: 'phone', title: `${mf.failedTranscripts.length} call transcript${mf.failedTranscripts.length > 1 ? 's' : ''} failed`, detail: mf.failedTranscripts[0].leadName, route: 'leads', tone: 'warning', leadId: mf.failedTranscripts[0].leadId } as any);
     if (this.appointments.length) out.push({ icon: 'calendar', title: `${this.appointments.length} scheduled demo${this.appointments.length > 1 ? 's' : ''}`, detail: this.appointments[0].customer_name || this.appointments[0].contact_name || 'Upcoming', route: 'appointments', tone: 'info' });
     return out;
   }
@@ -531,7 +540,54 @@ export class AppComponent implements OnInit, OnDestroy {
   newLead: any = this.blankLead();
   leadProducts: any[] = [];
   leadStatuses: string[] = [];
-  leadFilters = { productId: '', status: '', country: '', q: '' };
+  leadFilters = { view: 'all', productId: '', status: '', country: '', q: '' };
+  /** Ownership views the server allows this person (admins: all; others: all / mine / shared with me). */
+  leadViews: string[] = ['all', 'mine', 'shared_with_me'];
+  leadCanManageAccess = false;
+  accessLeadId: number | null = null;
+  /** The lead whose Follow-ups panel is open. */
+  followupLead: any = null;
+  /** My follow-ups for the notification bell (overdue, due within a day, newly assigned, failed transcripts). */
+  myFollowups: { overdue: any[]; upcoming: any[]; newlyAssigned: any[]; failedTranscripts: any[] } | null = null;
+  loadMyFollowups(): void {
+    if (!this.hasModule('leads')) return;
+    this.apiService.getMyFollowups().subscribe({ next: (r: any) => { this.myFollowups = r; }, error: () => { this.myFollowups = null; } });
+  }
+  openFollowupLead(leadId: number): void {
+    const found = this.leads.find(l => l.id === leadId);
+    if (found) { this.followupLead = found; return; }
+    this.apiService.getLead(leadId).subscribe({ next: (r: any) => { this.followupLead = r.lead; }, error: () => this.showToast('This lead is no longer available to you.') });
+  }
+  leadMembers: any[] = [];
+  bulkOwnerId: number | null = null;
+  bulkAssigning = false;
+  leadViewLabel(v: string): string {
+    return ({ all: this.leadCanManageAccess ? 'All leads' : 'All my leads', mine: 'Assigned to me', user_created: 'Created by users',
+      admin_created: 'Created by admins', assigned: 'Assigned by an admin', unassigned: 'Unassigned' } as any)[v] || v;
+  }
+  leadSourceLabel(s: string | null): string {
+    return ({ manual: 'Manual', import: 'Excel import', discovery: 'AI Discovery', social: 'Social', phone: 'Phone', api: 'API' } as any)[s || ''] || '—';
+  }
+  /** Owners/Admins: leads ticked in the list, to assign them to one member in one action. */
+  selectedLeadIds = new Set<number>();
+  get allLeadsShownSelected(): boolean { return !!this.leads.length && this.leads.every(l => this.selectedLeadIds.has(l.id)); }
+  toggleLeadSelected(id: number): void { this.selectedLeadIds.has(id) ? this.selectedLeadIds.delete(id) : this.selectedLeadIds.add(id); }
+  toggleAllShownLeads(): void {
+    const all = this.allLeadsShownSelected;
+    for (const l of this.leads) all ? this.selectedLeadIds.delete(l.id) : this.selectedLeadIds.add(l.id);
+  }
+  assignSelectedLeads(): void {
+    const ids = [...this.selectedLeadIds];
+    if (!this.bulkOwnerId || !ids.length) return;
+    const name = this.leadMembers.find(m => m.userId === this.bulkOwnerId)?.name || 'the member';
+    if (!confirm(`Assign the ${ids.length} selected lead(s) to ${name}? Whoever they were assigned to before no longer sees them.`)) return;
+    this.bulkAssigning = true;
+    this.apiService.bulkLeadOwner(ids, this.bulkOwnerId).subscribe({
+      next: (r: any) => { this.bulkAssigning = false; this.selectedLeadIds.clear(); this.showToast(`${r.changed} lead(s) assigned to ${name}.`); this.loadLeads(); },
+      error: (e: any) => { this.bulkAssigning = false; this.showToast(e?.error?.error || 'Could not assign the leads.'); }
+    });
+  }
+
   /** Countries of this workspace's leads with counts (null = no country), for the country filter. */
   leadCountries: { country: string | null; count: number }[] = [];
   leadPage = 1;
@@ -1196,6 +1252,7 @@ export class AppComponent implements OnInit, OnDestroy {
     if (this.leadFilters.status) params.status = this.leadFilters.status;
     if (this.leadFilters.country) params.country = this.leadFilters.country;
     if (this.leadFilters.q.trim()) params.q = this.leadFilters.q.trim();
+    if (this.leadFilters.view && this.leadFilters.view !== 'all') params.view = this.leadFilters.view;
     this.apiService.exportLeads(params).subscribe({
       next: (res) => {
         this.leadExporting = false;
@@ -1230,10 +1287,17 @@ export class AppComponent implements OnInit, OnDestroy {
     if (this.leadFilters.status) params.status = this.leadFilters.status;
     if (this.leadFilters.country) params.country = this.leadFilters.country;
     if (this.leadFilters.q.trim()) params.q = this.leadFilters.q.trim();
+    if (this.leadFilters.view && this.leadFilters.view !== 'all') params.view = this.leadFilters.view;
     this.apiService.getLeads(params).subscribe({
       next: (res) => {
         this.leadsLoading = false;
         this.leads = res.leads || [];
+        if (Array.isArray(res.views)) this.leadViews = res.views;
+        this.leadCanManageAccess = !!res.canManageAccess;
+        this.loadMyFollowups();
+        if (!this.leadMembers.length) {
+          this.apiService.getMembers().subscribe({ next: (m: any) => { this.leadMembers = (m.members || []).filter((x: any) => x.status === 'Active').map((x: any) => ({ userId: x.userId, name: x.displayName || x.email, role: x.role })); }, error: () => null });
+        }
         this.leadTotal = res.total ?? this.leads.length;
         this.leadStatuses = res.statuses || this.leadStatuses;
         if (res.countries) this.leadCountries = res.countries;
@@ -1259,6 +1323,7 @@ export class AppComponent implements OnInit, OnDestroy {
 
   applyLeadFilters(): void {
     this.leadPage = 1;
+    this.selectedLeadIds.clear(); // a new filter starts a new selection
     this.loadLeads();
   }
 
@@ -1332,6 +1397,7 @@ export class AppComponent implements OnInit, OnDestroy {
       name: ld.name || '', phone: ld.phone || '', email: ld.email || '', company_name: ld.companyName || '', country: ld.country || '', address: ld.address || '',
       estimated_budget: ld.estimatedBudget || '', notes: ld.notes || '', productId: ld.productId ?? null, status: ld.status || 'New'
     };
+    this.editingLeadOriginalPhone = String(ld.phone || '').trim();
     if (!this.leadProducts.length) this.loadLeadProducts();
     this.showNewLeadModal = true;
   }
@@ -1344,19 +1410,35 @@ export class AppComponent implements OnInit, OnDestroy {
     });
   }
 
+  /** The file box stays closed until a product is selected (never returns false: that would cancel the click). */
+  onImportDropzoneClick(event: Event): void {
+    if (!this.importProductId) {
+      event.preventDefault();
+      this.showToast('Select the product for these leads first.');
+    }
+  }
+
   onExcelFileSelected(event: any): void {
     const files = event.target.files;
     if (!files || files.length === 0) return;
+    if (!this.importProductId) { event.target.value = ''; this.showToast('Select the product for these leads first.'); return; }
     const file = files[0];
     this.excelFileName = file.name;
     this.leadImportResult = null;
     if (!this.leadProducts.length) this.loadLeadProducts();
-    parseLeadSheet(file).then(({ rows, skippedNoName }) => {
-      this.excelSkippedNoName = skippedNoName;
-      this.excelPreviewRows = rows;
-      this.showToast(`Parsed ${rows.length} leads from "${file.name}".${skippedNoName ? ` ${skippedNoName} rows without a name will be skipped.` : ''}`);
-    }).catch(err => this.showToast(err.message));
+    this.excelSheets = [];
+    this.excelPreviewRows = [];
+    // The column-matching step (app-lead-import-mapper) builds the leads from the sheets.
+    readWorkbook(file).then(sheets => { this.excelSheets = sheets; })
+      .catch(err => { this.excelFileName = ''; this.showToast(err.message); });
     event.target.value = '';
+  }
+
+  /** Sheets of the chosen import file; the column-matching step turns them into leads. */
+  excelSheets: SheetData[] = [];
+  onMappedRows(e: { rows: LeadSheetRow[]; skippedNoName: number }): void {
+    // Emitted while the matching step renders: applied after this change-detection pass.
+    Promise.resolve().then(() => { this.excelPreviewRows = e.rows; this.excelSkippedNoName = e.skippedNoName; });
   }
 
   /** Leads → "Add to contact list" popup. */
@@ -1365,11 +1447,34 @@ export class AppComponent implements OnInit, OnDestroy {
   /** Consent and contact list for the Excel import (see ImportSyncOptionsComponent). */
   importSync: ImportSync = newImportSync();
   get canSendCampaigns(): boolean { return !!this.myCaps?.has('mail.send'); }
-  get importSyncProblem(): string { return importSyncProblem(this.importSync); }
+  /** The product the imported leads are for (required); fills rows whose Product cell is blank. */
+  importProductId = '';
+  get importSyncProblem(): string {
+    if (this.excelPreviewRows.length && !this.importProductId) {
+      return this.leadProducts.length ? 'Select the product these leads are for.' : 'Add a product in Digital Products first, then import.';
+    }
+    return importSyncProblem(this.importSync);
+  }
   openExcelImport(): void {
     this.showExcelImportModal = true;
     this.leadImportResult = null;
+    this.excelSheets = [];
+    this.excelPreviewRows = [];
+    this.excelFileName = '';
     this.importSync = newImportSync();
+    // Preselect the product the Leads list is filtered by, if any.
+    const f = this.leadFilters?.productId;
+    this.importProductId = f && f !== 'none' ? String(f) : '';
+    if (!this.leadProducts.length) this.loadLeadProducts();
+  }
+
+  get importProductName(): string {
+    return this.leadProducts.find(p => String(p.id) === String(this.importProductId))?.name || '';
+  }
+
+  /** Rows that name their own product in the file (they keep it; the others get the selected product). */
+  get excelOwnProductCount(): number {
+    return this.excelPreviewRows.filter(r => r.productId || (r.product && String(r.product).trim())).length;
   }
 
   /** Preview-only product match (the server re-validates against the workspace on import). */
@@ -1382,6 +1487,7 @@ export class AppComponent implements OnInit, OnDestroy {
       const p = this.leadProducts.find(x => x.name.trim().toLowerCase() === row.product.trim().toLowerCase());
       return p ? { label: p.name, ok: true } : { label: `"${row.product}" not found — needs review`, ok: false };
     }
+    if (this.importProductName) return { label: this.importProductName, ok: true };
     return { label: 'No product selected', ok: null };
   }
 
@@ -1391,14 +1497,17 @@ export class AppComponent implements OnInit, OnDestroy {
 
   confirmImportExcelLeads(): void {
     if (this.excelPreviewRows.length === 0) return;
-    this.isImportingLeads = true;
     if (this.importSyncProblem) { this.showToast(this.importSyncProblem); return; }
-    this.apiService.importLeadsBulk(this.excelPreviewRows, importSyncBody(this.importSync)).subscribe({
+    this.isImportingLeads = true;
+    // Rows without a product in the file get the selected product (the server checks it belongs to this workspace).
+    const rows = this.excelPreviewRows.map(r => (r.productId || (r.product && String(r.product).trim())) ? r : { ...r, productId: Number(this.importProductId) });
+    this.apiService.importLeadsBulk(rows, importSyncBody(this.importSync)).subscribe({
       next: (res) => {
         this.isImportingLeads = false;
         this.showToast(res.message);
         this.leadImportResult = res;
         this.excelPreviewRows = [];
+        this.excelSheets = [];
         this.excelFileName = '';
         this.leadPage = 1;
         this.loadLeads();
@@ -1435,8 +1544,17 @@ export class AppComponent implements OnInit, OnDestroy {
     });
   }
 
+  /** A changed phone number must include its country code (an older saved number may stay as it is). */
+  private editingLeadOriginalPhone = '';
+  get newLeadPhoneProblem(): string {
+    const p = String(this.newLead?.phone || '').trim();
+    if (this.editingLeadId && p === this.editingLeadOriginalPhone) return '';
+    return phoneProblem(p);
+  }
+
   submitNewLead(): void {
     if (!this.newLead.name?.trim()) { this.showToast('Lead name is required.'); return; }
+    if (this.newLeadPhoneProblem) { this.showToast(this.newLeadPhoneProblem); return; }
     const payload: any = {
       name: this.newLead.name.trim(),
       email: this.newLead.email?.trim() || null,

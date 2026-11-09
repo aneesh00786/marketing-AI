@@ -600,8 +600,8 @@
           <div class="small">Create a lead from this enquiry</div>
           <div class="quick-row">
             <input class="hud-input" [(ngModel)]="leadForm.email" placeholder="Email (if shared)" />
-            <input class="hud-input" [(ngModel)]="leadForm.phone" placeholder="Phone (if shared)" />
-            <button class="btn btn-secondary btn-sm" (click)="createLead()">Create lead</button>
+            <app-crm-phone-input label="" placeholder="Phone (if shared)" [value]="leadForm.phone" (valueChange)="leadForm.phone = $event"></app-crm-phone-input>
+            <button class="btn btn-secondary btn-sm" (click)="createLead()" [disabled]="!!leadPhoneProblem" [title]="leadPhoneProblem">Create lead</button>
           </div>
         </div>
         <div class="small ok-text" *ngIf="activeThread.thread.leadId">Linked to lead #{{ activeThread.thread.leadId }}</div>

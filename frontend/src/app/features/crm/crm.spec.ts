@@ -10,7 +10,7 @@ import { CrmDealsComponent } from './crm-deals.component';
 import { CrmOverviewComponent } from './crm-overview.component';
 import { CrmSupportComponent } from './crm-support.component';
 import { crmSectionFromLink, statusTone } from './crm-api.service';
-import { COUNTRY_CODES, CrmPhoneInputComponent, splitPhone } from './crm-phone-input.component';
+import { COUNTRY_CODES, CrmPhoneInputComponent, splitPhone, phoneProblem } from './crm-phone-input.component';
 
 describe('Global CRM', () => {
   let http: HttpTestingController;
@@ -47,8 +47,9 @@ describe('Global CRM', () => {
       expect(splitPhone('+1 (555) 010-0100')).toEqual({ code: '1', number: '(555) 010-0100' });
       expect(splitPhone('+18685550100')).toEqual({ code: '1868', number: '5550100' });
       expect(splitPhone('+971501234567').code).toBe('971');
-      expect(splitPhone('')).toEqual({ code: '91', number: '' });
-      expect(splitPhone(null).code).toBe('91');
+      expect(splitPhone('')).toEqual({ code: '', number: '' }, 'no country is assumed');
+      expect(splitPhone('0412 345 678')).toEqual({ code: '', number: '0412 345 678' });
+      expect(splitPhone(null).code).toBe('');
     });
 
     it('lists every country once, with India and the common codes present', () => {
@@ -60,19 +61,30 @@ describe('Global CRM', () => {
       expect(COUNTRY_CODES.every(c => /^[1-9]\d{0,3}$/.test(c.code))).toBeTrue();
     });
 
-    it('starts on +91, joins the code and number, and an empty number stays empty', fakeAsync(() => {
+    it('needs a country code: none is assumed; a typed +code fills the picker; joins code and number', fakeAsync(() => {
       const { f, c, el } = make(CrmPhoneInputComponent, { value: '' });
       tick();
       f.detectChanges();
       let out: string | null = null;
       c.valueChange.subscribe(v => out = v);
-      expect(c.code).toBe('91');
+      expect(c.code).toBe('');
       input(el).value = '98765 43210';
       input(el).dispatchEvent(new Event('input'));
+      f.detectChanges();
+      expect(out as any).toBe('98765 43210');
+      expect(phoneProblem(out)).toContain('country code');
+      expect(el.textContent).toContain('Choose the country code');
+      select(el).value = '91';
+      select(el).dispatchEvent(new Event('change'));
       expect(out as any).toBe('+91 98765 43210');
+      expect(phoneProblem(out)).toBe('');
+      input(el).value = '+61 412 345 678';
+      input(el).dispatchEvent(new Event('input'));
+      expect(c.code).toBe('61');
+      expect(out as any).toBe('+61 412 345 678');
       select(el).value = '971';
       select(el).dispatchEvent(new Event('change'));
-      expect(out as any).toBe('+971 98765 43210');
+      expect(out as any).toBe('+971 412 345 678');
       input(el).value = '  ';
       input(el).dispatchEvent(new Event('input'));
       expect(out as any).toBe('');

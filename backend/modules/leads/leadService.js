@@ -1,4 +1,5 @@
 const { run, get, all } = require('../../db/database');
+const leadAccess = require('../../lib/leadAccess');
 const { audit } = require('../../lib/audit');
 const automationEvents = require('../../lib/automationEvents');
 const { generateText, untrusted, AiUnavailableError } = require('../../lib/aiStructured');
@@ -141,9 +142,22 @@ function present(row) {
     // Granted with how, when and evidence: the standard email campaigns and Product Emails require.
     marketingConsentProven: row.marketing_consent === 'granted' && !!(row.marketing_consent_method && row.marketing_consent_evidence),
     createdAt: row.created_at,
-    updatedAt: row.updated_at || null
+    updatedAt: row.updated_at || null,
+    // Ownership and access (lib/leadAccess.js).
+    ownerUserId: row.owner_user_id ?? null,
+    ownerName: row.owner_name || null,
+    createdByUserId: row.created_by_user_id ?? null,
+    createdByName: row.created_by_name || null,
+    createdByAdmin: row.created_by_admin === undefined ? null : !!Number(row.created_by_admin),
+    sharedCount: row.shared_count === undefined ? null : Number(row.shared_count),
+    leadSource: row.lead_source || (row.google_place ? 'discovery' : null),
+    accessLevel: row.accessLevel || row.access_level || null
   };
 }
+
+const ADMIN_ROLES_SQL = "'Workspace Owner', 'Workspace Admin'";
+/** Ownership views of the Leads list (admins: all of them; others: mine / shared with me). */
+const OWNERSHIP_VIEWS = ['all', 'mine', 'shared_with_me', 'user_created', 'admin_created', 'assigned', 'shared', 'unassigned'];
 
 // lead_place_refs arrives with migration 013; until then leads are listed without the flag.
 let placeRefs = { exists: false, checkedAt: 0 };
@@ -151,14 +165,35 @@ async function selectLead() {
   if (!placeRefs.exists && Date.now() - placeRefs.checkedAt > 60000) {
     placeRefs = { exists: !!(await get("SELECT 1 AS x FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'lead_place_refs'")), checkedAt: Date.now() };
   }
-  return `SELECT l.*, p.name AS product_name${placeRefs.exists ? ', (SELECT 1 FROM lead_place_refs r WHERE r.lead_id = l.id LIMIT 1) AS google_place' : ''} FROM leads l
-  LEFT JOIN digital_products p ON p.workspace_id = l.workspace_id AND p.id = l.product_id`;
+  return `SELECT l.*, p.name AS product_name${placeRefs.exists ? ', (SELECT 1 FROM lead_place_refs r WHERE r.lead_id = l.id LIMIT 1) AS google_place' : ''},
+    COALESCE(NULLIF(ou.display_name, ''), ou.email) AS owner_name, COALESCE(NULLIF(cu.display_name, ''), cu.email) AS created_by_name,
+    (SELECT COUNT(*) FROM workspace_members am WHERE am.workspace_id = l.workspace_id AND am.user_id = l.created_by_user_id AND am.role IN (${ADMIN_ROLES_SQL})) AS created_by_admin,
+    (SELECT COUNT(*) FROM lead_user_access sa WHERE sa.lead_id = l.id) AS shared_count
+  FROM leads l
+  LEFT JOIN digital_products p ON p.workspace_id = l.workspace_id AND p.id = l.product_id
+  LEFT JOIN users ou ON ou.id = l.owner_user_id
+  LEFT JOIN users cu ON cu.id = l.created_by_user_id`;
 }
 
 /** The WHERE clause for the Leads list filters (also used by the export). */
-async function leadWhere(workspaceId, { productId, status, q, source, country } = {}) {
-  const where = ['l.workspace_id = ?'];
-  const params = [workspaceId];
+async function leadWhere(ctx, { productId, status, q, source, country, view } = {}) {
+  const workspaceId = ctx.auth.workspaceId;
+  // Only the leads this person may see (Owners/Admins: all of the workspace's).
+  const vis = leadAccess.visibleSql(ctx, 'l');
+  const where = ['l.workspace_id = ?', vis.sql];
+  const params = [workspaceId, ...vis.params];
+  const me = Number(ctx.auth.userId) || 0;
+  const adminCreator = `EXISTS (SELECT 1 FROM workspace_members vm WHERE vm.workspace_id = l.workspace_id AND vm.user_id = l.created_by_user_id AND vm.role IN (${ADMIN_ROLES_SQL}))`;
+  switch (OWNERSHIP_VIEWS.includes(view) ? view : 'all') {
+    case 'mine': where.push('l.owner_user_id = ?'); params.push(me); break;
+    case 'shared_with_me': where.push('EXISTS (SELECT 1 FROM lead_user_access w WHERE w.lead_id = l.id AND w.user_id = ?)'); params.push(me); break;
+    case 'user_created': where.push(`l.created_by_user_id IS NOT NULL AND NOT ${adminCreator}`); break;
+    case 'admin_created': where.push(adminCreator); break;
+    case 'assigned': where.push('l.owner_user_id IS NOT NULL AND (l.created_by_user_id IS NULL OR l.owner_user_id <> l.created_by_user_id)'); break;
+    case 'shared': where.push('EXISTS (SELECT 1 FROM lead_user_access w WHERE w.lead_id = l.id)'); break;
+    case 'unassigned': where.push('l.owner_user_id IS NULL'); break;
+    default: break;
+  }
   // source: 'discovery' = found with AI Lead Discovery (Google Places), 'crm' = all other leads.
   if (source === 'discovery' || source === 'crm') {
     await selectLead();
@@ -184,29 +219,50 @@ async function leadWhere(workspaceId, { productId, status, q, source, country } 
   return { where, params };
 }
 
-/** The countries of a workspace's leads with how many each, for the country filter (most first). */
-async function leadCountries(workspaceId) {
-  const rows = await all(`SELECT NULLIF(TRIM(country), '') AS country, COUNT(*) AS n FROM leads WHERE workspace_id = ? GROUP BY NULLIF(TRIM(country), '') ORDER BY n DESC, country`, [workspaceId]);
+/** The countries of the leads this person can see, with how many each, for the country filter (most first). */
+async function leadCountries(ctx) {
+  const vis = leadAccess.visibleSql(ctx, 'l');
+  const rows = await all(`SELECT NULLIF(TRIM(l.country), '') AS country, COUNT(*) AS n FROM leads l WHERE l.workspace_id = ? AND ${vis.sql} GROUP BY NULLIF(TRIM(l.country), '') ORDER BY n DESC, country`, [ctx.auth.workspaceId, ...vis.params]);
   return rows.map(r => ({ country: r.country || null, count: Number(r.n) }));
 }
 
-async function listLeads(workspaceId, { productId, status, q, source, country, page = 1, limit = 50 } = {}) {
-  const { where, params } = await leadWhere(workspaceId, { productId, status, q, source, country });
+async function listLeads(ctx, { productId, status, q, source, country, view, page = 1, limit = 50 } = {}) {
+  const { where, params } = await leadWhere(ctx, { productId, status, q, source, country, view });
   const lim = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 200);
   const pg = Math.max(parseInt(page, 10) || 1, 1);
   const rows = await all(`${await selectLead()} WHERE ${where.join(' AND ')} ORDER BY l.id DESC LIMIT ${lim} OFFSET ${(pg - 1) * lim}`, params);
   const total = await get(`SELECT COUNT(*) AS c FROM leads l WHERE ${where.join(' AND ')}`, params);
-  return { leads: rows.map(present), total: Number(total?.c || 0), page: pg, limit: lim, countries: await leadCountries(workspaceId) };
+  const admin = leadAccess.isLeadAdmin(ctx);
+  // This person's level on each listed lead (owner / manage / view), so the screen shows only allowed actions.
+  const me = Number(ctx.auth.userId) || 0;
+  const shared = !admin && rows.length
+    ? new Map((await all(`SELECT lead_id, access_level FROM lead_user_access WHERE user_id = ? AND lead_id IN (${rows.map(() => '?').join(',')})`, [me, ...rows.map(r => r.id)])).map(g => [g.lead_id, g.access_level]))
+    : new Map();
+  const levelOf = r => (admin ? 'admin' : Number(r.owner_user_id) === me ? 'owner' : shared.get(r.id) || 'view');
+  return {
+    leads: rows.map(r => present({ ...r, accessLevel: levelOf(r) })),
+    total: Number(total?.c || 0), page: pg, limit: lim, countries: await leadCountries(ctx),
+    // Which ownership views this person can use.
+    // Leads are assigned (no sharing in the app): admins also see who created and assigned them.
+    views: admin ? ['all', 'mine', 'user_created', 'admin_created', 'assigned', 'unassigned'] : ['all', 'mine'],
+    canManageAccess: admin
+  };
 }
 
 const EXPORT_MAX = 10000;
 /** Every lead matching the Leads list filters (no paging), newest first, for export. */
-async function exportLeads(workspaceId, filters = {}) {
-  const { where, params } = await leadWhere(workspaceId, filters);
+async function exportLeads(ctx, filters = {}) {
+  const { where, params } = await leadWhere(ctx, filters);
   const rows = await all(`${await selectLead()} WHERE ${where.join(' AND ')} ORDER BY l.id DESC LIMIT ${EXPORT_MAX + 1}`, params);
   return { leads: rows.slice(0, EXPORT_MAX).map(present), truncated: rows.length > EXPORT_MAX, max: EXPORT_MAX };
 }
 
+/** A lead this person may use at `need` level (view / manage / owner / admin), with names and flags. */
+async function requireLeadFor(ctx, id, need = 'view') {
+  return leadAccess.requireLeadAccess(ctx, id, need, { select: await selectLead() });
+}
+
+/** Internal (background jobs only): any lead of the workspace, no per-person check. */
 async function requireLead(workspaceId, id) {
   const leadId = Number(id);
   if (!Number.isInteger(leadId) || leadId <= 0) throw httpError(400, 'Invalid lead id.');
@@ -240,7 +296,7 @@ async function matchProductByName(workspaceId, name) {
   return get('SELECT * FROM digital_products WHERE workspace_id = ? AND LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1', [workspaceId, name]);
 }
 
-async function createLead(ctx, input, { withAi = true } = {}) {
+async function createLead(ctx, input, { withAi = true, source = 'manual' } = {}) {
   const workspaceId = ctx.auth.workspaceId;
   const data = normalizeInput(input);
   if (!data.name) throw httpError(400, 'Lead name is required.');
@@ -253,23 +309,25 @@ async function createLead(ctx, input, { withAi = true } = {}) {
     if (!product) reviewNote = `Interest "${data.product_interest.slice(0, 200)}" is not linked to a product. Choose one from Products.`;
   }
   const { score, category } = scoreLead(data);
+  // The person creating it is its creator and owner; ownership is never taken from the request.
+  const own = leadAccess.newLeadOwnership(ctx, source);
   const ins = await run(
     `INSERT INTO leads (workspace_id, name, email, phone, company_name, country, address, estimated_budget, notes, status, product_id, product_interest,
-       product_review_note, ai_score, ai_category, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+       product_review_note, ai_score, ai_category, created_by_user_id, owner_user_id, lead_source, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
     [workspaceId, data.name, data.email, data.phone, data.company_name, data.country, data.address, data.estimated_budget, data.notes, data.status || 'New',
-      product?.id || null, data.product_interest || product?.name || null, reviewNote, score, category]
+      product?.id || null, data.product_interest || product?.name || null, reviewNote, score, category, own.created_by_user_id, own.owner_user_id, own.lead_source]
   );
-  await audit(ctx, 'leads.created', { resourceType: 'lead', resourceId: ins.lastID, metadata: { productId: product?.id || null } });
+  await audit(ctx, 'leads.created', { resourceType: 'lead', resourceId: ins.lastID, metadata: { productId: product?.id || null, ownerUserId: own.owner_user_id, source } });
   await automationEvents.emit(workspaceId, 'lead.created', { subjectType: 'lead', subjectId: ins.lastID, payload: { productId: product?.id || null, status: data.status || 'New' }, key: `lead.created:${ins.lastID}` });
   let ai = null;
   if (withAi) ai = await generateAdvice(ctx, ins.lastID);
-  return { lead: present(await requireLead(workspaceId, ins.lastID)), ai };
+  return { lead: present(await requireLeadFor(ctx, ins.lastID)), ai };
 }
 
 async function updateLead(ctx, id, input) {
   const workspaceId = ctx.auth.workspaceId;
-  const existing = await requireLead(workspaceId, id);
+  const existing = await requireLeadFor(ctx, id, 'manage');
   const data = normalizeInput(input);
   const sets = [];
   const params = [];
@@ -289,6 +347,7 @@ async function updateLead(ctx, id, input) {
     if (product) { sets.push('product_interest = ?'); params.push(product.name); }
   }
   if (!sets.length) return { lead: present(existing) };
+  // Ownership fields are never changed here (only through changeOwner by an Owner/Admin).
   await run(`UPDATE leads SET ${sets.join(', ')}, updated_at = UTC_TIMESTAMP() WHERE workspace_id = ? AND id = ?`, [...params, workspaceId, existing.id]);
   // Keep the stored rule-based score in step with the edited fields.
   const fresh = await requireLead(workspaceId, existing.id);
@@ -298,15 +357,16 @@ async function updateLead(ctx, id, input) {
   if (fresh.status !== existing.status) {
     await automationEvents.emit(workspaceId, 'lead.status_changed', { subjectType: 'lead', subjectId: existing.id, payload: { from: existing.status, to: fresh.status, cause: ctx.auth?.automation ? { workflowIds: ctx.auth.automation.workflowIds } : null }, key: `lead.status:${existing.id}:${fresh.status}:${Date.now()}` });
   }
-  return { lead: present(await requireLead(workspaceId, existing.id)) };
+  return { lead: present(await requireLeadFor(ctx, existing.id)) };
 }
 
+/** Deleting: the owner or an Owner/Admin (shared access never allows it). */
 async function deleteLead(ctx, id) {
   const workspaceId = ctx.auth.workspaceId;
-  const existing = await requireLead(workspaceId, id);
+  const existing = await requireLeadFor(ctx, id, 'owner');
   await run('UPDATE engagement_threads SET lead_id = NULL WHERE workspace_id = ? AND lead_id = ?', [workspaceId, existing.id]).catch(() => {});
   await run('DELETE FROM leads WHERE workspace_id = ? AND id = ?', [workspaceId, existing.id]);
-  await audit(ctx, 'leads.deleted', { resourceType: 'lead', resourceId: existing.id });
+  await audit(ctx, 'leads.deleted', { resourceType: 'lead', resourceId: existing.id, metadata: { name: existing.name, ownerUserId: existing.owner_user_id ?? null } });
   return { deleted: true };
 }
 
@@ -323,9 +383,13 @@ async function importLeads(ctx, rows) {
   const products = await all('SELECT id, name FROM digital_products WHERE workspace_id = ?', [workspaceId]);
   const byId = new Map(products.map(p => [p.id, p]));
   const byName = new Map(products.map(p => [p.name.trim().toLowerCase(), p]));
-  // email → id of the first lead with it: a duplicate row reports which lead it matched.
+  // email → id of the first lead with it: a duplicate row reports which lead it matched. Leads are
+  // never duplicated, also when the existing one belongs to someone else; then its id is not shown.
   const existingEmails = new Map();
   for (const r of await all("SELECT id, LOWER(email) AS e FROM leads WHERE workspace_id = ? AND email IS NOT NULL AND email <> '' ORDER BY id", [workspaceId])) if (!existingEmails.has(r.e)) existingEmails.set(r.e, r.id);
+  const visibleExisting = new Set(await leadAccess.allowedLeadIds(ctx, [...existingEmails.values()]));
+  // Imported leads belong to the person importing them (admins included; others get no access by default).
+  const own = leadAccess.newLeadOwnership(ctx, 'import');
 
   const result = { imported: 0, skipped: [], flagged: [], duplicates: [], leadIds: [] };
   for (const [i, raw] of rows.entries()) {
@@ -336,7 +400,10 @@ async function importLeads(ctx, rows) {
     if (data.error) { result.skipped.push({ row: rowNo, reason: data.error }); continue; }
     if (!data.name) { result.skipped.push({ row: rowNo, reason: 'Missing name' }); continue; }
     if (data.email && existingEmails.has(data.email.toLowerCase())) {
-      result.duplicates.push({ row: rowNo, email: data.email, leadId: existingEmails.get(data.email.toLowerCase()) });
+      const dupId = existingEmails.get(data.email.toLowerCase());
+      result.duplicates.push(visibleExisting.has(dupId) || result.leadIds.includes(dupId)
+        ? { row: rowNo, email: data.email, leadId: dupId }
+        : { row: rowNo, email: data.email, leadId: null, reason: 'Already a lead in this workspace, owned by someone else' });
       continue;
     }
 
@@ -356,17 +423,17 @@ async function importLeads(ctx, rows) {
     const { score, category } = scoreLead(data);
     const ins = await run(
       `INSERT INTO leads (workspace_id, name, email, phone, company_name, country, address, estimated_budget, notes, status, product_id, product_interest,
-         product_review_note, ai_score, ai_category, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+         product_review_note, ai_score, ai_category, created_by_user_id, owner_user_id, lead_source, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
       [workspaceId, data.name, data.email, data.phone, data.company_name, data.country, data.address, data.estimated_budget, data.notes, data.status || 'Imported',
-        product?.id || null, product?.name || rawName || data.product_interest || null, reviewNote, score, category]
+        product?.id || null, product?.name || rawName || data.product_interest || null, reviewNote, score, category, own.created_by_user_id, own.owner_user_id, own.lead_source]
     );
     if (data.email && !existingEmails.has(data.email.toLowerCase())) existingEmails.set(data.email.toLowerCase(), ins.lastID);
     result.imported += 1;
     result.leadIds.push(ins.lastID);
     await automationEvents.emit(workspaceId, 'lead.created', { subjectType: 'lead', subjectId: ins.lastID, payload: { source: 'import', status: data.status || 'Imported' }, key: `lead.created:${ins.lastID}` });
   }
-  await audit(ctx, 'leads.imported', { resourceType: 'lead', metadata: { imported: result.imported, skipped: result.skipped.length, flagged: result.flagged.length, duplicates: result.duplicates.length } });
+  await audit(ctx, 'leads.imported', { resourceType: 'lead', metadata: { imported: result.imported, ownerUserId: own.owner_user_id, leadIds: result.leadIds.slice(0, 1000), skipped: result.skipped.length, flagged: result.flagged.length, duplicates: result.duplicates.length } });
   return result;
 }
 
@@ -380,7 +447,7 @@ function productFacts(product) {
 /** Recomputes the rule-based score and asks a real AI model for advice; never stores canned text. */
 async function generateAdvice(ctx, id) {
   const workspaceId = ctx.auth.workspaceId;
-  const row = await requireLead(workspaceId, id);
+  const row = await requireLeadFor(ctx, id, 'manage');
   const { score, category } = scoreLead(row);
   await run('UPDATE leads SET ai_score = ?, ai_category = ?, updated_at = UTC_TIMESTAMP() WHERE workspace_id = ? AND id = ?', [score, category, workspaceId, row.id]);
   const product = row.product_id ? await get('SELECT * FROM digital_products WHERE workspace_id = ? AND id = ?', [workspaceId, row.product_id]) : null;
@@ -418,10 +485,15 @@ async function qualifyAll(ctx, { productId } = {}) {
   let filter = '';
   if (productId) {
     await requireWorkspaceProduct(workspaceId, productId);
-    filter = ' AND product_id = ?';
+    filter = ' AND l.product_id = ?';
     params.push(Number(productId));
   }
-  const rows = await all(`SELECT id FROM leads WHERE workspace_id = ?${filter} ORDER BY COALESCE(ai_suggested_at, '1970-01-01') ASC, id DESC LIMIT ${MAX_QUALIFY_BATCH}`, params);
+  // Only leads this person may manage (Owners/Admins: all; others: owned or shared to manage).
+  if (!leadAccess.isLeadAdmin(ctx)) {
+    filter += " AND (l.owner_user_id = ? OR EXISTS (SELECT 1 FROM lead_user_access a WHERE a.lead_id = l.id AND a.user_id = ? AND a.access_level = 'manage'))";
+    params.push(Number(ctx.auth.userId) || 0, Number(ctx.auth.userId) || 0);
+  }
+  const rows = await all(`SELECT l.id FROM leads l WHERE l.workspace_id = ?${filter} ORDER BY COALESCE(l.ai_suggested_at, '1970-01-01') ASC, l.id DESC LIMIT ${MAX_QUALIFY_BATCH}`, params);
   let advised = 0;
   let unavailable = 0;
   for (const r of rows) {
@@ -434,7 +506,7 @@ async function qualifyAll(ctx, { productId } = {}) {
     }
   }
   // Rule-based scores are refreshed for every lead in scope (cheap, no AI).
-  const all_ = await all(`SELECT * FROM leads WHERE workspace_id = ?${filter}`, params);
+  const all_ = await all(`SELECT l.* FROM leads l WHERE l.workspace_id = ?${filter}`, params);
   for (const l of all_) {
     const { score, category } = scoreLead(l);
     await run('UPDATE leads SET ai_score = ?, ai_category = ? WHERE workspace_id = ? AND id = ?', [score, category, workspaceId, l.id]);
@@ -447,7 +519,7 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 
 async function emailDraft(ctx, id) {
   const workspaceId = ctx.auth.workspaceId;
-  const row = await requireLead(workspaceId, id);
+  const row = await requireLeadFor(ctx, id, 'view');
   if (!isValidEmail(row.email)) throw httpError(400, 'This lead has no valid email address. Add one before drafting an email.', 'NO_VALID_EMAIL');
   const product = row.product_id ? presentProduct(await get('SELECT * FROM digital_products WHERE workspace_id = ? AND id = ?', [workspaceId, row.product_id])) : null;
   const firstName = String(row.name).split(/\s+/)[0];
@@ -495,6 +567,8 @@ module.exports = {
   requireWorkspaceProduct,
   listLeads,
   requireLead,
+  requireLeadFor,
+  OWNERSHIP_VIEWS,
   createLead,
   updateLead,
   deleteLead,

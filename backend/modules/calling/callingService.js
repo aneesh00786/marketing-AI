@@ -62,7 +62,7 @@ async function telnyxPost(path, apiKey, body) {
  * A credential that expires by itself (none are left behind on the account) and a token for it.
  * The destination is checked and audited here; only its last digits are stored.
  */
-async function startSession(ctx, { to, name, contactId, transcribe, campaignId, email } = {}) {
+async function startSession(ctx, { to, name, contactId, transcribe, campaignId, email, leadId, followupId } = {}) {
   if (!isConfigured()) throw httpError(503, 'Calling is not set up on this server.', 'CALLING_NOT_CONFIGURED');
   const destination = normalizeNumber(to);
   if (!destination) throw httpError(400, 'Enter the full number with its country code, like +91 98765 43210.', 'INVALID_NUMBER');
@@ -74,6 +74,17 @@ async function startSession(ctx, { to, name, contactId, transcribe, campaignId, 
   if (campaignId !== undefined && campaignId !== null) {
     campaign = await get('SELECT id FROM mail_campaigns WHERE id = ? AND workspace_id = ?', [Number(campaignId) || 0, ctx.auth.workspaceId || 0]);
     if (!campaign) throw httpError(400, 'Choose an existing campaign.', 'INVALID_CAMPAIGN');
+  }
+  // A call from a lead (Leads → Follow-ups): the caller needs Manage access to that lead of their
+  // workspace (lib/leadAccess.js); a scheduled follow-up it is made for must belong to the lead.
+  let lead = null;
+  let followup = null;
+  if (leadId !== undefined && leadId !== null) {
+    lead = await require('../../lib/leadAccess').requireLeadAccess(ctx, leadId, 'manage');
+    if (followupId !== undefined && followupId !== null) {
+      followup = await get('SELECT id FROM lead_followups WHERE id = ? AND workspace_id = ? AND lead_id = ?', [Number(followupId) || 0, ctx.auth.workspaceId, lead.id]);
+      if (!followup) throw httpError(400, 'Choose a follow-up of this lead.', 'INVALID_FOLLOWUP');
+    }
   }
   const followEmail = typeof email === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) && email.trim().length <= 255 ? email.trim() : null;
   const s = settings();
@@ -87,7 +98,8 @@ async function startSession(ctx, { to, name, contactId, transcribe, campaignId, 
   const tokenRes = await telnyxPost(`/telephony_credentials/${encodeURIComponent(credentialId)}/token`, s.apiKey);
   const token = typeof tokenRes === 'string' ? tokenRes : tokenRes?.data?.token || tokenRes?.token;
   if (!token) throw httpError(502, 'Telnyx did not return a call token.', 'TELNYX_BAD_RESPONSE');
-  const callLogId = await logs.createLog(ctx, { phone: destination, name, contactId, transcribe: transcribe === true, campaignId: campaign ? campaign.id : null, email: followEmail });
+  const callLogId = await logs.createLog(ctx, { phone: destination, name, contactId, transcribe: transcribe === true, campaignId: campaign ? campaign.id : null,
+    email: followEmail || (lead && lead.email) || null, leadId: lead ? lead.id : null, leadWorkspaceId: lead ? ctx.auth.workspaceId : null, followupId: followup ? followup.id : null });
   await audit({ auth: { ...ctx.auth, workspaceId: null }, requestId: ctx.requestId, ip: ctx.ip }, 'calling.call_started', {
     resourceType: 'call', resourceId: callLogId, metadata: { numberEnding: destination.slice(-4), transcribe: transcribe === true }
   });

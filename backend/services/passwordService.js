@@ -89,6 +89,11 @@ async function changePassword(auth, currentPassword, newPassword) {
   await authService.signOutEverywhere(user.id);
   await audit({ auth: { userId: user.id, workspaceId: auth.workspaceId } }, 'auth.password_changed', { resourceType: 'user', resourceId: user.id });
   const fresh = await get('SELECT * FROM users WHERE id = ?', [user.id]);
+  // The platform admin viewing another workspace stays in it (a new admin-access session, checked again on every request).
+  if (auth.platformAccess) {
+    const workspace = await get('SELECT * FROM workspaces WHERE id = ?', [auth.workspaceId]);
+    if (workspace) return authService.platformAccessSession(fresh, workspace);
+  }
   try {
     return await authService.sessionFor(fresh, auth.workspaceId);
   } catch (err) {

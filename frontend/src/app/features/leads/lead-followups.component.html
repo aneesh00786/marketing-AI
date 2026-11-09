@@ -1,0 +1,176 @@
+<div class="lf-backdrop" (click)="close.emit()">
+  <section class="lf-card" role="dialog" aria-modal="true" aria-labelledby="lf-title" (click)="$event.stopPropagation()">
+    <header class="lf-head">
+      <div>
+        <h3 id="lf-title">{{ lead.name }}</h3>
+        <small class="lf-muted">{{ lead.companyName || '' }}{{ lead.companyName && (lead.email || lead.phone) ? ' · ' : '' }}{{ lead.email || '' }}{{ lead.email && lead.phone ? ' · ' : '' }}{{ lead.phone || '' }}</small>
+      </div>
+      <button type="button" class="lf-x" (click)="close.emit()" aria-label="Close">✕</button>
+    </header>
+
+    <nav class="lf-tabs" role="tablist">
+      <button role="tab" [class.on]="tab === 'overview'" [attr.aria-selected]="tab === 'overview'" (click)="tab = 'overview'">Overview</button>
+      <button role="tab" [class.on]="tab === 'timeline'" [attr.aria-selected]="tab === 'timeline'" (click)="tab = 'timeline'">Follow-ups &amp; Activities</button>
+      <button role="tab" [class.on]="tab === 'notes'" [attr.aria-selected]="tab === 'notes'" (click)="tab = 'notes'">Notes <span class="lf-count" *ngIf="notes.length">{{ notes.length }}</span></button>
+    </nav>
+
+    <p class="lf-error" *ngIf="error" role="alert">{{ error }} <button type="button" class="lf-link" (click)="error = ''">Dismiss</button></p>
+    <p class="lf-muted" *ngIf="loading">Loading…</p>
+
+    <!-- Summary cards (from the records) -->
+    <div class="lf-cards" *ngIf="summary && tab !== 'notes'">
+      <div class="lf-cardlet"><b>{{ summary.totalCalls }}</b><span>Calls</span></div>
+      <div class="lf-cardlet"><b>{{ summary.totalEmails }}</b><span>Emails sent</span></div>
+      <div class="lf-cardlet ok"><b>{{ summary.completedFollowups }}</b><span>Completed</span></div>
+      <div class="lf-cardlet"><b>{{ summary.pendingFollowups }}</b><span>Pending</span></div>
+      <div class="lf-cardlet bad" [class.zero]="!summary.overdueFollowups"><b>{{ summary.overdueFollowups }}</b><span>Overdue</span></div>
+    </div>
+
+    <!-- ===== Overview ===== -->
+    <ng-container *ngIf="tab === 'overview' && summary">
+      <dl class="lf-facts">
+        <div><dt>Last contacted</dt><dd>{{ summary.lastContacted ? (summary.lastContacted.at | date:'d MMM y, h:mm a') + ' · ' + summary.lastContacted.type : 'Not contacted yet' }}</dd></div>
+        <div><dt>Next follow-up</dt><dd>{{ summary.nextFollowup ? summary.nextFollowup.title + ' · ' + (summary.nextFollowup.dueAt | date:'d MMM y, h:mm a') : 'None scheduled' }}<span class="lf-tag bad" *ngIf="summary.nextFollowup?.status === 'overdue'">overdue</span></dd></div>
+        <div class="wide"><dt>Last call</dt><dd>
+          <ng-container *ngIf="summary.lastCall; else noCall">{{ summary.lastCall.at | date:'d MMM y, h:mm a' }} · {{ duration(summary.lastCall.durationSeconds) }}{{ summary.lastCall.by ? ' · by ' + summary.lastCall.by : '' }}
+            <div class="lf-muted" *ngIf="summary.lastCall.transcriptStart">“{{ summary.lastCall.transcriptStart }}…”</div></ng-container>
+          <ng-template #noCall>No answered calls yet</ng-template></dd></div>
+        <div><dt>Your access</dt><dd>{{ summary.yourAccess === 'view' ? 'View only' : summary.yourAccess === 'manage' ? 'Manage' : summary.yourAccess === 'owner' ? 'Assigned to you' : 'Full (Owner/Admin)' }}</dd></div>
+        <div><dt>Status</dt><dd>{{ lead.status || '—' }}</dd></div>
+      </dl>
+    </ng-container>
+
+    <!-- ===== Follow-ups & Activities ===== -->
+    <ng-container *ngIf="tab === 'timeline'">
+      <!-- Quick actions: ✉ and 📞 are the app's existing Compose and calling -->
+      <div class="lf-actions" *ngIf="canAct">
+        <button type="button" class="btn btn-primary btn-sm" (click)="callLead()" [disabled]="!canCall" [title]="calls.available ? (lead.phone ? 'Call through your phone line' : 'This lead has no phone number') : 'Calling is not available for your account'">📞 Call lead</button>
+        <button type="button" class="btn btn-secondary btn-sm" (click)="emailLead()" [disabled]="!lead.email" [title]="lead.email ? 'Opens Compose' : 'This lead has no email address'">✉ Send email</button>
+        <button type="button" class="btn btn-secondary btn-sm" [class.on]="form === 'followup'" (click)="open('followup')">📅 Schedule follow-up</button>
+        <button type="button" class="btn btn-secondary btn-sm" [class.on]="form === 'note'" (click)="open('note')">📝 Add note</button>
+        <button type="button" class="btn btn-secondary btn-sm" [class.on]="form === 'activity'" (click)="open('activity')">➕ Log activity</button>
+      </div>
+      <p class="lf-muted" *ngIf="!canAct && !loading">You have view-only access: you can see this lead's history but not call, email or change it.</p>
+
+      <!-- Schedule follow-up -->
+      <form class="lf-form" *ngIf="form === 'followup'" (ngSubmit)="saveFollowup()">
+        <label class="wide">Title<input class="hud-input" name="t" [(ngModel)]="fu.title" maxlength="255" placeholder="e.g. Call back about the quote" required /></label>
+        <label>Type<select class="hud-input" name="ty" [(ngModel)]="fu.type"><option *ngFor="let t of followupTypes" [value]="t[0]">{{ t[1] }}</option></select></label>
+        <label>Priority<select class="hud-input" name="p" [(ngModel)]="fu.priority"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></label>
+        <label>Due date<input class="hud-input" type="date" name="d" [(ngModel)]="fu.date" required /></label>
+        <label>Due time<input class="hud-input" type="time" name="tm" [(ngModel)]="fu.time" /></label>
+        <label>Assigned to<select class="hud-input" name="a" [(ngModel)]="fu.assignedUserId"><option [ngValue]="null">Me</option><option *ngFor="let m of members" [ngValue]="m.userId">{{ m.name }} ({{ m.role }})</option></select></label>
+        <label>Reminder<select class="hud-input" name="r" [(ngModel)]="fu.reminderMinutes"><option [ngValue]="null">No reminder</option><option [ngValue]="0">At the due time</option><option [ngValue]="15">15 min before</option><option [ngValue]="30">30 min before</option><option [ngValue]="60">1 hour before</option><option [ngValue]="1440">1 day before</option></select></label>
+        <label class="wide">Description<textarea class="hud-input" name="ds" rows="2" [(ngModel)]="fu.description" maxlength="5000"></textarea></label>
+        <div class="lf-form-actions wide"><button class="btn btn-primary btn-sm" type="submit" [disabled]="busy">Schedule</button><button class="btn btn-secondary btn-sm" type="button" (click)="form = null">Cancel</button></div>
+      </form>
+
+      <!-- Add note -->
+      <form class="lf-form" *ngIf="form === 'note'" (ngSubmit)="saveNote()">
+        <label>Kind of note<select class="hud-input" name="c" [(ngModel)]="note.category"><option *ngFor="let c of noteCategories" [value]="c[0]">{{ c[1] }}</option></select></label>
+        <label class="wide">Note<textarea class="hud-input" name="n" rows="3" [(ngModel)]="note.text" maxlength="10000" required></textarea></label>
+        <div class="lf-form-actions wide"><button class="btn btn-primary btn-sm" type="submit" [disabled]="busy || !note.text.trim()">Add note</button><button class="btn btn-secondary btn-sm" type="button" (click)="form = null">Cancel</button></div>
+      </form>
+
+      <!-- Log activity -->
+      <form class="lf-form" *ngIf="form === 'activity'" (ngSubmit)="saveActivity()">
+        <label>Type<select class="hud-input" name="ty" [(ngModel)]="act.type"><option *ngFor="let t of activityTypes" [value]="t[0]">{{ t[1] }}</option></select></label>
+        <label>Date<input class="hud-input" type="date" name="d" [(ngModel)]="act.date" /></label>
+        <label>Time<input class="hud-input" type="time" name="tm" [(ngModel)]="act.time" /></label>
+        <label>Duration (min)<input class="hud-input" type="number" min="0" name="du" [(ngModel)]="act.durationMinutes" /></label>
+        <label class="wide">Title<input class="hud-input" name="t" [(ngModel)]="act.title" maxlength="255" placeholder="e.g. Product demo" /></label>
+        <label class="wide">What happened<textarea class="hud-input" name="ds" rows="2" [(ngModel)]="act.description" maxlength="10000"></textarea></label>
+        <label>Next follow-up (optional)<input class="hud-input" type="date" name="nx" [(ngModel)]="act.nextDate" /></label>
+        <div class="lf-form-actions wide"><button class="btn btn-primary btn-sm" type="submit" [disabled]="busy">Log activity</button><button class="btn btn-secondary btn-sm" type="button" (click)="form = null">Cancel</button></div>
+      </form>
+
+      <!-- Pending and overdue follow-ups, prominently -->
+      <section class="lf-pending" *ngIf="pendingFollowups.length">
+        <h4>Upcoming follow-ups</h4>
+        <div class="lf-fu" *ngFor="let f of pendingFollowups" [class.overdue]="f.status === 'overdue'">
+          <span class="lf-ico">📅</span>
+          <div class="lf-fu-main">
+            <b>{{ f.title }}</b> <span class="lf-tag" [class.bad]="f.status === 'overdue'">{{ f.status === 'overdue' ? 'Overdue' : 'Pending' }}</span> <span class="lf-tag" [class.warn]="f.priority === 'high'">{{ f.priority }}</span>
+            <div class="lf-muted">{{ typeName(f.type) }} · due {{ f.dueAt | date:'d MMM y, h:mm a' }}{{ f.assignedTo ? ' · ' + f.assignedTo : '' }}</div>
+            <div *ngIf="f.description" class="lf-desc">{{ f.description }}</div>
+            <div class="lf-row" *ngIf="editing?.id === f.id && editing?.kind === 'followup'">
+              <input class="hud-input" type="datetime-local" [(ngModel)]="editing!.dueAt" aria-label="New due date" />
+              <button class="btn btn-primary btn-sm" type="button" (click)="saveReschedule()" [disabled]="busy">Save</button>
+              <button class="btn btn-secondary btn-sm" type="button" (click)="editing = null">Cancel</button>
+            </div>
+          </div>
+          <div class="lf-fu-actions" *ngIf="canAct">
+            <button *ngIf="f.type === 'call' && canCall" class="btn btn-primary btn-sm" type="button" (click)="callLead(f.id)" title="The call is linked to this follow-up and completes it when answered">📞 Call</button>
+            <button class="btn btn-secondary btn-sm" type="button" (click)="completeFollowup(f)">✓ Complete</button>
+            <button class="btn btn-secondary btn-sm" type="button" (click)="startReschedule(f)">Reschedule</button>
+            <select class="hud-input sm" *ngIf="members.length" [ngModel]="f.assignedUserId || ''" (ngModelChange)="reassign(f, $event)" aria-label="Assigned to">
+              <option value="">Unassigned</option><option *ngFor="let m of members" [value]="m.userId">{{ m.name }}</option>
+            </select>
+            <button class="btn btn-secondary btn-sm" type="button" (click)="cancelFollowup(f)">Cancel</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Timeline -->
+      <div class="lf-filters">
+        <select class="hud-input" [(ngModel)]="filter.types" (ngModelChange)="loadTimeline()" aria-label="Show"><option *ngFor="let f of filters" [value]="f[0]">{{ f[1] }}</option></select>
+        <label>From <input class="hud-input" type="date" [(ngModel)]="filter.from" (change)="loadTimeline()" /></label>
+        <label>To <input class="hud-input" type="date" [(ngModel)]="filter.to" (change)="loadTimeline()" /></label>
+        <button class="lf-link" type="button" (click)="reload()">↻ Refresh</button>
+      </div>
+      <p class="lf-muted" *ngIf="!loading && !items.length">Nothing yet. Calls, emails, follow-ups and notes for this lead appear here.</p>
+      <ol class="lf-timeline">
+        <li *ngFor="let i of items" class="lf-item" [attr.data-kind]="i.kind">
+          <span class="lf-ico">{{ icon(i) }}</span>
+          <div class="lf-item-main">
+            <div class="lf-item-head">
+              <b>{{ label(i) }}</b>
+              <span class="lf-tag" *ngIf="i.status" [class.bad]="['overdue', 'missed', 'failed', 'bounced'].includes(i.status)" [class.ok]="['completed', 'delivered', 'sent'].includes(i.status)">{{ i.status }}</span>
+              <small class="lf-muted">{{ i.at | date:'d MMM y, h:mm a' }}{{ i.by || i.callerName || i.createdBy ? ' · ' + (i.by || i.callerName || i.createdBy) : '' }}</small>
+            </div>
+            <div *ngIf="i.title && i.kind !== 'followup'" class="lf-title">{{ i.title }}</div>
+            <div *ngIf="i.kind === 'followup'" class="lf-title">{{ i.title }}<span class="lf-muted"> · due {{ i.dueAt | date:'d MMM, h:mm a' }}{{ i.assignedTo ? ' · ' + i.assignedTo : '' }}</span></div>
+            <div *ngIf="i.description" class="lf-desc">{{ i.description }}</div>
+            <div *ngIf="i.completionNotes" class="lf-desc">✓ {{ i.completionNotes }}</div>
+            <div *ngIf="i.durationMinutes" class="lf-muted">{{ i.durationMinutes }} min</div>
+            <div *ngIf="i.nextFollowupAt" class="lf-muted">Next follow-up {{ i.nextFollowupAt | date:'d MMM y' }}</div>
+            <div *ngIf="i.kind === 'email'" class="lf-desc">{{ i.summary || '(no text)' }}</div>
+
+            <!-- Call: duration and the transcript (when "Transcribe this call" was ticked) -->
+            <ng-container *ngIf="i.kind === 'call'">
+              <div class="lf-muted">{{ i.answered ? duration(i.durationSeconds) : 'Not answered' }}{{ i.followupId ? ' · for a scheduled follow-up' : '' }}{{ i.campaignId ? ' · from a campaign' : '' }}</div>
+              <details class="lf-transcript" *ngIf="i.conversation?.length; else noText">
+                <summary>View transcript</summary>
+                <div class="lf-row"><input class="hud-input" type="search" [(ngModel)]="transcriptSearch[i.id]" placeholder="Search the transcript" aria-label="Search the transcript" />
+                  <button class="btn btn-secondary btn-sm" type="button" (click)="copyTranscript(i)">Copy</button>
+                  <button class="btn btn-secondary btn-sm" type="button" (click)="downloadTranscript(i)">Download</button></div>
+                <p *ngFor="let l of shownLines(i)" [class.them]="l.speaker !== 'agent'"><small class="lf-muted">{{ l.start * 1000 | date:'mm:ss':'UTC' }}</small> <b>{{ l.speaker === 'agent' ? (i.callerName || 'Agent') : (lead.name || 'Customer') }}:</b> {{ l.text }}</p>
+              </details>
+              <ng-template #noText><div class="lf-muted" *ngIf="i.answered">{{ transcriptNote(i) }}</div></ng-template>
+            </ng-container>
+          </div>
+          <div class="lf-item-actions" *ngIf="canAct && (i.kind === 'activity' || i.kind === 'note')">
+            <button class="lf-link" type="button" *ngIf="i.type === 'note'" (click)="editNote(i); tab = 'notes'">Edit</button>
+            <button class="lf-link" type="button" (click)="deleteItem(i)">Delete</button>
+          </div>
+        </li>
+      </ol>
+      <p class="lf-note">Calls use your phone line (📞); a transcript is kept only when "Transcribe this call" was ticked after telling the person. Audio is not stored. Emails are this lead's sent and received mail.</p>
+    </ng-container>
+
+    <!-- ===== Notes ===== -->
+    <ng-container *ngIf="tab === 'notes'">
+      <div class="lf-actions" *ngIf="canAct"><button type="button" class="btn btn-primary btn-sm" (click)="tab = 'timeline'; open('note')">📝 Add note</button></div>
+      <p class="lf-muted" *ngIf="!notes.length">No notes yet.</p>
+      <div class="lf-note-card" *ngFor="let n of notes">
+        <div class="lf-item-head"><b>{{ n.noteCategory ? noteName(n.noteCategory) : 'Note' }}</b><small class="lf-muted">{{ n.at | date:'d MMM y, h:mm a' }}{{ n.by ? ' · ' + n.by : '' }}{{ n.updatedAt && n.updatedAt !== n.createdAt ? ' · edited' : '' }}</small></div>
+        <ng-container *ngIf="editing?.id === n.id && editing?.kind === 'note'; else showNote">
+          <textarea class="hud-input" rows="3" [(ngModel)]="editing!.text" aria-label="Edit note"></textarea>
+          <div class="lf-row"><button class="btn btn-primary btn-sm" type="button" (click)="saveNoteEdit()" [disabled]="busy">Save</button><button class="btn btn-secondary btn-sm" type="button" (click)="editing = null">Cancel</button></div>
+        </ng-container>
+        <ng-template #showNote><p class="lf-desc">{{ n.description }}</p>
+          <div class="lf-row" *ngIf="canAct"><button class="lf-link" type="button" (click)="editNote(n)">Edit</button><button class="lf-link" type="button" (click)="deleteItem(n)">Delete</button></div></ng-template>
+      </div>
+    </ng-container>
+  </section>
+</div>

@@ -79,7 +79,8 @@
 .zl-range { margin: 0; }
 
 /* Add a contact manually */
-.zl-manual { display: grid; grid-template-columns: 1fr 1fr 1.3fr 1fr auto; gap: 6px; }
+.zl-manual { display: grid; grid-template-columns: 1fr 1fr 1.3fr 1.6fr auto; gap: 6px; align-items: start; }
+@media (max-width: 760px) { .zl-manual { grid-template-columns: 1fr; } }
 .zl-manual input { min-width: 0; }
 .zl-manual-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: 8px; max-height: 180px; overflow: auto; }
 .zl-manual-list li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 10px; border-top: 1px solid var(--border); }

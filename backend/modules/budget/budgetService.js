@@ -299,7 +299,7 @@ async function addRevenue(ctx, id, input) {
   }).strict().parse(input);
   if (v.currency !== b.currency) throw httpError(`Revenue must be in the budget currency (${b.currency}); there is no currency conversion.`, 400, 'CURRENCY_MISMATCH');
   if (v.date > todayUtc()) throw httpError('Recorded revenue cannot be in the future.', 400, 'FUTURE_REVENUE');
-  if (v.leadId && !(await get('SELECT id FROM leads WHERE id = ? AND workspace_id = ?', [v.leadId, ws(ctx)]))) throw httpError('Lead not found in this workspace.', 404, 'NOT_FOUND');
+  if (v.leadId && !(await require('../../lib/leadAccess').allowedLeadIds(ctx, [v.leadId])).length) throw httpError('Lead not found in this workspace.', 404, 'NOT_FOUND');
   const r = await run(
     'INSERT INTO budget_revenue_entries (workspace_id, budget_id, lead_id, amount, currency, received_date, description, evidence_ref, entered_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())',
     [ws(ctx), b.id, v.leadId || null, money(v.amount), v.currency, v.date, v.description, v.evidenceRef || null, ctx.auth.userId || null]

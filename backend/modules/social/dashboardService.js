@@ -1,4 +1,7 @@
 const { all, get } = require('../../db/database');
+const leadAccess = require('../../lib/leadAccess');
+/** Every lead (system use); a person's dashboard passes their own visibility (lib/leadAccess.js). */
+const ALL_LEADS = { sql: '1 = 1', params: [] };
 const { toDbDateTime } = require('../../lib/time');
 const analyticsService = require('./analyticsService');
 const accountService = require('./accountService');
@@ -50,7 +53,7 @@ function postEngagements(post) {
 }
 
 /** KPI block for one period, built from the analytics summary and leads. */
-async function periodKpis(workspaceId, start, end) {
+async function periodKpis(workspaceId, start, end, vis = ALL_LEADS) {
   const summary = await analyticsService.getSummary(workspaceId, { from: start.toISOString(), to: end.toISOString() });
   const posts = summary.posts;
   const reach = summary.totals.reach;
@@ -63,10 +66,10 @@ async function periodKpis(workspaceId, start, end) {
     ? rated.reduce((a, p) => a + postEngagements(p), 0) / rated.reduce((a, p) => a + p.metrics.reach.value, 0)
     : null;
 
-  const leads = await get('SELECT COUNT(*) AS c FROM leads WHERE workspace_id = ? AND created_at >= ? AND created_at < ?', [workspaceId, toDbDateTime(start), toDbDateTime(end)]);
+  const leads = await get(`SELECT COUNT(*) AS c FROM leads l WHERE l.workspace_id = ? AND ${vis.sql} AND l.created_at >= ? AND l.created_at < ?`, [workspaceId, ...vis.params, toDbDateTime(start), toDbDateTime(end)]);
   const socialLeads = await get(
-    "SELECT COUNT(*) AS c FROM leads WHERE workspace_id = ? AND created_at >= ? AND created_at < ? AND product_interest LIKE 'Social (%'",
-    [workspaceId, toDbDateTime(start), toDbDateTime(end)]
+    `SELECT COUNT(*) AS c FROM leads l WHERE l.workspace_id = ? AND ${vis.sql} AND l.created_at >= ? AND l.created_at < ? AND l.product_interest LIKE 'Social (%'`,
+    [workspaceId, ...vis.params, toDbDateTime(start), toDbDateTime(end)]
   );
   return {
     summary,
@@ -89,15 +92,17 @@ function compare(current, previous, hasPreviousData) {
   return { delta: Number((current - previous).toFixed(2)), pct: Number((((current - previous) / previous) * 100).toFixed(1)) };
 }
 
-async function getDashboard(workspaceId, query = {}) {
+async function getDashboard(workspaceId, query = {}, ctx = null) {
+  // Lead numbers count only the leads this person may see.
+  const vis = ctx ? leadAccess.visibleSql(ctx, 'l') : ALL_LEADS;
   const settings = await settingsService.getSettings(workspaceId);
   const tz = settings.timezone || 'UTC';
   const { start, end, prevStart, prevEnd } = resolveRange(query);
 
-  const [current, previous] = await Promise.all([periodKpis(workspaceId, start, end), periodKpis(workspaceId, prevStart, prevEnd)]);
+  const [current, previous] = await Promise.all([periodKpis(workspaceId, start, end, vis), periodKpis(workspaceId, prevStart, prevEnd, vis)]);
   const posts = current.summary.posts;
   const prevHasPosts = previous.summary.publishedCount > 0;
-  const prevLeadsExist = !!(await get('SELECT id FROM leads WHERE workspace_id = ? AND created_at < ? LIMIT 1', [workspaceId, toDbDateTime(prevEnd)]));
+  const prevLeadsExist = !!(await get(`SELECT l.id FROM leads l WHERE l.workspace_id = ? AND ${vis.sql} AND l.created_at < ? LIMIT 1`, [workspaceId, ...vis.params, toDbDateTime(prevEnd)]));
 
   // Campaign counts are not time-bound: they describe the current portfolio.
   const campaignRows = await all(
@@ -134,7 +139,7 @@ async function getDashboard(workspaceId, query = {}) {
     byDay[k].engagements.push(postEngagements(post));
     byDay[k].clicks.push(post.metrics.clicks.value);
   }
-  const leadRows = await all('SELECT created_at FROM leads WHERE workspace_id = ? AND created_at >= ? AND created_at < ?', [workspaceId, toDbDateTime(start), toDbDateTime(end)]);
+  const leadRows = await all(`SELECT l.created_at FROM leads l WHERE l.workspace_id = ? AND ${vis.sql} AND l.created_at >= ? AND l.created_at < ?`, [workspaceId, ...vis.params, toDbDateTime(start), toDbDateTime(end)]);
   const leadsByDay = {};
   for (const r of leadRows) {
     const k = dayKey(r.created_at, tz);

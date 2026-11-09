@@ -31,7 +31,19 @@ export const COUNTRY_CODES: { name: string; code: string }[] = [
   ['Vanuatu', '678'], ['Vatican City', '379'], ['Venezuela', '58'], ['Vietnam', '84'], ['Yemen', '967'], ['Zambia', '260'], ['Zimbabwe', '263']
 ].map(([name, code]) => ({ name, code }));
 
-const DEFAULT_CODE = '91';
+/** No country is assumed: the person entering a number chooses its code (or types it, e.g. +61 …). */
+const DEFAULT_CODE = '';
+
+export const PHONE_MESSAGE = 'Enter the phone number with its country code, like +61 412 345 678.';
+
+/** '' when the value is empty or a complete international number (+ code, 7–15 digits); otherwise why not. */
+export function phoneProblem(value: string | null | undefined): string {
+  const v = String(value ?? '').trim();
+  if (!v) return '';
+  if (!/^\+[1-9][\d\s().-]*$/.test(v)) return PHONE_MESSAGE;
+  const digits = v.replace(/\D/g, '').length;
+  return digits < 7 || digits > 15 ? 'Enter a complete phone number with its country code.' : '';
+}
 
 /** Splits a saved number into its dial code and the rest. The longest matching code wins (+1868 before +1). */
 export function splitPhone(value: string | null | undefined): { code: string; number: string } {
@@ -50,19 +62,21 @@ export function splitPhone(value: string | null | undefined): { code: string; nu
   standalone: true,
   imports: [CommonModule, FormsModule],
   template: `
-    <fieldset class="cp">
-      <legend>{{ label }}</legend>
+    <fieldset class="cp" [class.cp-bad]="showProblem">
+      <legend *ngIf="label">{{ label }}</legend>
       <div class="cp-row">
         <div class="cp-code">
           <!-- Closed, the box shows the code; open, the list shows countries, and typing a name finds one. -->
-          <select class="hud-input" [ngModel]="code" (ngModelChange)="code = $event; emit()" [ngModelOptions]="{ standalone: true }" [attr.aria-label]="label + ' country code'">
+          <select class="hud-input" [ngModel]="code" (ngModelChange)="code = $event; emit()" [ngModelOptions]="{ standalone: true }" [attr.aria-label]="(label || 'Phone') + ' country code'">
+            <option value="" disabled>Choose the country code</option>
             <option *ngFor="let c of countries; trackBy: trackCountry" [value]="c.code">{{ c.name }} (+{{ c.code }})</option>
           </select>
-          <span class="cp-shown" aria-hidden="true">+{{ code }}</span>
+          <span class="cp-shown" [class.cp-none]="!code" aria-hidden="true">{{ code ? '+' + code : 'Code' }}</span>
           <svg class="cp-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
         </div>
-        <input class="hud-input" type="tel" inputmode="tel" maxlength="30" [ngModel]="number" (ngModelChange)="number = $event; emit()" [ngModelOptions]="{ standalone: true }" placeholder="Mobile number" [attr.aria-label]="label + ' number'" />
+        <input class="hud-input" type="tel" inputmode="tel" maxlength="30" [ngModel]="number" (ngModelChange)="number = $event; emit()" [ngModelOptions]="{ standalone: true }" [placeholder]="placeholder" [attr.aria-label]="(label || 'Phone') + ' number'" />
       </div>
+      <small class="cp-msg" *ngIf="showProblem" role="alert">{{ number && !code ? 'Choose the country code for this number (or type it, like +61 412 345 678).' : problem }}</small>
     </fieldset>
   `,
   styleUrls: ['../command/command-center.component.css'],
@@ -75,12 +89,16 @@ export function splitPhone(value: string | null | undefined): { code: string; nu
     .cp-code select { color: transparent; }
     .cp-code select option { color: var(--text); background: var(--surface); }
     .cp-arrow { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); pointer-events: none; color: var(--text); }
+    .cp-none { color: var(--text-muted) !important; }
+    .cp-bad .hud-input { border-color: var(--danger-text, #b91c1c); }
+    .cp-msg { display: block; margin-top: 4px; color: var(--danger-text, #b91c1c); font-size: 0.78rem; }
     .cp-shown { position: absolute; left: 13px; top: 50%; transform: translateY(-50%); pointer-events: none; color: var(--text); font-size: 0.9rem; font-variant-numeric: tabular-nums; }
   `]
 })
 export class CrmPhoneInputComponent implements OnChanges {
   @Input() value: string | null = '';
   @Input() label = 'Phone';
+  @Input() placeholder = 'Phone number';
   @Output() valueChange = new EventEmitter<string>();
 
   readonly countries = COUNTRY_CODES;
@@ -97,9 +115,19 @@ export class CrmPhoneInputComponent implements OnChanges {
 
   trackCountry(_: number, c: { name: string }): string { return c.name; }
 
+  /** The value as it will be saved; why it cannot be saved yet ('' when fine). */
+  get problem(): string { return phoneProblem(this.emitted ?? ''); }
+  get showProblem(): boolean { return !!this.number.trim() && !!this.problem; }
+
   emit(): void {
-    const number = this.number.trim();
-    this.emitted = number ? `+${this.code} ${number}` : '';
+    let number = this.number.trim();
+    // Typed with its code ("+61 412…", "0061 412…"): the code moves to the picker.
+    if (/^(\+|00)[1-9]/.test(number)) {
+      const parts = splitPhone('+' + number.replace(/^(\+|00)/, ''));
+      if (parts.code) { this.code = parts.code; number = parts.number; this.number = number; }
+    }
+    // Without a code the number is passed on as typed, so the form sees it is not complete.
+    this.emitted = number ? (this.code ? `+${this.code} ${number}` : number) : '';
     this.valueChange.emit(this.emitted);
   }
 }

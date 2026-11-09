@@ -51,12 +51,12 @@ function conversation(r) {
   return [...side('agent', 'agent_segments'), ...side('customer', 'customer_segments')].sort((a, b) => a.start - b.start);
 }
 
-async function createLog(ctx, { phone, name, contactId, transcribe, campaignId = null, email = null }) {
+async function createLog(ctx, { phone, name, contactId, transcribe, campaignId = null, email = null, leadId = null, leadWorkspaceId = null, followupId = null }) {
   const ins = await run(
-    `INSERT INTO crm_call_logs (user_id, contact_id, phone, name, transcribe, transcript_status, campaign_id, email, started_at)
-     VALUES (?, ?, ?, ?, ?, 'none', ?, ?, UTC_TIMESTAMP())`,
+    `INSERT INTO crm_call_logs (user_id, contact_id, phone, name, transcribe, transcript_status, campaign_id, email, lead_id, lead_workspace_id, followup_id, started_at)
+     VALUES (?, ?, ?, ?, ?, 'none', ?, ?, ?, ?, ?, UTC_TIMESTAMP())`,
     [ctx.auth.userId, contactId ?? null, phone, name ? String(name).slice(0, 255) : null, transcribe ? 1 : 0,
-      campaignId || null, email ? String(email).trim().toLowerCase().slice(0, 255) : null]
+      campaignId || null, email ? String(email).trim().toLowerCase().slice(0, 255) : null, leadId || null, leadWorkspaceId || null, followupId || null]
   );
   return ins.lastID;
 }
@@ -73,7 +73,11 @@ async function endLog(ctx, rawId, input) {
   const row = await requireOwnLog(ctx, rawId);
   const wanted = row.transcribe && v.answered;
   const status = !wanted ? 'none' : v.audioCaptured === false ? 'failed' : 'pending';
-  await run('UPDATE crm_call_logs SET duration_seconds = ?, answered = ?, transcript_status = ?, ended_at = UTC_TIMESTAMP() WHERE id = ? AND ended_at IS NULL', [v.durationSeconds, v.answered ? 1 : 0, status, row.id]);
+  const ended = await run('UPDATE crm_call_logs SET duration_seconds = ?, answered = ?, transcript_status = ?, ended_at = UTC_TIMESTAMP() WHERE id = ? AND ended_at IS NULL', [v.durationSeconds, v.answered ? 1 : 0, status, row.id]);
+  // A call made for a scheduled lead follow-up is linked to it (and completes it when answered).
+  if (ended.changes && row.lead_id && row.followup_id) {
+    await require('../leads/followups/activityService').linkCallToFollowup(row.lead_workspace_id, row.lead_id, row.followup_id, row.id, v.answered, row.user_id);
+  }
   return { status };
 }
 

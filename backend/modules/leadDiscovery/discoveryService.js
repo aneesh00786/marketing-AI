@@ -722,10 +722,14 @@ async function importSelected(ctx, runIdRaw, input) {
         product_interest: product.name
       };
       const { score, category } = leadService.scoreLead(lead);
+      // The person importing from the search owns the new lead (lib/leadAccess.js).
+      const own = require('../../lib/leadAccess').newLeadOwnership(ctx, 'discovery');
       const ins = await tx.run(
-        `INSERT INTO leads (workspace_id, name, email, phone, company_name, country, address, estimated_budget, notes, status, product_id, product_interest, product_review_note, ai_score, ai_category, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, 'Imported', ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
-        [workspaceId, lead.name, lead.email, lead.phone, lead.company_name, places.countryName(d?.countryCode) || places.countryName(r.country_code), d?.address ? String(d.address).slice(0, 500) : null, lead.notes, product.id, lead.product_interest, null, score, category]
+        `INSERT INTO leads (workspace_id, name, email, phone, company_name, country, address, estimated_budget, notes, status, product_id, product_interest, product_review_note, ai_score, ai_category,
+           created_by_user_id, owner_user_id, lead_source, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, 'Imported', ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+        [workspaceId, lead.name, lead.email, lead.phone, lead.company_name, places.countryName(d?.countryCode) || places.countryName(r.country_code), d?.address ? String(d.address).slice(0, 500) : null, lead.notes, product.id, lead.product_interest, null, score, category,
+          own.created_by_user_id, own.owner_user_id, own.lead_source]
       );
       await tx.run('INSERT INTO lead_place_refs (workspace_id, lead_id, place_id, run_id, created_at) VALUES (?, ?, ?, ?, UTC_TIMESTAMP())', [workspaceId, ins.lastID, placeId, runId]);
       await tx.run('UPDATE lead_discovery_places SET imported_lead_id = ? WHERE id = ?', [ins.lastID, p.id]);
@@ -744,7 +748,7 @@ async function importSelected(ctx, runIdRaw, input) {
 // ---------------------------------------------------------------- live details for an imported lead
 async function liveDetails(ctx, leadIdRaw) {
   const workspaceId = ws(ctx);
-  const lead = await leadService.requireLead(workspaceId, leadIdRaw);
+  const lead = await leadService.requireLeadFor(ctx, leadIdRaw, 'view');
   const ref = await get('SELECT place_id FROM lead_place_refs WHERE workspace_id = ? AND lead_id = ?', [workspaceId, lead.id]);
   if (!ref) throw httpError(404, 'This lead was not found through Google Places.', 'NO_PLACE_REFERENCE');
   const usedToday = Number((await get("SELECT COUNT(*) AS n FROM usage_ledger WHERE workspace_id = ? AND category = 'places_details' AND created_at >= UTC_DATE()", [workspaceId])).n);

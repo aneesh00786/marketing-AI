@@ -86,8 +86,8 @@ async function handleCallDialogue(speechResult, callerNumber = '', workspaceId =
 
   // Auto-record lead into CRM
   await run(
-    `INSERT INTO leads (workspace_id, name, phone, product_interest, status, notes, created_at)
-     VALUES (?, 'Inbound Phone Caller', ?, ?, 'New', ?, ?)`,
+    `INSERT INTO leads (workspace_id, name, phone, product_interest, status, notes, lead_source, created_at)
+     VALUES (?, 'Inbound Phone Caller', ?, ?, 'New', ?, 'phone', ?)`,
     [workspaceId, callerNumber || '+1 (555) 019-2831', analysis.detectedProduct, `Telnyx Voice Query: "${speechResult}"`, now]
   );
 
@@ -118,8 +118,8 @@ async function simulateTelnyxCall(callerSpeech, callerPhone = '+1 (555) 948-2041
 
   // 1. Insert Lead into CRM
   const leadRes = await run(
-    `INSERT INTO leads (workspace_id, name, phone, product_interest, status, notes, created_at)
-     VALUES (?, ?, ?, ?, 'Qualified', ?, ?)`,
+    `INSERT INTO leads (workspace_id, name, phone, product_interest, status, notes, lead_source, created_at)
+     VALUES (?, ?, ?, ?, 'Qualified', ?, 'phone', ?)`,
     [workspaceId, callerName, callerPhone, analysis.detectedProduct, `Simulated Call Query: "${callerSpeech}"`, now]
   );
   const leadId = leadRes.lastID;

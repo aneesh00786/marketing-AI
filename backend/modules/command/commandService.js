@@ -220,9 +220,10 @@ async function productFacts(ctx, productId) {
 
 /** Real CRM numbers for the brief: counts only, no personal data. */
 async function crmSnapshot(ctx, productId) {
-  const byStatus = await all('SELECT status, COUNT(*) AS n FROM leads WHERE workspace_id = ? GROUP BY status', [ws(ctx)]);
-  const withEmail = await get("SELECT COUNT(*) AS n FROM leads WHERE workspace_id = ? AND email IS NOT NULL AND email <> ''", [ws(ctx)]);
-  const forProduct = productId ? await get('SELECT COUNT(*) AS n FROM leads WHERE workspace_id = ? AND product_id = ?', [ws(ctx), productId]) : null;
+  const vis = require('../../lib/leadAccess').visibleSql(ctx, 'l');
+  const byStatus = await all(`SELECT l.status, COUNT(*) AS n FROM leads l WHERE l.workspace_id = ? AND ${vis.sql} GROUP BY l.status`, [ws(ctx), ...vis.params]);
+  const withEmail = await get(`SELECT COUNT(*) AS n FROM leads l WHERE l.workspace_id = ? AND ${vis.sql} AND l.email IS NOT NULL AND l.email <> ''`, [ws(ctx), ...vis.params]);
+  const forProduct = productId ? await get(`SELECT COUNT(*) AS n FROM leads l WHERE l.workspace_id = ? AND ${vis.sql} AND l.product_id = ?`, [ws(ctx), ...vis.params, productId]) : null;
   return {
     total_leads: byStatus.reduce((a, r) => a + Number(r.n), 0),
     leads_with_email: Number(withEmail.n),
@@ -315,7 +316,8 @@ async function previewAudience(ctx, id, input = {}) {
   const filter = input.filter || {};
   const audience = await outreach.resolveAudience(ctx, { filter: { ...filter, productId: filter.productId === undefined ? (p.product_id || undefined) : filter.productId || undefined } });
   const ids = audience.map(a => a.leadId);
-  const rows = ids.length ? await all(`SELECT * FROM leads WHERE workspace_id = ? AND id IN (${ids.map(() => '?').join(',')})`, [ws(ctx), ...ids]) : [];
+  const okIds = await require('../../lib/leadAccess').allowedLeadIds(ctx, ids);
+  const rows = okIds.length ? await all(`SELECT * FROM leads WHERE workspace_id = ? AND id IN (${okIds.map(() => '?').join(',')})`, [ws(ctx), ...okIds]) : [];
   const byId = Object.fromEntries(rows.map(r => [r.id, r]));
   const productName = p.product_id ? (await get('SELECT name FROM digital_products WHERE workspace_id = ? AND id = ?', [ws(ctx), p.product_id]))?.name : null;
   const filterProductId = filter.productId === undefined ? p.product_id : filter.productId;

@@ -1,4 +1,6 @@
 const { z } = require('zod');
+const leadAccess = require('../../lib/leadAccess');
+const ALL_LEADS = { sql: '1 = 1', params: [] };
 const { get, all } = require('../../db/database');
 const { toDbDateTime } = require('../../lib/time');
 const { twoProportionTest } = require('../../lib/abStats');
@@ -208,11 +210,11 @@ async function socialAnalytics(workspaceId, start, end) {
 // ---------------------------------------------------------------------------
 // CRM outcomes and attribution
 // ---------------------------------------------------------------------------
-async function crmAnalytics(workspaceId, start, end, conversionStatus) {
+async function crmAnalytics(workspaceId, start, end, conversionStatus, vis = ALL_LEADS) {
   const s = toDbDateTime(start);
   const e = toDbDateTime(end);
-  const created = await get('SELECT COUNT(*) AS n FROM leads WHERE workspace_id = ? AND created_at >= ? AND created_at <= ?', [workspaceId, s, e]);
-  const byStatus = await all('SELECT status, COUNT(*) AS n FROM leads WHERE workspace_id = ? GROUP BY status', [workspaceId]);
+  const created = await get(`SELECT COUNT(*) AS n FROM leads l WHERE l.workspace_id = ? AND ${vis.sql} AND l.created_at >= ? AND l.created_at <= ?`, [workspaceId, ...vis.params, s, e]);
+  const byStatus = await all(`SELECT l.status, COUNT(*) AS n FROM leads l WHERE l.workspace_id = ? AND ${vis.sql} GROUP BY l.status`, [workspaceId, ...vis.params]);
   const hasEvents = await tableExists('automation_events');
   let conversions = null;
   let historyFrom = null;
@@ -276,7 +278,7 @@ async function attribution(workspaceId, conversionRows, lookbackDays, conversion
 // ---------------------------------------------------------------------------
 // Trends (daily)
 // ---------------------------------------------------------------------------
-async function trends(workspaceId, start, end, tracking, social, crm) {
+async function trends(workspaceId, start, end, tracking, social, crm, vis = ALL_LEADS) {
   const days = dayList(start, end);
   const s = toDbDateTime(start);
   const e = toDbDateTime(end);
@@ -293,7 +295,7 @@ async function trends(workspaceId, start, end, tracking, social, crm) {
     }
   }
   const leads = zero();
-  for (const r of await all('SELECT DATE(created_at) AS d, COUNT(*) AS n FROM leads WHERE workspace_id = ? AND created_at >= ? AND created_at <= ? GROUP BY DATE(created_at)', [workspaceId, s, e])) {
+  for (const r of await all(`SELECT DATE(l.created_at) AS d, COUNT(*) AS n FROM leads l WHERE l.workspace_id = ? AND ${vis.sql} AND l.created_at >= ? AND l.created_at <= ? GROUP BY DATE(l.created_at)`, [workspaceId, ...vis.params, s, e])) {
     const k = dayOf(r.d); if (k in leads) leads[k] = Number(r.n);
   }
   const posts = zero();
@@ -417,11 +419,11 @@ async function overview(ctx, query = {}) {
   const conversionStatus = q.conversionStatus || 'Won';
   const lookbackDays = Math.min(Math.max(parseInt(q.lookbackDays || '30', 10), 1), 180);
   const tracking = await replyTracking(workspaceId);
-  const [email, social, crm] = [await emailAnalytics(workspaceId, start, end, tracking), await socialAnalytics(workspaceId, start, end), await crmAnalytics(workspaceId, start, end, conversionStatus)];
+  const [email, social, crm] = [await emailAnalytics(workspaceId, start, end, tracking), await socialAnalytics(workspaceId, start, end), await crmAnalytics(workspaceId, start, end, conversionStatus, leadAccess.visibleSql(ctx, 'l'))];
   const attr = await attribution(workspaceId, crm.conversionRows, lookbackDays, conversionStatus);
   for (const c of email.campaigns) c.attributedConversions = attr.email[c.id] || { value: 0, status: 'estimate', method: attr.method };
   const progs = await programs(workspaceId, email, social, attr);
-  const trend = await trends(workspaceId, start, end, tracking, social, crm);
+  const trend = await trends(workspaceId, start, end, tracking, social, crm, leadAccess.visibleSql(ctx, 'l'));
   const strip = c => { const { raw, ...rest } = c; return rest; };
   return {
     range: { from: start.toISOString(), to: end.toISOString() },

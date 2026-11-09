@@ -38,6 +38,8 @@ export class CallService {
   contactId: number | null = null;
   /** A follow-up from a campaign's results: the call is kept with that campaign and person. */
   followUp: { campaignId: number; email: string } | null = null;
+  /** A call from a lead (Leads → Follow-ups): kept with that lead and, if any, the follow-up it is for. */
+  lead: { leadId: number; followupId?: number | null } | null = null;
   transcriptState: '' | 'saving' | 'saved' | 'failed' = '';
 
   private base = `${apiRoot()}/api/v1/calling`;
@@ -65,12 +67,14 @@ export class CallService {
   setAudioElement(el: HTMLAudioElement): void { this.audio = el; }
 
   /** Opens the panel with the number ready. The call starts only when the user presses Call. */
-  prepare(phone: string, name = '', contactId: number | null = null, followUp: { campaignId: number; email: string } | null = null): void {
+  prepare(phone: string, name = '', contactId: number | null = null, followUp: { campaignId: number; email: string } | null = null,
+    lead: { leadId: number; followupId?: number | null } | null = null): void {
     if (this.inCall) { this.message = 'Finish the current call first.'; return; }
     this.number = phone;
     this.name = name;
     this.contactId = contactId;
     this.followUp = followUp;
+    this.lead = lead;
     this.transcribe = false;
     this.transcriptState = '';
     this.state = 'idle';
@@ -114,7 +118,8 @@ export class CallService {
       this.message = 'Connecting…';
       const session = await firstValueFrom(this.http.post<any>(`${this.base}/token`, {
         to: this.number, name: this.name || undefined, contactId: this.contactId ?? undefined, transcribe: this.transcribe,
-        ...(this.followUp ? { campaignId: this.followUp.campaignId, email: this.followUp.email } : {})
+        ...(this.followUp ? { campaignId: this.followUp.campaignId, email: this.followUp.email } : {}),
+        ...(this.lead ? { leadId: this.lead.leadId, followupId: this.lead.followupId ?? undefined } : {})
       }));
       this.callLogId = session.callLogId ?? null;
       await this.loadSdk();

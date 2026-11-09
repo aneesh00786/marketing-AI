@@ -232,6 +232,8 @@ async function removeMember(ctx, rawUserId) {
   await run("UPDATE workspace_members SET status = 'Removed' WHERE workspace_id = ? AND user_id = ? AND status = 'Active'", [ws(ctx), m.user_id]);
   await audit(ctx, 'workspace.member_removed', { resourceType: 'workspace_member', resourceId: m.user_id, metadata: { role: m.role } });
   await dropIneligibleGrants(ctx, m.user_id, null, 'member_removed');
+  // Leads shared with them stop being reachable; leads they own stay, for the admins to reassign.
+  await require('../leads/leadOwnershipService').dropMemberShares(ws(ctx), m.user_id);
   return { removed: true };
 }
 

@@ -184,7 +184,8 @@ router.post(['/api/v1/marketing/dispatch-campaign', '/api/marketing/dispatch-cam
   const product = await resolveSelectedProduct(ws(req), v.productId);
 
   const ids = [...new Set(v.leadIds.map(Number))];
-  const leads = await all(`SELECT id, name, email FROM leads WHERE workspace_id = ? AND id IN (${ids.map(() => '?').join(',')})`, [ws(req), ...ids]);
+  const okIds = await require('../../lib/leadAccess').allowedLeadIds(req, ids);
+  const leads = okIds.length ? await all(`SELECT id, name, email FROM leads WHERE workspace_id = ? AND id IN (${okIds.map(() => '?').join(',')})`, [ws(req), ...okIds]) : [];
   if (leads.length !== ids.length) throw httpError('One or more selected leads were not found in this workspace.', 404, 'NOT_FOUND');
 
   const created = [];

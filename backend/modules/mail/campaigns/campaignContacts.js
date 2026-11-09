@@ -94,7 +94,8 @@ async function emailsFromOtherSources(workspaceId, campaignId, source) {
  */
 async function setLeads(ctx, row, input, touch) {
   const { leadIds } = leadsSchema.parse(input || {});
-  const ids = [...new Set(leadIds)];
+  // Only leads this person may see; others count as not found (lib/leadAccess.js).
+  const ids = await require('../../../lib/leadAccess').allowedLeadIds(ctx, [...new Set(leadIds)]);
   const leads = ids.length ? await all(`SELECT ${LEAD_COLUMNS} FROM leads WHERE workspace_id = ? AND id IN (${placeholders(ids.length)})`, [ws(ctx), ...ids]) : [];
   const assessed = await withEligibility(ws(ctx), leads, { requireConsent: false });
   const seen = new Set();

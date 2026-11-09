@@ -191,7 +191,7 @@ test('the admin can open any workspace with full rights, without joining it', as
   assert.deepEqual([s.workspace.id, s.workspace.adminAccess, s.role], [owner.workspaceId, true, 'Workspace Owner']);
   const inside = { token: s.token };
   assert.equal((await h.api('GET', `/api/v1/leads/${lead.id}`, inside)).data.lead.name, 'Their lead');
-  assert.equal((await h.api('PATCH', `/api/v1/leads/${lead.id}`, { ...inside, body: { phone: '123' } })).status, 200);
+  assert.equal((await h.api('PATCH', `/api/v1/leads/${lead.id}`, { ...inside, body: { phone: '+61 400 123 456' } })).status, 200);
   const me = await h.api('GET', '/api/v1/auth/me', inside);
   assert.ok(['leads.manage', 'mail.configure', 'members.manage', 'billing.manage'].every(c => me.data.capabilities.includes(c)), 'every capability');
   assert.equal((await db().get('SELECT 1 AS x FROM workspace_members WHERE workspace_id = ? AND user_id = ?', [owner.workspaceId, admin.userId])) ?? null, null, 'not added as a member');

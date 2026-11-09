@@ -7,6 +7,9 @@ const os = require('os');
 const { initDatabase, get, all, run, queryTraivoMySQL } = require('./db/database');
 const authService = require('./services/authService');
 const passwordService = require('./services/passwordService');
+const leadAccess = require('./lib/leadAccess');
+/** Leads this person may see, for queries written as `FROM leads l WHERE l.workspace_id = ? AND ${vis.sql}`. */
+const leadVis = req => leadAccess.visibleSql(req, 'l');
 const { audit } = require('./lib/audit');
 const telnyxService = require('./services/telnyxService');
 const marketingService = require('./services/marketingService');
@@ -399,7 +402,8 @@ app.get(['/api/v1/dashboard/summary', '/api/dashboard/summary'], async (req, res
     const contentDrafts = await get("SELECT count(*) as count FROM content_items WHERE workspace_id = 1 AND status = 'draft'");
     const contentApproved = await get("SELECT count(*) as count FROM content_items WHERE workspace_id = 1 AND status = 'approved'");
     const videoJobsCount = await get('SELECT count(*) as count FROM video_jobs WHERE workspace_id = 1');
-    const leadsCount = await get('SELECT count(*) as count FROM leads WHERE workspace_id = 1');
+    const lv0 = leadVis(req);
+    const leadsCount = await get(`SELECT count(*) as count FROM leads l WHERE l.workspace_id = 1 AND ${lv0.sql}`, lv0.params);
     const agents = await all('SELECT * FROM agents WHERE workspace_id = 1 OR workspace_id IS NULL');
     const recentTasks = await all('SELECT * FROM tasks WHERE workspace_id = 1 ORDER BY id DESC LIMIT 5');
 
@@ -448,7 +452,8 @@ app.post(['/api/v1/assistant/chat', '/api/assistant/chat'], async (req, res) => 
     const connectedBiz = await all('SELECT * FROM connected_businesses WHERE workspace_id = ? ORDER BY id ASC', [req.auth.workspaceId]);
     const traivoStats = await queryTraivoMySQL();
     const urgentEmails = await all("SELECT * FROM emails WHERE workspace_id = ? AND is_urgent = 1 AND is_read = 0 ORDER BY id DESC LIMIT 5", [req.auth.workspaceId]);
-    const allLeads = await all("SELECT * FROM leads WHERE workspace_id = ? ORDER BY id DESC LIMIT 5", [req.auth.workspaceId]);
+    const lv1 = leadVis(req);
+    const allLeads = await all(`SELECT l.* FROM leads l WHERE l.workspace_id = ? AND ${lv1.sql} ORDER BY l.id DESC LIMIT 5`, [req.auth.workspaceId, ...lv1.params]);
     const digitalProductsList = await all('SELECT * FROM digital_products WHERE workspace_id = ? ORDER BY id ASC', [req.auth.workspaceId]);
 
     let contextSnippet = `Live Business Context:
@@ -511,9 +516,10 @@ ${connectedBiz.map(b => `  * ${b.business_type === 'owner' ? '[MY BUSINESS]' : '
 
       // If we have a name but no email, search CRM leads and B2B clients
       if (!targetEmail && targetRecipient) {
+        const lv2 = leadVis(req);
         const matchedLead = await get(
-          "SELECT * FROM leads WHERE workspace_id = ? AND (LOWER(name) LIKE ? OR LOWER(company_name) LIKE ?) LIMIT 1",
-          [req.auth.workspaceId, `%${targetRecipient.toLowerCase()}%`, `%${targetRecipient.toLowerCase()}%`]
+          `SELECT l.* FROM leads l WHERE l.workspace_id = ? AND ${lv2.sql} AND (LOWER(l.name) LIKE ? OR LOWER(l.company_name) LIKE ?) LIMIT 1`,
+          [req.auth.workspaceId, ...lv2.params, `%${targetRecipient.toLowerCase()}%`, `%${targetRecipient.toLowerCase()}%`]
         );
         if (matchedLead) {
           targetEmail = matchedLead.email;
@@ -595,7 +601,8 @@ ${connectedBiz.map(b => `  * ${b.business_type === 'owner' ? '[MY BUSINESS]' : '
           recipient = target;
         } else {
           const key = target.toLowerCase();
-          let matches = await all("SELECT name, company_name, email FROM leads WHERE workspace_id = ? AND email IS NOT NULL AND email <> '' AND (LOWER(name) = ? OR LOWER(company_name) = ?) LIMIT 2", [req.auth.workspaceId, key, key]);
+          const lv3 = leadVis(req);
+          let matches = await all(`SELECT l.name, l.company_name, l.email FROM leads l WHERE l.workspace_id = ? AND ${lv3.sql} AND l.email IS NOT NULL AND l.email <> '' AND (LOWER(l.name) = ? OR LOWER(l.company_name) = ?) LIMIT 2`, [req.auth.workspaceId, ...lv3.params, key, key]);
           if (!matches.length) {
             matches = (await all("SELECT contact_name AS name, company_name, email FROM b2b_clients WHERE email IS NOT NULL AND email <> '' AND (LOWER(contact_name) = ? OR LOWER(company_name) = ?) LIMIT 2", [key, key]));
           }
@@ -645,7 +652,8 @@ ${connectedBiz.map(b => `  * ${b.business_type === 'owner' ? '[MY BUSINESS]' : '
     }
     // 7. Lead queries & CRM Intelligence
     else if (lower.includes('lead') || lower.includes('client') || lower.includes('prospect') || lower.includes('crm') || lower.includes('inquir')) {
-      const topLeadRows = await all("SELECT * FROM leads WHERE workspace_id = ? ORDER BY ai_score DESC, id DESC LIMIT 3", [req.auth.workspaceId]);
+      const lv4 = leadVis(req);
+      const topLeadRows = await all(`SELECT l.* FROM leads l WHERE l.workspace_id = ? AND ${lv4.sql} ORDER BY l.ai_score DESC, l.id DESC LIMIT 3`, [req.auth.workspaceId, ...lv4.params]);
       if (topLeadRows.length > 0) {
         const leadSummaries = topLeadRows.map((l, i) => `${i + 1}) ${l.name || l.contact_name}${l.company_name ? ` from ${l.company_name}` : ''} (lead score: ${l.ai_score === null || l.ai_score === undefined ? 'not scored' : `${l.ai_score}/100`}${l.ai_category ? `, ${l.ai_category}` : ''}${l.ai_suggestion ? ` - ${l.ai_suggestion}` : ''})`).join('. ');
         fastReply = `Sir, you currently have ${allLeads.length} leads in your CRM. Your highest qualified leads are: ${leadSummaries}. All prospects are qualified for immediate multi-channel follow-up. Would you like me to draft an outreach email to any of them?`;
@@ -1080,7 +1088,8 @@ app.all(['/api/tools/get_business_info', '/api/business_info'], async (req, res)
 // Tool: Executive Briefing
 app.all(['/api/tools/get_briefing'], async (req, res) => {
   try {
-    const totalLeads = await get('SELECT count(*) as count FROM leads WHERE workspace_id = ?', [req.auth.workspaceId]);
+    const lv5 = leadVis(req);
+    const totalLeads = await get(`SELECT count(*) as count FROM leads l WHERE l.workspace_id = ? AND ${lv5.sql}`, [req.auth.workspaceId, ...lv5.params]);
     const urgentEmails = await get('SELECT count(*) as count FROM emails WHERE workspace_id = ? AND is_urgent = 1 AND is_read = 0', [req.auth.workspaceId]);
     const appointments = await all("SELECT customer_name, service, date, time FROM appointments WHERE status = 'Confirmed' ORDER BY date, time LIMIT 5");
     const traivoStats = await queryTraivoMySQL();

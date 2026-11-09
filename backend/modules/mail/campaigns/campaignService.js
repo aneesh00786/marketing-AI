@@ -438,17 +438,35 @@ async function recipientHistory(ctx, id, { email, phone } = {}) {
   await requireRow(ctx, id);
   const addr = String(email || '').trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr) || addr.length > 255) throw httpError(400, 'Give the recipient\'s email address.', 'VALIDATION_ERROR');
+  const h = await personHistory(ws(ctx), { email: addr, phone });
+  await audit(ctx, 'mail.campaign_recipient_history_viewed', { resourceType: 'mail_campaign', resourceId: Number(id), metadata: { emails: h.emails.length, calls: h.calls.length } });
+  return h;
+}
+
+/**
+ * Every email to or from one person (Sent Mail and Inbox) and every follow-up call with them, made
+ * from this workspace's campaigns or from their lead. Shared by a campaign's Follow up → History
+ * and a lead's Follow-ups tab. Callers check access first.
+ */
+async function personHistory(workspaceId, { email, phone, leadId = null } = {}) {
+  const addr = String(email || '').trim().toLowerCase();
+  const hasAddr = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr) && addr.length <= 255;
   const digits = String(phone || '').replace(/\D/g, '');
   const tail = digits.length >= 7 ? digits.slice(-9) : null;
-  const emails = await all(
+  const emails = hasAddr ? await all(
     `SELECT id, sender, sender_email, recipient_email, recipient_name, subject, body, status, smtp_status, sent_at, received_at
      FROM emails WHERE workspace_id = ? AND (LOWER(TRIM(recipient_email)) = ? OR LOWER(TRIM(sender_email)) = ?)
-     ORDER BY COALESCE(received_at, sent_at) DESC, id DESC LIMIT 50`, [ws(ctx), addr, addr]);
+     ORDER BY COALESCE(received_at, sent_at) DESC, id DESC LIMIT 50`, [workspaceId, addr, addr]) : [];
   const logs = require('../../calling/callLogService');
-  const calls = await all(
-    `${logs.SELECT} WHERE l.campaign_id IN (SELECT id FROM mail_campaigns WHERE workspace_id = ?) AND (l.email = ?${tail ? " OR RIGHT(REGEXP_REPLACE(l.phone, '[^0-9]', ''), 9) = ?" : ''})
-     ORDER BY l.started_at DESC, l.id DESC LIMIT 50`, tail ? [ws(ctx), addr, tail] : [ws(ctx), addr]);
-  await audit(ctx, 'mail.campaign_recipient_history_viewed', { resourceType: 'mail_campaign', resourceId: Number(id), metadata: { emails: emails.length, calls: calls.length } });
+  const match = [];
+  const params = [];
+  if (hasAddr || tail) {
+    const who = [hasAddr ? 'l.email = ?' : null, tail ? "RIGHT(REGEXP_REPLACE(l.phone, '[^0-9]', ''), 9) = ?" : null].filter(Boolean).join(' OR ');
+    match.push(`(l.campaign_id IN (SELECT id FROM mail_campaigns WHERE workspace_id = ?) AND (${who}))`);
+    params.push(workspaceId, ...(hasAddr ? [addr] : []), ...(tail ? [tail] : []));
+  }
+  if (leadId) { match.push('(l.lead_workspace_id = ? AND l.lead_id = ?)'); params.push(workspaceId, leadId); }
+  const calls = match.length ? await all(`${logs.SELECT} WHERE ${match.join(' OR ')} ORDER BY l.started_at DESC, l.id DESC LIMIT 50`, params) : [];
   const text = v => String(v || '').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
   return {
     emails: emails.map(e => {
@@ -457,7 +475,7 @@ async function recipientHistory(ctx, id, { email, phone } = {}) {
         at: inbound ? (e.received_at || e.sent_at) : (e.sent_at || e.received_at), preview: text(e.body).slice(0, 600) };
     }),
     // The conversation is the transcript text (empty unless the call was transcribed).
-    calls: calls.map(r => ({ ...logs.present(r), campaignId: r.campaign_id || null, conversation: logs.conversation(r) }))
+    calls: calls.map(r => ({ ...logs.present(r), campaignId: r.campaign_id || null, leadId: r.lead_id || null, followupId: r.followup_id || null, conversation: logs.conversation(r) }))
   };
 }
 
@@ -541,7 +559,8 @@ async function withLeadDetails(workspaceId, contacts) {
   });
 }
 
-module.exports = { checkLinks,
+module.exports = {
+  personHistory, checkLinks,
   unsubscribeTokenOf: row => unsubToken(row), recipientHistory, unsubscribeFromCampaign, list, getOne, create, update, duplicate, remove,
   getContacts, setContactLeads, removeContacts, leadOptions, audiences, validate, approve, send, refresh, recipientActivity
 };

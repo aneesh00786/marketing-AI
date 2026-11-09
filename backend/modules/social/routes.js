@@ -117,7 +117,7 @@ router.get('/overview', requireCapability('analytics.view'), wrap(async (req, re
 // AI Marketing Command Center (workspace-scoped aggregate of stored data).
 router.get('/dashboard', requireCapability('analytics.view'), wrap(async (req, res) => {
   const { range, from, to } = req.query;
-  res.json({ success: true, dashboard: await dashboardService.getDashboard(ws(req), { range, from, to }) });
+  res.json({ success: true, dashboard: await dashboardService.getDashboard(ws(req), { range, from, to }, req) });
 }));
 
 router.get('/capabilities', wrap(async (req, res) => {
@@ -597,7 +597,7 @@ router.patch('/inbox/threads/:id', requireCapability('inbox.reply'), body(z.obje
 router.post('/inbox/threads/:id/create-lead', requireCapability('inbox.reply'), body(z.object({
   name: z.string().max(255).optional(),
   email: z.string().email().max(255).optional(),
-  phone: z.string().max(50).optional(),
+  phone: z.string().max(50).optional().refine(...require('../../lib/phone').phoneRefine),
   notes: z.string().max(1000).optional()
 })), wrap(async (req, res) => {
   res.json({ success: true, ...(await inboxService.createLeadFromThread(req, idParam(req), req.valid)) });

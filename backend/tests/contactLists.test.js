@@ -17,7 +17,7 @@ const lead = (ws, email, consent, method = null, evidence = null) => db().run(`I
 test('contact lists: create, add people, view with status and consent, remove, delete; another workspace sees none', async () => {
   const ws = await h.createWorkspace({ name: `Lists ${Date.now()}` });
   await db().run("INSERT INTO email_suppressions (workspace_id, email, reason, source) VALUES (?, 'stop@x.io', 'unsubscribed', 'test')", [ws.workspaceId]);
-  const made = await capi(ws, 'POST', '/contact-lists', { name: 'Sydney buyers', emails: ['Stop@X.io', 'not-an-email'], contacts: [{ name: 'Kim Lee', company: 'Shop', email: 'KIM@shop.com.au', phone: '0400' }] });
+  const made = await capi(ws, 'POST', '/contact-lists', { name: 'Sydney buyers', emails: ['Stop@X.io', 'not-an-email'], contacts: [{ name: 'Kim Lee', company: 'Shop', email: 'KIM@shop.com.au', phone: '+61 400 123 456' }] });
   assert.equal(made.status, 200, JSON.stringify(made.data));
   assert.equal(made.data.added, 2);
   assert.deepEqual(made.data.skipped.map(x => x.email), ['not-an-email']);
@@ -30,7 +30,7 @@ test('contact lists: create, add people, view with status and consent, remove, d
   assert.deepEqual([l.total, l.reachable, l.noConsent], [3, 2, 0], 'consent is not required for campaigns; the stop-list wins for stop@x.io');
   const view = (await capi(ws, 'GET', `/contact-lists/${id}/contacts?status=all`)).data.contacts;
   const kim = view.find(c => c.email === 'kim@shop.com.au');
-  assert.deepEqual([kim.name, kim.company, kim.phone, kim.status, kim.consent], ['Kim Lee', 'Shop', '0400', 'subscribed', 'granted']);
+  assert.deepEqual([kim.name, kim.company, kim.phone, kim.status, kim.consent], ['Kim Lee', 'Shop', '+61 400 123 456', 'subscribed', 'granted']);
   assert.equal(view.find(c => c.email === 'stop@x.io').status, 'unsubscribed');
   assert.equal(view.find(c => c.email === 'new@x.io').consent, 'none');
   assert.equal((await capi(ws, 'POST', `/contact-lists/${id}/remove`, { contactIds: [kim.id] })).data.removed, 1);

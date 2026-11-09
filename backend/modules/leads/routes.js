@@ -3,6 +3,8 @@ const { audit } = require('../../lib/audit');
 const { z } = require('zod');
 const { requireCapability } = require('../../middleware/auth');
 const leadService = require('./leadService');
+const ownership = require('./leadOwnershipService');
+const leadAccess = require('../../lib/leadAccess');
 const productEmails = require('../mail/productEmails/service');
 
 /**
@@ -10,7 +12,13 @@ const productEmails = require('../mail/productEmails/service');
  * /api/leads and /api/v1/crm/leads). The workspace always comes from the session.
  */
 const router = express.Router();
-const wrap = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+// Invalid input (zod) is a 400 with the field and reason, not a server error.
+const wrap = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(err => {
+  if (err instanceof z.ZodError) {
+    return res.status(400).json({ success: false, code: 'VALIDATION_ERROR', error: err.issues.map(i => `${i.path.join('.') || 'body'}: ${i.message}`).join('; ') });
+  }
+  next(err);
+});
 const ws = req => req.auth.workspaceId;
 
 function body(schema) {
@@ -53,19 +61,26 @@ router.get('/products', requireCapability('leads.view'), wrap(async (req, res) =
 }));
 
 router.get('/', requireCapability('leads.view'), wrap(async (req, res) => {
-  const result = await leadService.listLeads(ws(req), req.query);
+  const result = await leadService.listLeads(req, req.query);
   res.json({ success: true, ...result, statuses: leadService.STATUSES });
 }));
 
 // Export: every lead matching the current filters. Recorded in the audit log (personal data leaves the app).
 router.get('/export', requireCapability('leads.view'), wrap(async (req, res) => {
-  const result = await leadService.exportLeads(ws(req), req.query);
+  // Only the leads this person may see are exported (lib/leadAccess.js).
+  const result = await leadService.exportLeads(req, req.query);
   await audit(req, 'leads.exported', { resourceType: 'lead', metadata: { count: result.leads.length, truncated: result.truncated,
-    filters: { productId: req.query.productId || null, status: req.query.status || null, country: req.query.country ? String(req.query.country).slice(0, 100) : null, q: req.query.q ? String(req.query.q).slice(0, 100) : null } } });
+    filters: { view: req.query.view || 'all', productId: req.query.productId || null, status: req.query.status || null, country: req.query.country ? String(req.query.country).slice(0, 100) : null, q: req.query.q ? String(req.query.q).slice(0, 100) : null } } });
   res.json({ success: true, ...result });
 }));
 
-router.post('/', requireCapability('leads.manage'), body(z.object(leadFields)), wrap(async (req, res) => {
+// Numbers typed in by hand need their country code (imports and Lead Discovery are not checked).
+const { phoneProblem } = require('../../lib/phone');
+const phoneError = (res, msg) => res.status(400).json({ success: false, code: 'INVALID_PHONE', error: msg });
+
+router.post('/', requireCapability('leads.manage'), body(z.object(leadFields)), wrap(async (req, res, next) => {
+  const bad = phoneProblem(req.valid.phone);
+  if (bad) return phoneError(res, bad);
   const { lead, ai } = await leadService.createLead(req, req.valid);
   const scoreText = lead.score === null ? '' : ` Lead score ${lead.score} (${lead.category}, rule-based).`;
   res.json({
@@ -115,7 +130,8 @@ router.post('/import-bulk', requireCapability('leads.manage'), body(z.object({ l
     return res.status(403).json({ success: false, code: 'FORBIDDEN', error: 'Only people who can send campaigns can add contacts to lists. Import without a list.' });
   }
   const r = await leadService.importLeads(req, req.valid.leads);
-  const targets = [...new Set([...r.leadIds, ...r.duplicates.map(d => d.leadId).filter(Boolean)])];
+  // Lists get only leads this person may see (duplicates owned by someone else are left out).
+  const targets = await leadAccess.allowedLeadIds(req, [...new Set([...r.leadIds, ...r.duplicates.map(d => d.leadId).filter(Boolean)])]);
 
   let consentRecorded = 0;
   if (consent && targets.length) {
@@ -167,11 +183,49 @@ router.post('/ai-qualify-all', requireCapability('leads.manage'), body(z.object(
   });
 }));
 
+// ---- Follow-ups (Leads → a lead → Follow-ups): access per lead in followups/activityService ----
+const followups = require('./followups/activityService');
+router.get('/followups/mine', requireCapability('leads.view'), wrap(async (req, res) => res.json({ success: true, ...(await followups.myFollowups(req)) })));
+router.get('/:id/followup-summary', requireCapability('leads.view'), wrap(async (req, res) => res.json({ success: true, ...(await followups.summary(req, req.params.id)) })));
+router.get('/:id/timeline', requireCapability('leads.view'), wrap(async (req, res) => res.json({ success: true, ...(await followups.timeline(req, req.params.id, req.query)) })));
+router.get('/:id/notes', requireCapability('leads.view'), wrap(async (req, res) => res.json({ success: true, ...(await followups.listNotes(req, req.params.id)) })));
+router.post('/:id/activities', requireCapability('leads.manage'), wrap(async (req, res) => res.json({ success: true, ...(await followups.addActivity(req, req.params.id, req.body)) })));
+router.patch('/:id/activities/:activityId', requireCapability('leads.manage'), wrap(async (req, res) => res.json({ success: true, ...(await followups.updateActivity(req, req.params.id, req.params.activityId, req.body)) })));
+router.delete('/:id/activities/:activityId', requireCapability('leads.manage'), wrap(async (req, res) => res.json({ success: true, ...(await followups.deleteActivity(req, req.params.id, req.params.activityId)) })));
+router.post('/:id/followups', requireCapability('leads.manage'), wrap(async (req, res) => res.json({ success: true, ...(await followups.createFollowup(req, req.params.id, req.body)) })));
+router.patch('/:id/followups/:followupId', requireCapability('leads.manage'), wrap(async (req, res) => res.json({ success: true, ...(await followups.updateFollowup(req, req.params.id, req.params.followupId, req.body)) })));
+
+// ---- Ownership & access (changes: workspace Owners/Admins only; checked in leadOwnershipService) ----
+router.post('/bulk-owner', requireCapability('leads.view'), wrap(async (req, res) => {
+  res.json({ success: true, ...(await ownership.bulkChangeOwner(req, req.body)) });
+}));
+router.post('/bulk-access', requireCapability('leads.view'), wrap(async (req, res) => {
+  res.json({ success: true, ...(await ownership.bulkGrant(req, req.body)) });
+}));
+router.get('/:id/access', requireCapability('leads.view'), wrap(async (req, res) => {
+  res.json({ success: true, ...(await ownership.getAccess(req, req.params.id)) });
+}));
+router.put('/:id/access', requireCapability('leads.view'), wrap(async (req, res) => {
+  res.json({ success: true, ...(await ownership.grantAccess(req, req.params.id, req.body)) });
+}));
+router.delete('/:id/access/:userId', requireCapability('leads.view'), wrap(async (req, res) => {
+  res.json({ success: true, ...(await ownership.revokeAccess(req, req.params.id, req.params.userId)) });
+}));
+router.put('/:id/owner', requireCapability('leads.view'), wrap(async (req, res) => {
+  res.json({ success: true, ...(await ownership.changeOwner(req, req.params.id, req.body)) });
+}));
+
 router.get('/:id', requireCapability('leads.view'), wrap(async (req, res) => {
-  res.json({ success: true, lead: leadService.present(await leadService.requireLead(ws(req), req.params.id)) });
+  res.json({ success: true, lead: leadService.present(await leadService.requireLeadFor(req, req.params.id, 'view')) });
 }));
 
 router.patch('/:id', requireCapability('leads.manage'), body(z.object(leadFields)), wrap(async (req, res) => {
+  // Only a changed number is checked, so an older lead saved without a code can still be edited.
+  const bad = phoneProblem(req.valid.phone);
+  if (bad) {
+    const cur = await leadAccess.requireLeadAccess(req, req.params.id, 'manage');
+    if (String(cur.phone || '').trim() !== String(req.valid.phone || '').trim()) return phoneError(res, bad);
+  }
   res.json({ success: true, ...(await leadService.updateLead(req, req.params.id, req.valid)) });
 }));
 
@@ -181,7 +235,7 @@ router.delete('/:id', requireCapability('leads.manage'), wrap(async (req, res) =
 
 router.post('/:id/ai-qualify', requireCapability('leads.manage'), wrap(async (req, res) => {
   const ai = await leadService.generateAdvice(req, req.params.id);
-  const lead = leadService.present(await leadService.requireLead(ws(req), req.params.id));
+  const lead = leadService.present(await leadService.requireLeadFor(req, req.params.id, 'view'));
   res.json({ success: true, lead, ai, message: ai.available ? 'Score refreshed and AI advice generated.' : `Score refreshed. ${ai.reason}.` });
 }));
 

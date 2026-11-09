@@ -108,8 +108,10 @@ const LEAD_COLUMNS = 'id, name, email, company_name, country, address, status, p
  * eligibility. Nothing is selected server-side; eligibleIds supports "Select all eligible".
  */
 async function listRecipients(ctx, query = {}, { maxSelect = maxBatch(), maxPageSize = 100, requireConsent = false } = {}) {
-  const where = ['workspace_id = ?'];
-  const params = [ws(ctx)];
+  // Only leads this person may see (lib/leadAccess.js): Product Emails and the campaign lead picker.
+  const vis = require('../../../lib/leadAccess').visibleSql(ctx, 'leads');
+  const where = ['workspace_id = ?', vis.sql];
+  const params = [ws(ctx), ...vis.params];
   const q = String(query.q || '').trim().slice(0, 100);
   if (q) {
     const like = `%${q.replace(/[%_\\]/g, '\\$&')}%`;
@@ -142,7 +144,7 @@ async function listRecipients(ctx, query = {}, { maxSelect = maxBatch(), maxPage
     eligibleIds: dedupeByEmail(leads.filter(l => l.eligible)).slice(0, maxSelect).map(l => l.id),
     eligibleCount: leads.filter(l => l.eligible).length,
     maxBatch: maxBatch(),
-    countries: await require('../../leads/leadService').leadCountries(ws(ctx))
+    countries: await require('../../leads/leadService').leadCountries(ctx)
   };
 }
 
@@ -188,7 +190,8 @@ async function consentEvent(workspaceId, leadId, { status, method = null, obtain
 async function recordConsent(ctx, input) {
   const v = consentSchema.parse(input || {});
   const ids = [...new Set(v.leadIds)];
-  const found = await all(`SELECT id FROM leads WHERE workspace_id = ? AND id IN (${ids.map(() => '?').join(',')})`, [ws(ctx), ...ids]);
+  // Only leads this person may manage (lib/leadAccess.js).
+  const found = (await require('../../../lib/leadAccess').allowedLeadIds(ctx, ids, 'manage')).map(id => ({ id }));
   if (found.length !== ids.length) throw httpError(404, 'One or more leads were not found in this workspace.', 'NOT_FOUND');
   if (v.status === 'granted') {
     const given = new Date(`${v.obtainedAt}T00:00:00Z`);
@@ -334,7 +337,8 @@ async function createBatch(ctx, input) {
   const ids = [...new Set(v.leadIds)];
   if (ids.length > maxBatch()) throw httpError(400, `Select at most ${maxBatch()} leads per batch.`, 'TOO_MANY_RECIPIENTS');
   const product = await resolveSelectedProduct(ws(ctx), v.productId);
-  const rows = await all(`SELECT ${LEAD_COLUMNS} FROM leads WHERE workspace_id = ? AND id IN (${ids.map(() => '?').join(',')})`, [ws(ctx), ...ids]);
+  const okIds = await require('../../../lib/leadAccess').allowedLeadIds(ctx, ids);
+  const rows = okIds.length ? await all(`SELECT ${LEAD_COLUMNS} FROM leads WHERE workspace_id = ? AND id IN (${okIds.map(() => '?').join(',')})`, [ws(ctx), ...okIds]) : [];
   if (rows.length !== ids.length) throw httpError(404, 'One or more selected leads were not found in this workspace.', 'NOT_FOUND');
 
   let template = null;

@@ -163,6 +163,20 @@ export class ApiService {
     return this.http.get(`${this.baseUrl}/leads`, { params });
   }
 
+  /** My follow-ups for the notification bell. */
+  getMyFollowups(): Observable<any> { return this.http.get(`${this.baseUrl}/leads/followups/mine`); }
+  getLead(id: number): Observable<any> { return this.http.get(`${this.baseUrl}/leads/${id}`); }
+
+  /** Owners/Admins: assign several leads to one member. */
+  bulkLeadOwner(leadIds: number[], ownerUserId: number | null): Observable<any> {
+    return this.http.post(`${this.baseUrl}/leads/bulk-owner`, { leadIds, ownerUserId });
+  }
+
+  /** Members of the current workspace (names and roles). */
+  getMembers(): Observable<any> {
+    return this.http.get(`${this.baseUrl}/workspace/members`);
+  }
+
   /** Every lead matching the filters (no paging), for export. */
   exportLeads(params: Record<string, any> = {}): Observable<any> {
     return this.http.get(`${this.baseUrl}/leads/export`, { params });

@@ -82,7 +82,7 @@
         <input class="hud-input" [(ngModel)]="form.draft.name" maxlength="200" placeholder="Name" aria-label="Contact name" (keydown.enter)="addManual()" />
         <input class="hud-input" [(ngModel)]="form.draft.company" maxlength="200" placeholder="Business" aria-label="Business name" (keydown.enter)="addManual()" />
         <input class="hud-input" type="email" [(ngModel)]="form.draft.email" maxlength="255" placeholder="Email *" aria-label="Email" (keydown.enter)="addManual()" />
-        <input class="hud-input" type="tel" [(ngModel)]="form.draft.phone" maxlength="50" placeholder="Phone" aria-label="Phone" (keydown.enter)="addManual()" />
+        <app-crm-phone-input label="" placeholder="Phone" [value]="form.draft.phone" (valueChange)="form.draft.phone = $event"></app-crm-phone-input>
         <button type="button" class="btn btn-secondary btn-sm" [disabled]="!!draftProblem" [title]="draftProblem" (click)="addManual()">+ Add</button>
       </div>
       <p class="muted small" *ngIf="(form.draft.email || form.draft.name || form.draft.company) && draftProblem">{{ draftProblem }}</p>

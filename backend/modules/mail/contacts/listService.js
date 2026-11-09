@@ -21,7 +21,7 @@ const contactInput = z.object({
   name: z.string().trim().max(200).optional().default(''),
   company: z.string().trim().max(200).optional().default(''),
   email: z.string().trim().max(255),
-  phone: z.string().trim().max(50).optional().default('')
+  phone: z.string().trim().max(50).optional().default('').refine(...require('../../../lib/phone').phoneRefine)
 }).strict();
 const addSchema = z.object({
   leadIds: z.array(z.number().int().positive()).max(MAX_ADD).default([]),
@@ -84,7 +84,9 @@ async function resolvePeople(ctx, { leadIds, emails, contacts }) {
     people.set(email, had ? { ...p, ...Object.fromEntries(Object.entries(had).filter(([, v]) => v)), email } : { ...p, email });
   };
   if (leadIds.length) {
-    const leads = await all(`SELECT id, name, email, company_name, phone, marketing_consent FROM leads WHERE workspace_id = ? AND id IN (${leadIds.map(() => '?').join(',')})`, [ws(ctx), ...leadIds]);
+    // Only leads this person may see (lib/leadAccess.js).
+    const okIds = await require('../../../lib/leadAccess').allowedLeadIds(ctx, leadIds);
+    const leads = okIds.length ? await all(`SELECT id, name, email, company_name, phone, marketing_consent FROM leads WHERE workspace_id = ? AND id IN (${okIds.map(() => '?').join(',')})`, [ws(ctx), ...okIds]) : [];
     for (const l of leads) {
       if (l.marketing_consent === 'withdrawn') { skipped.push({ email: normalize(l.email) || l.name || `Lead ${l.id}`, reason: 'Withdrew consent' }); continue; }
       const { first, last } = splitName(l.name);

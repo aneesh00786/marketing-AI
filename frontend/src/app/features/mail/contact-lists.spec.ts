@@ -45,14 +45,14 @@ describe('ContactListsComponent (lists kept in Marketech.ai)', () => {
     fixture.detectChanges();
     expect(el().textContent).toContain('An empty list can be filled later.');
     comp.form!.picked.set(7, { id: 7, name: 'Priya', email: 'p@a.io' });
-    Object.assign(comp.form!.draft, { name: 'Kim Lee', company: 'Shop', email: 'kim@shop.io', phone: '0400' });
+    Object.assign(comp.form!.draft, { name: 'Kim Lee', company: 'Shop', email: 'kim@shop.io', phone: '+61 400 123 456' });
     comp.addManual();
     comp.form!.emails = 'a@b.io, A@b.io';
     fixture.detectChanges();
     expect(el().textContent).toContain('3 contact(s) will be added.');
     button('Create list').click();
     const req = http.expectOne(r => r.method === 'POST' && r.url.endsWith('/contact-lists'));
-    expect(req.request.body).toEqual({ name: 'Trade show', leadIds: [7], emails: ['a@b.io'], contacts: [{ name: 'Kim Lee', company: 'Shop', email: 'kim@shop.io', phone: '0400' }] });
+    expect(req.request.body).toEqual({ name: 'Trade show', leadIds: [7], emails: ['a@b.io'], contacts: [{ name: 'Kim Lee', company: 'Shop', email: 'kim@shop.io', phone: '+61 400 123 456' }] });
     req.flush({ list: { id: 3, name: 'Trade show' }, added: 3, alreadyIn: 0, skipped: [] });
     reload();
     expect(comp.form).toBeNull();

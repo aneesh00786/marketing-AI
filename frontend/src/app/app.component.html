@@ -126,7 +126,7 @@
           </button>
           <div class="dropdown dropdown-wide" *ngIf="openMenu === 'notifications'" (click)="$event.stopPropagation()" role="menu">
             <div class="dropdown-label">Notifications</div>
-            <button class="dropdown-item" *ngFor="let n of notifications" (click)="navigate(n.route, n.mailSection)">
+            <button class="dropdown-item" *ngFor="let n of notifications" (click)="navigate(n.route, n.mailSection); $any(n).leadId && openFollowupLead($any(n).leadId)">
               <span class="notif-icon" [ngClass]="'tone-' + n.tone"><app-icon [name]="n.icon" [size]="16"></app-icon></span>
               <span class="grow"><strong>{{ n.title }}</strong><small>{{ n.detail }}</small></span>
             </button>
@@ -329,6 +329,9 @@
     </div>
 
     <div class="lead-filters">
+      <select class="hud-input" [(ngModel)]="leadFilters.view" (change)="applyLeadFilters()" aria-label="Filter by assignment">
+        <option *ngFor="let v of leadViews" [value]="v">{{ leadViewLabel(v) }}</option>
+      </select>
       <select class="hud-input" [(ngModel)]="leadFilters.productId" (change)="applyLeadFilters()" aria-label="Filter by product">
         <option value="">All products</option>
         <option value="none">No product selected</option>
@@ -350,11 +353,27 @@
       <span class="lead-count">{{ leadTotal }} lead{{ leadTotal === 1 ? '' : 's' }}</span>
     </div>
 
+    <!-- Owners/Admins: tick leads, then assign them to a member -->
+    <div class="lead-assign-bar" *ngIf="leadCanManageAccess && leadFilters.view === 'unassigned' && leads.length && !selectedLeadIds.size">
+      {{ leadTotal }} unassigned lead{{ leadTotal === 1 ? '' : 's' }}: only Owners and Admins see them until they are assigned. Tick them (or ☑ all) to assign.
+    </div>
+    <div class="lead-bulk-bar" *ngIf="leadCanManageAccess && selectedLeadIds.size" role="region" aria-label="Selected leads">
+      <b>{{ selectedLeadIds.size }} selected</b>
+      <span class="bulk-group">
+        <select class="hud-input" [(ngModel)]="bulkOwnerId" aria-label="Assign to">
+          <option [ngValue]="null">Assign to…</option>
+          <option *ngFor="let m of leadMembers" [ngValue]="m.userId">{{ m.name }} ({{ m.role }})</option>
+        </select>
+        <button class="btn btn-primary btn-sm" type="button" (click)="assignSelectedLeads()" [disabled]="!bulkOwnerId || bulkAssigning">Assign</button>
+      </span>
+      <button class="btn btn-secondary btn-sm" type="button" (click)="selectedLeadIds.clear()">Clear selection</button>
+    </div>
+
     <div class="table-container full-table">
       <table class="data-table leads-table">
         <thead>
           <tr>
-            <th class="sl-cell freeze freeze-1">#</th>
+            <th class="sl-cell freeze freeze-1"><label *ngIf="leadCanManageAccess" class="sel-all" title="Select all shown"><input type="checkbox" [checked]="allLeadsShownSelected" (change)="toggleAllShownLeads()" aria-label="Select all shown leads" /></label><span *ngIf="!leadCanManageAccess">#</span></th>
             <th class="freeze freeze-2 freeze-edge">Contact</th>
             <th>Company</th>
             <th>Country</th>
@@ -363,6 +382,10 @@
             <th>Product</th>
             <th>Budget</th>
             <th>Status</th>
+            <th>Lead Assigned</th>
+            <th>Created by</th>
+            <th>Source</th>
+            <th>Created</th>
             <th title="Rule-based score: contact details, budget and buying-intent words">Lead score (rule-based)</th>
             <th>AI follow-up advice</th>
             <th>Actions</th>
@@ -370,8 +393,8 @@
         </thead>
         <tbody>
           <tr *ngFor="let ld of leads; let i = index">
-            <td class="sl-cell freeze freeze-1" data-label="No.">{{ (leadPage - 1) * leadPageSize + i + 1 }}</td>
-            <td data-label="Contact" class="contact-cell freeze freeze-2 freeze-edge"><strong>{{ ld.name }}</strong>
+            <td class="sl-cell freeze freeze-1" data-label="No."><label *ngIf="leadCanManageAccess" class="sel-one"><input type="checkbox" [checked]="selectedLeadIds.has(ld.id)" (change)="toggleLeadSelected(ld.id)" [attr.aria-label]="'Select ' + ld.name" /></label>{{ (leadPage - 1) * leadPageSize + i + 1 }}</td>
+            <td data-label="Contact" class="contact-cell freeze freeze-2 freeze-edge"><button type="button" class="lead-name-link" (click)="followupLead = ld" title="Follow-ups, calls, emails and notes"><strong>{{ ld.name }}</strong></button>
               <div class="lead-sub has-note-tip" *ngIf="ld.notes" tabindex="0" [attr.aria-label]="'Notes: ' + ld.notes"
                    (mouseenter)="showNoteTip($event, ld.notes)" (mouseleave)="hideNoteTip()" (focus)="showNoteTip($event, ld.notes)" (blur)="hideNoteTip()">📝 {{ ld.notes | slice:0:50 }}{{ ld.notes.length > 50 ? '…' : '' }}</div></td>
             <td data-label="Company" class="company-cell">{{ dash(ld.companyName) }}<div class="lead-sub lead-address" *ngIf="ld.address" [title]="ld.address">📍 {{ ld.address }}</div></td>
@@ -386,6 +409,13 @@
             </td>
             <td data-label="Budget">{{ dash(ld.estimatedBudget) }}</td>
             <td data-label="Status" class="one-line">{{ dash(ld.status) }}</td>
+            <td data-label="Lead Assigned" class="one-line">
+              <span *ngIf="ld.ownerName">{{ ld.ownerName }}</span>
+              <span class="lead-warn" *ngIf="!ld.ownerUserId">Unassigned</span>
+            </td>
+            <td data-label="Created by" class="one-line">{{ ld.createdByName || '—' }}<span class="lead-muted" *ngIf="ld.createdByAdmin"> · admin</span></td>
+            <td data-label="Source" class="one-line">{{ leadSourceLabel(ld.leadSource) }}</td>
+            <td data-label="Created" class="one-line">{{ ld.createdAt | date:'mediumDate' }}</td>
             <td data-label="Lead score">
               <div class="score-pill" *ngIf="ld.score !== null" [class.score-hot]="ld.category === 'Hot'" [class.score-warm]="ld.category === 'Warm'" [class.score-cold]="ld.category === 'Cold'"
                    [title]="scoreFactorsText(ld)">
@@ -400,19 +430,21 @@
             </td>
             <td data-label="Actions" class="actions-cell">
               <div class="button-group">
-                <button class="btn btn-secondary btn-sm" (click)="openEditLead(ld)">Edit</button>
+                <button class="btn btn-secondary btn-sm" *ngIf="ld.accessLevel !== 'view'" (click)="openEditLead(ld)">Edit</button>
+                <button class="btn btn-secondary btn-sm" (click)="followupLead = ld" title="Follow-ups, calls, emails and notes for this lead">📅 Follow-ups</button>
+                <button class="btn btn-secondary btn-sm" *ngIf="leadCanManageAccess" (click)="accessLeadId = ld.id" title="Assign this lead to a member">👤 Assign</button>
                 <button class="btn btn-secondary btn-sm" *ngIf="ld.googlePlace" (click)="viewPlaceDetails(ld)" title="Show this business's details live from Google Maps">📍 Live details</button>
                 <button class="btn btn-secondary btn-sm" (click)="quickEmailLead(ld)" [disabled]="!ld.hasValidEmail" [title]="ld.hasValidEmail ? 'Draft an email about ' + (ld.productName || 'their needs') : 'No valid email address'">✉️ Email</button>
-                <button class="btn btn-secondary btn-sm" (click)="qualifySingleLead(ld)" title="Refresh the rule-based score and ask AI for advice">⚡ AI advice</button>
-                <button class="btn btn-danger btn-sm" (click)="deleteLead(ld)" aria-label="Delete lead">🗑</button>
+                <button class="btn btn-secondary btn-sm" *ngIf="ld.accessLevel !== 'view'" (click)="qualifySingleLead(ld)" title="Refresh the rule-based score and ask AI for advice">⚡ AI advice</button>
+                <button class="btn btn-danger btn-sm" *ngIf="ld.accessLevel === 'admin' || ld.accessLevel === 'owner'" (click)="deleteLead(ld)" aria-label="Delete lead">🗑</button>
               </div>
             </td>
           </tr>
           <tr *ngIf="!leadsLoading && leads.length === 0">
-            <td colspan="13" class="empty-state">No leads match. Click "📂 Import Excel / CSV" or "+ Add Lead" to get started.</td>
+            <td colspan="17" class="empty-state">No leads match. Click "📂 Import Excel / CSV" or "+ Add Lead" to get started.</td>
           </tr>
           <tr *ngIf="leadsLoading && leads.length === 0">
-            <td colspan="13" class="empty-state">Loading leads…</td>
+            <td colspan="17" class="empty-state">Loading leads…</td>
           </tr>
         </tbody>
       </table>
@@ -919,26 +951,39 @@
         <button class="close-btn" (click)="showExcelImportModal = false">✕</button>
       </div>
       <div class="modal-body">
-        <p class="helper-text">Upload a spreadsheet (<code>.xlsx</code>, <code>.xls</code> or <code>.csv</code>). Recognised columns: <em>Name</em>, <em>Company</em>, <em>Email</em>, <em>Phone</em>, <em>Product</em> (name) or <em>Product ID</em>, <em>Budget</em>, <em>Notes</em>. Blank cells stay blank. Products must already exist in Products; unmatched ones are flagged for review.</p>
+        <p class="helper-text">Upload a spreadsheet (<code>.xlsx</code>, <code>.xls</code> or <code>.csv</code>) in any layout. Your column headings are matched to lead fields automatically (Name or First/Last name, Company, Email, Phone, Country, Address, Product, Budget, Notes), and you can change the matches before importing. Blank cells stay blank.</p>
 
-        <div class="excel-dropzone">
-          <input type="file" id="excelFileInput" accept=".xlsx, .xls, .csv" (change)="onExcelFileSelected($event)" style="display: none;" />
-          <label for="excelFileInput" class="dropzone-label">
-            <div class="dropzone-icon">📊</div>
-            <strong>Click to browse for your spreadsheet</strong>
-            <span class="dropzone-sub">Supports .xlsx, .xls, and .csv files</span>
+        <!-- Step 1: the product these leads are for (required before choosing a file) -->
+        <div class="import-product" *ngIf="!leadImportResult">
+          <label for="importProduct"><strong>1. Product for these leads</strong> <span class="lead-warn">*</span></label>
+          <select id="importProduct" class="hud-input" [(ngModel)]="importProductId" [disabled]="!leadProducts.length">
+            <option value="">{{ leadProducts.length ? 'Select a product…' : 'No products yet' }}</option>
+            <option *ngFor="let p of leadProducts" [value]="p.id">{{ p.name }}</option>
+          </select>
+          <span class="helper-text" *ngIf="!leadProducts.length">Add a product in <a href="#" (click)="$event.preventDefault(); showExcelImportModal = false; navigate('products')">Digital Products</a> first.</span>
+          <span class="helper-text" *ngIf="leadProducts.length && excelOwnProductCount">{{ excelOwnProductCount }} row{{ excelOwnProductCount === 1 ? ' names its' : 's name their' }} own product in the file and keep{{ excelOwnProductCount === 1 ? 's' : '' }} it; the others get this product.</span>
+        </div>
+
+        <!-- Step 2: the file (only after a product is selected) -->
+        <div class="excel-dropzone" [class.locked]="!importProductId" *ngIf="!leadImportResult">
+          <input type="file" id="excelFileInput" accept=".xlsx, .xls, .csv" (change)="onExcelFileSelected($event)" [disabled]="!importProductId" style="display: none;" />
+          <label for="excelFileInput" class="dropzone-label" [attr.aria-disabled]="!importProductId" (click)="onImportDropzoneClick($event)">
+            <div class="dropzone-icon">{{ importProductId ? '📊' : '🔒' }}</div>
+            <strong>{{ importProductId ? '2. Click to browse for your spreadsheet' : '2. Select a product first' }}</strong>
+            <span class="dropzone-sub">{{ importProductId ? 'Supports .xlsx, .xls, and .csv files' : 'Then choose your .xlsx, .xls or .csv file' }}</span>
           </label>
         </div>
 
         <div *ngIf="excelFileName" class="file-loaded-banner">
-          ✓ Loaded <strong>{{ excelFileName }}</strong> · {{ excelPreviewRows.length }} rows with a name<span *ngIf="excelSkippedNoName"> · {{ excelSkippedNoName }} without a name will be skipped</span>
+          ✓ Loaded <strong>{{ excelFileName }}</strong> · {{ excelPreviewRows.length }} leads<span *ngIf="excelSkippedNoName"> · {{ excelSkippedNoName }} rows without a name, company or email will be skipped</span>
         </div>
+        <app-lead-import-mapper *ngIf="excelSheets.length && !leadImportResult" [sheets]="excelSheets" (rowsChange)="onMappedRows($event)"></app-lead-import-mapper>
         <div *ngIf="excelUnmatchedCount" class="lead-review-banner">⚠ {{ excelUnmatchedCount }} row{{ excelUnmatchedCount === 1 ? ' references' : 's reference' }} a product that is not in this workspace. They will be imported without a product and flagged for review.</div>
 
         <div *ngIf="excelPreviewRows.length > 0" class="excel-preview-table-container table-container">
           <table class="data-table">
             <thead>
-              <tr><th>Name</th><th>Company</th><th>Email</th><th>Phone</th><th>Product</th><th>Budget</th></tr>
+              <tr><th>Name</th><th>Company</th><th>Email</th><th>Phone</th><th>Country</th><th>Product</th><th>Budget</th><th>Notes</th></tr>
             </thead>
             <tbody>
               <tr *ngFor="let row of excelPreviewRows.slice(0, 8)">
@@ -946,8 +991,10 @@
                 <td>{{ dash(row.companyName) }}</td>
                 <td>{{ dash(row.email) }}</td>
                 <td>{{ dash(row.phone) }}</td>
+                <td>{{ dash(row.country) }}</td>
                 <td><span [class.lead-warn]="previewProductMatch(row).ok === false" [class.lead-muted]="previewProductMatch(row).ok === null">{{ previewProductMatch(row).label }}</span></td>
                 <td>{{ dash(row.estimatedBudget) }}</td>
+                <td class="import-notes" [title]="row.notes">{{ dash(row.notes) }}</td>
               </tr>
             </tbody>
           </table>
@@ -1125,8 +1172,7 @@
             <input type="email" class="hud-input" [(ngModel)]="newLead.email" placeholder="name@company.com" />
           </div>
           <div class="form-group">
-            <label>Phone</label>
-            <input type="text" class="hud-input" [(ngModel)]="newLead.phone" placeholder="Phone number" />
+            <app-crm-phone-input label="Phone" [value]="newLead.phone" (valueChange)="newLead.phone = $event"></app-crm-phone-input>
           </div>
         </div>
         <div class="form-group" *ngIf="editingLeadId">
@@ -1142,7 +1188,7 @@
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" (click)="showNewLeadModal = false">Cancel</button>
-        <button class="btn btn-primary" (click)="submitNewLead()" [disabled]="!newLead.name?.trim()">{{ editingLeadId ? 'Save changes' : 'Save lead' }}</button>
+        <button class="btn btn-primary" (click)="submitNewLead()" [disabled]="!newLead.name?.trim() || !!newLeadPhoneProblem">{{ editingLeadId ? 'Save changes' : 'Save lead' }}</button>
       </div>
     </div>
   </div>
@@ -1299,3 +1345,9 @@
     </div>
   </form>
 </div>
+
+<!-- Lead assignment (Leads → 👤 Assign) -->
+<app-lead-access *ngIf="accessLeadId" [leadId]="accessLeadId" (close)="accessLeadId = null" (changed)="showToast($event); loadLeads()"></app-lead-access>
+
+<!-- Lead follow-ups: calls (📞), emails (Compose), scheduled follow-ups and notes -->
+<app-lead-followups *ngIf="followupLead" [lead]="followupLead" [members]="leadMembers" (close)="followupLead = null; loadMyFollowups()" (toast)="showToast($event)"></app-lead-followups>

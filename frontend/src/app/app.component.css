@@ -771,3 +771,20 @@ button.dropdown-item:disabled { opacity: 0.6; cursor: default; }
 .pw-form label { display: flex; flex-direction: column; gap: 6px; font-size: 0.82rem; color: var(--text-muted); font-weight: 500; }
 .pw-form .helper-text, .pw-form .lead-warn { margin: 0; }
 .pw-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* Lead import: product choice */
+.import-product { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border: 1px solid var(--accent, #7b6cf6); border-radius: 10px; background: var(--accent-soft); }
+.import-product select { max-width: 360px; }
+.import-notes { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.excel-dropzone.locked .dropzone-label { opacity: 0.55; cursor: not-allowed; }
+
+/* Leads: ownership */
+.lead-assign-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; margin: 8px 0; border: 1px solid var(--warning-text, #b45309); border-radius: 10px; background: var(--warning-soft); font-size: 0.86rem; }
+.lead-assign-bar select { max-width: 260px; }
+
+.lead-bulk-bar { position: sticky; top: 0; z-index: 3; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 12px; margin: 8px 0; border: 1px solid var(--accent, #7b6cf6); border-radius: 10px; background: var(--surface); box-shadow: var(--shadow-sm, 0 2px 8px rgba(0,0,0,.08)); font-size: 0.86rem; }
+.lead-bulk-bar .bulk-group { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.lead-bulk-bar select { max-width: 220px; }
+.sel-all, .sel-one { display: inline-flex; align-items: center; margin-right: 6px; cursor: pointer; }
+.lead-name-link { background: none; border: none; padding: 0; color: inherit; cursor: pointer; text-align: left; font: inherit; }
+.lead-name-link:hover strong { text-decoration: underline; color: var(--accent-text); }

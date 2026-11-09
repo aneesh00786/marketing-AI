@@ -148,7 +148,7 @@ drafts.post('/generate', requireCapability('mail.compose'), body(z.object({
   const v = req.valid;
   let leadId = null;
   if (v.leadId) {
-    const lead = await get('SELECT id, name, email FROM leads WHERE workspace_id = ? AND id = ?', [ws(req), Number(v.leadId)]);
+    const lead = await require('../../lib/leadAccess').requireLeadAccess(req, v.leadId, 'view').catch(() => null);
     if (!lead) throw httpError('Lead not found.', 404, 'NOT_FOUND');
     if (!isEmail(lead.email)) throw httpError(`${lead.name || 'This lead'} has no valid email address. Add one to the lead first.`, 400, 'LEAD_NO_EMAIL');
     leadId = lead.id;
@@ -217,7 +217,7 @@ drafts.patch('/:id', requireCapability('mail.compose'), body(z.object({
   }
   let leadId = draft.lead_id || null;
   if (v.lead_id !== undefined) {
-    const lead = await get('SELECT id, name, email FROM leads WHERE workspace_id = ? AND id = ?', [ws(req), Number(v.lead_id)]);
+    const lead = await require('../../lib/leadAccess').requireLeadAccess(req, v.lead_id, 'view').catch(() => null);
     if (!lead) throw httpError('Contact not found.', 404, 'NOT_FOUND');
     if (!isEmail(lead.email)) throw httpError(`${lead.name || 'This contact'} has no valid email address. Add one in Leads first.`, 400, 'LEAD_NO_EMAIL');
     leadId = lead.id;

@@ -186,6 +186,8 @@ test('sending is queued and done by the worker: separate emails, once each, with
   const x = await lead(A, { name: 'Xia Lim', email: `xia-${uid()}@acme.io`, company: 'Acme', consent: 'granted' });
   const y = await lead(A, { name: 'Yan Ho', email: `yan-${uid()}@acme.io`, company: 'Acme', consent: 'granted' });
   const member = await h.addMember(A.workspaceId, 'Member');
+  // A Member works with leads they own (lib/leadAccess.js).
+  await db().run('UPDATE leads SET owner_user_id = ? WHERE id IN (?, ?)', [member.userId, x, y]);
   const c = await pe(member, 'POST', '/batches', { productId: product, leadIds: [x, y], goal: 'Intro', senderName: 'Jane' });
   await pe(A, 'POST', `/batches/${c.data.batch.id}/approve`, {});
   assert.equal((await pe(member, 'POST', `/batches/${c.data.batch.id}/send`, { confirm: true })).status, 403);

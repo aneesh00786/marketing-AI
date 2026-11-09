@@ -286,11 +286,14 @@ async function resolveAudience(ctx, input) {
   let leads;
   if (v.leadIds && v.leadIds.length) {
     const ids = [...new Set(v.leadIds)];
-    leads = await all(`SELECT id, name, email, company_name, country, status, ai_score, product_id FROM leads WHERE workspace_id = ? AND id IN (${ids.map(() => '?').join(',')})`, [ws(ctx), ...ids]);
+    // Only leads this person may see (lib/leadAccess.js); others are reported as not found.
+    const ok = await require('../../lib/leadAccess').allowedLeadIds(ctx, ids);
+    leads = ok.length ? await all(`SELECT id, name, email, company_name, country, status, ai_score, product_id FROM leads WHERE workspace_id = ? AND id IN (${ok.map(() => '?').join(',')})`, [ws(ctx), ...ok]) : [];
     if (leads.length !== ids.length) throw httpError('One or more selected leads were not found in this workspace.', 404, 'NOT_FOUND');
   } else if (v.filter) {
-    const where = ['workspace_id = ?'];
-    const params = [ws(ctx)];
+    const vis = require('../../lib/leadAccess').visibleSql(ctx, 'leads');
+    const where = ['workspace_id = ?', vis.sql];
+    const params = [ws(ctx), ...vis.params];
     if (v.filter.statuses && v.filter.statuses.length) { where.push(`status IN (${v.filter.statuses.map(() => '?').join(',')})`); params.push(...v.filter.statuses); }
     if (v.filter.productId) { const p = await resolveSelectedProduct(ws(ctx), v.filter.productId); where.push('product_id = ?'); params.push(p.id); }
     if (v.filter.minScore !== undefined) { where.push('ai_score >= ?'); params.push(v.filter.minScore); }
