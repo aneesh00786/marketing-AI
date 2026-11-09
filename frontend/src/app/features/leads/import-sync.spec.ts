@@ -5,24 +5,16 @@ import { importSyncBody, importSyncProblem, newImportSync } from './import-sync'
 import { ImportSyncOptionsComponent } from './import-sync-options.component';
 import { LeadsToListComponent } from './leads-to-list.component';
 
-describe('Import sync (consent + contact list)', () => {
-  it('needs full consent details and a list choice before importing; builds the request body', () => {
+describe('Import sync (contact list)', () => {
+  it('needs a list choice before importing; builds the request body', () => {
     const o = newImportSync();
     expect(importSyncProblem(o)).toBe('');
     expect(importSyncBody(o)).toEqual({});
-    o.consent = true;
-    expect(importSyncProblem(o)).toContain('proof of consent');
-    o.evidence = 'Trade show sheet';
-    expect(importSyncProblem(o)).toContain('Confirm');
-    o.attest = true;
-    o.obtainedAt = '2999-01-01';
-    expect(importSyncProblem(o)).toContain('future');
-    o.obtainedAt = '2026-10-01';
     o.list = 'new';
     expect(importSyncProblem(o)).toContain('name for the new contact list');
     o.listName = ' Trade show ';
     expect(importSyncProblem(o)).toBe('');
-    expect(importSyncBody(o)).toEqual({ consent: { method: 'web_form', obtainedAt: '2026-10-01', evidence: 'Trade show sheet', attest: true }, mailList: { name: 'Trade show' } });
+    expect(importSyncBody(o)).toEqual({ mailList: { name: 'Trade show' } });
     const e = newImportSync('12');
     expect(e.list).toBe('existing');
     expect(importSyncBody(e)).toEqual({ mailList: { id: 12 } });
@@ -42,14 +34,10 @@ describe('ImportSyncOptionsComponent', () => {
     return { fixture, el: fixture.nativeElement };
   }
 
-  it('marks consent optional; consent shows how, when, proof and the confirmation', () => {
-    const { fixture, el } = make(false);
-    expect(el.textContent).toContain('Record consent only if these people agreed to marketing emails');
+  it('asks nothing about consent; without list access it shows nothing', () => {
+    const { el } = make(false);
+    expect(el.textContent).not.toContain('consent');
     expect(el.textContent).not.toContain('Contact list');
-    fixture.componentInstance.sync.consent = true;
-    fixture.detectChanges();
-    expect(el.textContent).toContain('How they agreed');
-    expect(el.textContent).toContain('I confirm I hold this proof');
   });
 
   it('loads the contact lists here; if they cannot be loaded, leads only', () => {

@@ -16,7 +16,6 @@ import { SocialHubComponent } from './features/social/social-hub.component';
 import { CommandCenterComponent } from './features/command/command-center.component';
 import { IconComponent } from './shared/icon.component';
 import { CallButtonComponent } from './shared/calling/call-button.component';
-import { LeadConsentComponent, consentLabel } from './shared/leads/lead-consent.component';
 import { CountryFilterComponent } from './shared/leads/country-filter.component';
 import { SoftphoneComponent } from './shared/calling/softphone.component';
 import { DashboardComponent, DashboardNavigation } from './features/dashboard/dashboard.component';
@@ -35,7 +34,7 @@ import { findTokens, fillTokens, defaultTokenValues } from './features/mail/temp
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [CommonModule, FormsModule, LoginComponent, SocialHubComponent, CommandCenterComponent, IconComponent, DashboardComponent, LeadDiscoveryComponent, CrmComponent, PlatformAdminComponent, CallButtonComponent, SoftphoneComponent, MembersComponent, TemplatePickerComponent, MailCenterComponent, EmailPreviewComponent, ImportSyncOptionsComponent, LeadsToListComponent, CountryFilterComponent, LeadConsentComponent],
+  imports: [CommonModule, FormsModule, LoginComponent, SocialHubComponent, CommandCenterComponent, IconComponent, DashboardComponent, LeadDiscoveryComponent, CrmComponent, PlatformAdminComponent, CallButtonComponent, SoftphoneComponent, MembersComponent, TemplatePickerComponent, MailCenterComponent, EmailPreviewComponent, ImportSyncOptionsComponent, LeadsToListComponent, CountryFilterComponent],
   templateUrl: './app.component.html',
   styleUrls: ['./app.component.css']
 })
@@ -1222,15 +1221,6 @@ export class AppComponent implements OnInit, OnDestroy {
     });
   }
 
-  /** The lead whose marketing consent is being recorded (Leads screen). */
-  consentLead: any = null;
-  leadConsentLabel(ld: any): string { return consentLabel(ld); }
-  onConsentSaved(e: { status: string }): void {
-    const name = this.consentLead?.name || 'the lead';
-    this.consentLead = null;
-    this.showToast(e.status === 'granted' ? `Consent recorded for ${name}. They can now get email campaigns.` : e.status === 'withdrawn' ? `Consent withdrawn for ${name}: no marketing email will reach them.` : `Consent for ${name} is now not recorded.`);
-    this.loadLeads();
-  }
 
   loadLeads(): void {
     if (!this.hasModule('leads')) return;
@@ -2040,7 +2030,6 @@ export function leadExportRows(leads: any[], forCsv: boolean): Record<string, st
     Status: safe(l.status),
     'Lead score': l.score ?? '',
     Category: safe(l.category),
-    'Marketing consent': safe(l.marketingConsent),
     Source: l.googlePlace ? 'AI Lead Discovery' : 'Leads',
     'AI advice': safe(l.aiSuggestion),
     Notes: safe(l.notes),

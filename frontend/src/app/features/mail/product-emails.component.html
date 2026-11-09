@@ -2,7 +2,7 @@
   <div class="pe-head mx-head">
     <div>
       <h2>Product emails</h2>
-      <p class="mx-desc">Choose a product, select leads, and send each one a personalized email. Only leads with marketing consent recorded (and not unsubscribed) can be selected. For one-off emails to any address, use Compose &amp; Send or Mail Drafts.</p>
+      <p class="mx-desc">Choose a product, select leads, and send each one a personalized email. Any lead with a valid email address can be selected, unless they unsubscribed, bounced or opted out. For one-off emails to any address, use Compose &amp; Send or Mail Drafts.</p>
     </div>
   </div>
   <div class="note error" *ngIf="error" role="alert">{{ error }}</div>
@@ -68,7 +68,6 @@
                 <span class="tag ok" *ngIf="l.eligible">Eligible</span>
                 <ng-container *ngIf="!l.eligible">
                   <span class="muted small">{{ l.reasons.join('; ') }}</span>
-                  <button *ngIf="(l.consent === 'unknown' || (l.consent === 'granted' && !l.consentMethod)) && l.email" class="btn btn-secondary btn-sm" (click)="recordConsent(l)">Record consent…</button>
                 </ng-container>
               </td>
             </tr>
@@ -76,22 +75,6 @@
         </table>
       </div>
       <p class="muted small" *ngIf="!leads.length">No leads match.</p>
-      <div class="consent-form" *ngIf="consentFor" role="dialog" aria-label="Record marketing consent">
-        <b>Record marketing consent for {{ consentFor.name }}</b>
-        <p class="muted small">Only record consent you can prove. A note alone is not consent.</p>
-        <label>How was consent given?
-          <select class="hud-input" [(ngModel)]="consentForm.method">
-            <option *ngFor="let m of consentMethods" [value]="m.value">{{ m.label }}</option>
-          </select>
-        </label>
-        <label>Date consent was given <input class="hud-input" type="date" [(ngModel)]="consentForm.obtainedAt" /></label>
-        <label>Evidence reference (form submission id, document, URL…) <input class="hud-input" [(ngModel)]="consentForm.evidence" maxlength="500" /></label>
-        <label class="check"><input type="checkbox" [(ngModel)]="consentForm.attest" /> I confirm we hold this evidence for this person.</label>
-        <div class="actions">
-          <button class="btn btn-primary btn-sm" (click)="saveConsent()" [disabled]="!consentReady">Save consent</button>
-          <button class="btn btn-secondary btn-sm" (click)="consentFor = null">Cancel</button>
-        </div>
-      </div>
       <div class="pager" *ngIf="pages > 1">
         <button class="btn btn-secondary btn-sm" (click)="go(page - 1)" [disabled]="page <= 1">‹ Prev</button>
         <span class="muted small">Page {{ page }} of {{ pages }} · {{ total }} leads</span>

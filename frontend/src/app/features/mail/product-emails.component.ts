@@ -11,7 +11,7 @@ import { CountryFilterComponent, LeadCountry } from '../../shared/leads/country-
 /**
  * Mail Center → Product emails: Product → Leads → personalized emails → preview → send.
  * Leads are never pre-selected; only leads the server reports as eligible (valid address,
- * marketing consent recorded, not unsubscribed/bounced) can be selected, and the reasons are
+ * not unsubscribed/bounced/opted out) can be selected, and the reasons are
  * shown for the rest. Each recipient gets a separate email (a draft in the batch), sent and
  * tracked with the usual draft safeguards. One-off emails to any address stay in Compose/Drafts.
  */
@@ -56,17 +56,6 @@ export class ProductEmailsComponent implements OnInit, OnDestroy {
   // Marketing delivery: never through ZeptoMail; only an SMTP mailbox approved for marketing.
   delivery: { allowed: boolean; code: string | null; reason: string | null; provider: string | null } | null = null;
   approveMarketingConfirm = false;
-  // Consent evidence form (granting consent needs how, when and proof, not just a note).
-  consentFor: any = null;
-  consentForm = { method: 'web_form', obtainedAt: '', evidence: '', attest: false };
-  readonly consentMethods = [
-    { value: 'web_form', label: 'Website sign-up form' },
-    { value: 'double_opt_in', label: 'Double opt-in (confirmed by email)' },
-    { value: 'checkbox_at_signup', label: 'Consent checkbox at account sign-up' },
-    { value: 'written', label: 'Written / signed consent' },
-    { value: 'event_signup', label: 'Event or trade-show sign-up' },
-    { value: 'customer_request', label: 'Customer asked to receive emails' }
-  ];
   private poll: any = null;
   previewId: number | null = null;
   readonly tokenHint = '{{first_name}}, {{company}}, {{product_name}}';
@@ -137,25 +126,6 @@ export class ProductEmailsComponent implements OnInit, OnDestroy {
   }
 
   clearSelection(): void { this.selected.clear(); }
-
-  recordConsent(l: any): void {
-    this.consentFor = l;
-    this.consentForm = { method: 'web_form', obtainedAt: '', evidence: '', attest: false };
-  }
-
-  get consentReady(): boolean {
-    const f = this.consentForm;
-    return !!f.method && /^\d{4}-\d{2}-\d{2}$/.test(f.obtainedAt) && f.evidence.trim().length >= 3 && f.attest;
-  }
-
-  saveConsent(): void {
-    const l = this.consentFor;
-    const f = this.consentForm;
-    this.http.post<any>(`${this.base}/consent`, { leadIds: [l.id], status: 'granted', method: f.method, obtainedAt: f.obtainedAt, evidence: f.evidence.trim(), attest: true }).subscribe({
-      next: () => { this.consentFor = null; this.toast.emit(`Consent recorded for ${l.name}.`); this.loadRecipients(); },
-      error: e => this.toast.emit(this.err(e))
-    });
-  }
 
   // ---------------------------------------------------------------- 3. generate
 

@@ -40,7 +40,7 @@
         <p class="ltz-muted" *ngIf="loading">Loading leads…</p>
         <div class="ltz-empty" *ngIf="!loading && !leads.length">
           <ng-container *ngIf="show === 'eligible'">
-            No leads can be added: a lead needs a valid email address and must not have unsubscribed, bounced or withdrawn consent.
+            No leads can be added: a lead needs a valid email address and must not have unsubscribed or bounced.
             <button type="button" class="link" (click)="show = 'all'; search()">Show all leads</button>
           </ng-container>
           <ng-container *ngIf="show === 'all'">No leads match.</ng-container>

@@ -16,10 +16,10 @@ const { workerAuthorizationProblem } = require('../../../lib/workerAuthorization
  * previewed, approved, sent and tracked exactly like a single draft: the same placeholder checks,
  * single-send claim, unknown-outcome review and audit log. Each recipient gets a separate email.
  *
- * Marketing consent is never assumed: a lead is eligible for these bulk sends only with a valid
- * email address, consent recorded as "granted" WITH evidence (method, date given, evidence
- * reference), and no unsubscribe/bounce on record. Eligibility is checked when the batch is
- * created and again right before each email is sent.
+ * A lead is eligible for these bulk sends with a valid email address and no opt-out on record
+ * (unsubscribed, bounced, spam complaint or consent withdrawn); recorded consent is not required
+ * (like email campaigns sent with Amazon SES). Eligibility is checked when the batch is created
+ * and again right before each email is sent.
  *
  * Sending is done by the background worker (processBatches): a batch is queued, then each email is
  * sent separately with its state stored per recipient, so an interrupted batch resumes without
@@ -57,7 +57,7 @@ async function hasTable(name) {
  * requireConsent=false (non-marketing uses): only
  * opt-outs block a lead (unsubscribed, bounced, spam complaint, consent withdrawn), not missing consent.
  */
-async function withEligibility(workspaceId, leads, { requireConsent = true } = {}) {
+async function withEligibility(workspaceId, leads, { requireConsent = false } = {}) {
   const suppressed = new Map((await all('SELECT email, reason FROM email_suppressions WHERE workspace_id = ?', [workspaceId])).map(r => [String(r.email).toLowerCase(), r.reason]));
   const ids = leads.map(l => l.id);
   const discovered = new Set(ids.length && (await hasTable('lead_place_refs'))
@@ -107,7 +107,7 @@ const LEAD_COLUMNS = 'id, name, email, company_name, country, address, status, p
  * Leads of the workspace for the recipient picker: searchable and filterable, each with its
  * eligibility. Nothing is selected server-side; eligibleIds supports "Select all eligible".
  */
-async function listRecipients(ctx, query = {}, { maxSelect = maxBatch(), maxPageSize = 100, requireConsent = true } = {}) {
+async function listRecipients(ctx, query = {}, { maxSelect = maxBatch(), maxPageSize = 100, requireConsent = false } = {}) {
   const where = ['workspace_id = ?'];
   const params = [ws(ctx)];
   const q = String(query.q || '').trim().slice(0, 100);
@@ -510,7 +510,7 @@ async function recoverStaleBatches() {
 /**
  * Worker tick: claims one queued batch at a time and sends up to EMAILS_PER_TICK emails. Before
  * each email: active workspace, the person who queued it is still an active member allowed to
- * send, and the recipient is still eligible (consent with evidence, not unsubscribed/bounced).
+ * send, and the recipient is still eligible (valid email, not unsubscribed/bounced/opted out).
  */
 async function processBatches(workerId, { maxEmails = EMAILS_PER_TICK() } = {}) {
   await recoverStaleBatches();

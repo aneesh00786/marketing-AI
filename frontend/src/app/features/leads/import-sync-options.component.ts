@@ -3,12 +3,11 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { apiRoot } from '../../core/api-base';
-import { CONSENT_METHOD_LABELS, ImportSync } from './import-sync';
+import { ImportSync } from './import-sync';
 
 /**
- * The two optional steps of an Excel / CSV import, shown under the file preview:
- * 1. Marketing consent (optional): needed for email campaigns and Product Emails.
- * 2. Contact list: also add the imported contacts to a contact list here (existing or new), to email them with a campaign.
+ * The optional step of an Excel / CSV import, shown under the file preview: also add the imported
+ * contacts to a contact list here (existing or new), to email them with a campaign.
  * It edits the ImportSync object it is given; the import itself is sent by the parent.
  */
 @Component({
@@ -19,20 +18,6 @@ import { CONSENT_METHOD_LABELS, ImportSync } from './import-sync';
   styleUrls: ['../command/command-center.component.css', '../mail/mail-ui.css'],
   template: `
   <div class="iso">
-    <fieldset class="iso-box">
-      <legend>Marketing consent <span class="iso-opt">(optional)</span></legend>
-      <label class="iso-check"><input type="checkbox" [(ngModel)]="sync.consent" /> These contacts agreed to receive marketing emails, and I have proof</label>
-      <p class="iso-help" *ngIf="!sync.consent">Record consent only if these people agreed to marketing emails. Campaigns skip anyone whose consent is withdrawn.</p>
-      <div class="iso-grid" *ngIf="sync.consent">
-        <label>How they agreed
-          <select class="hud-input" [(ngModel)]="sync.method"><option *ngFor="let m of methods" [value]="m.value">{{ m.label }}</option></select></label>
-        <label>When <input class="hud-input" type="date" [(ngModel)]="sync.obtainedAt" [max]="today" /></label>
-        <label class="iso-wide">Proof (where it is kept)
-          <input class="hud-input" [(ngModel)]="sync.evidence" maxlength="500" placeholder="e.g. Trade show sign-up sheets, Oct 2026 (Drive › Events)" /></label>
-        <label class="iso-check iso-wide"><input type="checkbox" [(ngModel)]="sync.attest" /> I confirm I hold this proof for every contact in the file. Contacts who unsubscribed or withdrew consent earlier are not changed.</label>
-      </div>
-    </fieldset>
-
     <fieldset class="iso-box" *ngIf="canList">
       <legend>Contact list <span class="iso-opt">(optional)</span></legend>
       <div class="iso-radios">
@@ -70,8 +55,6 @@ export class ImportSyncOptionsComponent implements OnInit {
   @Input({ required: true }) sync!: ImportSync;
   /** The user may add contacts to contact lists (mail.send). */
   @Input() canList = false;
-  readonly methods = CONSENT_METHOD_LABELS;
-  readonly today = new Date().toISOString().slice(0, 10);
   lists: { id: number; name: string; total: number }[] = [];
   listsError = '';
 

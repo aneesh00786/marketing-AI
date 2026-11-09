@@ -8,7 +8,7 @@ describe('leadExportRows', () => {
   it('has one numbered row per lead with readable column names', () => {
     const [row] = leadExportRows([lead], false);
     expect(row).toEqual({ '#': 1, Name: 'Ravi Kumar', Company: 'Global Quality Foods', Country: 'Australia', Address: '', Email: 'sales@gqf.com.au', Phone: '+61 3 9000 1000', Product: 'BrightCart',
-      Budget: '', Status: 'Imported', 'Lead score': 72, Category: 'Warm', 'Marketing consent': 'unknown', Source: 'AI Lead Discovery', 'AI advice': '',
+      Budget: '', Status: 'Imported', 'Lead score': 72, Category: 'Warm', Source: 'AI Lead Discovery', 'AI advice': '',
       Notes: 'Address: 1 Market Rd', Created: '2026-11-02' });
   });
 

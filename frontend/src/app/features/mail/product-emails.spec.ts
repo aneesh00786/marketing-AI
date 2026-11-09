@@ -7,7 +7,7 @@ import { apiRoot } from '../../core/api-base';
 const BASE = `${apiRoot()}/api/v1/mail/product-emails`;
 const LEADS = [
   { id: 1, name: 'Dana Smith', email: 'dana@fleetco.io', company: 'FleetCo', status: 'New', consent: 'granted', eligible: true, reasons: [] },
-  { id: 2, name: 'Kim Park', email: 'kim@cargo.io', company: 'Cargo', status: 'New', consent: 'unknown', eligible: false, reasons: ['Marketing consent not recorded'] },
+  { id: 2, name: 'Kim Park', email: 'kim@cargo.io', company: 'Cargo', status: 'New', consent: 'unknown', eligible: false, reasons: ['Unsubscribed'] },
   { id: 3, name: 'Lee Wong', email: 'lee@shipit.io', company: null, status: 'Qualified', consent: 'granted', eligible: true, reasons: [] }
 ];
 
@@ -44,7 +44,7 @@ describe('ProductEmailsComponent', () => {
 
   it('shows why a lead is ineligible and does not allow selecting it', () => {
     const rows = fixture.nativeElement.querySelectorAll('tbody tr');
-    expect(rows[1].textContent).toContain('Marketing consent not recorded');
+    expect(rows[1].textContent).toContain('Unsubscribed');
     expect((rows[1].querySelector('input') as HTMLInputElement).disabled).toBeTrue();
     comp.toggle(LEADS[1]);
     expect(comp.selected.has(2)).toBeFalse();
@@ -107,20 +107,9 @@ describe('ProductEmailsComponent', () => {
     expect(comp.delivery?.allowed).toBeTrue();
   });
 
-  it('records consent only with method, date, evidence and an explicit confirmation', () => {
-    comp.recordConsent(LEADS[1]);
+  it('offers no consent form: an ineligible lead only shows why (e.g. unsubscribed)', () => {
     fixture.detectChanges();
-    expect(fixture.nativeElement.textContent).toContain('A note alone is not consent');
-    expect(comp.consentReady).toBeFalse();
-    comp.consentForm.obtainedAt = '2026-09-10';
-    comp.consentForm.evidence = 'Form submission #8812';
-    expect(comp.consentReady).withContext('the attestation is required').toBeFalse();
-    comp.consentForm.attest = true;
-    expect(comp.consentReady).toBeTrue();
-    comp.saveConsent();
-    const req = http.expectOne(`${BASE}/consent`);
-    expect(req.request.body).toEqual({ leadIds: [2], status: 'granted', method: 'web_form', obtainedAt: '2026-09-10', evidence: 'Form submission #8812', attest: true });
-    req.flush({ updated: 1, status: 'granted' });
-    http.expectOne(r => r.url === `${BASE}/recipients`).flush({ product: null, leads: [], total: 0, eligibleIds: [], maxBatch: 100 });
+    expect(fixture.nativeElement.textContent).not.toContain('Record consent');
+    expect(fixture.nativeElement.textContent).toContain('unless they unsubscribed, bounced or opted out');
   });
 });

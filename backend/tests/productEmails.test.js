@@ -109,22 +109,23 @@ test.after(() => { process.env.MAIL_ALLOW_PRIVATE_HOSTS = savedPrivate; return h
 
 // ------------------------------------------------------------------ recipients and consent
 
-test('recipients: eligibility with reasons; note-only consent is not trusted; nothing pre-selected', async () => {
+test('recipients: eligibility with reasons; recorded consent is not required, opt-outs block; nothing pre-selected', async () => {
   const r = await pe(A, 'GET', `/recipients?productId=${product}&pageSize=100`);
   assert.equal(r.status, 200, JSON.stringify(r.data));
   assert.equal(r.data.product.name, 'RouteKit');
   const by = Object.fromEntries(r.data.leads.map(l => [l.id, l]));
   assert.ok(!r.data.leads.some(l => l.id === L.b), 'other workspace leads never listed');
   assert.equal(by[L.dana].eligible, true);
-  assert.deepEqual(by[L.kim].reasons, ['Marketing consent not recorded']);
+  // Like SES campaigns: no recorded consent needed; only opt-outs block.
+  assert.equal(by[L.kim].eligible, true, 'no consent recorded');
+  assert.equal(by[L.legacy].eligible, true, 'consent noted without evidence');
   assert.deepEqual(by[L.sam].reasons, ['Marketing consent withdrawn']);
-  assert.deepEqual(by[L.legacy].reasons, ['Consent recorded without evidence; record how and when it was given']);
   assert.deepEqual(by[L.noemail].reasons, ['No email address']);
   assert.deepEqual(by[L.placeholder].reasons, ['Invalid or placeholder email address']);
   assert.deepEqual(by[L.unsub].reasons, ['Unsubscribed']);
   assert.deepEqual(by[L.bounced].reasons, ['Email bounced earlier']);
-  assert.match(by[L.places].reasons[0], /AI Lead Discovery/);
-  assert.equal(r.data.eligibleIds.length, 2);
+  assert.equal(by[L.places].eligible, true, 'found with AI Lead Discovery');
+  assert.equal(r.data.eligibleIds.length, 5);
   assert.ok(r.data.eligibleIds.includes(L.lee));
   assert.equal(r.data.eligibleIds.filter(x => x === L.dana || x === L.dupe).length, 1, 'one lead per email address');
   assert.equal((await pe(A, 'GET', `/recipients?productId=${productB}`)).status, 404, "another workspace's product");
@@ -165,10 +166,10 @@ test('consent: granting needs method, date, evidence and attestation; history an
 test('batch: one personalized draft per eligible lead; exclusions explained', async () => {
   const r = await pe(A, 'POST', '/batches', { productId: product, leadIds: [L.dana, L.lee, L.sam, L.legacy, L.noemail, L.dupe], goal: 'Show {{company}} how route planning saves time', senderName: 'Jane <Ops>' });
   assert.equal(r.status, 200, JSON.stringify(r.data));
-  assert.equal(r.data.drafts.length, 2);
+  assert.equal(r.data.drafts.length, 3);
   const reasons = Object.fromEntries(r.data.skipped.map(s => [s.leadId, s.reasons.join('; ')]));
   assert.match(reasons[L.sam], /withdrawn/);
-  assert.match(reasons[L.legacy], /without evidence/);
+  assert.equal(reasons[L.legacy], undefined, 'no recorded consent needed');
   assert.match(reasons[L.dupe], /Same email address/);
   const dana = r.data.drafts.find(d => d.recipientEmail === 'dana@fleetco.io');
   assert.match(dana.bodyHtml, /Hi Dana,/);
