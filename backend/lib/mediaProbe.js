@@ -230,7 +230,22 @@ async function probeIsoMedia(fh, size, head) {
 }
 
 /** Probes a file on disk. Returns { ok: true, kind, mime, ... } or { ok: false, reason }. */
-async function probeFile(filePath) {
+// ---------- Audio (background music for videos only) ----------
+
+/** MP3: an ID3v2 tag and/or an MPEG audio frame header (sync word, layer III). */
+async function probeMp3(fh, size, head) {
+  let pos = 0;
+  if (head.subarray(0, 3).toString('latin1') === 'ID3') {
+    pos = 10 + ((head[6] & 0x7f) << 21 | (head[7] & 0x7f) << 14 | (head[8] & 0x7f) << 7 | (head[9] & 0x7f));
+    if (pos + 4 > size) return fail('the MP3 file is damaged');
+  }
+  const frame = await readAt(fh, pos, 4);
+  if (frame.length < 4 || frame[0] !== 0xff || (frame[1] & 0xe0) !== 0xe0 || ((frame[1] >> 1) & 0x03) !== 0x01) return fail('only MP3 audio is supported');
+  return { ok: true, kind: 'audio', mime: 'audio/mpeg', format: 'mp3' };
+}
+
+/** allowAudio: MP3 is accepted too (Content Studio background music); never for posts. */
+async function probeFile(filePath, { allowAudio = false } = {}) {
   const fh = await fs.promises.open(filePath, 'r');
   try {
     const { size } = await fh.stat();
@@ -241,6 +256,7 @@ async function probeFile(filePath) {
     if (head.subarray(0, 4).toString('latin1') === 'RIFF' && head.subarray(8, 12).toString('latin1') === 'WEBP') return probeWebp(head);
     if (head.subarray(4, 8).toString('latin1') === 'ftyp') return await probeIsoMedia(fh, size, head);
     if (/^GIF8[79]a$/.test(head.subarray(0, 6).toString('latin1'))) return fail('GIF files are not supported; upload JPEG, PNG or WebP');
+    if (allowAudio && (head.subarray(0, 3).toString('latin1') === 'ID3' || (head[0] === 0xff && (head[1] & 0xe0) === 0xe0))) return await probeMp3(fh, size, head);
     return fail('unsupported file type; upload JPEG, PNG or WebP images, or MP4/MOV videos');
   } finally {
     await fh.close();

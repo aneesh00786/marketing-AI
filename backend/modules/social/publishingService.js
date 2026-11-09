@@ -23,7 +23,7 @@ function idempotencyKey(content, accountId) {
 
 /** What an adapter needs to deliver one attached file; never includes credentials. */
 async function mediaForProvider(workspaceId, asset) {
-  const uploaded = asset.source === 'upload';
+  const uploaded = ['upload', 'ai', 'edited'].includes(asset.source);
   let thumbnailUrl = null;
   if (asset.thumbnail_asset_id) {
     const thumb = await get("SELECT public_id FROM assets WHERE workspace_id = ? AND id = ? AND status = 'ready'", [workspaceId, asset.thumbnail_asset_id]);
@@ -107,7 +107,7 @@ async function preflight(workspaceId, contentRow, accountRow) {
  */
 async function assertMediaFilesPresent(workspaceId, assets) {
   for (const a of assets) {
-    if (a.source !== 'upload') continue;
+    if (!['upload', 'ai', 'edited'].includes(a.source)) continue;
     let stat = null;
     try { stat = await fs.promises.stat(mediaStore.filePath(workspaceId, a.public_id)); } catch (e) { stat = null; }
     if (!stat || (a.size_bytes !== null && a.size_bytes !== undefined && stat.size !== Number(a.size_bytes))) {

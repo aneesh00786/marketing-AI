@@ -77,7 +77,7 @@ function publicUrlFor(publicId) {
 }
 
 async function usedBytes(workspaceId) {
-  const r = await get("SELECT COALESCE(SUM(size_bytes), 0) AS n FROM assets WHERE workspace_id = ? AND source = 'upload' AND status <> 'deleted'", [workspaceId]);
+  const r = await get("SELECT COALESCE(SUM(size_bytes), 0) AS n FROM assets WHERE workspace_id = ? AND source IN ('upload', 'ai', 'edited') AND status <> 'deleted'", [workspaceId]);
   return Number(r.n);
 }
 
@@ -86,7 +86,7 @@ async function usedBytes(workspaceId) {
  * identifies it by content. Returns { tmpPath, size, sha256, probe }; the caller commits or
  * discards the temporary file.
  */
-async function receiveUpload(req, workspaceId) {
+async function receiveUpload(req, workspaceId, { allowAudio = false } = {}) {
   const lim = limits();
   const maxBytes = Math.max(lim.imageBytes, lim.videoBytes);
   const declared = parseInt(req.headers['content-length'] || '', 10);
@@ -131,7 +131,7 @@ async function receiveUpload(req, workspaceId) {
   }
   let probe;
   try {
-    probe = await probeFile(tmpPath);
+    probe = await probeFile(tmpPath, { allowAudio });
   } catch (err) {
     probe = { ok: false, reason: 'the file could not be read' };
   }
@@ -152,7 +152,7 @@ function cleanName(name) {
 }
 
 /** Moves a received upload into place and records it. Enforces the workspace storage quota. */
-async function commitUpload(ctx, received, { originalName, title, thumbnailFor = null } = {}) {
+async function commitUpload(ctx, received, { originalName, title, thumbnailFor = null, source = 'upload', generationId = null, parentAssetId = null, campaignId = null, extraMeta = null } = {}) {
   const workspaceId = ctx.auth.workspaceId;
   const { tmpPath, size, sha256, probe } = received;
   try {
@@ -173,13 +173,13 @@ async function commitUpload(ctx, received, { originalName, title, thumbnailFor =
     try {
       ins = await run(
         `INSERT INTO assets (workspace_id, asset_type, source, public_id, storage_key, mime_type, size_bytes, width, height, duration_seconds,
-           video_codec, audio_codec, frame_rate, checksum, title, original_name, metadata_json, status, created_by, created_at, updated_at)
-         VALUES (?, ?, 'upload', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ready', ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
-        [workspaceId, probe.kind, publicId, publicId, probe.mime, size, probe.width || null, probe.height || null,
+           video_codec, audio_codec, frame_rate, checksum, title, original_name, metadata_json, status, created_by, generation_id, parent_asset_id, campaign_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ready', ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+        [workspaceId, probe.kind, source, publicId, publicId, probe.mime, size, probe.width || null, probe.height || null,
           probe.durationSeconds ?? null, probe.videoCodec || null, probe.audioCodec || null, probe.frameRate ?? null, sha256,
           cleanName(title) || cleanName(originalName), cleanName(originalName),
-          JSON.stringify({ format: probe.format, hasAudio: probe.hasAudio ?? null, progressive: probe.progressive ?? null, role: thumbnailFor ? 'thumbnail' : 'media' }),
-          ctx.auth.userId || null]
+          JSON.stringify({ format: probe.format, hasAudio: probe.hasAudio ?? null, progressive: probe.progressive ?? null, role: thumbnailFor ? 'thumbnail' : 'media', ...(extraMeta || {}) }),
+          ctx.auth.userId || null, generationId, parentAssetId, campaignId]
       );
     } catch (err) {
       await fs.promises.unlink(finalPath).catch(() => {});
@@ -200,6 +200,45 @@ async function commitUpload(ctx, received, { originalName, title, thumbnailFor =
   }
 }
 
+/**
+ * Stores generated or edited bytes (AI images and videos, editor exports) like an upload: the
+ * content is checked (JPEG/PNG/WebP/MP4/MOV only), the quota applies, and the file is never
+ * overwritten. source: 'ai' or 'edited'. Returns the new asset id.
+ */
+async function storeBuffer(ctx, buffer, { title, originalName = null, source = 'ai', generationId = null, parentAssetId = null, campaignId = null, extraMeta = null } = {}) {
+  const workspaceId = ctx.auth.workspaceId;
+  const lim = limits();
+  const dir = path.join(storageRoot(), String(Number(workspaceId)));
+  await fs.promises.mkdir(dir, { recursive: true, mode: 0o750 });
+  const tmpPath = path.join(dir, `.upload-${crypto.randomBytes(16).toString('hex')}`);
+  await fs.promises.writeFile(tmpPath, buffer, { mode: 0o640, flag: 'wx' });
+  return storeFile(ctx, tmpPath, { title, originalName, source, generationId, parentAssetId, campaignId, extraMeta, lim });
+}
+
+/** Same as storeBuffer for a temporary file already in the workspace folder (moved into place). */
+async function storeFile(ctx, tmpPath, { title, originalName = null, source = 'ai', generationId = null, parentAssetId = null, campaignId = null, extraMeta = null, lim = limits(), allowAudio = false } = {}) {
+  const stat = await fs.promises.stat(tmpPath);
+  let probe;
+  try { probe = await probeFile(tmpPath, { allowAudio }); } catch { probe = { ok: false, reason: 'the file could not be read' }; }
+  if (!probe.ok) {
+    await fs.promises.unlink(tmpPath).catch(() => {});
+    throw httpError(502, `The generated file cannot be used: ${probe.reason}.`, 'INVALID_MEDIA');
+  }
+  if (stat.size > (probe.kind === 'image' ? lim.imageBytes : lim.videoBytes)) {
+    await fs.promises.unlink(tmpPath).catch(() => {});
+    throw httpError(413, 'The generated file is larger than the media size limit.', 'TOO_LARGE');
+  }
+  const sha256 = crypto.createHash('sha256').update(await fs.promises.readFile(tmpPath)).digest('hex');
+  return commitUpload(ctx, { tmpPath, size: stat.size, sha256, probe }, { title, originalName, source, generationId, parentAssetId, campaignId, extraMeta });
+}
+
+/** A temporary path in the workspace's media folder (for FFmpeg output); the caller stores or deletes it. */
+async function tempPath(workspaceId, ext = '') {
+  const dir = path.join(storageRoot(), String(Number(workspaceId)));
+  await fs.promises.mkdir(dir, { recursive: true, mode: 0o750 });
+  return path.join(dir, `.upload-${crypto.randomBytes(16).toString('hex')}${ext}`);
+}
+
 async function deleteFile(workspaceId, publicId) {
   await fs.promises.unlink(filePath(workspaceId, publicId)).catch(err => { if (err.code !== 'ENOENT') throw err; });
 }
@@ -207,7 +246,7 @@ async function deleteFile(workspaceId, publicId) {
 /** For the public file route: only stored, live uploads of verified types. */
 async function findPublic(publicId) {
   if (!/^[A-Za-z0-9_-]{43}$/.test(String(publicId || ''))) return null;
-  const row = await get("SELECT workspace_id, public_id, mime_type FROM assets WHERE public_id = ? AND source = 'upload' AND status = 'ready'", [publicId]);
+  const row = await get("SELECT workspace_id, public_id, mime_type FROM assets WHERE public_id = ? AND source IN ('upload', 'ai', 'edited') AND status = 'ready'", [publicId]);
   if (!row || !['image/jpeg', 'image/png', 'image/webp', 'video/mp4', 'video/quicktime'].includes(row.mime_type)) return null;
   return { mime: row.mime_type, path: filePath(row.workspace_id, row.public_id) };
 }
@@ -270,10 +309,13 @@ async function sweepTemporaryFiles() {
 
 /** All live uploads still on disk for a workspace (used by tests and maintenance). */
 async function listStored(workspaceId) {
-  return all("SELECT id, public_id FROM assets WHERE workspace_id = ? AND source = 'upload' AND status = 'ready'", [workspaceId]);
+  return all("SELECT id, public_id FROM assets WHERE workspace_id = ? AND source IN ('upload', 'ai', 'edited') AND status = 'ready'", [workspaceId]);
 }
 
 module.exports = {
+  storeBuffer,
+  storeFile,
+  tempPath,
   MB,
   PUBLIC_PATH,
   storageRoot,

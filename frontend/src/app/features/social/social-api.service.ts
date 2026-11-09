@@ -26,6 +26,9 @@ export class SocialApiService {
 
   // Accounts
   startOAuth(provider: string): Observable<any> { return this.http.post(`${this.base}/oauth/${provider}/start`, {}); }
+  getOAuthSelection(provider: string, selection: string): Observable<any> { return this.http.get(`${this.base}/oauth/${provider}/selection/${encodeURIComponent(selection)}`); }
+  completeOAuthSelection(provider: string, selection: string, pageIds: string[]): Observable<any> { return this.http.post(`${this.base}/oauth/${provider}/selection/${encodeURIComponent(selection)}`, { pageIds }); }
+  cancelOAuthSelection(provider: string, selection: string): Observable<any> { return this.http.delete(`${this.base}/oauth/${provider}/selection/${encodeURIComponent(selection)}`); }
   accounts(includeDisconnected = false): Observable<any> { return this.http.get(`${this.base}/accounts`, { params: this.params({ includeDisconnected: includeDisconnected ? 1 : null }) }); }
   saveProviderApp(provider: string, body: { clientId: string; clientSecret: string }): Observable<any> { return this.http.put(`${this.base}/provider-apps/${provider}`, body); }
   removeProviderApp(provider: string): Observable<any> { return this.http.delete(`${this.base}/provider-apps/${provider}`); }

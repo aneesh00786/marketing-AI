@@ -18,3 +18,19 @@ tr.dim td { opacity: 0.6; }
 }
 
 .grant { display: inline-flex; gap: 6px; align-items: center; font-size: 0.82rem; white-space: nowrap; }
+
+/* Section access */
+.invite-form .modules { grid-column: 1 / -1; border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin: 4px 0 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.invite-form .modules legend { font-weight: 600; font-size: 13px; padding: 0 4px; }
+.invite-form .modules p { flex-basis: 100%; margin: 2px 0 0; }
+.mod { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid var(--border, rgba(148, 163, 184, .3)); border-radius: 999px; cursor: pointer; font-size: 13px; transition: border-color .15s, background .15s; }
+.mod.on { border-color: var(--primary, #4f46e5); background: rgba(79, 70, 229, .08); }
+.mods .mod { border-radius: 10px; flex-wrap: wrap; }
+.mods .mod small { flex-basis: 100%; padding-left: 22px; font-size: 11px; }
+.mods { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; margin: 10px 0; }
+td.access { min-width: 180px; }
+td.access .btn { margin-left: 6px; }
+tr.access-edit td { background: rgba(79, 70, 229, .04); }
+.row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.invite-form .modules label.mod { flex-direction: row; color: var(--text); }
+.mod.on { border-color: var(--accent, #4f46e5); background: var(--accent-soft); }

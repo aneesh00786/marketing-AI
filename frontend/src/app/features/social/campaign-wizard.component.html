@@ -1,0 +1,507 @@
+<div class="st cw">
+  <!-- ===================== Campaign list (no campaign open) ===================== -->
+  <ng-container *ngIf="!step">
+    <div class="st-head">
+      <div>
+        <h3>Product Campaigns</h3>
+        <p class="st-muted">Choose a product, describe the campaign, let Mark plan it, create the posters, videos and posts, then approve, schedule and track results.</p>
+      </div>
+      <div class="st-head-side"><button type="button" class="btn btn-primary" (click)="newCampaign()">＋ Create Campaign</button></div>
+    </div>
+    <div class="cw-list" *ngIf="campaigns.length; else noCampaigns">
+      <button type="button" class="cw-camp" *ngFor="let c of campaigns" (click)="openCampaign(c.id)">
+        <span class="cw-camp-top"><b>{{ c.name }}</b><span class="st-status" [attr.data-status]="c.status === 'Draft' ? 'queued' : 'completed'">{{ c.status }}</span></span>
+        <small class="st-muted">{{ c.objective || 'No objective yet' }}{{ c.startDate ? ' · ' + (c.startDate | date:'MMM d') + ' – ' + (c.endDate | date:'MMM d') : '' }}</small>
+        <span class="cw-camp-step">Next: {{ campaignStep(c) }} →</span>
+      </button>
+    </div>
+    <ng-template #noCampaigns>
+      <div class="cw-empty st-card">
+        <span class="cw-empty-icon" aria-hidden="true">📦</span>
+        <b>No campaigns yet</b>
+        <p class="st-muted">Start from one of your Digital Products: Mark uses its real details to plan and create the content.</p>
+        <button type="button" class="btn btn-primary" (click)="newCampaign()">＋ Create your first campaign</button>
+      </div>
+    </ng-template>
+  </ng-container>
+
+  <!-- ===================== Wizard ===================== -->
+  <ng-container *ngIf="step">
+    <div class="cw-top">
+      <button type="button" class="st-link" (click)="close()">← All campaigns</button>
+      <b class="cw-title">{{ form.name || 'New campaign' }}</b>
+      <span class="cw-product" *ngIf="product"><img *ngIf="product.images?.[0]" [src]="product.images[0].url" alt="" />{{ product.name }}</span>
+    </div>
+
+    <ol class="cw-steps" aria-label="Campaign steps">
+      <li *ngFor="let s of steps; let i = index" [class.on]="s.key === step" [class.done]="i < stepIndex" [class.locked]="!reachable(s.key)">
+        <button type="button" (click)="go(s.key)" [disabled]="!reachable(s.key)" [attr.aria-current]="s.key === step ? 'step' : null">
+          <span class="cw-dot">{{ i < stepIndex ? '✓' : (i + 1) }}</span>
+          <span class="cw-label"><small>Step {{ i + 1 }}</small>{{ s.label }}</span>
+        </button>
+      </li>
+    </ol>
+
+    <p class="st-note bad" *ngIf="error" role="alert">{{ error }} <button type="button" class="st-link" (click)="error = ''">Dismiss</button></p>
+
+    <!-- ---------- Step 1: Select Product ---------- -->
+    <section *ngIf="step === 'product'" class="cw-panel">
+      <div class="cw-toolbar">
+        <input type="search" [(ngModel)]="search" (keyup.enter)="loadProducts()" (search)="loadProducts()" placeholder="Search products…" aria-label="Search products" />
+        <select [(ngModel)]="category" (change)="loadProducts()" aria-label="Category"><option value="">All categories</option><option *ngFor="let c of categories" [value]="c">{{ c }}</option></select>
+        <button type="button" class="btn btn-secondary btn-sm" (click)="loadProducts()">Search</button>
+      </div>
+      <div class="cw-products" *ngIf="products.length; else noProducts">
+        <article *ngFor="let p of products" class="cw-prod" [class.on]="form.productId === p.id">
+          <div class="cw-prod-img">
+            <img *ngIf="p.images?.length" [src]="p.images[0].url" [alt]="p.name" loading="lazy" />
+            <span *ngIf="!p.images?.length" aria-hidden="true">📦</span>
+            <em class="cw-prod-status" [class.off]="p.status !== 'Active'">{{ p.status || 'Active' }}</em>
+          </div>
+          <div class="cw-prod-body">
+            <span class="cw-prod-cat" *ngIf="p.category">{{ p.category }}</span>
+            <b>{{ p.name }}</b>
+            <p>{{ p.tagline || (p.description | slice:0:110) }}</p>
+            <div class="cw-feats"><span *ngFor="let f of (p.features || []).slice(0, 3)">✓ {{ f }}</span><span *ngIf="(p.features || []).length > 3">+{{ p.features.length - 3 }} more</span></div>
+          </div>
+          <div class="cw-prod-actions">
+            <button type="button" class="btn btn-secondary btn-sm" (click)="detailsOf = p">Details</button>
+            <button type="button" class="btn btn-primary btn-sm" (click)="selectProduct(p)">Select →</button>
+          </div>
+        </article>
+      </div>
+      <ng-template #noProducts>
+        <div class="cw-empty st-card"><span class="cw-empty-icon" aria-hidden="true">🔎</span><b>No products found</b><p class="st-muted">Add your products on the Digital Products page, then come back to create a campaign.</p></div>
+      </ng-template>
+    </section>
+
+    <!-- ---------- Step 2: Review the selected product ---------- -->
+    <section *ngIf="step === 'confirm' && chosen" class="cw-panel">
+      <div class="st-card cw-confirm">
+        <div class="cw-confirm-media">
+          <img *ngIf="chosen.images?.length" [src]="chosen.images[0].url" [alt]="chosen.name" />
+          <span *ngIf="!chosen.images?.length" aria-hidden="true">📦</span>
+        </div>
+        <div class="cw-confirm-body">
+          <div class="cw-card-tags"><span class="cw-prod-cat" *ngIf="chosen.category">{{ chosen.category }}</span><span class="st-status" [attr.data-status]="chosen.status === 'Active' ? 'completed' : 'queued'">{{ chosen.status || 'Active' }}</span></div>
+          <h3 class="cw-confirm-title">{{ chosen.name }}</h3>
+          <p class="cw-muted-strong" *ngIf="chosen.tagline">{{ chosen.tagline }}</p>
+          <p>{{ chosen.description || 'No description yet.' }}</p>
+          <h4>Features and benefits</h4>
+          <ul class="cw-confirm-feats"><li *ngFor="let f of featuresOf(chosen)">✓ {{ f }}</li><li *ngIf="!featuresOf(chosen).length" class="st-muted">No features listed — Mark will not invent any.</li></ul>
+          <p *ngIf="chosen.target_audience"><b>For:</b> {{ chosen.target_audience }}</p>
+          <p *ngIf="chosen.url"><b>Website:</b> <a [href]="chosen.url" target="_blank" rel="noopener">{{ chosen.url }}</a></p>
+          <p class="st-muted">Mark uses this product's details from Digital Products as they are. To change them, edit the product there.</p>
+          <div class="st-actions">
+            <button type="button" class="btn btn-primary" (click)="confirmProduct()">Continue to Create Campaign →</button>
+            <button type="button" class="btn btn-secondary" (click)="step = 'product'">Change Product</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Product details drawer -->
+    <div class="cw-drawer-backdrop" *ngIf="detailsOf" (click)="detailsOf = null">
+      <aside class="cw-drawer" role="dialog" aria-modal="true" aria-labelledby="cw-pd" (click)="$event.stopPropagation()">
+        <header><b id="cw-pd">{{ detailsOf.name }}</b><button type="button" class="st-icon-btn" (click)="detailsOf = null" aria-label="Close">✕</button></header>
+        <div class="cw-drawer-imgs" *ngIf="detailsOf.images?.length"><img *ngFor="let i of detailsOf.images" [src]="i.url" [alt]="detailsOf.name" /></div>
+        <p class="cw-muted-strong">{{ detailsOf.tagline }}</p>
+        <p>{{ detailsOf.description || 'No description yet.' }}</p>
+        <h4>Features</h4><ul><li *ngFor="let f of detailsOf.features">{{ f }}</li><li *ngIf="!detailsOf.features?.length" class="st-muted">None added</li></ul>
+        <h4>Target customers</h4><p>{{ detailsOf.target_audience || 'Not specified' }}</p>
+        <h4>Pricing</h4><p *ngIf="!detailsOf.pricing?.length" class="st-muted">Not specified — prices will not be mentioned.</p>
+        <ul *ngIf="detailsOf.pricing?.length"><li *ngFor="let t of detailsOf.pricing">{{ t.name || t.tier || '' }} {{ t.price || '' }}</li></ul>
+        <h4>Website</h4><p><a [href]="detailsOf.url" target="_blank" rel="noopener">{{ detailsOf.url }}</a></p>
+        <button type="button" class="btn btn-primary" (click)="selectProduct(detailsOf)">Select this product →</button>
+      </aside>
+    </div>
+
+    <!-- ---------- Step 2: Campaign Details ---------- -->
+    <form *ngIf="step === 'details'" class="st-card st-form cw-panel" (ngSubmit)="saveDetails(true)" (input)="autosave()" (change)="autosave()">
+      <p class="st-muted cw-saved" *ngIf="campaignId">{{ savedAt ? 'Draft saved automatically at ' + (savedAt | date:'h:mm a') : 'Changes save automatically as a draft.' }}</p>
+      <div class="st-grid">
+        <label>Campaign name *<input name="name" [(ngModel)]="form.name" required maxlength="255" /></label>
+        <label>Selected product<span class="cw-picked" *ngIf="product"><img *ngIf="product.images?.[0]" [src]="product.images[0].url" alt="" />{{ product.name }} <button type="button" class="st-link" (click)="changeProduct()">Change product</button></span></label>
+        <label>Objective<select name="obj" [(ngModel)]="form.objective"><option *ngFor="let o of objectives" [value]="o">{{ o }}</option></select></label>
+        <label>Marketing tone<select name="tone" [(ngModel)]="form.tone"><option *ngFor="let t of tones" [value]="t">{{ t }}</option></select></label>
+        <label class="wide">Target audience<input name="aud" [(ngModel)]="form.targetAudience" maxlength="2000" placeholder="Who should see this campaign?" /></label>
+        <label class="wide">Campaign description<textarea name="desc" rows="2" [(ngModel)]="form.description" maxlength="3000" placeholder="What is this campaign about?"></textarea></label>
+        <label class="wide">Key marketing message<input name="msg" [(ngModel)]="form.keyMessage" maxlength="2000" placeholder="The one thing people should remember" /></label>
+        <label>Campaign duration<select name="dur" [ngModel]="form.duration" (ngModelChange)="setDuration($event)"><option *ngFor="let d of durations" [value]="d.key">{{ d.label }}</option></select></label>
+        <label>Start date<input type="date" name="start" [(ngModel)]="form.startDate" (ngModelChange)="form.duration !== 'custom' ? setDuration(form.duration) : autosave()" /></label>
+        <label>End date<input type="date" name="end" [(ngModel)]="form.endDate" [min]="form.startDate" [disabled]="form.duration !== 'custom'" /></label>
+        <label>Language<select name="lang" [(ngModel)]="form.language"><option value="en">English</option><option value="hi">Hindi</option><option value="ml">Malayalam</option><option value="ta">Tamil</option><option value="ar">Arabic</option><option value="es">Spanish</option><option value="fr">French</option><option value="de">German</option></select></label>
+        <label>Call to action<input name="cta" [(ngModel)]="form.callToAction" maxlength="255" placeholder="e.g. Book a demo" /></label>
+        <label class="wide">Landing page URL<input name="url" type="url" [(ngModel)]="form.landingUrl" maxlength="500" placeholder="https://" /></label>
+        <div class="wide cw-images">
+          <span class="cw-images-label">Product images for this campaign <small>(the first is the main image; Mark uses them as references for posters and videos)</small></span>
+          <div class="cw-images-row">
+            <figure *ngFor="let id of form.imageAssetIds; let i = index" class="cw-image" [class.cover]="i === 0">
+              <img *ngIf="imageUrl(id)" [src]="imageUrl(id)" [alt]="'Product image ' + (i + 1)" />
+              <button type="button" (click)="removeImage(id)" aria-label="Remove image">✕</button>
+            </figure>
+            <label class="cw-image-add">⬆<span>{{ uploading ? 'Uploading…' : 'Upload' }}</span><input type="file" accept="image/png,image/jpeg,image/webp" multiple hidden (change)="uploadImages($event)" [disabled]="uploading" /></label>
+            <button type="button" class="cw-image-add" (click)="togglePicker()">🗂<span>From library</span></button>
+          </div>
+          <div class="cw-image-picker" *ngIf="picking">
+            <button type="button" *ngFor="let a of library" (click)="pickImage(a)" [class.on]="form.imageAssetIds.includes(a.id)" [attr.aria-pressed]="form.imageAssetIds.includes(a.id)"><img [src]="a.previewPath || a.url" [alt]="a.title || 'Image'" loading="lazy" /></button>
+            <p class="st-muted" *ngIf="!library.length">No images in the Content Library yet — upload them here.</p>
+          </div>
+        </div>
+        <fieldset class="st-platforms wide"><legend>Platforms</legend>
+          <button type="button" *ngFor="let p of platforms" class="cw-plat" [class.on]="form.platforms.includes(p.key)" [disabled]="!connected.includes(p.key)" (click)="togglePlatform(p.key)" [attr.aria-pressed]="form.platforms.includes(p.key)"
+            [title]="connected.includes(p.key) ? '' : 'Connect a ' + p.label + ' account first (Connected Accounts)'">{{ p.icon }} {{ p.label }}<small *ngIf="!connected.includes(p.key)">not connected</small></button>
+        </fieldset>
+        <p class="st-muted wide" *ngIf="!connected.length">No social accounts are connected yet: connect them in Connected Accounts to publish. You can still plan and create content.</p>
+      </div>
+      <div class="st-actions">
+        <button type="submit" class="btn btn-primary" [disabled]="busy === 'details'">{{ busy === 'details' ? 'Saving…' : 'Save & continue →' }}</button>
+        <button type="button" class="btn btn-secondary" (click)="saveDetails(false)" [disabled]="busy === 'details'">Save draft</button>
+      </div>
+    </form>
+
+    <!-- ---------- AI Strategy (generate, review and approve) ---------- -->
+    <section *ngIf="step === 'strategy'" class="cw-panel">
+      <div class="st-card cw-hero" *ngIf="!strategy">
+        <span class="cw-empty-icon" aria-hidden="true">🧠</span>
+        <b>Let Mark plan this campaign</b>
+        <p class="st-muted">Mark analyses {{ product?.name || 'the product' }} (details, features, images, pricing if any), your objective, tone, platforms and the {{ campaignDays }}-day duration, then proposes a strategy and a content plan. No images or videos are created yet.</p>
+        <p class="st-note warn" *ngIf="ov?.missingInformation?.length">Missing product details: {{ ov.missingInformation.join(', ') }}. Mark will not invent them.</p>
+        <label class="cw-direction">Any direction? (optional)<input [(ngModel)]="direction" maxlength="500" placeholder="e.g. Focus on small retailers, keep it playful" /></label>
+        <button type="button" class="btn btn-primary cw-big" (click)="generateStrategy()" [disabled]="busy === 'strategy'">{{ busy === 'strategy' ? 'Mark is planning…' : '🧠 Generate AI Campaign Strategy' }}</button>
+      </div>
+
+      <ng-container *ngIf="strategy">
+        <div class="st-progress" *ngIf="busy === 'strategy'"><i></i></div>
+        <p class="st-note warn" *ngIf="strategy.unverifiedClaims?.length">Check before approving — not found in the product's details: {{ strategy.unverifiedClaims.join(', ') }}</p>
+        <p class="st-note warn" *ngIf="strategy.missingInformation?.length">Missing product details (not invented): {{ strategy.missingInformation.join(', ') }}</p>
+
+        <div class="cw-sgrid">
+          <!-- A. Overview -->
+          <div class="st-card">
+            <h4>🎯 Campaign overview</h4>
+            <label>Theme<input [(ngModel)]="ovw.theme" (ngModelChange)="strategyDirty = true" [disabled]="locked" /></label>
+            <label>Main marketing message<input [(ngModel)]="ovw.main_message" (ngModelChange)="strategyDirty = true" [disabled]="locked" /></label>
+            <p class="cw-kv" *ngIf="ovw.objective"><b>Objective</b> {{ ovw.objective }}</p>
+            <p class="cw-kv" *ngIf="ovw.target_audience"><b>Audience</b> {{ ovw.target_audience }}</p>
+            <div *ngIf="ovw.unique_selling_points?.length"><b class="cw-mini">Unique selling points</b><span class="cw-tag" *ngFor="let u of ovw.unique_selling_points">✓ {{ u }}</span></div>
+            <p class="cw-kv" *ngIf="ovw.approach"><b>Approach</b> {{ ovw.approach }}</p>
+          </div>
+          <!-- B. Content strategy -->
+          <div class="st-card">
+            <h4>🧩 Content mix</h4>
+            <div class="cw-mix">
+              <span *ngFor="let k of mixKeys" class="cw-mix-cell"><b>{{ planCount(k[0]) }}</b><small>{{ k[1] }}</small></span>
+            </div>
+            <p class="st-muted">Counts of the content plan below ({{ strategy.ideas.length }} items, {{ postCount }} posts across platforms).</p>
+          </div>
+          <!-- C. Platforms -->
+          <div class="st-card" *ngIf="objectEntries(strategy.platform_strategy).length">
+            <h4>📱 Platform strategy</h4>
+            <p class="cw-kv" *ngFor="let e of objectEntries(strategy.platform_strategy)" [hidden]="!e[1]"><b>{{ platformIcon(e[0]) }} {{ e[0] }}</b> {{ e[1] }}</p>
+          </div>
+          <!-- D. Publishing -->
+          <div class="st-card" *ngIf="strategy.publishing">
+            <h4>🗓 Publishing strategy</h4>
+            <p class="cw-kv" *ngIf="strategy.publishing.frequency"><b>Frequency</b> {{ strategy.publishing.frequency }}</p>
+            <p class="cw-kv" *ngIf="strategy.publishing.best_times"><b>Best times</b> {{ strategy.publishing.best_times }}</p>
+            <p class="cw-kv" *ngIf="strategy.publishing.sequence"><b>Sequence</b> {{ strategy.publishing.sequence }}</p>
+            <p class="cw-kv" *ngIf="strategy.publishing.notes"><b>Notes</b> {{ strategy.publishing.notes }}</p>
+          </div>
+          <!-- E. Messages -->
+          <div class="st-card cw-span2">
+            <h4>💬 Marketing messages</h4>
+            <label>Primary headline<input [(ngModel)]="msgs.headline" (ngModelChange)="strategyDirty = true" [disabled]="locked" /></label>
+            <div *ngIf="msgs.supporting?.length"><b class="cw-mini">Supporting</b><span class="cw-tag" *ngFor="let m of msgs.supporting">{{ m }}</span></div>
+            <div *ngIf="msgs.promotional?.length"><b class="cw-mini">Promotional</b><span class="cw-tag" *ngFor="let m of msgs.promotional">{{ m }}</span></div>
+            <div *ngIf="msgs.ctas?.length"><b class="cw-mini">Calls to action</b><span class="cw-tag" *ngFor="let m of msgs.ctas">{{ m }}</span></div>
+            <label>Hashtags<input [ngModel]="hashtagText()" (ngModelChange)="setHashtags($event)" [disabled]="locked" /></label>
+          </div>
+        </div>
+
+        <!-- Content calendar (plan) -->
+        <div class="st-card">
+          <div class="st-result-head"><b>📅 Content plan</b><span class="st-muted">{{ strategy.ideas.length }} items · {{ campaignDays }} days</span>
+            <button type="button" class="st-link" *ngIf="!locked" (click)="addIdea()">＋ Add content item</button></div>
+          <div class="cw-plan-list">
+            <article class="cw-idea" *ngFor="let it of strategy.ideas; let i = index" [class.open]="openIdea === it.id">
+              <div class="cw-idea-row">
+                <span class="st-day">{{ it.day }}</span>
+                <div class="cw-idea-main">
+                  <input class="cw-idea-title" [(ngModel)]="it.title" (ngModelChange)="strategyDirty = true" [disabled]="locked" aria-label="Title" />
+                  <small class="st-muted">{{ dateOf(it.day) | date:'EEE, MMM d' }} · {{ it.suggested_time }} · {{ it.media_format }}</small>
+                </div>
+                <select [(ngModel)]="it.format" (ngModelChange)="strategyDirty = true" [disabled]="locked" aria-label="Type"><option *ngFor="let f of formats" [value]="f">{{ formatIcon(f) }} {{ formatLabel(f) }}</option></select>
+                <span class="cw-idea-plats">
+                  <button type="button" *ngFor="let p of form.platforms" class="cw-chip-plat" [class.on]="(it.platforms || []).includes(p)" [disabled]="locked" (click)="toggleIdeaPlatform(it, p)" [attr.aria-pressed]="(it.platforms || []).includes(p)" [title]="p">{{ platformIcon(p) }}</button>
+                </span>
+                <span class="cw-idea-actions" *ngIf="!locked">
+                  <button type="button" class="st-icon-btn" (click)="moveIdea(i, -1)" [disabled]="i === 0" aria-label="Move up">↑</button>
+                  <button type="button" class="st-icon-btn" (click)="moveIdea(i, 1)" [disabled]="i === strategy.ideas.length - 1" aria-label="Move down">↓</button>
+                  <button type="button" class="st-icon-btn" (click)="regenerateIdea(it)" [disabled]="busy === 'idea-' + it.id" aria-label="Regenerate this item" title="Regenerate this item">{{ busy === 'idea-' + it.id ? '…' : '↻' }}</button>
+                  <button type="button" class="st-icon-btn" (click)="removeIdea(i)" aria-label="Delete">✕</button>
+                </span>
+                <button type="button" class="st-link" (click)="openIdea = openIdea === it.id ? null : it.id">{{ openIdea === it.id ? 'Less' : 'Details' }}</button>
+              </div>
+              <div class="cw-idea-details st-grid" *ngIf="openIdea === it.id">
+                <label>Day<input type="number" min="1" [max]="campaignDays" [(ngModel)]="it.day" (ngModelChange)="strategyDirty = true" [disabled]="locked" /></label>
+                <label>Time<input type="time" [(ngModel)]="it.suggested_time" (ngModelChange)="strategyDirty = true" [disabled]="locked" /></label>
+                <label>Objective<input [(ngModel)]="it.objective" (ngModelChange)="strategyDirty = true" [disabled]="locked" /></label>
+                <label>Call to action<input [(ngModel)]="it.cta" (ngModelChange)="strategyDirty = true" [disabled]="locked" /></label>
+                <label class="wide">Description<textarea rows="2" [(ngModel)]="it.idea" (ngModelChange)="strategyDirty = true" [disabled]="locked"></textarea></label>
+                <label class="wide">Caption<textarea rows="3" [(ngModel)]="it.caption" (ngModelChange)="strategyDirty = true" [disabled]="locked"></textarea></label>
+                <label class="wide">Hashtags<input [ngModel]="tagsOf(it)" (ngModelChange)="it.hashtags = splitTags($event); strategyDirty = true" [disabled]="locked" /></label>
+                <label class="wide" *ngIf="!['video', 'reel'].includes(it.format)">Image prompt<textarea rows="2" [(ngModel)]="it.image_prompt" (ngModelChange)="strategyDirty = true" [disabled]="locked"></textarea></label>
+                <label class="wide" *ngIf="['video', 'reel'].includes(it.format)">Video prompt / script<textarea rows="2" [(ngModel)]="it.video_prompt" (ngModelChange)="strategyDirty = true" [disabled]="locked"></textarea></label>
+              </div>
+            </article>
+          </div>
+        </div>
+
+        <div class="cw-sticky-actions" *ngIf="!locked">
+          <input [(ngModel)]="direction" maxlength="500" placeholder="Direction for a new strategy (optional)" aria-label="Direction" />
+          <button type="button" class="btn btn-secondary" (click)="regenerateAll()" [disabled]="!!busy">↻ Regenerate Strategy</button>
+          <button type="button" class="btn btn-secondary" (click)="saveStrategy()" [disabled]="!!busy || !strategyDirty">Save changes</button>
+          <button type="button" class="btn btn-primary" (click)="acceptStrategy()" [disabled]="!!busy || !strategy.ideas.length">{{ busy === 'accept' ? 'Approving…' : '✓ Approve Strategy' }}</button>
+        </div>
+        <p class="st-note" *ngIf="locked">Strategy approved: {{ (strategy.contentIds || []).length }} draft posts were created. <button type="button" class="st-link" (click)="go('content')">Generate all content →</button></p>
+      </ng-container>
+    </section>
+
+    <!-- ---------- Step 4: Generate Content ---------- -->
+    <section *ngIf="step === 'content'" class="cw-panel">
+      <!-- Generate All Content -->
+      <div class="st-card cw-bulk">
+        <div class="cw-bulk-head">
+          <div>
+            <h4>⚡ Generate All Content</h4>
+            <p class="st-muted">Creates every planned poster, video, reel, carousel, post and story from the approved strategy, in the background. You can leave this page; nothing is published.</p>
+          </div>
+          <button type="button" class="btn btn-primary cw-big" *ngIf="!bulkRun?.active" (click)="openBulkConfirm()" [disabled]="busy === 'bulk-est'">{{ busy === 'bulk-est' ? 'Calculating…' : '⚡ Generate All Content' }}</button>
+          <button type="button" class="btn btn-secondary" *ngIf="bulkRun?.active" (click)="cancelBulk(null)">Cancel what has not started</button>
+        </div>
+
+        <!-- Confirmation with the estimate -->
+        <div class="cw-bulk-confirm" *ngIf="bulkEstimate" role="alertdialog" aria-labelledby="cw-bc">
+          <b id="cw-bc">Generate all content for {{ bulkEstimate.campaign.name }}?</b>
+          <ul class="cw-bulk-types">
+            <li *ngFor="let t of bulkEstimate.byType">{{ formatIcon(t.type) }} <b>{{ t.count }}</b> {{ t.label }} <small>· {{ t.credits }} credits</small></li>
+          </ul>
+          <p class="st-note warn" *ngFor="let s of bulkEstimate.skipped">Skipped: {{ s.title }} — {{ s.reason }}</p>
+          <div class="cw-bulk-sum">
+            <span>Estimated usage <b>{{ bulkEstimate.credits }} credits</b>{{ bulkEstimate.costUsd !== null ? ' (≈ $' + bulkEstimate.costUsd + ')' : '' }}</span>
+            <span>Available <b>{{ bulkEstimate.balance.available === null ? 'No limit' : bulkEstimate.balance.available + ' credits' }}</b>{{ bulkEstimate.balance.reserved ? ' (' + bulkEstimate.balance.reserved + ' reserved)' : '' }}</span>
+          </div>
+          <p class="st-note bad" *ngIf="!bulkEstimate.enough">Not enough credits this month. Remove some items from the plan or wait for next month's credits.</p>
+          <p class="st-muted">Credits are reserved while items generate; failed or canceled items are not charged.</p>
+          <div class="st-actions">
+            <button type="button" class="btn btn-primary" [disabled]="!bulkEstimate.enough || !bulkEstimate.totalItems || busy === 'bulk'" (click)="startBulk()">⚡ Generate All Content</button>
+            <button type="button" class="btn btn-secondary" (click)="bulkEstimate = null">Cancel</button>
+          </div>
+        </div>
+
+        <!-- Progress dashboard -->
+        <ng-container *ngIf="bulkRun">
+          <div class="cw-bulk-counts">
+            <span class="st-kpi"><b>{{ bulkCounts.total }}</b> items</span>
+            <span class="st-kpi ok"><b>{{ bulkCounts.completed }}</b> completed</span>
+            <span class="st-kpi run"><b>{{ bulkCounts.processing }}</b> processing</span>
+            <span class="st-kpi"><b>{{ bulkCounts.queued }}</b> queued</span>
+            <span class="st-kpi bad"><b>{{ bulkCounts.failed }}</b> failed</span>
+            <span class="st-kpi" *ngIf="bulkCounts.canceled"><b>{{ bulkCounts.canceled }}</b> canceled</span>
+            <span class="st-muted">{{ bulkRun.charged }} of ~{{ bulkRun.estimatedCredits }} credits used</span>
+          </div>
+          <div class="st-progress cw-bulk-bar" [attr.aria-label]="'Done ' + bulkDone + ' of ' + bulkCounts.total"><i class="fill" [style.width.%]="bulkCounts.total ? (bulkDone / bulkCounts.total) * 100 : 0"></i></div>
+          <table class="st-table">
+            <thead><tr><th>Content</th><th>Type</th><th>Platforms</th><th>Status</th><th>Credits</th><th><span class="sr-only">Actions</span></th></tr></thead>
+            <tbody>
+              <tr *ngFor="let u of bulkItems">
+                <td class="st-cell-main"><b>Day {{ u.day }} · {{ u.title }}</b><small *ngIf="u.error" class="cw-err">{{ u.error }}</small></td>
+                <td><span class="st-format">{{ formatIcon(u.format) }} {{ formatLabel(u.format) }}</span></td>
+                <td>{{ platformsText(u.platforms) }}</td>
+                <td><span class="st-status" [attr.data-status]="u.status">{{ u.status }}</span></td>
+                <td>{{ u.credits !== null ? u.credits : '~' + u.estimatedCredits }}</td>
+                <td class="st-row-actions">
+                  <button type="button" class="st-link" *ngIf="u.status === 'failed'" (click)="retryBulkItem(u)">↻ Retry</button>
+                  <button type="button" class="st-link" *ngIf="u.status === 'queued'" (click)="cancelBulk(u.itemId)">Cancel</button>
+                  <button type="button" class="st-link" *ngIf="u.status === 'completed'" (click)="viewItem(u.itemId)">View</button>
+                  <button type="button" class="st-link" *ngIf="u.status === 'completed' || u.status === 'canceled'" (click)="work(itemById(u.itemId), tabOf(u.format))">Regenerate</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </ng-container>
+      </div>
+
+      <h4 class="cw-sub">Create or redo one item</h4>
+      <div class="cw-tabs" role="tablist">
+        <button type="button" role="tab" *ngFor="let t of tabs" [class.on]="tab === t.key" [attr.aria-selected]="tab === t.key" (click)="setTab(t.key)">{{ t.icon }} {{ t.label }} <em>{{ itemsFor(t.key).length }}</em></button>
+      </div>
+      <div class="cw-content">
+        <aside class="cw-planned">
+          <h4>Planned {{ tab === 'post' ? 'posts' : tab + 's' }}</h4>
+          <button type="button" class="cw-plan" *ngFor="let it of itemsFor(tab)" [class.on]="workingItem?.id === it.id" (click)="work(it)">
+            <span class="cw-plan-thumb"><img *ngIf="cover(it)?.thumbnailUrl" [src]="cover(it).thumbnailUrl" alt="" /><span *ngIf="!cover(it)?.thumbnailUrl">{{ formatIcon(it.format) }}</span></span>
+            <span class="cw-plan-text"><b>Day {{ it.planDay || '—' }} · {{ it.title }}</b><small>{{ platformIcon(it.platformKey) }} {{ it.platformKey }} · {{ it.media?.length ? '✓ media ready' : 'needs content' }}</small></span>
+          </button>
+          <p class="st-muted" *ngIf="!itemsFor(tab).length">No planned {{ tab }} items. Create one freely on the right.</p>
+          <button type="button" class="st-link" (click)="work(null)">＋ Create something new</button>
+        </aside>
+        <div class="cw-gen">
+          <p class="st-note" *ngIf="workingItem">Creating for <b>Day {{ workingItem.planDay }} · {{ workingItem.title }}</b> — the result is attached to this post (as a new version). Uses {{ product?.name }}'s details{{ product?.images?.length ? ' and images' : '' }}.</p>
+          <app-studio-generator [embedded]="true" [campaignId]="campaignId" [contentItemId]="workingItem?.id || null" [startMode]="tab === 'story' ? 'poster' : $any(tab)" [prefill]="prefill"
+            (toast)="toast.emit($event); loadOverview()" (openContent)="openContent.emit($event)"></app-studio-generator>
+        </div>
+      </div>
+      <div class="st-actions cw-next"><button type="button" class="btn btn-primary" (click)="go('review')">Review & approve →</button></div>
+    </section>
+
+    <!-- ---------- Step 5: Review & Approve ---------- -->
+    <section *ngIf="step === 'review'" class="cw-panel">
+      <div class="cw-toolbar">
+        <span class="st-kpi"><b>{{ ov?.counts?.draft || 0 }}</b> draft</span>
+        <span class="st-kpi"><b>{{ ov?.counts?.review || 0 }}</b> ready for review</span>
+        <span class="st-kpi"><b>{{ (ov?.counts?.approved || 0) + (ov?.counts?.scheduled || 0) }}</b> approved</span>
+        <span class="st-kpi"><b>{{ ov?.counts?.published || 0 }}</b> published</span>
+        <button type="button" class="btn btn-secondary btn-sm cw-push" (click)="approveAllReady()">✓ Approve all with media</button>
+        <button type="button" class="btn btn-primary btn-sm" [disabled]="!selectedIds.length" (click)="approveSelected()">✓ Approve selected ({{ selectedIds.length }})</button>
+      </div>
+      <div class="cw-filters" role="tablist" aria-label="Filter content">
+        <button type="button" *ngFor="let f of reviewFilters" [class.on]="reviewFilter === f.key" (click)="reviewFilter = f.key" [attr.aria-pressed]="reviewFilter === f.key">{{ f.label }} <em>{{ countFor(f.key) }}</em></button>
+      </div>
+      <div class="cw-cards">
+        <article class="cw-card" *ngFor="let it of filteredItems" [class.sel]="selectedIds.includes(it.id)">
+          <label class="cw-card-check" *ngIf="['draft', 'review', 'rejected'].includes(it.status)"><input type="checkbox" [checked]="selectedIds.includes(it.id)" (change)="toggleSelect(it.id)" [attr.aria-label]="'Select ' + it.title" /></label>
+          <button type="button" class="cw-card-media" (click)="previewing = it" [attr.aria-label]="'Preview ' + it.title">
+            <img *ngIf="cover(it)?.thumbnailUrl" [src]="cover(it).thumbnailUrl" alt="" loading="lazy" />
+            <span *ngIf="!cover(it)?.thumbnailUrl" class="cw-card-ph">{{ formatIcon(it.format) }}<small>{{ it.format === 'post' ? 'Text post' : 'No media yet' }}</small></span>
+            <em class="cw-card-play" *ngIf="cover(it)?.type === 'video'">▶</em>
+          </button>
+          <div class="cw-card-body">
+            <div class="cw-card-tags"><span class="st-format">{{ formatIcon(it.format) }} {{ it.format || 'post' }}</span><span class="st-format">{{ platformIcon(it.platformKey) }} {{ it.platformKey }}</span><span class="st-format" *ngIf="it.planDay">Day {{ it.planDay }}</span></div>
+            <b>{{ it.title || 'Untitled' }}</b>
+            <small class="st-muted">{{ product?.name }} · {{ form.name }}</small>
+            <p class="cw-card-caption">{{ it.caption | slice:0:140 }}{{ it.caption?.length > 140 ? '…' : '' }}</p>
+            <small class="cw-card-tagsline" *ngIf="it.hashtags?.length">{{ tagsOf(it) }}</small>
+            <small class="st-muted" *ngIf="it.suggestedPublishAt || it.scheduledAt">🗓 {{ (it.scheduledAt || it.suggestedPublishAt) | date:'EEE, MMM d, h:mm a' }}{{ it.scheduledAt ? '' : ' (planned)' }}</small>
+            <div class="cw-card-status">
+              <span class="st-status" [attr.data-status]="it.status">{{ statusOf(it.status) }}</span>
+              <span class="st-status" *ngIf="it.generation" [attr.data-status]="it.generation.status">AI {{ it.generation.status }}</span>
+            </div>
+            <p class="st-note warn" *ngIf="it.assumptions?.length">{{ it.assumptions[0] }}</p>
+          </div>
+          <footer class="cw-card-actions">
+            <button type="button" class="btn btn-primary btn-sm" *ngIf="['draft', 'review', 'rejected'].includes(it.status)" [disabled]="busy === 'approve-' + it.id" (click)="approve(it)">✓ Approve</button>
+            <button type="button" class="btn btn-secondary btn-sm" *ngIf="it.status === 'approved'" (click)="go('schedule')">🗓 Schedule</button>
+            <button type="button" class="st-link" (click)="openContent.emit(it.id)">Edit</button>
+            <button type="button" class="st-link" (click)="regenerate(it)">↻ Media</button>
+            <button type="button" class="st-link" [disabled]="busy === 'rewrite-' + it.id" (click)="rewrite(it)">↻ Text</button>
+            <button type="button" class="st-link" (click)="duplicate(it)">Duplicate</button>
+            <a class="st-link" *ngIf="cover(it)?.url" [href]="cover(it).url" download>Download</a>
+            <button type="button" class="st-link" (click)="showHistory(it)">Versions</button>
+            <button type="button" class="st-link danger" *ngIf="!['published', 'publishing', 'scheduled'].includes(it.status)" (click)="remove(it)">Delete</button>
+          </footer>
+        </article>
+      </div>
+      <p class="st-muted">Approval is required before scheduling or publishing. Editing an approved post sends it back for approval.</p>
+      <div class="st-actions cw-next"><button type="button" class="btn btn-primary" (click)="go('schedule')">Schedule & publish →</button></div>
+    </section>
+
+    <!-- Generation history -->
+    <div class="cw-drawer-backdrop" *ngIf="historyFor" (click)="historyFor = null">
+      <aside class="cw-drawer" role="dialog" aria-modal="true" aria-labelledby="cw-hist" (click)="$event.stopPropagation()">
+        <header><b id="cw-hist">Versions — {{ historyFor.title }}</b><button type="button" class="st-icon-btn" (click)="historyFor = null" aria-label="Close">✕</button></header>
+        <p class="st-muted" *ngIf="!history.length">No AI generations for this post yet.</p>
+        <article class="cw-ver" *ngFor="let h of history.slice().reverse()">
+          <div class="cw-ver-head"><b>Version {{ h.version }}</b><span class="st-status" [attr.data-status]="h.status">{{ h.status }}</span><small class="st-muted">{{ h.createdAt | date:'MMM d, h:mm a' }}</small></div>
+          <div class="cw-ver-media"><img *ngFor="let a of h.assets" [hidden]="a.type !== 'image'" [src]="a.url" alt="" /></div>
+          <small class="st-muted">{{ h.provider || '—' }} · {{ h.model || '—' }} · {{ h.credits !== null ? h.credits + ' credits' : 'not charged' }}{{ h.costUsd !== null ? ' · $' + h.costUsd : '' }}</small>
+          <p class="cw-ver-prompt" *ngIf="h.prompt">{{ h.prompt | slice:0:300 }}</p>
+        </article>
+      </aside>
+    </div>
+
+    <!-- Preview -->
+    <div class="cw-drawer-backdrop" *ngIf="previewing" (click)="previewing = null">
+      <div class="cw-preview" role="dialog" aria-modal="true" (click)="$event.stopPropagation()">
+        <header><b>{{ previewing.title }}</b><button type="button" class="st-icon-btn" (click)="previewing = null" aria-label="Close">✕</button></header>
+        <div class="cw-preview-media">
+          <ng-container *ngFor="let m of previewing.media">
+            <img *ngIf="m.type === 'image'" [src]="m.url" [alt]="previewing.title" />
+            <video *ngIf="m.type === 'video'" [src]="m.url" controls playsinline></video>
+          </ng-container>
+          <ol *ngIf="previewing.slides?.length" class="cw-preview-slides"><li *ngFor="let s of previewing.slides"><b>{{ s.title }}</b> {{ s.body }}</li></ol>
+        </div>
+        <p class="cw-preview-caption">{{ previewing.caption }}</p>
+        <p class="st-muted">{{ tagsOf(previewing) }}</p>
+      </div>
+    </div>
+
+    <!-- ---------- Step 6: Schedule & Publish ---------- -->
+    <section *ngIf="step === 'schedule'" class="cw-panel">
+      <div class="cw-toolbar">
+        <span class="st-muted">Approved posts can be scheduled or published now. The platform confirms each post before it is marked Published.</span>
+        <button type="button" class="btn btn-primary btn-sm cw-push" [disabled]="!approvedCount || busy === 'sched-all'" (click)="scheduleAllPlanned()">🗓 Schedule all approved at the planned times ({{ approvedCount }})</button>
+        <button type="button" class="btn btn-secondary btn-sm" (click)="openCalendar.emit(campaignId!)">Open the calendar</button>
+      </div>
+      <p class="st-note" *ngIf="!publishable.length">No approved posts yet. <button type="button" class="st-link" (click)="go('review')">Review & approve →</button></p>
+      <div class="cw-sched" *ngFor="let it of publishable">
+        <span class="cw-plan-thumb"><img *ngIf="cover(it)?.thumbnailUrl" [src]="cover(it).thumbnailUrl" alt="" /><span *ngIf="!cover(it)?.thumbnailUrl">{{ formatIcon(it.format) }}</span></span>
+        <div class="cw-sched-main"><b>{{ it.title }}</b><small class="st-muted">{{ platformIcon(it.platformKey) }} {{ it.platformKey }} · Day {{ it.planDay || '—' }}</small>
+          <span class="st-status" [attr.data-status]="it.status">{{ statusOf(it.status) }}{{ it.scheduledAt ? ' · ' + (it.scheduledAt | date:'MMM d, h:mm a') : '' }}</span>
+          <a *ngIf="it.externalUrl" [href]="it.externalUrl" target="_blank" rel="noopener" class="st-link">View on {{ it.platformKey }} ↗</a>
+          <small class="st-note bad" *ngIf="it.lastError">{{ it.lastError }}</small></div>
+        <div class="cw-sched-ctrl" *ngIf="it.status === 'approved' || it.status === 'failed'">
+          <select [ngModel]="scheduleAccount[it.id] ?? it.socialAccountId ?? accountsFor(it.platformKey)[0]?.id" (ngModelChange)="scheduleAccount[it.id] = $event" [attr.aria-label]="'Account for ' + it.title">
+            <option *ngFor="let a of accountsFor(it.platformKey)" [ngValue]="a.id">{{ a.displayName || a.accountTypeLabel }}</option>
+            <option *ngIf="!accountsFor(it.platformKey).length" [ngValue]="null">No {{ it.platformKey }} account connected</option>
+          </select>
+          <input type="datetime-local" [ngModel]="defaultWhen(it)" (ngModelChange)="scheduleAt[it.id] = $event" [attr.aria-label]="'When to publish ' + it.title" />
+          <button type="button" class="btn btn-primary btn-sm" [disabled]="busy === 'sched-' + it.id" (click)="schedule(it)">Schedule</button>
+          <button type="button" class="btn btn-secondary btn-sm" [disabled]="busy === 'pub-' + it.id" (click)="publishNow(it)">Publish now</button>
+        </div>
+        <div class="cw-sched-ctrl" *ngIf="it.status === 'scheduled'">
+          <button type="button" class="st-link" (click)="openContent.emit(it.id)">Edit</button>
+          <button type="button" class="st-link danger" (click)="unschedule(it)">Unschedule</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- Step 7: Analytics ---------- -->
+    <section *ngIf="step === 'analytics'" class="cw-panel">
+      <p class="st-muted" *ngIf="busy === 'analytics'">Loading…</p>
+      <ng-container *ngIf="analytics">
+        <div class="cw-funnel">
+          <div *ngFor="let f of [['planned','Planned','📋'],['generatedWithMedia','Generated','✨'],['approved','Approved','✅'],['scheduled','Scheduled','🗓'],['published','Published','🚀'],['failed','Failed','⚠️']]" class="cw-funnel-step">
+            <span aria-hidden="true">{{ f[2] }}</span><b>{{ analytics.funnel[f[0]] }}</b><small>{{ f[1] }}</small>
+          </div>
+        </div>
+        <div class="cw-metrics">
+          <div class="cw-metric" *ngFor="let m of metricKeys" [class.na]="metric(analytics.metrics.totals?.[m[0]]) === 'Unavailable'">
+            <small>{{ m[1] }}</small><b>{{ metric(analytics.metrics.totals?.[m[0]]) }}</b>
+          </div>
+        </div>
+        <div class="st-card" *ngIf="objectEntries(analytics.metrics.byPlatform).length">
+          <h4>By platform</h4>
+          <table class="st-table"><thead><tr><th>Platform</th><th>Posts</th><th *ngFor="let m of metricKeys">{{ m[1] }}</th></tr></thead>
+            <tbody><tr *ngFor="let e of objectEntries(analytics.metrics.byPlatform)"><td>{{ platformIcon(e[0]) }} {{ e[0] }}</td><td>{{ e[1].posts }}</td><td *ngFor="let m of metricKeys">{{ metric(e[1].metrics?.[m[0]]) }}</td></tr></tbody></table>
+        </div>
+        <div class="st-card" *ngIf="objectEntries(analytics.metrics.byFormat).length">
+          <h4>By content type</h4>
+          <table class="st-table"><thead><tr><th>Type</th><th>Posts</th><th *ngFor="let m of metricKeys">{{ m[1] }}</th></tr></thead>
+            <tbody><tr *ngFor="let e of objectEntries(analytics.metrics.byFormat)"><td>{{ formatIcon(e[0]) }} {{ formatLabel(e[0]) }}</td><td>{{ e[1].posts }}</td><td *ngFor="let m of metricKeys">{{ metric(e[1].metrics?.[m[0]]) }}</td></tr></tbody></table>
+        </div>
+        <div class="st-card" *ngIf="analytics.metrics.posts?.length">
+          <h4>Published posts</h4>
+          <table class="st-table"><thead><tr><th>Post</th><th>Platform</th><th>Published</th><th>Reach</th><th>Likes</th><th>Comments</th></tr></thead>
+            <tbody><tr *ngFor="let p of analytics.metrics.posts" class="cw-row-link" (click)="openContent.emit(p.contentId)">
+              <td>{{ p.title || 'Untitled' }}</td><td>{{ platformIcon(p.platformKey) }} {{ p.platformKey }}</td><td>{{ p.publishedAt | date:'MMM d' }}</td>
+              <td>{{ metric(p.metrics?.reach) }}</td><td>{{ metric(p.metrics?.likes) }}</td><td>{{ metric(p.metrics?.comments) }}</td></tr></tbody></table>
+        </div>
+        <div class="cw-empty st-card" *ngIf="!analytics.metrics.publishedCount"><span class="cw-empty-icon" aria-hidden="true">📊</span><b>No published posts yet</b><p class="st-muted">Performance appears here once posts are published and the platforms report their numbers.</p></div>
+        <p class="st-muted">AI usage for this campaign: {{ analytics.ai.completed }} generations, {{ analytics.ai.credits }} credits{{ analytics.ai.costUsd !== null ? ' (≈ $' + analytics.ai.costUsd + ')' : '' }}.</p>
+        <p class="st-muted">{{ analytics.note }}</p>
+      </ng-container>
+    </section>
+  </ng-container>
+</div>

@@ -8,6 +8,7 @@
 const crypto = require('crypto');
 const { ProviderError, providerRequest } = require('./http');
 const { openBlob } = require('./media');
+const { metaInstagramEnabled } = require('../capabilities');
 
 const GRAPH_VERSION = () => process.env.META_GRAPH_VERSION || 'v23.0';
 const GRAPH = () => `https://graph.facebook.com/${GRAPH_VERSION()}`;
@@ -136,8 +137,11 @@ const meta = {
     const me = await graph(`/me?${qs({ fields: 'id,name', access_token: userToken })}`);
     const perms = await graph(`/me/permissions?${qs({ access_token: userToken })}`);
     const scopes = (perms.data || []).filter(p => p.status === 'granted').map(p => p.permission);
+    // The Instagram field is requested only when Instagram permissions are enabled for the app.
+    const instagram = metaInstagramEnabled();
+    const pageFields = 'id,name,access_token,link,picture{url}' + (instagram ? ',instagram_business_account{id,username,name,profile_picture_url}' : '');
     const pages = await graph(`/me/accounts?${qs({
-      fields: 'id,name,access_token,link,picture{url},instagram_business_account{id,username,name,profile_picture_url}',
+      fields: pageFields,
       limit: 100,
       access_token: userToken
     })}`);
@@ -157,7 +161,7 @@ const meta = {
         token_expires_at: null,
         metadata: { meta_user_id: me.id }
       });
-      const ig = page.instagram_business_account;
+      const ig = instagram ? page.instagram_business_account : null;
       if (ig?.id) {
         accounts.push({
           account_type: 'instagram_business',

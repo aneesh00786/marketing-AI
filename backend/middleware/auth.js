@@ -73,7 +73,7 @@ async function resolveAuth(token) {
   }
 
   const member = await get(
-    `SELECT m.workspace_id, m.user_id, m.role, m.status, u.email, u.display_name, u.status AS user_status
+    `SELECT m.workspace_id, m.user_id, m.role, m.status, m.module_access_json, u.email, u.display_name, u.status AS user_status
      FROM workspace_members m
      JOIN users u ON u.id = m.user_id
      JOIN workspaces w ON w.id = m.workspace_id AND (w.status IS NULL OR w.status = 'Active')
@@ -92,7 +92,9 @@ async function resolveAuth(token) {
     displayName: member.display_name,
     ...session,
     // Role capabilities plus per-member grants the role currently qualifies for (fails closed).
-    capabilities: await require('../lib/capabilityGrants').effectiveCapabilities(member.workspace_id, member.user_id, member.role)
+    capabilities: await require('../lib/capabilityGrants').effectiveCapabilities(member.workspace_id, member.user_id, member.role),
+    // Sections this member may open (Owners/Admins: all). Read on every request, so changes apply at once.
+    modules: require('../lib/moduleAccess').modulesFor(member.role, member.module_access_json)
   };
 }
 

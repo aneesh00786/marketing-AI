@@ -246,7 +246,7 @@ describe('CampaignMetricsComponent', () => {
   });
 
   it('shows unique and total opens and clicks separately', () => {
-    comp.report = { emails_sent_count: 10, delivered_count: 8, opens_count: 3, open_events: 7, open_percent: 37.5, unique_clicks_count: 2, click_events: 5, unique_clicked_percent: 25 };
+    init({ report: { emails_sent_count: 10, delivered_count: 8, opens_count: 3, open_events: 7, open_percent: 37.5, unique_clicks_count: 2, click_events: 5, unique_clicked_percent: 25 } });
     const open = comp.metrics.find(m => m.label === 'Open rate')!;
     const click = comp.metrics.find(m => m.label === 'Click-through rate')!;
     expect([open.value, open.hint]).toEqual(['37.5%', '3 unique · 7 total opens. Unique opens ÷ delivered; counted only when images load.']);

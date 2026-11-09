@@ -3,6 +3,8 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpEventType } from '@angular/common/http';
 import { SocialApiService } from './social-api.service';
+import { StudioApiService } from './studio-api.service';
+import { ImageEditorComponent } from './image-editor.component';
 import { apiRoot } from '../../core/api-base';
 
 interface UploadRow { name: string; size: number; progress: number; status: 'uploading' | 'thumbnail' | 'done' | 'error'; error?: string; }
@@ -15,7 +17,7 @@ interface UploadRow { name: string; size: number; progress: number; status: 'upl
 @Component({
   selector: 'app-media-library',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, ImageEditorComponent],
   templateUrl: './media-library.component.html',
   styleUrls: ['./social-shared.css', './media-library.component.css']
 })
@@ -31,7 +33,9 @@ export class MediaLibraryComponent implements OnInit {
   storage: any = null;
   limits: any = null;
   publicFetchProblem: string | null = null;
-  filter: 'all' | 'image' | 'video' | 'unused' = 'all';
+  filter: 'all' | 'image' | 'video' | 'unused' | 'ai' | 'edited' | 'upload' = 'all';
+  editing: any = null;
+  brandKit: any = null;
   q = '';
   loading = false;
   uploads: UploadRow[] = [];
@@ -41,14 +45,20 @@ export class MediaLibraryComponent implements OnInit {
   titleDraft = '';
   error: string | null = null;
 
-  constructor(private api: SocialApiService) {}
+  constructor(private api: SocialApiService, private studio: StudioApiService) {}
 
   ngOnInit(): void { this.load(); }
+
+  /** Opens the image editor (the brand kit, for its logo and colours, is loaded then). */
+  editImage(a: any): void {
+    this.editing = a;
+    if (!this.brandKit) this.studio.brandKits().subscribe({ next: r => this.brandKit = (r.brandKits || []).find((k: any) => k.isDefault) || null, error: () => {} });
+  }
 
   load(): void {
     this.loading = true;
     const f = this.filter;
-    this.api.media({ type: f === 'image' || f === 'video' ? f : null, unused: f === 'unused' ? 1 : null, q: this.q || null, limit: 200 }).subscribe({
+    this.api.media({ type: f === 'image' || f === 'video' ? f : null, unused: f === 'unused' ? 1 : null, source: ['ai', 'edited', 'upload'].includes(f) ? f : null, q: this.q || null, limit: 200 }).subscribe({
       next: r => {
         this.items = r.items;
         this.storage = r.storage;

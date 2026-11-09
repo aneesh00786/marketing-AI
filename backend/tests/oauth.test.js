@@ -79,7 +79,10 @@ test('each workspace sets up its own app from the UI; the secret is verified, en
   ]);
   try {
     const cb = await h.api('GET', `/api/v1/social/oauth/meta/callback?state=${state}&code=c1`);
-    assert.match(cb.headers.get('location'), /oauth=success/);
+    assert.match(cb.headers.get('location'), /oauth=select/);
+    const selection = new URL(cb.headers.get('location')).searchParams.get('selection');
+    const picked = await h.api('POST', `/api/v1/social/oauth/meta/selection/${selection}`, { token: T.token, body: { pageIds: ['5150'] } });
+    assert.equal(picked.data.connected, 1);
   } finally { mock.restore(); }
   const acct = await get("SELECT app_source FROM social_accounts WHERE workspace_id = ? AND external_account_id = '5150'", [T.workspaceId]);
   assert.equal(acct.app_source, 'workspace');
@@ -137,13 +140,15 @@ test('callback rejects unknown, replayed and expired state', async () => {
   assert.match(expired.headers.get('location'), /reason=invalid_state/);
 });
 
-test('a valid Meta callback stores Page + Instagram accounts with encrypted tokens (mocked Graph API)', async () => {
+test('with Instagram enabled, a selected Page is stored with its linked Instagram account and encrypted tokens (mocked Graph API)', async () => {
   process.env.META_APP_ID = 'app-id';
   process.env.META_APP_SECRET = 'app-secret';
+  process.env.META_INSTAGRAM_ENABLED = '1';
   const start = await h.api('POST', '/api/v1/social/oauth/meta/start', { token: W.token });
   const authorize = new URL(start.data.authorizeUrl);
   assert.equal(authorize.hostname, 'www.facebook.com');
   assert.ok(authorize.searchParams.get('scope').includes('pages_manage_posts'));
+  assert.ok(authorize.searchParams.get('scope').includes('instagram_basic'));
   const state = authorize.searchParams.get('state');
 
   const graph = 'https://graph.facebook.com/';
@@ -159,11 +164,16 @@ test('a valid Meta callback stores Page + Instagram accounts with encrypted toke
     assert.equal(cb.status, 302);
     const loc = cb.headers.get('location');
     assert.match(loc, /^http:\/\/localhost:4200\/\?/);
-    assert.match(loc, /oauth=success/);
-    assert.match(loc, /connected=2/);
+    assert.match(loc, /oauth=select/);
     assert.ok(!loc.includes('token'), 'tokens must never appear in redirect URLs');
+    const selection = new URL(loc).searchParams.get('selection');
+    const list = await h.api('GET', `/api/v1/social/oauth/meta/selection/${selection}`, { token: W.token });
+    assert.equal(list.data.pages[0].instagram.username, 'acme');
+    const picked = await h.api('POST', `/api/v1/social/oauth/meta/selection/${selection}`, { token: W.token, body: { pageIds: ['111'] } });
+    assert.equal(picked.data.connected, 2);
   } finally {
     mock.restore();
+    delete process.env.META_INSTAGRAM_ENABLED;
   }
 
   const accounts = await h.api('GET', '/api/v1/social/accounts', { token: W.token });

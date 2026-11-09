@@ -25,6 +25,10 @@ export class MembersComponent implements OnInit {
   error = '';
   busy = '';
   inviteForm = { email: '', role: 'Member' };
+  /** Sections chosen for the invitation (all by default). */
+  inviteModules = new Set<string>();
+  /** The member whose section access is being edited, and the working selection. */
+  editing: { userId: number; modules: Set<string> } | null = null;
   // The link of the last invitation created or resent (shown once, for sharing when not emailed).
   lastLink: { email: string; link: string; emailed: boolean; emailError: string | null } | null = null;
 
@@ -35,7 +39,11 @@ export class MembersComponent implements OnInit {
   load(): void {
     this.loading = true;
     this.http.get<any>(`${this.base}/members`).subscribe({
-      next: r => { this.data = r; this.loading = false; this.error = ''; },
+      next: r => {
+        const first = !this.data;
+        this.data = r; this.loading = false; this.error = '';
+        if (first) this.inviteModules = new Set((r.modules || []).map((m: any) => m.key));
+      },
       error: e => { this.loading = false; this.error = this.err(e); }
     });
   }
@@ -50,11 +58,56 @@ export class MembersComponent implements OnInit {
     return !!this.data?.canManage && !m.isYou && m.status === 'Active' && (m.role !== 'Workspace Owner' || this.data.canManageOwners);
   }
 
+  /** Owners and Admins always have every section. */
+  fullAccess(role: string): boolean {
+    return (this.data?.fullAccessRoles || []).includes(role);
+  }
+
+  moduleLabel(key: string): string {
+    return this.data?.modules?.find((m: any) => m.key === key)?.label || key;
+  }
+
+  accessText(v: any): string {
+    if (!v || v.fullAccessRole) return 'All sections (role)';
+    if (v.all || v.keys.length === this.data?.modules?.length) return 'All sections';
+    return v.keys.length ? v.keys.map((k: string) => this.moduleLabel(k)).join(', ') : 'No sections';
+  }
+
+  toggle(set: Set<string>, key: string): void {
+    set.has(key) ? set.delete(key) : set.add(key);
+  }
+
+  editAccess(m: any): void {
+    this.editing = this.editing?.userId === m.userId ? null : { userId: m.userId, modules: new Set(m.modules?.keys || []) };
+  }
+
+  saveAccess(m: any): void {
+    if (!this.editing) return;
+    this.busy = 'modules';
+    const modules = (this.data.modules || []).map((x: any) => x.key).filter((k: string) => this.editing!.modules.has(k));
+    this.http.put<any>(`${this.base}/members/${m.userId}/modules`, { modules }).subscribe({
+      next: () => { this.busy = ''; this.editing = null; this.toast.emit(`Section access updated for ${m.displayName || m.email}.`); this.load(); },
+      error: e => { this.busy = ''; this.toast.emit(this.err(e)); }
+    });
+  }
+
+  /** Platform admin only: CRM access (platform-wide data). */
+  setCrm(m: any, role: string): void {
+    const value = role || null;
+    if ((m.crmRole || null) === value) return;
+    this.http.put<any>(`${this.base}/members/${m.userId}/crm`, { role: value }).subscribe({
+      next: () => { this.toast.emit(value ? `CRM access (${value}) given to ${m.displayName || m.email}.` : `CRM access removed from ${m.displayName || m.email}.`); this.load(); },
+      error: e => { this.toast.emit(this.err(e)); this.load(); }
+    });
+  }
+
   invite(): void {
     const email = this.inviteForm.email.trim();
     if (!email) return;
     this.busy = 'invite';
-    this.http.post<any>(`${this.base}/invitations`, { email, role: this.inviteForm.role }).subscribe({
+    const body: any = { email, role: this.inviteForm.role };
+    if (!this.fullAccess(this.inviteForm.role)) body.modules = (this.data.modules || []).map((x: any) => x.key).filter((k: string) => this.inviteModules.has(k));
+    this.http.post<any>(`${this.base}/invitations`, body).subscribe({
       next: r => {
         this.busy = '';
         this.lastLink = { email: r.invitation.email, link: r.link, emailed: r.emailed, emailError: r.emailError };

@@ -4,9 +4,12 @@ import { FormsModule } from '@angular/forms';
 import { SocialApiService } from './social-api.service';
 import { MediaLibraryComponent } from './media-library.component';
 import { PostComposerComponent } from './post-composer.component';
+import { CampaignWizardComponent } from './campaign-wizard.component';
+import { BrandKitComponent } from './brand-kit.component';
+import { StudioUsageComponent } from './studio-usage.component';
 import { apiRoot } from '../../core/api-base';
 
-type Section = 'overview' | 'accounts' | 'campaigns' | 'calendar' | 'library' | 'media' | 'queue' | 'analytics' | 'inbox' | 'strategist' | 'settings';
+type Section = 'overview' | 'generator' | 'brand' | 'accounts' | 'campaigns' | 'calendar' | 'library' | 'media' | 'queue' | 'analytics' | 'inbox' | 'strategist' | 'settings';
 
 const PLATFORMS = [
   { key: 'facebook', label: 'Facebook', icon: '📘' },
@@ -24,7 +27,7 @@ const METRIC_LABELS: Record<string, string> = {
 @Component({
   selector: 'app-social-hub',
   standalone: true,
-  imports: [CommonModule, FormsModule, MediaLibraryComponent, PostComposerComponent],
+  imports: [CommonModule, FormsModule, MediaLibraryComponent, PostComposerComponent, CampaignWizardComponent, BrandKitComponent, StudioUsageComponent],
   templateUrl: './social-hub.component.html',
   styleUrls: ['./social-shared.css', './social-hub.component.css']
 })
@@ -35,19 +38,27 @@ export class SocialHubComponent implements OnInit, OnDestroy {
   @Input() initialLibraryStatus: string | null = null;
   @Output() toast = new EventEmitter<string>();
 
-  readonly sections: { key: Section; label: string; icon: string }[] = [
+  /** The Content Studio's nine sections, then the other social tools (after a divider). */
+  readonly sections: { key: Section; label: string; icon: string; more?: boolean }[] = [
     { key: 'overview', label: 'Overview', icon: '🧭' },
-    { key: 'accounts', label: 'Connected Accounts', icon: '🔗' },
+    { key: 'generator', label: 'AI Content Generator', icon: '✨' },
     { key: 'campaigns', label: 'Campaigns', icon: '🎯' },
     { key: 'calendar', label: 'Content Calendar', icon: '🗓️' },
-    { key: 'library', label: 'Content Library', icon: '🗂️' },
-    { key: 'media', label: 'Media Library', icon: '🖼️' },
-    { key: 'queue', label: 'Publishing Queue', icon: '🚀' },
-    { key: 'analytics', label: 'Analytics & Reports', icon: '📊' },
-    { key: 'inbox', label: 'Engagement Inbox', icon: '💬' },
-    { key: 'strategist', label: 'Mark AI Strategist', icon: '🧠' },
-    { key: 'settings', label: 'Social Settings', icon: '⚙️' }
+    { key: 'media', label: 'Content Library', icon: '🗂️' },
+    { key: 'queue', label: 'Published Posts', icon: '🚀' },
+    { key: 'analytics', label: 'Analytics', icon: '📊' },
+    { key: 'brand', label: 'Brand Kit', icon: '🎨' },
+    { key: 'accounts', label: 'Connected Accounts', icon: '🔗' },
+    { key: 'library', label: 'All Posts', icon: '📝', more: true },
+    { key: 'inbox', label: 'Engagement Inbox', icon: '💬', more: true },
+    { key: 'strategist', label: 'Mark AI Strategist', icon: '🧠', more: true },
+    { key: 'settings', label: 'Social Settings', icon: '⚙️', more: true }
   ];
+  generatorMode: 'poster' | 'video' | 'post' | 'carousel' | null = null;
+
+  startGenerator(mode: 'poster' | 'video' | 'post' | 'carousel'): void { this.generatorMode = mode; this.go('generator'); }
+  /** The calendar filtered to one campaign (from the campaign wizard). */
+  openCampaignCalendar(campaignId: number): void { this.calendarFilters = { ...this.calendarFilters, campaignId }; this.go('calendar'); }
   readonly platforms = PLATFORMS;
   readonly metricKeys = Object.keys(METRIC_LABELS);
   readonly metricLabels = METRIC_LABELS;
@@ -58,6 +69,8 @@ export class SocialHubComponent implements OnInit, OnDestroy {
   loading = false;
   error: string | null = null;
   oauthBanner: { ok: boolean; text: string } | null = null;
+  /** Pages found by a Meta login, waiting for the user to pick which to connect (names only, no tokens). */
+  pagePicker: { provider: string; selection: string; label: string; pages: any[]; chosen: Set<string>; loading: boolean; saving: boolean; error: string | null } | null = null;
 
   // Shared reference data
   settings: any = { timezone: 'UTC', requireApproval: true };
@@ -189,7 +202,8 @@ export class SocialHubComponent implements OnInit, OnDestroy {
         setup_required: 'Credential encryption is not configured on the server.',
         not_a_member: 'Your account is no longer a member of this workspace.'
       };
-      this.oauthBanner = r['oauth'] === 'success'
+      if (r['oauth'] === 'select' && r['selection']) this.openPagePicker(r['provider'] || 'meta', r['selection']);
+      else this.oauthBanner = r['oauth'] === 'success'
         ? { ok: true, text: `Connected ${r['connected'] || ''} account(s) from ${r['provider']}.` }
         : { ok: false, text: `Connection failed (${r['provider'] || 'provider'}): ${reasons[r['reason']] || r['reason']}` };
     }
@@ -197,7 +211,6 @@ export class SocialHubComponent implements OnInit, OnDestroy {
     if (this.initialLibraryStatus && this.initialSection === 'library') this.libraryFilters.status = this.initialLibraryStatus;
     if (this.initialLibraryStatus && this.initialSection === 'queue') this.queueStatus = 'failed,needs_review';
     this.go(this.initialSection || (this.oauthResult ? 'accounts' : 'overview'));
-    if (this.initialCampaignId && this.section === 'campaigns') this.openCampaign({ id: this.initialCampaignId });
   }
 
   ngOnDestroy(): void {
@@ -299,6 +312,7 @@ export class SocialHubComponent implements OnInit, OnDestroy {
       case 'overview': this.loadOverview(); break;
       case 'accounts': this.loadAccounts(); break;
       case 'campaigns': this.loadCampaigns(); break;
+      case 'generator': if (!this.campaigns?.length) this.loadCampaigns(); break;
       case 'calendar': this.loadCalendar(); break;
       case 'library': this.loadLibrary(); break;
       case 'media': break;
@@ -341,6 +355,47 @@ export class SocialHubComponent implements OnInit, OnDestroy {
       next: r => { this.accounts = r.accounts.filter((a: any) => a.status !== 'disconnected'); this.loading = false; },
       error: e => this.fail(e)
     });
+  }
+
+  openPagePicker(provider: string, selection: string): void {
+    this.pagePicker = { provider, selection, label: '', pages: [], chosen: new Set(), loading: true, saving: false, error: null };
+    this.api.getOAuthSelection(provider, selection).subscribe({
+      next: r => {
+        if (!this.pagePicker) return;
+        this.pagePicker.loading = false;
+        this.pagePicker.label = r.label;
+        this.pagePicker.pages = r.pages || [];
+        if (this.pagePicker.pages.length === 1) this.pagePicker.chosen.add(this.pagePicker.pages[0].externalId);
+      },
+      error: e => { if (this.pagePicker) { this.pagePicker.loading = false; this.pagePicker.error = e?.error?.error || 'This Page selection expired. Connect again.'; } }
+    });
+  }
+
+  togglePage(id: string): void {
+    const c = this.pagePicker?.chosen;
+    if (!c) return;
+    c.has(id) ? c.delete(id) : c.add(id);
+  }
+
+  confirmPages(): void {
+    const p = this.pagePicker;
+    if (!p || !p.chosen.size) return;
+    p.saving = true;
+    p.error = null;
+    this.api.completeOAuthSelection(p.provider, p.selection, [...p.chosen]).subscribe({
+      next: r => {
+        this.pagePicker = null;
+        this.oauthBanner = { ok: true, text: `Connected ${r.connected} account(s). You can now publish to ${r.connected === 1 ? 'this Page' : 'these Pages'}.` };
+        this.loadAccounts();
+      },
+      error: e => { p.saving = false; p.error = e?.error?.error || 'Could not connect the selected Page(s).'; }
+    });
+  }
+
+  cancelPagePicker(): void {
+    const p = this.pagePicker;
+    this.pagePicker = null;
+    if (p && !p.error) this.api.cancelOAuthSelection(p.provider, p.selection).subscribe({ error: () => null });
   }
 
   connect(provider: any): void {

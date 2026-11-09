@@ -6,6 +6,9 @@ const { ROLES } = require('../../lib/permissions');
 const emailService = require('../../services/emailService');
 const authService = require('../../services/authService');
 const grants = require('../../lib/capabilityGrants');
+const moduleAccess = require('../../lib/moduleAccess');
+const crmAccess = require('../crm/crmAccess');
+const { isPlatformAdmin } = require('../../lib/platformAdmin');
 
 /**
  * Workspace members and invitations. The workspace is always the caller's session workspace;
@@ -46,9 +49,15 @@ function linkFor(token) {
 
 function presentInvitation(r) {
   return {
-    id: r.id, email: r.email, role: r.role, status: r.status,
+    id: r.id, email: r.email, role: r.role, status: r.status, modules: modulesView(r.role, r.module_access_json),
     expiresAt: r.expires_at, createdAt: r.created_at, invitedBy: r.inviter_name || r.inviter_email || null
   };
+}
+
+/** { all, keys }: the sections a member (or invitee) can open. */
+function modulesView(role, json) {
+  const keys = [...moduleAccess.modulesFor(role, json)];
+  return { all: moduleAccess.FULL_ACCESS_ROLES.includes(role) || json === null || json === undefined, fullAccessRole: moduleAccess.FULL_ACCESS_ROLES.includes(role), keys };
 }
 
 /** Pending invitations past their expiry become 'expired' (keeps history, frees the pending slot). */
@@ -59,7 +68,7 @@ async function expireStale(db, where = '', params = []) {
 // ---------------------------------------------------------------- members of the current workspace
 async function listMembers(ctx) {
   const members = await all(
-    `SELECT m.user_id, m.role, m.status, m.created_at, u.email, u.display_name
+    `SELECT m.user_id, m.role, m.status, m.created_at, m.module_access_json, u.email, u.display_name
      FROM workspace_members m JOIN users u ON u.id = m.user_id
      WHERE m.workspace_id = ? ORDER BY (m.status = 'Active') DESC, m.id ASC`, [ws(ctx)]);
   const manage = ctx.auth.capabilities.has('members.manage');
@@ -81,8 +90,19 @@ async function listMembers(ctx) {
     }
     return out;
   };
+  // CRM access is platform-wide: only the platform admin sees and assigns it.
+  const platformAdmin = manage && await isPlatformAdmin(ctx.auth.userId);
+  const crmRows = platformAdmin && members.length
+    ? await all(`SELECT user_id, role FROM crm_user_access WHERE user_id IN (${members.map(() => '?').join(',')})`, members.map(m => m.user_id)).catch(() => [])
+    : [];
   return {
-    members: members.map(m => ({ userId: m.user_id, email: m.email, displayName: m.display_name, role: m.role, status: m.status, joinedAt: m.created_at, isYou: m.user_id === ctx.auth.userId, ...(manage ? { grants: grantsOf(m.user_id) } : {}) })),
+    members: members.map(m => ({ userId: m.user_id, email: m.email, displayName: m.display_name, role: m.role, status: m.status, joinedAt: m.created_at, isYou: m.user_id === ctx.auth.userId,
+      modules: modulesView(m.role, m.module_access_json),
+      ...(manage ? { grants: grantsOf(m.user_id) } : {}),
+      ...(platformAdmin ? { crmRole: m.user_id === ctx.auth.userId ? 'manager' : (crmRows.find(r => r.user_id === m.user_id)?.role || null) } : {}) })),
+    modules: moduleAccess.registry(),
+    fullAccessRoles: moduleAccess.FULL_ACCESS_ROLES,
+    crmRoles: platformAdmin ? Object.keys(crmAccess.CRM_ROLES) : null,
     grantable: manage ? Object.entries(grants.GRANTABLE).map(([capability, g]) => ({ capability, label: g.label, requires: g.requires })) : [],
     invitations,
     roles: ROLES,
@@ -119,8 +139,10 @@ async function sendInvitationEmail(ctx, inv, token) {
 }
 
 async function invite(ctx, input) {
-  const v = z.object({ email: z.string().trim().toLowerCase().max(255).refine(e => EMAIL_RE.test(e), 'Enter a valid email address.'), role: z.string() }).strict().parse(input || {});
+  const v = z.object({ email: z.string().trim().toLowerCase().max(255).refine(e => EMAIL_RE.test(e), 'Enter a valid email address.'), role: z.string(), modules: z.array(z.string().max(40)).max(20).optional() }).strict().parse(input || {});
   assertRoleAllowed(ctx, v.role);
+  // Owners/Admins always get every section; otherwise the chosen sections (none chosen = all).
+  const moduleJson = v.modules && !moduleAccess.FULL_ACCESS_ROLES.includes(v.role) ? JSON.stringify(moduleAccess.cleanList(v.modules)) : null;
   const member = await get(
     `SELECT m.status FROM workspace_members m JOIN users u ON u.id = m.user_id WHERE m.workspace_id = ? AND LOWER(u.email) = ?`, [ws(ctx), v.email]);
   if (member && member.status === 'Active') throw httpError(409, 'This person is already a member of the workspace.', 'ALREADY_MEMBER');
@@ -133,16 +155,16 @@ async function invite(ctx, input) {
   let id;
   try {
     id = (await run(
-      `INSERT INTO workspace_invitations (workspace_id, email, role, token_hash, status, invited_by, expires_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, 'pending', ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
-      [ws(ctx), v.email, v.role, hashToken(token), ctx.auth.userId, expiresAt])).lastID;
+      `INSERT INTO workspace_invitations (workspace_id, email, role, module_access_json, token_hash, status, invited_by, expires_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+      [ws(ctx), v.email, v.role, moduleJson, hashToken(token), ctx.auth.userId, expiresAt])).lastID;
   } catch (err) {
     if (err.code === 'ER_DUP_ENTRY') throw httpError(409, 'There is already a pending invitation for this email. Resend or cancel it instead.', 'INVITATION_EXISTS');
     throw err;
   }
   const inv = await get('SELECT * FROM workspace_invitations WHERE id = ?', [id]);
   const delivery = await sendInvitationEmail(ctx, inv, token);
-  await audit(ctx, 'workspace.member_invited', { resourceType: 'workspace_invitation', resourceId: id, metadata: { email: v.email, role: v.role, emailed: delivery.emailed } });
+  await audit(ctx, 'workspace.member_invited', { resourceType: 'workspace_invitation', resourceId: id, metadata: { email: v.email, role: v.role, modules: moduleJson ? JSON.parse(moduleJson) : 'all', emailed: delivery.emailed } });
   return { invitation: presentInvitation(inv), link: linkFor(token), ...delivery };
 }
 
@@ -249,6 +271,31 @@ async function revokeCapability(ctx, rawUserId, capability) {
   return { userId: m.user_id, capability, granted: false };
 }
 
+// ---------------------------------------------------------------- section (module) access
+
+/** Sets which sections a member can open. Owners and Admins always have all of them. */
+async function setModules(ctx, rawUserId, input) {
+  const v = z.object({ modules: z.array(z.string().max(40)).max(20).nullable() }).strict().parse(input || {});
+  const m = await requireOtherMember(ctx, rawUserId);
+  if (moduleAccess.FULL_ACCESS_ROLES.includes(m.role)) throw httpError(409, `${m.role}s always have access to every section. Change their role first.`, 'FULL_ACCESS_ROLE');
+  const list = v.modules === null ? null : moduleAccess.cleanList(v.modules);
+  await run("UPDATE workspace_members SET module_access_json = ? WHERE workspace_id = ? AND user_id = ? AND status = 'Active'",
+    [list === null ? null : JSON.stringify(list), ws(ctx), m.user_id]);
+  await audit(ctx, 'workspace.member_modules_changed', { resourceType: 'workspace_member', resourceId: m.user_id, metadata: { modules: list === null ? 'all' : list } });
+  return { userId: m.user_id, modules: modulesView(m.role, list === null ? null : JSON.stringify(list)) };
+}
+
+/** CRM access (platform-wide data): only the platform admin may grant or remove it, for members of this workspace. */
+async function setCrmAccess(ctx, rawUserId, input) {
+  const v = z.object({ role: z.enum(Object.keys(crmAccess.CRM_ROLES)).nullable() }).strict().parse(input || {});
+  if (!await isPlatformAdmin(ctx.auth.userId)) throw httpError(403, 'Only the platform admin can give CRM access.', 'PLATFORM_ADMIN_ONLY');
+  const m = await requireOtherMember(ctx, rawUserId);
+  if (v.role) await crmAccess.grant(m.user_id, v.role, ctx.auth.userId);
+  else await crmAccess.revoke(m.user_id);
+  await crmAccess.crmAudit(ctx, v.role ? 'crm.access_granted' : 'crm.access_revoked', { resourceType: 'user', resourceId: m.user_id, metadata: { role: v.role } });
+  return { userId: m.user_id, crmRole: v.role };
+}
+
 // ---------------------------------------------------------------- the invited person
 async function myEmail(ctx) {
   const u = await get('SELECT email FROM users WHERE id = ?', [ctx.auth.userId]);
@@ -319,9 +366,9 @@ async function accept(ctx, input) {
       return { workspaceId: inv.workspace_id, alreadyMember: true, inv };
     }
     if (existing) {
-      await tx.run("UPDATE workspace_members SET status = 'Active', role = ? WHERE workspace_id = ? AND user_id = ?", [inv.role, inv.workspace_id, ctx.auth.userId]);
+      await tx.run("UPDATE workspace_members SET status = 'Active', role = ?, module_access_json = ? WHERE workspace_id = ? AND user_id = ?", [inv.role, inv.module_access_json ?? null, inv.workspace_id, ctx.auth.userId]);
     } else {
-      await tx.run("INSERT INTO workspace_members (workspace_id, user_id, role, status, created_at) VALUES (?, ?, ?, 'Active', UTC_TIMESTAMP())", [inv.workspace_id, ctx.auth.userId, inv.role]);
+      await tx.run("INSERT INTO workspace_members (workspace_id, user_id, role, module_access_json, status, created_at) VALUES (?, ?, ?, ?, 'Active', UTC_TIMESTAMP())", [inv.workspace_id, ctx.auth.userId, inv.role, inv.module_access_json ?? null]);
     }
     await tx.run("UPDATE workspace_invitations SET status = 'accepted', accepted_by = ?, responded_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP() WHERE id = ?", [ctx.auth.userId, inv.id]);
     return { workspaceId: inv.workspace_id, alreadyMember: false, inv };
@@ -350,4 +397,6 @@ async function decline(ctx, input) {
   return { declined: true };
 }
 
-module.exports = { listMembers, invite, resend, cancel, changeRole, removeMember, grantCapability, revokeCapability, myInvitations, preview, accept, decline, hashToken, OWNER };
+module.exports = {
+  setModules,
+  setCrmAccess, listMembers, invite, resend, cancel, changeRole, removeMember, grantCapability, revokeCapability, myInvitations, preview, accept, decline, hashToken, OWNER };

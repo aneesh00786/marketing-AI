@@ -141,7 +141,26 @@ export class AppComponent implements OnInit, OnDestroy {
   showNavItem(route: AppComponent['currentRoute']): boolean {
     if (route === 'crm') return !!this.crmAccess;
     if (route === 'admin') return this.platformAdmin;
-    return true;
+    return this.canOpen(route);
+  }
+
+  groupVisible(group: { items: { route: AppComponent['currentRoute'] }[] }): boolean {
+    return group.items.some(i => this.showNavItem(i.route));
+  }
+
+  /** Sections a member may open (Members > Section access). Unknown yet (null): everything. */
+  myModules: Set<string> | null = null;
+  private readonly ROUTE_MODULE: Partial<Record<string, string>> = {
+    products: 'products', leads: 'leads', emails: 'mail', social: 'social', businesses: 'campaigns', appointments: 'appointments', voice: 'voice'
+  };
+
+  hasModule(key: string): boolean {
+    return this.myModules === null || this.myModules.has(key);
+  }
+
+  canOpen(route: string): boolean {
+    const key = this.ROUTE_MODULE[route];
+    return !key || this.hasModule(key);
   }
 
   navigate(route: AppComponent['currentRoute'] | 'drafts', mailSection: MailSection = 'overview', crmSection: CrmSection = 'dashboard'): void {
@@ -150,6 +169,10 @@ export class AppComponent implements OnInit, OnDestroy {
     this.socialLibraryStatus = null;
     this.showPlaybooks = false;
     if (route === 'drafts') { route = 'emails'; mailSection = 'drafts'; }
+    if (!this.canOpen(route)) {
+      this.showToast('You do not have access to that section. Ask a workspace Owner or Admin.');
+      route = 'dashboard';
+    }
     if (route === 'emails') this.mailSection = mailSection;
     if (route === 'crm') { this.crmSection = crmSection; this.crmResetKey++; }
     this.currentRoute = route;
@@ -626,7 +649,7 @@ export class AppComponent implements OnInit, OnDestroy {
       this.currentRoute = 'social';
       this.socialSection = params.get('section');
       if (params.get('oauth')) {
-        this.socialOauthResult = Object.fromEntries(['oauth', 'provider', 'reason', 'connected'].filter(k => params.get(k)).map(k => [k, params.get(k) as string]));
+        this.socialOauthResult = Object.fromEntries(['oauth', 'provider', 'reason', 'connected', 'selection'].filter(k => params.get(k)).map(k => [k, params.get(k) as string]));
       }
       window.history.replaceState({}, '', window.location.pathname);
     }
@@ -710,23 +733,32 @@ export class AppComponent implements OnInit, OnDestroy {
   private loadWorkspaceData(): void {
     this.loadStatus();
     this.myCaps = null;
+    this.myModules = null;
+    // Section data loads once the member's sections are known, so no request is made for a section they cannot open.
+    const loadSections = () => {
+      this.loadDigitalProducts();
+      this.loadLeads();
+      this.loadEmails();
+      this.loadDrafts();
+      this.loadMailConfig();
+      this.loadConnectedBusinesses();
+      if (!this.canOpen(this.currentRoute)) this.currentRoute = 'dashboard';
+    };
     this.apiService.getMe().subscribe({
-      next: (me: any) => { this.myCaps = Array.isArray(me?.capabilities) ? new Set(me.capabilities) : null; },
-      error: () => { this.myCaps = null; }
+      next: (me: any) => {
+        this.myCaps = Array.isArray(me?.capabilities) ? new Set(me.capabilities) : null;
+        this.myModules = Array.isArray(me?.modules) ? new Set(me.modules) : null;
+        loadSections();
+      },
+      error: () => { this.myCaps = null; loadSections(); }
     });
     this.platformAdmin = false;
     this.apiService.getPlatformAccess().subscribe({ next: (r: any) => { this.platformAdmin = !!r.admin; }, error: () => { this.platformAdmin = false; } });
     this.crmAccess = null;
     this.apiService.getCrmAccess().subscribe({ next: (r: any) => { this.crmAccess = r.access; }, error: () => { this.crmAccess = null; } });
-    this.loadDigitalProducts();
-    this.loadLeads();
-    this.loadEmails();
-    this.loadDrafts();
-    this.loadMailConfig();
-    this.loadConnectedBusinesses();
     // Appointments are a workspace-1-only module: load them only once the server confirms they
     // work here (sessions from before multi-workspace support carry no flag).
-    this.loadWorkspaces(() => { if (this.legacyModules) this.loadAppointments(); });
+    this.loadWorkspaces(() => { if (this.legacyModules && this.hasModule('appointments')) this.loadAppointments(); });
   }
 
   ngOnDestroy(): void {
@@ -1171,6 +1203,7 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   loadLeads(): void {
+    if (!this.hasModule('leads')) return;
     this.leadsLoading = true;
     const params: any = { page: this.leadPage, limit: this.leadPageSize };
     if (this.leadFilters.productId) params.productId = this.leadFilters.productId;
@@ -1433,6 +1466,7 @@ export class AppComponent implements OnInit, OnDestroy {
   // 4. EMAIL COMMAND CENTER & VISUAL HTML DISPATCH
   // ==========================================
   loadEmails(): void {
+    if (!this.hasModule('mail')) return;
     this.apiService.getEmails().subscribe({
       next: (res) => {
         this.emails = res.emails || [];
@@ -1750,6 +1784,7 @@ export class AppComponent implements OnInit, OnDestroy {
   // 5. MAIL DRAFTS & APPROVALS WORKFLOW
   // ==========================================
   loadDrafts(): void {
+    if (!this.hasModule('mail')) return;
     this.apiService.getMailDrafts().subscribe({
       next: (res) => { this.drafts = res.drafts || []; this.draftsState = 'ready'; },
       error: (err) => { this.draftsState = 'error'; console.warn('Error loading drafts:', err); }
@@ -1765,6 +1800,7 @@ export class AppComponent implements OnInit, OnDestroy {
   // 6. CONNECTED BUSINESSES & DYNAMIC CAMPAIGNS
   // ==========================================
   loadConnectedBusinesses(): void {
+    if (!this.hasModule('campaigns')) return;
     this.apiService.getConnectedBusinesses().subscribe({
       next: (res) => {
         this.connectedBusinesses = res.businesses || [];
@@ -1871,6 +1907,7 @@ export class AppComponent implements OnInit, OnDestroy {
   // 7. APPOINTMENTS
   // ==========================================
   loadAppointments(): void {
+    if (!this.hasModule('appointments')) return;
     this.apiService.getAppointments().subscribe({
       next: (res) => {
         this.appointments = res.appointments || [];
@@ -1911,6 +1948,7 @@ export class AppComponent implements OnInit, OnDestroy {
   // 9. COMPANY MAIL AUTHORIZATION (SMTP & IMAP)
   // ==========================================
   loadMailConfig(): void {
+    if (!this.hasModule('mail')) return;
     this.apiService.getMailConfig().subscribe({
       next: (res) => {
         if (res.config) {

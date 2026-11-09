@@ -37,3 +37,13 @@
   .detail-grid { grid-template-columns: 1fr; }
   .search { width: 100%; }
 }
+
+.src-badge { position: absolute; top: 4px; left: 4px; font-size: 0.66rem; background: rgba(79, 70, 229, 0.9); color: #fff; padding: 1px 6px; border-radius: 999px; }
+
+/* Modern look */
+.grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px; }
+.tile { border-radius: 14px; border: 1px solid var(--border); box-shadow: var(--shadow-sm); transition: transform .2s var(--ease), box-shadow .2s var(--ease), border-color .2s var(--ease); }
+.tile:hover { transform: translateY(-3px); box-shadow: var(--shadow); border-color: var(--accent-ring); }
+.tile.on { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow); }
+.src-badge { background: var(--accent-gradient); box-shadow: 0 2px 8px rgba(0, 0, 0, .25); font-weight: 600; }
+@media (prefers-reduced-motion: reduce) { .tile { transition: none; } }

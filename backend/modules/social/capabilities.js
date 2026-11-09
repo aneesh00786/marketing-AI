@@ -119,16 +119,28 @@ const MANUAL_PLATFORMS = {
   }
 };
 
+/** Facebook Page permissions requested on every Meta connection. */
+const META_FACEBOOK_SCOPES = ['pages_show_list', 'pages_manage_posts', 'pages_read_engagement'];
+/** Instagram permissions, requested only when Instagram is enabled for the Meta app. */
+const META_INSTAGRAM_SCOPES = ['instagram_basic', 'instagram_content_publish', 'instagram_manage_comments', 'instagram_manage_insights'];
+
+function metaInstagramEnabled() {
+  return ['1', 'true', 'yes'].includes(String(process.env.META_INSTAGRAM_ENABLED || '').toLowerCase());
+}
+
+function metaScopes() {
+  return metaInstagramEnabled() ? [...META_FACEBOOK_SCOPES, ...META_INSTAGRAM_SCOPES] : [...META_FACEBOOK_SCOPES];
+}
+
 const PROVIDERS = {
   meta: {
     label: 'Meta (Facebook Pages & Instagram)',
     accountTypes: ['facebook_page', 'instagram_business'],
     env: ['META_APP_ID', 'META_APP_SECRET'],
-    scopes: [
-      'pages_show_list', 'pages_read_engagement', 'pages_manage_posts', 'pages_read_user_content',
-      'pages_manage_engagement', 'read_insights', 'business_management',
-      'instagram_basic', 'instagram_content_publish', 'instagram_manage_comments', 'instagram_manage_insights'
-    ],
+    // Facebook and Instagram permissions are kept apart: the Facebook connection asks only for
+    // what Page publishing needs. Instagram permissions are added only when META_INSTAGRAM_ENABLED=1
+    // (after they are approved on the Meta app); otherwise Meta rejects the whole login as "Invalid Scopes".
+    get scopes() { return metaScopes(); },
     docs: 'https://developers.facebook.com/docs/pages-api and https://developers.facebook.com/docs/instagram-platform'
   },
   linkedin: {
@@ -229,6 +241,9 @@ module.exports = {
   FEATURES,
   ACCOUNT_TYPES,
   PROVIDERS,
+  META_FACEBOOK_SCOPES,
+  META_INSTAGRAM_SCOPES,
+  metaInstagramEnabled,
   MANUAL_PLATFORMS,
   isProviderConfigured,
   parseScopes,

@@ -62,3 +62,61 @@ describe('MembersComponent: transactional email grants', () => {
     expect(el().querySelector('thead')!.textContent).not.toContain('Transactional email');
   });
 });
+
+describe('MembersComponent: section access', () => {
+  let fixture: ComponentFixture<MembersComponent>;
+  let http: HttpTestingController;
+  const MODULES = [{ key: 'leads', label: 'Leads', description: '' }, { key: 'social', label: 'Social media & social campaigns', description: '' }];
+  const full = { all: true, fullAccessRole: true, keys: ['leads', 'social'] };
+  const d = () => ({
+    canManage: true, canManageOwners: true, roles: ['Workspace Owner', 'Workspace Admin', 'Member'], invitations: [], grantable: [],
+    modules: MODULES, fullAccessRoles: ['Workspace Owner', 'Workspace Admin'], crmRoles: null,
+    members: [
+      { userId: 1, email: 'own@x.io', role: 'Workspace Owner', status: 'Active', isYou: true, modules: full },
+      { userId: 2, email: 'mem@x.io', role: 'Member', status: 'Active', modules: { all: false, fullAccessRole: false, keys: ['social'] } }
+    ]
+  });
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({ imports: [MembersComponent], providers: [provideHttpClient(), provideHttpClientTesting()] });
+    http = TestBed.inject(HttpTestingController);
+    fixture = TestBed.createComponent(MembersComponent);
+    fixture.detectChanges();
+    http.expectOne(r => r.url.endsWith('/workspace/members')).flush(d());
+    fixture.detectChanges();
+  });
+  afterEach(() => http.verify());
+
+  it('shows each member\'s sections and invites with the chosen sections', () => {
+    const c = fixture.componentInstance;
+    expect(c.accessText(c.data.members[0].modules)).toBe('All sections (role)');
+    expect(c.accessText(c.data.members[1].modules)).toBe('Social media & social campaigns');
+    c.inviteForm = { email: 'new@x.io', role: 'Member' };
+    c.toggle(c.inviteModules, 'leads');
+    c.invite();
+    const req = http.expectOne(r => r.url.endsWith('/workspace/invitations'));
+    expect(req.request.body).toEqual({ email: 'new@x.io', role: 'Member', modules: ['social'] });
+    req.flush({ invitation: { email: 'new@x.io' }, link: 'x', emailed: true });
+    http.expectOne(r => r.url.endsWith('/workspace/members')).flush(d());
+  });
+
+  it('Admins are invited without a section list; editing a member saves the selection', () => {
+    const c = fixture.componentInstance;
+    c.inviteForm = { email: 'adm@x.io', role: 'Workspace Admin' };
+    c.invite();
+    const inv = http.expectOne(r => r.url.endsWith('/workspace/invitations'));
+    expect(inv.request.body.modules).toBeUndefined();
+    inv.flush({ invitation: { email: 'adm@x.io' }, link: 'x', emailed: true });
+    http.expectOne(r => r.url.endsWith('/workspace/members')).flush(d());
+
+    const m = c.data.members[1];
+    c.editAccess(m);
+    c.toggle(c.editing!.modules, 'leads');
+    c.saveAccess(m);
+    const put = http.expectOne(r => r.url.endsWith('/members/2/modules'));
+    expect(put.request.method).toBe('PUT');
+    expect(put.request.body).toEqual({ modules: ['leads', 'social'] });
+    put.flush({ success: true });
+    http.expectOne(r => r.url.endsWith('/workspace/members')).flush(d());
+  });
+});

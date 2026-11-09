@@ -64,6 +64,12 @@ function present(row) {
     postGroupId: row.post_group_id || null,
     platformOptions: parseJson(row.platform_options_json, {}),
     source: row.source,
+    format: row.format || null,
+    planDay: row.plan_day ?? null,
+    mediaPrompt: row.media_prompt || null,
+    slides: parseJson(row.carousel_json, null),
+    brandKitId: row.brand_kit_id || null,
+    productId: row.product_id || null,
     createdBy: row.created_by,
     createdAt: row.created_at,
     updatedAt: row.updated_at
@@ -127,6 +133,7 @@ async function assertAssetsInWorkspace(workspaceId, assetIds, { attaching = fals
   );
   if (rows.length !== assetIds.length) throw httpError(400, 'One or more media assets do not belong to this workspace.');
   if (attaching && rows.some(r => r.status === 'deleted')) throw httpError(400, 'A selected media file was deleted from the library.');
+  if (rows.some(r => r.asset_type === 'audio')) throw httpError(400, 'Audio files are background music for videos; they cannot be attached to a post.');
   const byId = new Map(rows.map(r => [Number(r.id), r]));
   return assetIds.map(id => byId.get(Number(id)));
 }
@@ -170,6 +177,7 @@ async function createContent(ctx, input) {
   await assertCampaignInWorkspace(workspaceId, input.campaignId);
   const acct = await assertAccountInWorkspace(workspaceId, input.socialAccountId ?? null);
   await assertAssetsInWorkspace(workspaceId, input.mediaAssetIds || [], { attaching: true });
+  if (input.slides) await assertAssetsInWorkspace(workspaceId, input.slides.map(s => s.assetId).filter(Boolean), { attaching: true });
   const platformKey = input.platformKey || (acct ? ACCOUNT_TYPES[acct.account_type]?.platformKey : null);
   const options = normalizeOptions(input.platformOptions);
 
@@ -190,6 +198,13 @@ async function createContent(ctx, input) {
         input.source || 'manual', ctx.auth.userId || null
       ]
     );
+    // Content Studio fields (format, campaign plan day, media prompt, carousel slides, brand kit).
+    // The campaign's product, so every post is linked to its product.
+    if (input.campaignId) await tx.run('UPDATE content_items c JOIN campaigns k ON k.workspace_id = c.workspace_id AND k.id = c.campaign_id SET c.product_id = k.product_id WHERE c.id = ?', [ins.lastID]);
+    if (input.format || input.planDay != null || input.mediaPrompt || input.slides || input.brandKitId) {
+      await tx.run('UPDATE content_items SET format = ?, plan_day = ?, media_prompt = ?, carousel_json = ?, brand_kit_id = ? WHERE id = ?',
+        [input.format || null, input.planDay ?? null, input.mediaPrompt || null, input.slides ? JSON.stringify(input.slides) : null, input.brandKitId || null, ins.lastID]);
+    }
     const row = await tx.get('SELECT * FROM content_items WHERE id = ?', [ins.lastID]);
     await snapshotVersion(tx, row, ctx.auth.userId, 'Created');
     return ins.lastID;
@@ -216,6 +231,7 @@ async function updateContent(ctx, id, input) {
     if (rows.some(r => r.status === 'deleted' && !current.has(Number(r.id)))) throw httpError(400, 'A selected media file was deleted from the library.');
   }
   const options = normalizeOptions(input.platformOptions);
+  if (input.slides) await assertAssetsInWorkspace(workspaceId, input.slides.map(s => s.assetId).filter(Boolean), { attaching: true });
 
   const fields = {
     title: input.title,
@@ -231,7 +247,11 @@ async function updateContent(ctx, id, input) {
     video_script: input.videoScript,
     campaign_id: input.campaignId,
     assigned_approver_id: input.assignedApproverId,
-    platform_options_json: options !== undefined ? (options ? JSON.stringify(options) : null) : undefined
+    platform_options_json: options !== undefined ? (options ? JSON.stringify(options) : null) : undefined,
+    format: input.format,
+    plan_day: input.planDay,
+    media_prompt: input.mediaPrompt,
+    carousel_json: input.slides !== undefined ? (input.slides ? JSON.stringify(input.slides) : null) : undefined
   };
   const sets = Object.entries(fields).filter(([, v]) => v !== undefined);
   if (sets.length === 0) return present(row);
@@ -466,7 +486,7 @@ const { composeText } = platformRules;
  * relative previewPath for the app; server paths are never exposed.
  */
 function presentAsset(a) {
-  const uploaded = a.source === 'upload';
+  const uploaded = ['upload', 'ai', 'edited'].includes(a.source);
   const meta = parseJson(a.metadata_json, {});
   return {
     id: a.id,
@@ -492,6 +512,11 @@ function presentAsset(a) {
     originalName: a.original_name || null,
     verified: uploaded,
     prompt: a.prompt,
+    aiGenerated: a.source === 'ai',
+    edited: a.source === 'edited',
+    generationId: a.generation_id || null,
+    parentAssetId: a.parent_asset_id || null,
+    campaignId: a.campaign_id || null,
     createdAt: a.created_at,
     updatedAt: a.updated_at || null
   };
@@ -642,6 +667,7 @@ module.exports = {
   compose,
   normalizeOptions,
   assertAssetsInWorkspace,
+  assertCampaignInWorkspace,
   listAssets,
   registerAssetUrl,
   httpError

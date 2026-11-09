@@ -39,23 +39,40 @@ function unavailableMessage(excludeProviders = []) {
  * enforces the workspace AI quota and meters usage. Never returns template fallbacks:
  * when no real model answers with valid output, it throws AiUnavailableError.
  */
-async function generateStructured({ workspaceId, prompt, system, schema, referenceType = null, referenceId = null, maxTokens = 2000, excludeProviders = [] }) {
+/** Short, content-free description of why a reply was rejected (field paths and messages only). */
+function describeIssues(result, text) {
+  if (!result) return `the reply was not a complete JSON object (${String(text || '').length} characters; it may have been cut off)`;
+  return result.error.issues.slice(0, 8).map(i => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ');
+}
+
+/**
+ * `coerce` (optional) tidies the parsed JSON before validation — e.g. "Poster" → "poster",
+ * "9:00 AM" → "09:00" — so small models' harmless variations are not rejected.
+ */
+async function generateStructured({ workspaceId, prompt, system, schema, coerce = null, referenceType = null, referenceId = null, maxTokens = 2000, excludeProviders = [] }) {
   await assertAiQuota(workspaceId);
-  // Models occasionally produce malformed or off-schema JSON; one more attempt usually returns a valid answer.
+  // Models occasionally produce malformed or off-schema JSON; one more attempt, told what was wrong, usually returns a valid answer.
   let res;
   let result = null;
+  let feedback = '';
   for (let attempt = 1; attempt <= STRUCTURED_ATTEMPTS; attempt++) {
     if (attempt > 1) await assertAiQuota(workspaceId);
-    res = await aiEngine.generateAiResponse(prompt, `${system}\n\n${UNTRUSTED_RULE}\nRespond with a single valid JSON object only.`, workspaceId, { maxTokens, excludeProviders, json: true });
+    res = await aiEngine.generateAiResponse(prompt + feedback, `${system}\n\n${UNTRUSTED_RULE}\nRespond with a single valid JSON object only.`, workspaceId, { maxTokens, excludeProviders, json: true });
 
     if (!isRealAiProvider(res?.provider)) {
       throw new AiUnavailableError(unavailableMessage(excludeProviders));
     }
     await recordUsage({ workspaceId, category: 'ai_text', providerKey: res.provider, referenceType, referenceId });
 
-    const parsed = extractJson(res.text);
+    let parsed = extractJson(res.text);
+    if (parsed && coerce) {
+      try { parsed = coerce(parsed); } catch (e) { /* validation below reports the problem */ }
+    }
     result = parsed ? schema.safeParse(parsed) : null;
     if (result && result.success) break;
+    const why = describeIssues(result, res.text);
+    console.warn(`[ai] ${res.provider} reply rejected (attempt ${attempt}/${STRUCTURED_ATTEMPTS}${referenceType ? `, ${referenceType}` : ''}): ${why}`);
+    feedback = `\n\nYour previous answer was rejected because it did not match the required JSON format: ${why}. Return the complete, corrected JSON object, keeping it concise.`;
   }
   if (!result || !result.success) {
     const err = new AiUnavailableError(`The AI model (${res.provider}) returned output that did not match the expected format. Try again or use a stronger model.`);

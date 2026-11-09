@@ -86,6 +86,9 @@ router.patch('/api/v1/workspace/members/:userId', member, requireCapability('mem
 // Per-member permission grants (Owners/Admins: members.manage). Only grantable capabilities are accepted.
 router.put('/api/v1/workspace/members/:userId/grants/:capability', member, requireCapability('members.manage'), wrap(async (req, res) => res.json({ success: true, ...(await members.grantCapability(req, req.params.userId, req.params.capability)) })));
 router.delete('/api/v1/workspace/members/:userId/grants/:capability', member, requireCapability('members.manage'), wrap(async (req, res) => res.json({ success: true, ...(await members.revokeCapability(req, req.params.userId, req.params.capability)) })));
+// Sections a member can open (Owners/Admins: members.manage), and CRM access (platform admin only).
+router.put('/api/v1/workspace/members/:userId/modules', member, requireCapability('members.manage'), wrap(async (req, res) => res.json({ success: true, ...(await members.setModules(req, req.params.userId, req.body)) })));
+router.put('/api/v1/workspace/members/:userId/crm', member, requireCapability('members.manage'), wrap(async (req, res) => res.json({ success: true, ...(await members.setCrmAccess(req, req.params.userId, req.body)) })));
 router.delete('/api/v1/workspace/members/:userId', member, requireCapability('members.manage'), wrap(async (req, res) => res.json({ success: true, ...(await members.removeMember(req, req.params.userId)) })));
 
 // The invited person (any signed-in account; the invitation's email must match theirs).

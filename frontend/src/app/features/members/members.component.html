@@ -19,7 +19,17 @@
           <option *ngFor="let r of assignableRoles" [value]="r">{{ r }}</option>
         </select>
       </label>
-      <button class="btn btn-primary" type="submit" [disabled]="busy === 'invite' || !inviteForm.email.trim()">{{ busy === 'invite' ? 'Inviting…' : 'Send invitation' }}</button>
+      <button class="btn btn-primary" type="submit" [disabled]="busy === 'invite' || !inviteForm.email.trim() || (!fullAccess(inviteForm.role) && !inviteModules.size)">{{ busy === 'invite' ? 'Inviting…' : 'Send invitation' }}</button>
+      <fieldset class="modules" *ngIf="data.modules?.length">
+        <legend>Sections they can open</legend>
+        <p class="muted small" *ngIf="fullAccess(inviteForm.role)">{{ inviteForm.role }}s always have access to every section.</p>
+        <ng-container *ngIf="!fullAccess(inviteForm.role)">
+          <label class="mod" *ngFor="let mod of data.modules" [class.on]="inviteModules.has(mod.key)" [title]="mod.description">
+            <input type="checkbox" [checked]="inviteModules.has(mod.key)" (change)="toggle(inviteModules, mod.key)" /> {{ mod.label }}
+          </label>
+          <p class="muted small">The role decides what they can do in a section (create, approve, publish, send); these choose which sections they see.</p>
+        </ng-container>
+      </fieldset>
     </form>
     <p class="muted small" *ngIf="data.canManage">The invited person signs in (or creates an account) with that email address, then opens the invitation link. Links expire and work once.</p>
 
@@ -37,9 +47,10 @@
     <h3 class="sub">Members ({{ data.members.length }})</h3>
     <div class="table-wrap">
       <table class="tbl">
-        <thead><tr><th>Member</th><th>Role</th><th>Status</th><th>Joined</th><th *ngFor="let g of data.grantable" [title]="g.label">{{ grantHeading(g.capability) }}</th><th *ngIf="data.canManage"></th></tr></thead>
+        <thead><tr><th>Member</th><th>Role</th><th>Status</th><th>Joined</th><th>Section access</th><th *ngIf="data.crmRoles" title="Platform-wide CRM (only you, as platform admin, can assign it)">CRM</th><th *ngFor="let g of data.grantable" [title]="g.label">{{ grantHeading(g.capability) }}</th><th *ngIf="data.canManage"></th></tr></thead>
         <tbody>
-          <tr *ngFor="let m of data.members" [class.dim]="m.status !== 'Active'">
+          <ng-container *ngFor="let m of data.members">
+          <tr [class.dim]="m.status !== 'Active'">
             <td><b>{{ m.displayName || m.email }}</b><span class="you" *ngIf="m.isYou">You</span><div class="muted small">{{ m.email }}</div></td>
             <td>
               <select *ngIf="canEdit(m); else roleText" class="hud-input sm" [ngModel]="m.role" (ngModelChange)="changeRole(m, $event)" [attr.aria-label]="'Role of ' + m.email">
@@ -49,6 +60,17 @@
             </td>
             <td><span class="tag" [class.ok]="m.status === 'Active'">{{ m.status }}</span></td>
             <td>{{ m.joinedAt | date:'mediumDate' }}</td>
+            <td class="access">
+              <span class="muted small">{{ accessText(m.modules) }}</span>
+              <button *ngIf="canEdit(m) && !m.modules?.fullAccessRole" class="btn btn-secondary btn-sm" type="button" (click)="editAccess(m)" [attr.aria-expanded]="editing?.userId === m.userId">{{ editing?.userId === m.userId ? 'Close' : 'Edit access' }}</button>
+            </td>
+            <td *ngIf="data.crmRoles">
+              <select *ngIf="!m.isYou && canEdit(m); else crmText" class="hud-input sm" [ngModel]="m.crmRole || ''" (ngModelChange)="setCrm(m, $event)" [attr.aria-label]="'CRM access of ' + m.email">
+                <option value="">No access</option>
+                <option *ngFor="let r of data.crmRoles" [value]="r">{{ r | titlecase }}</option>
+              </select>
+              <ng-template #crmText><span class="muted small">{{ m.crmRole ? (m.crmRole | titlecase) : 'No access' }}</span></ng-template>
+            </td>
             <!-- Per-member permission grants (Owners/Admins only): only for roles that can already send mail. -->
             <td *ngFor="let g of data.grantable">
               <ng-container [ngSwitch]="m.grants?.[g.capability]">
@@ -62,6 +84,23 @@
               <button *ngIf="canEdit(m)" class="btn btn-danger btn-sm" type="button" (click)="remove(m)">Remove</button>
             </td>
           </tr>
+          <tr *ngIf="editing?.userId === m.userId" class="access-edit">
+            <td [attr.colspan]="6 + (data.crmRoles ? 1 : 0) + data.grantable.length">
+              <b>Sections {{ m.displayName || m.email }} can open</b>
+              <div class="mods">
+                <label class="mod" *ngFor="let mod of data.modules" [class.on]="editing!.modules.has(mod.key)" [title]="mod.description">
+                  <input type="checkbox" [checked]="editing!.modules.has(mod.key)" (change)="toggle(editing!.modules, mod.key)" /> {{ mod.label }}
+                  <small class="muted">{{ mod.description }}</small>
+                </label>
+              </div>
+              <div class="row-actions">
+                <button class="btn btn-primary btn-sm" type="button" (click)="saveAccess(m)" [disabled]="busy === 'modules'">{{ busy === 'modules' ? 'Saving…' : 'Save access' }}</button>
+                <button class="btn btn-secondary btn-sm" type="button" (click)="editing = null">Cancel</button>
+                <span class="muted small">Takes effect immediately. Their role ({{ m.role }}) still decides what they can do inside each section.</span>
+              </div>
+            </td>
+          </tr>
+          </ng-container>
         </tbody>
       </table>
     </div>
@@ -70,11 +109,12 @@
       <h3 class="sub">Pending invitations ({{ data.invitations.length }})</h3>
       <div class="table-wrap" *ngIf="data.invitations.length; else noInvites">
         <table class="tbl">
-          <thead><tr><th>Email</th><th>Role</th><th>Invited by</th><th>Expires</th><th></th></tr></thead>
+          <thead><tr><th>Email</th><th>Role</th><th>Section access</th><th>Invited by</th><th>Expires</th><th></th></tr></thead>
           <tbody>
             <tr *ngFor="let i of data.invitations">
               <td>{{ i.email }}</td>
               <td>{{ i.role }}</td>
+              <td class="muted small">{{ accessText(i.modules) }}</td>
               <td>{{ i.invitedBy || '—' }}</td>
               <td>{{ i.expiresAt | date:'medium' }}</td>
               <td class="right">

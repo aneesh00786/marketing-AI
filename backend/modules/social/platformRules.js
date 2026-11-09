@@ -144,7 +144,7 @@ function evaluate(accountType, content, assets = [], env = {}) {
     const name = assetLabel(a, i);
     const spec = a.asset_type === 'video' ? rules.video : rules.image;
     if (!spec) return;
-    const uploaded = a.source === 'upload';
+    const uploaded = ['upload', 'ai', 'edited'].includes(a.source);
     if (!uploaded && rules.needsUploadedFileFor?.includes(a.asset_type)) {
       problems.push(`${name} is a linked URL; ${label} needs the file itself. Upload it to the media library.`);
       return;
@@ -186,10 +186,10 @@ function evaluate(accountType, content, assets = [], env = {}) {
   });
 
   // ---- Delivery ----
-  if (rules.fetchesByUrl && live.some(a => a.source === 'upload') && env.publicFetchProblem) {
+  if (rules.fetchesByUrl && live.some(a => ['upload', 'ai', 'edited'].includes(a.source)) && env.publicFetchProblem) {
     problems.push(`Instagram downloads media from this server by URL: ${env.publicFetchProblem}`);
   }
-  if (rules.fetchesByUrl && live.some(a => a.source !== 'upload' && a.public_url && !String(a.public_url).startsWith('https://'))) {
+  if (rules.fetchesByUrl && live.some(a => !['upload', 'ai', 'edited'].includes(a.source) && a.public_url && !String(a.public_url).startsWith('https://'))) {
     problems.push('Linked media must be served over HTTPS so Instagram can fetch it.');
   }
   if (!text && live.length === 0) problems.push('The post has no text or media.');

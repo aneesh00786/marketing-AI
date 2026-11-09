@@ -30,8 +30,35 @@ function parseJson(v, fallback) {
 }
 
 /** Same shape the Products screen already uses. */
-function present(p) {
-  return { ...p, features: parseJson(p.features_json, []), pricing: parseJson(p.pricing_tiers_json, []) };
+function present(p, images = new Map()) {
+  const imageAssetIds = parseJson(p.image_asset_ids_json, []).filter(Number.isInteger);
+  return {
+    ...p, features: parseJson(p.features_json, []), pricing: parseJson(p.pricing_tiers_json, []), category: p.category || null,
+    imageAssetIds, images: imageAssetIds.map(id => images.get(id)).filter(Boolean)
+  };
+}
+
+/** Products with their images (this workspace's media library images; deleted ones are left out). */
+async function presentAll(workspaceId, rows) {
+  const ids = [...new Set(rows.flatMap(r => parseJson(r.image_asset_ids_json, [])).filter(Number.isInteger))];
+  const images = new Map();
+  if (ids.length) {
+    const PUBLIC = '/api/v1/social/media-files';
+    const assets = await all(`SELECT id, public_id, title, width, height FROM assets WHERE workspace_id = ? AND asset_type = 'image' AND status = 'ready' AND id IN (${ids.map(() => '?').join(',')})`, [workspaceId, ...ids]);
+    for (const a of assets) images.set(a.id, { id: a.id, url: `${PUBLIC}/${a.public_id}`, title: a.title, width: a.width, height: a.height });
+  }
+  return rows.map(r => present(r, images));
+}
+
+/** Product images must be images in this workspace's media library. */
+async function assertImages(workspaceId, ids) {
+  if (!ids || !ids.length) return;
+  const rows = await all(`SELECT id FROM assets WHERE workspace_id = ? AND asset_type = 'image' AND status = 'ready' AND id IN (${ids.map(() => '?').join(',')})`, [workspaceId, ...ids]);
+  if (rows.length !== new Set(ids).size) {
+    const err = new Error('Product images must be images from this workspace\'s media library.');
+    err.status = 400; err.code = 'VALIDATION_ERROR';
+    throw err;
+  }
 }
 
 async function requireProduct(workspaceId, id) {
@@ -61,7 +88,9 @@ const fields = {
   features: z.array(z.union([z.string(), z.number()]).transform(v => String(v).slice(0, 500))).transform(a => a.slice(0, 50)).optional(),
   target_audience: text(2000),
   pricing: z.array(z.any()).transform(a => a.slice(0, 20)).optional(),
-  status: z.enum(['Active', 'Inactive']).optional()
+  status: z.enum(['Active', 'Inactive']).optional(),
+  category: text(100),
+  imageAssetIds: z.array(z.number().int().positive()).max(12).optional()
 };
 
 router.use((req, res, next) => {
@@ -81,21 +110,33 @@ router.post('/extract-url', requireCapability('campaigns.manage'), body(z.object
 }));
 
 router.get('/', wrap(async (req, res) => {
-  const list = await all('SELECT * FROM digital_products WHERE workspace_id = ? ORDER BY id ASC', [ws(req)]);
-  res.json({ success: true, products: list.map(present) });
+  const where = ['workspace_id = ?']; const params = [ws(req)];
+  const q = String(req.query.search || '').trim().slice(0, 100);
+  if (q) { where.push('(name LIKE ? OR tagline LIKE ? OR description LIKE ? OR category LIKE ?)'); params.push(...Array(4).fill(`%${q}%`)); }
+  if (req.query.category) { where.push('category = ?'); params.push(String(req.query.category).slice(0, 100)); }
+  if (req.query.status === 'Active' || req.query.status === 'Inactive') { where.push('status = ?'); params.push(req.query.status); }
+  const list = await all(`SELECT * FROM digital_products WHERE ${where.join(' AND ')} ORDER BY id ASC`, params);
+  res.json({ success: true, products: await presentAll(ws(req), list) });
+}));
+
+/** The categories used by this workspace's products (for the filter). */
+router.get('/categories', wrap(async (req, res) => {
+  const rows = await all("SELECT DISTINCT category FROM digital_products WHERE workspace_id = ? AND category IS NOT NULL AND category <> '' ORDER BY category", [ws(req)]);
+  res.json({ success: true, categories: rows.map(r => r.category) });
 }));
 
 router.get('/:id', wrap(async (req, res) => {
-  res.json({ success: true, product: present(await requireProduct(ws(req), req.params.id)) });
+  res.json({ success: true, product: (await presentAll(ws(req), [await requireProduct(ws(req), req.params.id)]))[0] });
 }));
 
 router.post('/', requireCapability('campaigns.manage'), body(z.object(fields)), wrap(async (req, res) => {
   const v = req.valid;
+  await assertImages(ws(req), v.imageAssetIds);
   const result = await run(
-    `INSERT INTO digital_products (workspace_id, name, url, tagline, description, features_json, target_audience, pricing_tiers_json, status, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())`,
+    `INSERT INTO digital_products (workspace_id, name, url, tagline, description, features_json, target_audience, pricing_tiers_json, status, category, image_asset_ids_json, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())`,
     [ws(req), v.name.trim(), v.url || '', v.tagline || null, v.description || null, JSON.stringify(v.features || []),
-      v.target_audience || null, JSON.stringify(v.pricing || []), v.status || 'Active']
+      v.target_audience || null, JSON.stringify(v.pricing || []), v.status || 'Active', v.category ? v.category.trim() || null : null, JSON.stringify(v.imageAssetIds || [])]
   );
   await audit(req, 'products.created', { resourceType: 'product', resourceId: result.lastID, metadata: { name: v.name } });
   res.json({ success: true, productId: result.lastID, message: `Digital product "${v.name}" successfully registered.` });
@@ -104,17 +145,19 @@ router.post('/', requireCapability('campaigns.manage'), body(z.object(fields)), 
 router.patch('/:id', requireCapability('campaigns.manage'), body(z.object(Object.fromEntries(Object.entries(fields).map(([k, s]) => [k, s.optional()])))), wrap(async (req, res) => {
   const p = await requireProduct(ws(req), req.params.id);
   const v = req.valid;
-  const map = { name: 'name', url: 'url', tagline: 'tagline', description: 'description', target_audience: 'target_audience', status: 'status' };
+  await assertImages(ws(req), v.imageAssetIds);
+  const map = { name: 'name', url: 'url', tagline: 'tagline', description: 'description', target_audience: 'target_audience', status: 'status', category: 'category' };
   const sets = [];
   const params = [];
   for (const [k, col] of Object.entries(map)) if (v[k] !== undefined) { sets.push(`${col} = ?`); params.push(v[k]); }
   if (v.features !== undefined) { sets.push('features_json = ?'); params.push(JSON.stringify(v.features)); }
   if (v.pricing !== undefined) { sets.push('pricing_tiers_json = ?'); params.push(JSON.stringify(v.pricing)); }
+  if (v.imageAssetIds !== undefined) { sets.push('image_asset_ids_json = ?'); params.push(JSON.stringify(v.imageAssetIds)); }
   if (sets.length) {
     await run(`UPDATE digital_products SET ${sets.join(', ')} WHERE workspace_id = ? AND id = ?`, [...params, ws(req), p.id]);
     await audit(req, 'products.updated', { resourceType: 'product', resourceId: p.id, metadata: { fields: Object.keys(v) } });
   }
-  res.json({ success: true, product: present(await requireProduct(ws(req), p.id)) });
+  res.json({ success: true, product: (await presentAll(ws(req), [await requireProduct(ws(req), p.id)]))[0] });
 }));
 
 router.delete('/:id', requireCapability('campaigns.manage'), wrap(async (req, res) => {

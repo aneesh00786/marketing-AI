@@ -1,8 +1,8 @@
 <section class="hud-panel social-hub">
   <div class="panel-header">
     <div>
-      <h2>Social media marketing hub</h2>
-      <p class="subtitle">Connect official accounts, plan campaigns with Mark, approve content, publish on schedule and track real results.</p>
+      <h2>Social Media Content Studio</h2>
+      <p class="subtitle">Create posters, videos, posts and carousels with AI, plan whole campaigns, approve, schedule and track real results.</p>
     </div>
     <div class="header-actions">
       <span class="chip">TZ: {{ settings?.timezone || 'UTC' }}</span>
@@ -11,7 +11,7 @@
   </div>
 
   <nav class="sub-nav" aria-label="Social Media Marketing sections">
-    <button *ngFor="let s of sections" class="sub-nav-btn" [class.active]="section === s.key" (click)="go(s.key)">
+    <button *ngFor="let s of sections" class="sub-nav-btn" [class.active]="section === s.key" [class.sub-nav-more]="s.more" (click)="go(s.key)">
       <span aria-hidden="true">{{ s.icon }}</span> {{ s.label }}
     </button>
   </nav>
@@ -21,8 +21,27 @@
   </div>
   <div *ngIf="error" class="banner bad">{{ error }} <button class="link-btn" (click)="error = null">Dismiss</button></div>
 
+  <!-- ===================== AI CONTENT GENERATOR ===================== -->
+  <div *ngIf="section === 'generator'" class="section">
+    <!-- AI content always starts by selecting a product (then the campaign, strategy and content steps). -->
+    <app-campaign-wizard [campaigns]="campaigns || []" [startNew]="true" [preferredTab]="generatorMode" (toast)="notify($event)" (openContent)="openContentById($event)"
+      (openCalendar)="openCampaignCalendar($event)" (changed)="loadCampaigns()"></app-campaign-wizard>
+  </div>
+
+  <!-- ===================== BRAND KIT ===================== -->
+  <div *ngIf="section === 'brand'" class="section">
+    <app-brand-kit (toast)="notify($event)"></app-brand-kit>
+  </div>
+
   <!-- ===================== OVERVIEW ===================== -->
   <div *ngIf="section === 'overview'" class="section">
+    <div class="studio-start" aria-label="Create with AI">
+      <button type="button" class="studio-start-card" (click)="startGenerator('poster')"><span aria-hidden="true">🖼️</span><b>Create a poster</b><small>Offers, launches, festivals</small></button>
+      <button type="button" class="studio-start-card" (click)="startGenerator('video')"><span aria-hidden="true">🎬</span><b>Create a video</b><small>Reels, Shorts, promos</small></button>
+      <button type="button" class="studio-start-card" (click)="startGenerator('post')"><span aria-hidden="true">✍️</span><b>Write posts</b><small>Captions for every platform</small></button>
+      <button type="button" class="studio-start-card" (click)="startGenerator('carousel')"><span aria-hidden="true">🎠</span><b>Build a carousel</b><small>Multi-slide posts</small></button>
+      <button type="button" class="studio-start-card" (click)="go('campaigns')"><span aria-hidden="true">📦</span><b>Create a campaign</b><small>Pick a product, Mark plans it</small></button>
+    </div>
     <div *ngIf="loading && !overview" class="muted">Loading…</div>
     <ng-container *ngIf="overview">
       <div class="stat-grid">
@@ -137,6 +156,30 @@
 
   <!-- ===================== CONNECTED ACCOUNTS ===================== -->
   <div *ngIf="section === 'accounts'" class="section">
+    <!-- Page selection after a Facebook login: names only; tokens stay on the server. -->
+    <div *ngIf="pagePicker" class="card page-picker" role="dialog" aria-labelledby="pp-title">
+      <h3 id="pp-title">Choose the Facebook Page(s) to connect</h3>
+      <p class="muted">Your Facebook login gave access to these Pages. Only the Pages you select are connected to this workspace.</p>
+      <p *ngIf="pagePicker.loading" class="muted">Loading your Pages…</p>
+      <div *ngIf="pagePicker.error" class="banner bad">{{ pagePicker.error }}</div>
+      <p *ngIf="!pagePicker.loading && !pagePicker.error && !pagePicker.pages.length" class="muted">No Facebook Pages were found for this login.</p>
+      <ul class="page-list" *ngIf="pagePicker.pages.length">
+        <li *ngFor="let pg of pagePicker.pages">
+          <label class="page-option" [class.on]="pagePicker.chosen.has(pg.externalId)">
+            <input type="checkbox" [checked]="pagePicker.chosen.has(pg.externalId)" (change)="togglePage(pg.externalId)" [disabled]="pagePicker.saving" />
+            <img *ngIf="pg.avatarUrl" [src]="pg.avatarUrl" alt="" class="page-avatar" />
+            <span class="page-name"><b>{{ pg.name }}</b>
+              <small class="muted">Page ID {{ pg.externalId }}<span *ngIf="pg.instagram"> · Instagram &#64;{{ pg.instagram.username }}</span><span *ngIf="pg.alreadyConnected"> · already connected (will refresh)</span></small>
+            </span>
+          </label>
+        </li>
+      </ul>
+      <div class="row-line">
+        <button class="btn btn-primary" (click)="confirmPages()" [disabled]="!pagePicker.chosen.size || pagePicker.saving">{{ pagePicker.saving ? 'Connecting…' : 'Connect ' + (pagePicker.chosen.size || '') + ' Page' + (pagePicker.chosen.size === 1 ? '' : 's') }}</button>
+        <button class="btn btn-secondary" (click)="cancelPagePicker()" [disabled]="pagePicker.saving">{{ pagePicker.error ? 'Close' : 'Cancel' }}</button>
+      </div>
+    </div>
+
     <h3>PROVIDERS</h3>
     <div class="provider-grid">
       <div *ngFor="let p of providers" class="card provider-card" [class.setup-open]="setupProvider === p.providerKey">
@@ -229,132 +272,9 @@
 
   <!-- ===================== CAMPAIGNS ===================== -->
   <div *ngIf="section === 'campaigns'" class="section">
-    <div class="row-line">
-      <h3>CAMPAIGNS ({{ campaigns.length }})</h3>
-      <button class="btn btn-primary btn-sm" (click)="openWizard()">＋ New campaign with Mark</button>
-    </div>
-
-    <div *ngIf="showCampaignWizard" class="card wizard">
-      <h3>CAMPAIGN BRIEF</h3>
-      <div class="form-grid">
-        <label>Campaign name *<input class="hud-input" [(ngModel)]="campaignForm.name" placeholder="e.g. VanSale Pro – Q4 distributor launch" /></label>
-        <label>Objective<select class="hud-input" [(ngModel)]="campaignForm.objective">
-          <option value="">Choose…</option><option>Awareness</option><option>Lead generation</option><option>Demo bookings</option><option>Product launch</option><option>Engagement</option><option>Customer retention</option>
-        </select></label>
-        <label>Product / business
-          <select class="hud-input" [(ngModel)]="campaignForm.productId">
-            <option [ngValue]="null">— Business profile only —</option>
-            <option *ngFor="let p of products" [ngValue]="p.id">{{ p.name }}</option>
-          </select>
-        </label>
-        <label>Target audience<input class="hud-input" [(ngModel)]="campaignForm.targetAudience" placeholder="e.g. Small business owners in your city" /></label>
-        <label class="span-2">Offer<input class="hud-input" [(ngModel)]="campaignForm.offer" placeholder="Only real offers — e.g. 14-day free pilot" /></label>
-        <label class="span-2">Key message<textarea class="hud-textarea" rows="2" [(ngModel)]="campaignForm.keyMessage"></textarea></label>
-        <label>Start date<input type="date" class="hud-input" [(ngModel)]="campaignForm.startDate" /></label>
-        <label>End date<input type="date" class="hud-input" [(ngModel)]="campaignForm.endDate" /></label>
-        <label>Tone<select class="hud-input" [(ngModel)]="campaignForm.tone"><option>Professional</option><option>Friendly</option><option>Bold &amp; direct</option><option>Educational</option><option>Founder storytelling</option></select></label>
-        <label>Language<select class="hud-input" [(ngModel)]="campaignForm.language"><option value="en">English</option><option value="ar">Arabic</option><option value="hi">Hindi</option><option value="ml">Malayalam</option><option value="ta">Tamil</option><option value="es">Spanish</option><option value="fr">French</option></select></label>
-        <label>Number of posts<input type="number" min="1" max="20" class="hud-input" [(ngModel)]="campaignForm.desiredPostCount" /></label>
-        <label>Call to action<input class="hud-input" [(ngModel)]="campaignForm.callToAction" placeholder="e.g. Book a 15-minute demo" /></label>
-        <label class="span-2">Landing page<input class="hud-input" [(ngModel)]="campaignForm.landingUrl" placeholder="https://…" /></label>
-        <label>Image requirements<input class="hud-input" [(ngModel)]="campaignForm.imageRequirements" placeholder="e.g. real product screenshots" /></label>
-        <label>Video requirements<input class="hud-input" [(ngModel)]="campaignForm.videoRequirements" placeholder="e.g. 30s vertical demo" /></label>
-      </div>
-
-      <div class="field-block">
-        <div class="small">Target platforms *</div>
-        <div class="button-row">
-          <label *ngFor="let p of platforms" class="check-pill" [class.on]="campaignForm.platforms[p.key]">
-            <input type="checkbox" [(ngModel)]="campaignForm.platforms[p.key]" /> {{ p.icon }} {{ p.label }}
-          </label>
-        </div>
-      </div>
-      <div class="field-block" *ngIf="accounts.length">
-        <div class="small">Publish to accounts (optional)</div>
-        <div class="button-row">
-          <ng-container *ngFor="let a of accounts">
-            <label *ngIf="campaignForm.platforms[a.platformKey]" class="check-pill" [class.on]="campaignForm.accountIds[a.id]">
-              <input type="checkbox" [(ngModel)]="campaignForm.accountIds[a.id]" /> {{ platformIcon(a.platformKey) }} {{ a.displayName }}
-            </label>
-          </ng-container>
-        </div>
-      </div>
-
-      <details class="field-block">
-        <summary class="small">Import real product facts from a website (reviewed before saving)</summary>
-        <div class="quick-row">
-          <input class="hud-input" [(ngModel)]="factsUrl" placeholder="https://your-product-site.com" />
-          <button class="btn btn-secondary btn-sm" (click)="extractFacts()" [disabled]="isExtracting">{{ isExtracting ? 'Reading…' : 'Extract facts' }}</button>
-        </div>
-        <div *ngIf="extractedFacts" class="card inset">
-          <label>Name<input class="hud-input" [(ngModel)]="extractedFacts.name" /></label>
-          <label>Tagline<input class="hud-input" [(ngModel)]="extractedFacts.tagline" /></label>
-          <label>Description<textarea class="hud-textarea" rows="2" [(ngModel)]="extractedFacts.description"></textarea></label>
-          <div class="small">Features found on the page:</div>
-          <ul class="small"><li *ngFor="let f of extractedFacts.features">{{ f }}</li></ul>
-          <div class="small muted">Source: {{ extractedFacts.provider }} · pricing is never extracted.</div>
-          <button class="btn btn-primary btn-sm" (click)="saveExtractedProduct()">Facts are correct — save as product</button>
-        </div>
-      </details>
-
-      <div class="callout small">Mark only uses the facts above. Prices, statistics and claims that are not in your facts are flagged for verification, and missing information is listed instead of invented.</div>
-      <div class="button-row">
-        <button class="btn btn-primary" (click)="saveCampaign(true)" [disabled]="busy">Save &amp; generate drafts</button>
-        <button class="btn btn-secondary" (click)="saveCampaign(false)" [disabled]="busy">Save brief only</button>
-        <button class="btn btn-secondary" (click)="showCampaignWizard = false">Close</button>
-      </div>
-    </div>
-
-    <div *ngIf="selectedCampaign" class="card">
-      <div class="row-line">
-        <h3>{{ selectedCampaign.name | uppercase }}</h3>
-        <span class="status-pill" [ngClass]="'gen-' + selectedCampaign.generationStatus">{{ selectedCampaign.generationStatus.replace('_', ' ') }}</span>
-      </div>
-      <div class="small muted">{{ selectedCampaign.objective }} · {{ selectedCampaign.startDate || '—' }} → {{ selectedCampaign.endDate || '—' }} · {{ selectedCampaign.platforms.join(', ') }}</div>
-      <div *ngIf="selectedCampaign.generationError" class="banner bad">{{ selectedCampaign.generationError }}</div>
-      <div *ngIf="['queued','running'].includes(selectedCampaign.generationStatus)" class="muted">Mark is writing drafts… (the background worker must be running)</div>
-      <div class="button-row" *ngIf="!['queued','running'].includes(selectedCampaign.generationStatus)">
-        <button class="btn btn-primary btn-sm" (click)="generate(selectedCampaign)">{{ selectedCampaign.generationStatus === 'completed' ? 'Generate more drafts' : 'Generate drafts' }}</button>
-      </div>
-      <div *ngIf="selectedCampaign.brief" class="card inset">
-        <strong>Brief</strong>
-        <p>{{ selectedCampaign.brief.summary }}</p>
-        <div class="small" *ngIf="selectedCampaign.brief.key_messages?.length">Key messages: {{ selectedCampaign.brief.key_messages.join(' · ') }}</div>
-        <div class="small" *ngIf="selectedCampaign.brief.success_measures?.length">Measure success by: {{ selectedCampaign.brief.success_measures.join(' · ') }}</div>
-        <div class="small warn-text" *ngIf="selectedCampaign.brief.missing_information?.length">Missing information: {{ selectedCampaign.brief.missing_information.join(' · ') }}</div>
-        <div class="small muted" *ngIf="selectedCampaign.assumptions?.length">Assumptions: {{ selectedCampaign.assumptions.join(' · ') }}</div>
-        <div class="small muted">Model: {{ selectedCampaign.brief.provider }}</div>
-      </div>
-      <div class="content-grid">
-        <div *ngFor="let c of selectedCampaignContent" class="content-card clickable" (click)="openEditor(c)">
-          <div class="row-line">
-            <span>{{ platformIcon(c.platformKey) }} {{ platformLabel(c.platformKey) }} <span *ngIf="c.variantLabel" class="variant">Variant {{ c.variantLabel }}</span></span>
-            <span class="status-pill" [ngClass]="statusClass(c.status)">{{ c.status }}</span>
-          </div>
-          <strong>{{ c.title }}</strong>
-          <p class="caption-clip">{{ c.caption }}</p>
-          <div class="small warn-text" *ngFor="let a of c.assumptions">⚠️ {{ a }}</div>
-          <div class="small muted" *ngIf="c.suggestedPublishAt">Suggested: {{ fmt(c.suggestedPublishAt) }}</div>
-        </div>
-      </div>
-    </div>
-
-    <div class="table-container" *ngIf="campaigns.length">
-      <table class="data-table">
-        <thead><tr><th>Name</th><th>Objective</th><th>Dates</th><th>Platforms</th><th>Drafts / Approved / Published</th><th>Generation</th></tr></thead>
-        <tbody>
-          <tr *ngFor="let c of campaigns" class="clickable" (click)="openCampaign(c)">
-            <td>{{ c.name }}</td>
-            <td>{{ c.objective || '—' }}</td>
-            <td class="small">{{ c.startDate || '—' }} → {{ c.endDate || '—' }}</td>
-            <td>{{ c.platforms.length ? c.platforms.join(', ') : '—' }}</td>
-            <td>{{ c.contentCounts?.draft || 0 }} / {{ c.contentCounts?.approved || 0 }} / {{ c.contentCounts?.published || 0 }}</td>
-            <td><span class="status-pill" [ngClass]="'gen-' + c.generationStatus">{{ c.generationStatus.replace('_', ' ') }}</span></td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-    <div *ngIf="!campaigns.length && !showCampaignWizard" class="empty-box">No campaigns yet. Start one and Mark will draft platform-specific content from your real product facts.</div>
+    <!-- Every campaign starts by selecting a product (Social Media Campaigns wizard). -->
+    <app-campaign-wizard [campaigns]="campaigns || []" [initialCampaignId]="initialCampaignId" (toast)="notify($event)" (openContent)="openContentById($event)"
+      (openCalendar)="openCampaignCalendar($event)" (changed)="loadCampaigns()"></app-campaign-wizard>
   </div>
 
   <!-- ===================== CALENDAR ===================== -->
@@ -387,13 +307,14 @@
       <div *ngFor="let day of calendarDays()" class="cal-cell" [class.other]="isOtherMonth(day)" [class.today]="isToday(day)" [class.drop]="dragItem" (dragover)="onDragOver($event)" (drop)="onDrop($event, day)">
         <button type="button" class="cal-date" (click)="openDay(day)" [attr.aria-label]="'Open ' + day.toDateString()">{{ day.getDate() }}</button>
         <div *ngFor="let i of itemsOn(day)" class="cal-item" [ngClass]="calendarClass(i)" [attr.draggable]="canDrag(i)" (dragstart)="onDragStart($event, i)" (dragend)="dragItem = null" (click)="section = 'library'; openEditor(i)" [title]="(i.title || i.caption) + ' · ' + (i.needsReview ? 'check platform' : i.status)">
-          {{ platformIcon(i.platformKey) }} {{ fmt(i.calendarAt).split(', ').pop() }} {{ i.title || (i.caption | slice:0:24) }}
+          <img *ngIf="i.thumbnailPath" class="cal-thumb" [src]="i.thumbnailPath" alt="" loading="lazy" />{{ platformIcon(i.platformKey) }} {{ fmt(i.calendarAt).split(', ').pop() }} {{ i.title || (i.caption | slice:0:24) }}
         </div>
       </div>
     </div>
 
     <div *ngIf="calendarView === 'day'" class="day-view">
       <div *ngFor="let i of dayItems()" class="day-item clickable" [ngClass]="calendarClass(i)" (click)="section = 'library'; openEditor(i)">
+        <img *ngIf="i.thumbnailPath" class="cal-list-thumb" [src]="i.thumbnailPath" alt="" loading="lazy" />
         <span class="nowrap">{{ fmt(i.calendarAt).split(', ').pop() }}</span>
         <span>{{ platformIcon(i.platformKey) }} {{ i.accountName || platformLabel(i.platformKey) }}</span>
         <span class="grow">{{ i.title || (i.caption | slice:0:80) }}</span>
@@ -410,7 +331,7 @@
             <td>{{ fmt(i.calendarAt) }}<span *ngIf="i.isSuggestion" class="small muted"> (suggested)</span></td>
             <td>{{ platformIcon(i.platformKey) }} {{ platformLabel(i.platformKey) }}</td>
             <td>{{ i.accountName || '—' }}</td>
-            <td>{{ i.title || (i.caption | slice:0:60) }}</td>
+            <td><img *ngIf="i.thumbnailPath" class="cal-list-thumb" [src]="i.thumbnailPath" alt="" loading="lazy" /> {{ i.title || (i.caption | slice:0:60) }}</td>
             <td><span class="status-pill" [ngClass]="i.needsReview ? 'job-needs_review' : statusClass(i.status)">{{ i.needsReview ? 'check platform' : i.status }}</span></td>
           </tr>
           <tr *ngIf="!calendarItems.length"><td colspan="5" class="empty-state">Nothing in this period.</td></tr>
@@ -605,6 +526,7 @@
         </div>
       </div>
     </ng-container>
+    <app-studio-usage></app-studio-usage>
   </div>
 
   <!-- ===================== ENGAGEMENT INBOX ===================== -->

@@ -157,6 +157,19 @@ router.post('/oauth/:provider/start', requireCapability('integrations.manage'), 
   res.json({ success: true, ...(await oauthService.startAuthorization(req, req.params.provider)) });
 }));
 
+// Page selection after a Meta login. Returns Page names only; tokens never leave the server.
+router.get('/oauth/:provider/selection/:selection', requireCapability('integrations.manage'), wrap(async (req, res) => {
+  res.json({ success: true, ...(await oauthService.getPendingSelection(req, req.params.provider, req.params.selection)) });
+}));
+
+router.post('/oauth/:provider/selection/:selection', requireCapability('integrations.manage'), wrap(async (req, res) => {
+  res.json({ success: true, ...(await oauthService.completeSelection(req, req.params.provider, req.params.selection, req.body?.pageIds)) });
+}));
+
+router.delete('/oauth/:provider/selection/:selection', requireCapability('integrations.manage'), wrap(async (req, res) => {
+  res.json({ success: true, ...(await oauthService.cancelSelection(req, req.params.provider, req.params.selection)) });
+}));
+
 router.get('/accounts', wrap(async (req, res) => {
   res.json({ success: true, accounts: await accountService.listAccounts(ws(req), { includeDisconnected: req.query.includeDisconnected === '1' }) });
 }));
@@ -220,7 +233,10 @@ const campaignFields = {
   imageRequirements: z.string().max(2000).optional().nullable(),
   videoRequirements: z.string().max(2000).optional().nullable(),
   callToAction: z.string().max(255).optional().nullable(),
-  landingUrl: z.string().url().max(500).optional().nullable().or(z.literal(''))
+  landingUrl: z.string().url().max(500).optional().nullable().or(z.literal('')),
+  description: z.string().max(3000).optional().nullable(),
+  wizardStep: z.enum(['product', 'confirm', 'details', 'strategy', 'content', 'review', 'schedule', 'analytics']).optional().nullable(),
+  imageAssetIds: z.array(z.number().int().positive()).max(12).optional()
 };
 
 router.get('/campaigns', wrap(async (req, res) => {
@@ -237,7 +253,8 @@ router.get('/campaigns/:id', wrap(async (req, res) => {
 
 router.patch('/campaigns/:id', requireCapability('campaigns.manage'), body(z.object({
   ...Object.fromEntries(Object.entries(campaignFields).map(([k, v]) => [k, v.optional()])),
-  status: z.enum(['Draft', 'Active', 'Paused', 'Completed', 'Archived']).optional()
+  status: z.enum(['Draft', 'Active', 'Paused', 'Completed', 'Archived']).optional(),
+  confirmProductChange: z.boolean().optional()
 })), wrap(async (req, res) => {
   res.json({ success: true, campaign: await campaignService.updateCampaign(req, idParam(req), req.valid) });
 }));
@@ -267,7 +284,11 @@ const contentFields = {
   videoScript: z.string().max(10000).optional().nullable(),
   assignedApproverId: z.number().int().positive().optional().nullable(),
   platformOptions: z.object({ youtube: z.object({ privacyStatus: z.string().max(20).optional(), madeForKids: z.boolean().optional() }).optional() }).optional().nullable(),
-  changeNote: z.string().max(255).optional()
+  changeNote: z.string().max(255).optional(),
+  format: z.enum(['post', 'poster', 'carousel', 'reel', 'video', 'story']).optional().nullable(),
+  planDay: z.number().int().min(1).max(366).optional().nullable(),
+  mediaPrompt: z.string().max(2000).optional().nullable(),
+  slides: z.array(z.object({ title: z.string().max(200).optional().default(''), body: z.string().max(1000).optional().default(''), imagePrompt: z.string().max(1000).optional().nullable(), assetId: z.number().int().positive().optional().nullable() })).max(10).optional().nullable()
 };
 
 router.get('/content', wrap(async (req, res) => {
@@ -476,10 +497,19 @@ router.get('/calendar', wrap(async (req, res) => {
     params
   );
   const settings = await settingsService.getSettings(ws(req));
+  // Thumbnail: the post's first image, or its first video's thumbnail (this workspace's files only).
+  const firstIds = [...new Set(rows.map(r => { try { return JSON.parse(r.media_asset_ids_json || '[]')[0]; } catch { return null; } }).filter(Number.isInteger))];
+  const thumbs = new Map();
+  if (firstIds.length) {
+    const assetRows = await all(`SELECT a.id, a.asset_type, a.public_id, t.public_id AS thumb FROM assets a LEFT JOIN assets t ON t.workspace_id = a.workspace_id AND t.id = a.thumbnail_asset_id AND t.status = 'ready'
+      WHERE a.workspace_id = ? AND a.status = 'ready' AND a.id IN (${firstIds.map(() => '?').join(',')})`, [ws(req), ...firstIds]);
+    for (const a of assetRows) { const pid = a.asset_type === 'image' ? a.public_id : a.thumb; if (pid) thumbs.set(a.id, `${mediaStore.PUBLIC_PATH}/${pid}`); }
+  }
+  const thumbOf = r => { try { return thumbs.get(JSON.parse(r.media_asset_ids_json || '[]')[0]) || null; } catch { return null; } };
   res.json({
     success: true,
     timezone: settings.timezone,
-    items: rows.map(r => ({ ...contentService.present(r), accountName: r.account_name, jobStatus: r.job_status || null, needsReview: r.job_status === 'needs_review', calendarAt: r.status === 'published' ? r.published_at : (r.scheduled_at || r.suggested_publish_at || r.updated_at), isSuggestion: ['draft', 'review', 'approved'].includes(r.status) }))
+    items: rows.map(r => ({ ...contentService.present(r), thumbnailPath: thumbOf(r), accountName: r.account_name, jobStatus: r.job_status || null, needsReview: r.job_status === 'needs_review', calendarAt: r.status === 'published' ? r.published_at : (r.scheduled_at || r.suggested_publish_at || r.updated_at), isSuggestion: ['draft', 'review', 'approved'].includes(r.status) }))
   });
 }));
 

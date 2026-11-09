@@ -147,8 +147,12 @@ app.use('/api', apiGate({
   ],
   toolPaths: [/^\/api\/(tools\/)?(send_email|track_lead|book_appointment|business_info|get_business_info|get_briefing)$/]
 }));
+// Section access per member (Leads, Mail, Social…): refused here when the member does not have it.
+app.use('/api', require('./lib/moduleAccess').moduleGate());
 
 // Tenant-aware social media marketing module.
+// AI Content Studio (brand kits, AI posters, videos, posts, carousels, campaign planner).
+app.use('/api/v1/social/studio', require('./modules/social/studio/routes'));
 app.use('/api/v1/social', socialRouter);
 
 // AI Lead Discovery (Google Places API (New)); mounted before the Leads router so its paths win.
@@ -313,7 +317,7 @@ app.post(['/api/v1/auth/login', '/api/auth/login'], async (req, res) => {
 app.get(['/api/v1/auth/me', '/api/auth/me'], async (req, res) => {
   try {
     const me = await authService.getUserMe(req.auth.userId, req.auth.workspaceId);
-    res.json({ ...me, role: req.auth.role, capabilities: [...req.auth.capabilities] });
+    res.json({ ...me, role: req.auth.role, capabilities: [...req.auth.capabilities], modules: [...(req.auth.modules || [])] });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

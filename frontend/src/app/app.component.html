@@ -21,7 +21,8 @@
     </div>
 
     <nav class="sidebar-nav">
-      <div class="nav-group" *ngFor="let group of navGroups">
+      <ng-container *ngFor="let group of navGroups">
+      <div class="nav-group" *ngIf="groupVisible(group)">
         <div class="nav-group-label">{{ group.label }}</div>
         <ng-container *ngFor="let item of group.items">
           <ng-container *ngIf="showNavItem(item.route)">
@@ -50,6 +51,7 @@
           </ng-container>
         </ng-container>
       </div>
+      </ng-container>
     </nav>
 
     <div class="sidebar-footer">

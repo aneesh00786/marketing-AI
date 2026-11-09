@@ -60,11 +60,14 @@ async function requireAsset(workspaceId, id) {
   return row;
 }
 
-async function list(workspaceId, { type, unused, q, limit = 100, offset = 0 } = {}) {
+async function list(workspaceId, { type, unused, q, source, campaignId, limit = 100, offset = 0 } = {}) {
   const where = ["workspace_id = ?", "status <> 'deleted'", "COALESCE(JSON_VALUE(metadata_json, '$.role'), 'media') <> 'thumbnail'"];
   const params = [workspaceId];
-  if (type === 'image' || type === 'video') { where.push('asset_type = ?'); params.push(type); }
+  if (type === 'image' || type === 'video' || type === 'audio') { where.push('asset_type = ?'); params.push(type); }
+  else where.push("asset_type <> 'audio'");
   if (q) { where.push('(title LIKE ? OR original_name LIKE ?)'); params.push(`%${q}%`, `%${q}%`); }
+  if (source === 'ai' || source === 'edited' || source === 'upload') { where.push('source = ?'); params.push(source); }
+  if (campaignId) { where.push('campaign_id = ?'); params.push(Number(campaignId)); }
   const lim = Math.min(Math.max(parseInt(limit, 10) || 100, 1), 200);
   const off = Math.max(parseInt(offset, 10) || 0, 0);
   let rows = await all(`SELECT * FROM assets WHERE ${where.join(' AND ')} ORDER BY id DESC LIMIT ${lim} OFFSET ${off}`, params);
@@ -135,7 +138,7 @@ async function remove(ctx, id) {
   }
   for (const a of toDelete) {
     await run("UPDATE assets SET status = 'deleted', deleted_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP() WHERE workspace_id = ? AND id = ?", [workspaceId, a.id]);
-    if (a.source === 'upload' && a.public_id) await mediaStore.deleteFile(workspaceId, a.public_id);
+    if (['upload', 'ai', 'edited'].includes(a.source) && a.public_id) await mediaStore.deleteFile(workspaceId, a.public_id);
   }
   await audit(ctx, 'social.media.deleted', { resourceType: 'asset', resourceId: id, metadata: { deletedIds: toDelete.map(a => a.id) } });
   return { deleted: true, deletedIds: toDelete.map(a => a.id) };

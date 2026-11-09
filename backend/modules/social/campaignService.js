@@ -41,6 +41,10 @@ function present(row, counts = null) {
     videoRequirements: row.video_requirements,
     callToAction: row.call_to_action,
     landingUrl: row.landing_url,
+    description: row.description || null,
+    wizardStep: row.wizard_step || null,
+    imageAssetIds: parseJson(row.image_asset_ids_json, []),
+    strategy: parseJson(row.strategy_json, null),
     brief: parseJson(row.brief_json, null),
     assumptions: parseJson(row.assumptions_json, []),
     generationStatus: row.generation_status,
@@ -91,6 +95,11 @@ async function getCampaign(workspaceId, id) {
 }
 
 async function assertRefs(workspaceId, input) {
+  if (input.imageAssetIds && input.imageAssetIds.length) {
+    const ids = [...new Set(input.imageAssetIds)];
+    const found = await all(`SELECT id FROM assets WHERE workspace_id = ? AND asset_type = 'image' AND status = 'ready' AND id IN (${ids.map(() => '?').join(',')})`, [workspaceId, ...ids]);
+    if (found.length !== ids.length) throw httpError(400, 'Product images must be images from this workspace\'s media library.');
+  }
   if (input.productId) {
     const p = await get('SELECT id FROM digital_products WHERE workspace_id = ? AND id = ?', [workspaceId, input.productId]);
     if (!p) throw httpError(400, 'Product not found in this workspace.');
@@ -110,7 +119,7 @@ const COLUMN_MAP = {
   offer: 'offer', keyMessage: 'key_message', startDate: 'start_date', endDate: 'end_date',
   tone: 'tone', language: 'language', desiredPostCount: 'desired_post_count',
   imageRequirements: 'image_requirements', videoRequirements: 'video_requirements',
-  callToAction: 'call_to_action', landingUrl: 'landing_url'
+  callToAction: 'call_to_action', landingUrl: 'landing_url', description: 'description', wizardStep: 'wizard_step'
 };
 
 function toColumns(input) {
@@ -121,6 +130,7 @@ function toColumns(input) {
     cols.channels = input.platforms.join(', ');
   }
   if (input.accountIds !== undefined) cols.account_ids_json = JSON.stringify(input.accountIds);
+  if (input.imageAssetIds !== undefined) cols.image_asset_ids_json = JSON.stringify(input.imageAssetIds);
   return cols;
 }
 
@@ -142,7 +152,21 @@ async function updateCampaign(ctx, id, input) {
   const row = await requireRow(workspaceId, id);
   if (['queued', 'running'].includes(row.generation_status)) throw httpError(409, 'Wait for content generation to finish before editing the campaign.', 'INVALID_STATE');
   await assertRefs(workspaceId, { ...present(row), ...input });
+  // Changing the product: never once posts are scheduled or published; with confirmation when a
+  // strategy or posts exist (a draft strategy was written for the old product and is cleared).
+  const productChanged = input.productId !== undefined && Number(input.productId || 0) !== Number(row.product_id || 0);
+  if (productChanged) {
+    const used = await get(`SELECT COUNT(*) AS n, SUM(status IN ('scheduled', 'publishing', 'published')) AS live FROM content_items WHERE workspace_id = ? AND campaign_id = ? AND status <> 'cancelled'`, [workspaceId, id]);
+    if (Number(used?.live)) throw httpError(409, 'Posts of this campaign are scheduled or published, so its product can no longer be changed. Create a new campaign for the other product.', 'PRODUCT_LOCKED');
+    if ((Number(used?.n) || row.strategy_json) && input.confirmProductChange !== true) {
+      throw httpError(409, `This campaign already has ${Number(used?.n) ? `${used.n} post(s)` : 'a strategy'} made for its current product. Confirm to change the product.`, 'CONFIRM_PRODUCT_CHANGE');
+    }
+  }
   const cols = toColumns(input);
+  if (productChanged) {
+    const strategy = parseJson(row.strategy_json, null);
+    if (strategy && strategy.status !== 'accepted') cols.strategy_json = null;
+  }
   if (input.status !== undefined) cols.status = input.status;
   const names = Object.keys(cols);
   if (names.length) {
@@ -150,7 +174,7 @@ async function updateCampaign(ctx, id, input) {
       `UPDATE campaigns SET ${names.map(n => `${n} = ?`).join(', ')}, updated_at = UTC_TIMESTAMP() WHERE workspace_id = ? AND id = ?`,
       [...Object.values(cols), workspaceId, id]
     );
-    await audit(ctx, 'social.campaign.updated', { resourceType: 'campaign', resourceId: id, metadata: { fields: names } });
+    await audit(ctx, 'social.campaign.updated', { resourceType: 'campaign', resourceId: id, metadata: { fields: names, productChanged } });
   }
   return present(await requireRow(workspaceId, id));
 }
@@ -208,15 +232,17 @@ const GenerationSchema = z.object({
 async function loadFacts(workspaceId, campaign) {
   const facts = {};
   if (campaign.product_id) {
-    const p = await get('SELECT name, url, tagline, description, features_json, target_audience FROM digital_products WHERE workspace_id = ? AND id = ?', [workspaceId, campaign.product_id]);
+    const p = await get('SELECT name, url, tagline, description, features_json, target_audience, pricing_tiers_json, category FROM digital_products WHERE workspace_id = ? AND id = ?', [workspaceId, campaign.product_id]);
     if (p) {
       facts.product = {
         name: p.name,
         url: p.url,
         tagline: p.tagline,
         description: p.description,
+        category: p.category || undefined,
         features: parseJson(p.features_json, []),
-        target_audience: p.target_audience
+        target_audience: p.target_audience,
+        pricing: parseJson(p.pricing_tiers_json, [])
       };
     }
   }
@@ -415,6 +441,8 @@ module.exports = {
   runGeneration,
   regenerateContent,
   unverifiedClaims,
+  loadFacts,
+  requireRow,
   buildPrompt,
   GenerationSchema
 };

@@ -44,3 +44,15 @@ label.check { flex-direction: row; align-items: center; gap: 8px; }
 .banner.warn { background: var(--warning-soft); border: 1px solid rgba(245, 158, 11, 0.4); color: var(--warning-text); }
 .btn:focus-visible, .chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .visually-hidden-input { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; pointer-events: none; }
+
+/* Modern controls (Content Studio refresh) */
+.btn { font-weight: 600; border-radius: 10px; transition: transform .15s var(--ease), box-shadow .15s var(--ease), background .15s var(--ease), border-color .15s var(--ease); }
+.btn-primary { box-shadow: 0 6px 18px var(--accent-ring); }
+.btn-primary:hover:not(:disabled) { box-shadow: 0 10px 24px var(--accent-ring); }
+.btn-secondary { background: var(--surface); border: 1px solid var(--border-strong); }
+.btn-secondary:hover:not(:disabled) { border-color: var(--accent-ring); background: var(--surface-2); }
+.chip { transition: all .15s var(--ease); }
+.chip:hover { border-color: var(--accent-ring); color: var(--text); }
+.chip.active { background: var(--accent-gradient); color: #fff; border-color: transparent; }
+.hud-input, .hud-textarea { transition: border-color .15s var(--ease), box-shadow .15s var(--ease); }
+.hud-input:hover:not(:disabled), .hud-textarea:hover:not(:disabled) { border-color: var(--accent-ring); }
