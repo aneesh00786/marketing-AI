@@ -43,6 +43,8 @@ export class CallService {
   transcriptState: '' | 'saving' | 'saved' | 'failed' = '';
   /** Why the transcript could not be made (shown under the call). */
   transcriptError = '';
+  /** While saving: which side is being transcribed (1 = the caller, 2 = the customer). */
+  transcriptStep = 0;
 
   private base = `${apiRoot()}/api/v1/calling`;
   private client: any = null;
@@ -218,6 +220,8 @@ export class CallService {
   /** Records how the call went and, if it was captured, sends each side to be transcribed. */
   private async save(logId: number, durationSeconds: number, answered: boolean, wanted: boolean, captures: Capture[]): Promise<void> {
     const audioCaptured = captures.length === 2;
+    // Shown at once (spinner), so nobody closes the tab while the call is being saved and transcribed.
+    if (wanted && answered && audioCaptured) { this.transcriptState = 'saving'; this.transcriptStep = 0; }
     try {
       const url = `${this.base}/logs/${logId}`;
       await firstValueFrom(this.http.post(`${url}/end`, { durationSeconds, answered, ...(wanted ? { audioCaptured } : {}) }));
@@ -228,13 +232,16 @@ export class CallService {
         return;
       }
       this.transcriptState = 'saving';
-      for (const c of captures) {
+      for (const [i, c] of captures.entries()) {
+        this.transcriptStep = i + 1;
         const blob = await c.finished;
         if (!blob.size) throw { transcriptReason: 'No audio was recorded for one side of the call.' };
         await firstValueFrom(this.http.post(`${url}/audio/${c.track}`, blob, { headers: { 'Content-Type': blob.type } }));
       }
       this.transcriptState = 'saved';
+      this.transcriptStep = 0;
     } catch (e: any) {
+      this.transcriptStep = 0;
       if (wanted && answered) {
         this.transcriptState = 'failed';
         this.transcriptError = e?.transcriptReason

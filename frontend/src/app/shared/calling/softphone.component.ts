@@ -29,7 +29,12 @@ import { CallService } from './call.service';
         <span>Transcribe this call<small *ngIf="calls.transcribe">Tell the customer before you start. Only the text is kept.</small></span>
       </label>
       <p class="sp-note" *ngIf="calls.inCall && calls.transcribe">Transcribing this call. Tell the customer.</p>
-      <p class="sp-note" *ngIf="calls.transcriptState === 'saving'" role="status">Saving the transcript…</p>
+      <div class="sp-saving" *ngIf="calls.transcriptState === 'saving'" role="status" aria-live="polite">
+        <span class="sp-spinner" aria-hidden="true"></span>
+        <span><b>Saving the transcript…</b>
+          <small>{{ calls.transcriptStep === 2 ? 'Transcribing the customer\'s side (2 of 2)' : calls.transcriptStep === 1 ? 'Transcribing your side (1 of 2)' : 'Saving the call' }}. This can take a minute; please keep this tab open.</small></span>
+        <span class="sp-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+      </div>
       <p class="sp-note good" *ngIf="calls.transcriptState === 'saved'" role="status">Transcript saved{{ calls.lead ? ' with this lead (Leads → the lead → Follow-ups)' : ' in CRM → Calls' }}.</p>
       <p class="sp-note bad" *ngIf="calls.transcriptState === 'failed'" role="status">The transcript could not be made: {{ calls.transcriptError || 'unknown reason' }} The call is still in the log.</p>
 
@@ -65,6 +70,17 @@ import { CallService } from './call.service';
     .sp-consent input { margin-top: 2px; }
     .sp-consent small { display: block; font-weight: 400; color: var(--warning-text); }
     .sp-note { margin: 0; font-size: 0.78rem; color: var(--warning-text); }
+    .sp-saving { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px; background: var(--accent-soft); color: var(--text); font-size: 0.8rem; }
+    .sp-saving b { display: block; font-size: 0.84rem; }
+    .sp-saving small { display: block; color: var(--text-muted); margin-top: 2px; }
+    .sp-spinner { flex: 0 0 22px; width: 22px; height: 22px; border-radius: 50%; border: 3px solid var(--border-strong); border-top-color: var(--accent); animation: sp-spin 0.8s linear infinite; }
+    .sp-dots { display: inline-flex; gap: 3px; margin-left: auto; }
+    .sp-dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); animation: sp-blink 1.2s infinite ease-in-out; }
+    .sp-dots i:nth-child(2) { animation-delay: 0.2s; }
+    .sp-dots i:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes sp-spin { to { transform: rotate(360deg); } }
+    @keyframes sp-blink { 0%, 80%, 100% { opacity: 0.25; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1); } }
+    @media (prefers-reduced-motion: reduce) { .sp-spinner, .sp-dots i { animation: none; } }
     .sp-note.good { color: var(--success-text); }
     .sp-note.bad { color: var(--danger-text); }
     .sp-keys { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
