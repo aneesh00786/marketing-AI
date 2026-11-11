@@ -750,8 +750,10 @@ button.dropdown-item:disabled { opacity: 0.6; cursor: default; }
 @media (min-width: 761px) {
   .leads-table .freeze { position: sticky; z-index: 2; background: var(--bg-elev); }
   .leads-table th.freeze { z-index: 3; background: var(--surface); }
-  .leads-table .freeze-1 { left: 0; width: 52px; min-width: 52px; max-width: 52px; }
-  .leads-table .freeze-2 { left: 52px; }
+  /* Wide enough for the checkbox and a four-digit row number. */
+  .leads-table .freeze-1 { left: 0; width: 84px; min-width: 84px; max-width: 84px; }
+  .leads-table .freeze-2 { left: 84px; }
+  .leads-table tbody tr.picked .freeze { background: var(--accent-soft, rgba(123, 108, 246, .08)); }
   .leads-table .freeze-edge { box-shadow: inset -1px 0 0 var(--border), 6px 0 8px -6px rgba(0, 0, 0, 0.18); }
   .leads-table tbody tr:hover .freeze { background: var(--surface-hover); }
 }
@@ -789,3 +791,7 @@ button.dropdown-item:disabled { opacity: 0.6; cursor: default; }
 .lead-name-link { background: none; border: none; padding: 0; color: inherit; cursor: pointer; text-align: left; font: inherit; }
 .lead-name-link:hover strong { text-decoration: underline; color: var(--accent-text); }
 .leads-table tbody tr.picked td { background: var(--accent-soft, rgba(123, 108, 246, .08)); }
+
+.lead-bulk-bar.idle { position: static; border-color: var(--border); box-shadow: none; }
+.lead-bulk-bar .bulk-hint { flex: 1 1 240px; font-size: 0.84rem; }
+.lead-bulk-bar.idle .btn-danger:disabled { opacity: .55; cursor: not-allowed; }

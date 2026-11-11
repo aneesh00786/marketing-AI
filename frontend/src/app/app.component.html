@@ -357,17 +357,19 @@
     <div class="lead-assign-bar" *ngIf="leadCanManageAccess && leadFilters.view === 'unassigned' && leads.length && !selectedLeadIds.size">
       {{ leadTotal }} unassigned lead{{ leadTotal === 1 ? '' : 's' }}: only Owners and Admins see them until they are assigned. Tick them (or ☑ all) to assign.
     </div>
-    <div class="lead-bulk-bar" *ngIf="selectedLeadIds.size" role="region" aria-label="Selected leads">
-      <b>{{ selectedLeadIds.size }} selected</b>
-      <span class="bulk-group" *ngIf="leadCanManageAccess">
+    <div class="lead-bulk-bar" *ngIf="canSelectAnyLead && leads.length" [class.idle]="!selectedLeadIds.size" role="region" aria-label="Selected leads">
+      <b *ngIf="selectedLeadIds.size">{{ selectedLeadIds.size }} selected</b>
+      <span class="muted bulk-hint" *ngIf="!selectedLeadIds.size">☐ Tick leads (or the box at the top of the No. column for this page) to delete{{ leadCanManageAccess ? ' or assign' : '' }} several at once.</span>
+      <span class="bulk-group" *ngIf="leadCanManageAccess && selectedLeadIds.size">
         <select class="hud-input" [(ngModel)]="bulkOwnerId" aria-label="Assign to">
           <option [ngValue]="null">Assign to…</option>
           <option *ngFor="let m of leadMembers" [ngValue]="m.userId">{{ m.name }} ({{ m.role }})</option>
         </select>
         <button class="btn btn-primary btn-sm" type="button" (click)="assignSelectedLeads()" [disabled]="!bulkOwnerId || bulkAssigning">Assign</button>
       </span>
-      <button class="btn btn-danger btn-sm" type="button" (click)="deleteSelectedLeads()" [disabled]="deletingLeads">{{ deletingLeads ? 'Deleting…' : '🗑 Delete selected' }}</button>
-      <button class="btn btn-secondary btn-sm" type="button" (click)="selectedLeadIds.clear()">Clear selection</button>
+      <button class="btn btn-danger btn-sm" type="button" (click)="deleteSelectedLeads()" [disabled]="deletingLeads || !selectedLeadIds.size"
+              [title]="selectedLeadIds.size ? 'Delete the ticked leads' : 'Tick leads first'">{{ deletingLeads ? 'Deleting…' : '🗑 Delete selected' + (selectedLeadIds.size ? ' (' + selectedLeadIds.size + ')' : '') }}</button>
+      <button class="btn btn-secondary btn-sm" type="button" *ngIf="selectedLeadIds.size" (click)="selectedLeadIds.clear()">Clear selection</button>
     </div>
 
     <div class="table-container full-table">
