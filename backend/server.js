@@ -219,6 +219,8 @@ app.use('/api/v1/automations', automationRouter);
 app.use('/api/v1/campaign-analytics', campaignAnalyticsRouter);
 // Tenant-aware campaign budgets, actual spend, pacing, alerts and ROI (not subscription billing).
 app.use('/api/v1/budgets', budgetRouter);
+// Team performance: what each member did, from recorded activity (Owners/Admins: everyone; others: themselves).
+app.use('/api/v1/performance', require('./modules/performance/routes'));
 // The signed-in user's workspaces: list, create, switch (every workspace; before the legacy gate).
 app.use(workspacesRouter);
 

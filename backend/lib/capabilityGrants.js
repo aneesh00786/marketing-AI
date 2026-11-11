@@ -12,7 +12,17 @@ const { capabilitiesForRole } = require('./permissions');
 const GRANTABLE = {
   // A Member writes email but does not send it; this lets one member send as well.
   'mail.send': { requires: 'mail.compose', label: 'Send email' },
-  'mail.send_transactional': { requires: 'mail.send', label: 'Send transactional email (Compose)' }
+  'mail.send_transactional': { requires: 'mail.send', label: 'Send transactional email (Compose)' },
+  // Team Performance for everyone (Owners/Admins always have it): e.g. a Marketing Manager leading the team.
+  'performance.view_team': { requires: 'analytics.view', label: 'View team performance' },
+  // Set and change staff targets (Owners/Admins always can).
+  'performance.manage_targets': { requires: 'analytics.view', label: 'Manage staff targets' },
+  // Each needs "View team performance" to matter (except scoring); Owners/Admins always have them.
+  'performance.compare': { requires: 'analytics.view', label: 'Compare staff' },
+  'performance.export': { requires: 'analytics.view', label: 'Export team reports' },
+  'performance.view_transcripts': { requires: 'analytics.view', label: 'View call transcripts of others' },
+  'performance.configure_scoring': { requires: 'analytics.view', label: 'Configure performance scoring' },
+  'performance.schedule_reports': { requires: 'analytics.view', label: 'Schedule performance reports' }
 };
 
 /** 'role' (already included), 'eligible' (may be granted) or 'not_eligible' for this role. */

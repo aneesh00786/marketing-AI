@@ -348,6 +348,8 @@ async function sendDraftCore(ctx, draft) {
     throw err;
   }
   await run(`UPDATE email_drafts SET status = 'Sent', sent_at = UTC_TIMESTAMP(), email_id = ?, send_error = NULL, updated_at = ? WHERE id = ? AND workspace_id = ?`, [sendResult.emailId || null, nowSql(), draft.id, workspaceId]);
+  // Who sent it: the person sending the draft, or (product emails) the person who queued the batch.
+  if (sendResult.emailId && ctx.auth?.userId) await run('UPDATE emails SET sent_by_user_id = ? WHERE id = ? AND workspace_id = ?', [ctx.auth.userId, sendResult.emailId, workspaceId]).catch(() => null);
   await audit(ctx, 'mail.draft_sent', { resourceType: 'email_draft', resourceId: draft.id, metadata: { emailId: sendResult.emailId, batchId: draft.batch_id || null } });
   return sendResult;
 }
@@ -704,6 +706,8 @@ async function sendDirect(req, res, { requireHtml }) {
     throw err;
   }
   await run("UPDATE mail_send_requests SET status = 'sent', email_id = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?", [sendRes.emailId, claim.id]);
+  // Who sent it (staff performance and lead contact history); Compose, including the lead panel's "Send email".
+  if (sendRes.emailId) await run('UPDATE emails SET sent_by_user_id = ? WHERE id = ? AND workspace_id = ?', [req.auth.userId || null, sendRes.emailId, ws(req)]).catch(() => null);
   await audit(req, 'mail.sent', { resourceType: 'email', resourceId: sendRes.emailId, metadata: { purpose: purposeMeta } });
   if (cls.reclassified) await audit(req, 'mail.purpose_reclassified', { resourceType: 'email', resourceId: sendRes.emailId, metadata: purposeMeta });
   res.json({

@@ -32,6 +32,7 @@ const HANDLERS = {
   studio_bulk: job => require('../modules/social/studio/bulkService').runJob(job),
   studio_generation: job => require('../modules/social/studio/generationService').runJob(job),
   ses_campaign_send: job => require('../modules/mail/ses/sesCampaigns').runSendJob(job),
+  performance_report: job => require('../modules/performance/scheduledReports').runReportJob(job),
   check_account: async job => {
     const { accountId } = JSON.parse(job.payload_json || '{}');
     return accountService.checkAccountHealth({ auth: { workspaceId: job.workspace_id, actorType: 'worker' } }, accountId);
@@ -174,6 +175,8 @@ async function scheduleRecurring() {
     await jobsService.enqueue(a.workspace_id, 'sync_inbox', { accountId: a.id }, { idempotencyKey: `auto_inbox:${a.id}:${iBucket}` });
     await jobsService.enqueue(a.workspace_id, 'check_account', { accountId: a.id }, { idempotencyKey: `auto_health:${a.id}:${hBucket}`, maxAttempts: 1 });
   }
+  // Scheduled Team Performance reports that are due (once per period).
+  await require('../modules/performance/scheduledReports').enqueueDue().catch(err => log('performance report schedule error:', err.message));
   await require('../modules/social/mediaStore').sweepTemporaryFiles().catch(err => log('media sweep error:', err.message));
   const stalePublishing = await publishingService.recoverStaleJobs();
   const staleBackground = await jobsService.recoverStale();
