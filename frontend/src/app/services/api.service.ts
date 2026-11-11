@@ -194,6 +194,11 @@ export class ApiService {
     return this.http.patch(`${this.baseUrl}/leads/${id}`, data);
   }
 
+  /** Delete several leads (each must be one the person may delete; the rest are skipped and reported). */
+  bulkDeleteLeads(leadIds: number[]): Observable<any> {
+    return this.http.post(`${this.baseUrl}/leads/bulk-delete`, { leadIds });
+  }
+
   deleteLead(id: number): Observable<any> {
     return this.http.delete(`${this.baseUrl}/leads/${id}`);
   }

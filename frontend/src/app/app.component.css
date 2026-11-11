@@ -788,3 +788,4 @@ button.dropdown-item:disabled { opacity: 0.6; cursor: default; }
 .sel-all, .sel-one { display: inline-flex; align-items: center; margin-right: 6px; cursor: pointer; }
 .lead-name-link { background: none; border: none; padding: 0; color: inherit; cursor: pointer; text-align: left; font: inherit; }
 .lead-name-link:hover strong { text-decoration: underline; color: var(--accent-text); }
+.leads-table tbody tr.picked td { background: var(--accent-soft, rgba(123, 108, 246, .08)); }

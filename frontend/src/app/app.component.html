@@ -357,15 +357,16 @@
     <div class="lead-assign-bar" *ngIf="leadCanManageAccess && leadFilters.view === 'unassigned' && leads.length && !selectedLeadIds.size">
       {{ leadTotal }} unassigned lead{{ leadTotal === 1 ? '' : 's' }}: only Owners and Admins see them until they are assigned. Tick them (or ☑ all) to assign.
     </div>
-    <div class="lead-bulk-bar" *ngIf="leadCanManageAccess && selectedLeadIds.size" role="region" aria-label="Selected leads">
+    <div class="lead-bulk-bar" *ngIf="selectedLeadIds.size" role="region" aria-label="Selected leads">
       <b>{{ selectedLeadIds.size }} selected</b>
-      <span class="bulk-group">
+      <span class="bulk-group" *ngIf="leadCanManageAccess">
         <select class="hud-input" [(ngModel)]="bulkOwnerId" aria-label="Assign to">
           <option [ngValue]="null">Assign to…</option>
           <option *ngFor="let m of leadMembers" [ngValue]="m.userId">{{ m.name }} ({{ m.role }})</option>
         </select>
         <button class="btn btn-primary btn-sm" type="button" (click)="assignSelectedLeads()" [disabled]="!bulkOwnerId || bulkAssigning">Assign</button>
       </span>
+      <button class="btn btn-danger btn-sm" type="button" (click)="deleteSelectedLeads()" [disabled]="deletingLeads">{{ deletingLeads ? 'Deleting…' : '🗑 Delete selected' }}</button>
       <button class="btn btn-secondary btn-sm" type="button" (click)="selectedLeadIds.clear()">Clear selection</button>
     </div>
 
@@ -373,7 +374,7 @@
       <table class="data-table leads-table">
         <thead>
           <tr>
-            <th class="sl-cell freeze freeze-1"><label *ngIf="leadCanManageAccess" class="sel-all" title="Select all shown"><input type="checkbox" [checked]="allLeadsShownSelected" (change)="toggleAllShownLeads()" aria-label="Select all shown leads" /></label><span *ngIf="!leadCanManageAccess">#</span></th>
+            <th class="sl-cell freeze freeze-1"><label *ngIf="canSelectAnyLead" class="sel-all" title="Select all shown"><input type="checkbox" [checked]="allLeadsShownSelected" (change)="toggleAllShownLeads()" aria-label="Select all shown leads" /></label><span *ngIf="!canSelectAnyLead">#</span></th>
             <th class="freeze freeze-2 freeze-edge">Contact</th>
             <th>Company</th>
             <th>Country</th>
@@ -392,8 +393,8 @@
           </tr>
         </thead>
         <tbody>
-          <tr *ngFor="let ld of leads; let i = index">
-            <td class="sl-cell freeze freeze-1" data-label="No."><label *ngIf="leadCanManageAccess" class="sel-one"><input type="checkbox" [checked]="selectedLeadIds.has(ld.id)" (change)="toggleLeadSelected(ld.id)" [attr.aria-label]="'Select ' + ld.name" /></label>{{ (leadPage - 1) * leadPageSize + i + 1 }}</td>
+          <tr *ngFor="let ld of leads; let i = index; trackBy: trackLead" [class.picked]="selectedLeadIds.has(ld.id)">
+            <td class="sl-cell freeze freeze-1" data-label="No."><label *ngIf="canSelectLead(ld)" class="sel-one"><input type="checkbox" [checked]="selectedLeadIds.has(ld.id)" (change)="toggleLeadSelected(ld.id)" [attr.aria-label]="'Select ' + ld.name" /></label>{{ (leadPage - 1) * leadPageSize + i + 1 }}</td>
             <td data-label="Contact" class="contact-cell freeze freeze-2 freeze-edge"><button type="button" class="lead-name-link" (click)="followupLead = ld" title="Follow-ups, calls, emails and notes"><strong>{{ ld.name }}</strong></button>
               <div class="lead-sub has-note-tip" *ngIf="ld.notes" tabindex="0" [attr.aria-label]="'Notes: ' + ld.notes"
                    (mouseenter)="showNoteTip($event, ld.notes)" (mouseleave)="hideNoteTip()" (focus)="showNoteTip($event, ld.notes)" (blur)="hideNoteTip()">📝 {{ ld.notes | slice:0:50 }}{{ ld.notes.length > 50 ? '…' : '' }}</div></td>
@@ -436,7 +437,7 @@
                 <button class="btn btn-secondary btn-sm" *ngIf="ld.googlePlace" (click)="viewPlaceDetails(ld)" title="Show this business's details live from Google Maps">📍 Live details</button>
                 <button class="btn btn-secondary btn-sm" (click)="quickEmailLead(ld)" [disabled]="!ld.hasValidEmail" [title]="ld.hasValidEmail ? 'Draft an email about ' + (ld.productName || 'their needs') : 'No valid email address'">✉️ Email</button>
                 <button class="btn btn-secondary btn-sm" *ngIf="ld.accessLevel !== 'view'" (click)="qualifySingleLead(ld)" title="Refresh the rule-based score and ask AI for advice">⚡ AI advice</button>
-                <button class="btn btn-danger btn-sm" *ngIf="ld.accessLevel === 'admin' || ld.accessLevel === 'owner'" (click)="deleteLead(ld)" aria-label="Delete lead">🗑</button>
+                <button class="btn btn-danger btn-sm" *ngIf="ld.accessLevel === 'admin' || ld.accessLevel === 'owner'" (click)="deleteLead(ld)" type="button" aria-label="Delete lead">🗑</button>
               </div>
             </td>
           </tr>

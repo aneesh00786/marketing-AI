@@ -187,3 +187,30 @@ test('Admins select several leads and assign an owner or share them in one actio
   for (const id of picks) assert.equal((await call(A, 'GET', `/api/v1/leads/${id}`)).data.lead.accessLevel, 'owner', 'owner, and its old share removed');
   assert.equal((await db().get(`SELECT COUNT(*) AS n FROM lead_user_access WHERE user_id = ? AND lead_id IN (${picks.join(',')})`, [A.userId])).n, 0);
 });
+
+test('deleting several leads at once: the same rule as one at a time; others are skipped and reported', async () => {
+  const a1 = await create(A, 'Bulk One');
+  const a2 = await create(A, 'Bulk Two');
+  const b1 = await create(B, 'Bulk Bee');
+  const o1 = await create(Owner, 'Bulk Owner Lead');
+  const otherLead = await create(Other, 'Bulk Elsewhere');
+  const del = (who, leadIds) => call(who, 'POST', '/api/v1/leads/bulk-delete', { leadIds });
+  // A deletes their own two; B's lead, the owner's lead and another workspace's lead are skipped, untouched.
+  const r = await del(A, [a1.id, a2.id, b1.id, o1.id, otherLead.id, 999999999]);
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.deleted, 2);
+  assert.deepEqual(r.data.deletedIds.sort(), [a1.id, a2.id].sort());
+  assert.deepEqual(r.data.skipped.map(s => s.id).sort(), [b1.id, o1.id, otherLead.id, 999999999].sort());
+  for (const s of r.data.skipped) assert.equal(s.reason, 'not found', 'what A cannot see is not revealed');
+  for (const id of [b1.id, o1.id]) assert.equal((await call(Owner, 'GET', `/api/v1/leads/${id}`)).status, 200, 'still there');
+  assert.equal((await call(Other, 'GET', `/api/v1/leads/${otherLead.id}`)).status, 200);
+  assert.equal((await call(Owner, 'GET', `/api/v1/leads/${a1.id}`)).status, 404, 'gone');
+  // An admin deletes anyone's leads in this workspace.
+  const r2 = await del(Admin, [b1.id, o1.id]);
+  assert.equal(r2.data.deleted, 2);
+  assert.equal(await db().get("SELECT COUNT(*) n FROM audit_logs WHERE action = 'leads.deleted' AND workspace_id = ? AND resource_id IN (?, ?, ?, ?)", [Owner.workspaceId, String(a1.id), String(a2.id), String(b1.id), String(o1.id)]).then(x => x.n), 4, 'each deletion audited');
+  // Validation.
+  assert.equal((await del(A, [])).status, 400);
+  assert.equal((await del(A, Array.from({ length: 501 }, (_, i) => i + 1))).status, 400);
+  assert.equal((await del(A, ['x'])).status, 400);
+});

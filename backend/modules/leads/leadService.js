@@ -371,6 +371,28 @@ async function deleteLead(ctx, id) {
 }
 
 /**
+ * Deletes several leads at once, with the same rule as deleting one: each lead must be one the person may delete
+ * (its owner, or an Owner/Admin). Leads they may not delete, or that no longer exist, are skipped and reported.
+ */
+const MAX_BULK_DELETE = 500;
+async function deleteLeads(ctx, rawIds) {
+  const ids = [...new Set((Array.isArray(rawIds) ? rawIds : []).map(Number).filter(n => Number.isInteger(n) && n > 0))];
+  if (!ids.length) throw httpError(400, 'Choose at least one lead.');
+  if (ids.length > MAX_BULK_DELETE) throw httpError(400, `Delete at most ${MAX_BULK_DELETE} leads at a time.`);
+  const deleted = []; const skipped = [];
+  for (const id of ids) {
+    try {
+      await deleteLead(ctx, id);
+      deleted.push(id);
+    } catch (err) {
+      if (!err.status || err.status >= 500) throw err;
+      skipped.push({ id, reason: err.status === 404 ? 'not found' : 'not allowed' });
+    }
+  }
+  return { deleted: deleted.length, deletedIds: deleted, skipped };
+}
+
+/**
  * Imports spreadsheet rows. Products are matched by id or exact name within this
  * workspace; unmatched products are flagged for review, never invented. Rows without a
  * name are skipped and reported. AI advice is not generated per row (cost/time);
@@ -572,6 +594,7 @@ module.exports = {
   createLead,
   updateLead,
   deleteLead,
+  deleteLeads,
   importLeads,
   generateAdvice,
   qualifyAll,

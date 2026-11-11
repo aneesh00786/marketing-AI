@@ -570,13 +570,52 @@ export class AppComponent implements OnInit, OnDestroy {
   leadSourceLabel(s: string | null): string {
     return ({ manual: 'Manual', import: 'Excel import', discovery: 'AI Discovery', social: 'Social', phone: 'Phone', api: 'API' } as any)[s || ''] || '—';
   }
-  /** Owners/Admins: leads ticked in the list, to assign them to one member in one action. */
+  /**
+   * Leads ticked in the list: Owners/Admins assign or delete them; anyone deletes the ticked leads they own.
+   * A lead can be ticked when the person may delete it (the same rule as its 🗑 button).
+   */
   selectedLeadIds = new Set<number>();
-  get allLeadsShownSelected(): boolean { return !!this.leads.length && this.leads.every(l => this.selectedLeadIds.has(l.id)); }
+  deletingLeads = false;
+  canSelectLead(ld: any): boolean { return this.leadCanManageAccess || ld?.accessLevel === 'admin' || ld?.accessLevel === 'owner'; }
+  get canSelectAnyLead(): boolean { return this.leadCanManageAccess || this.leads.some(l => this.canSelectLead(l)); }
+  private get selectableLeads(): any[] { return this.leads.filter(l => this.canSelectLead(l)); }
+  get allLeadsShownSelected(): boolean { const s = this.selectableLeads; return !!s.length && s.every(l => this.selectedLeadIds.has(l.id)); }
   toggleLeadSelected(id: number): void { this.selectedLeadIds.has(id) ? this.selectedLeadIds.delete(id) : this.selectedLeadIds.add(id); }
   toggleAllShownLeads(): void {
     const all = this.allLeadsShownSelected;
-    for (const l of this.leads) all ? this.selectedLeadIds.delete(l.id) : this.selectedLeadIds.add(l.id);
+    for (const l of this.selectableLeads) all ? this.selectedLeadIds.delete(l.id) : this.selectedLeadIds.add(l.id);
+  }
+  /** Rows keep their identity across refreshes, so the table is updated in place instead of redrawn. */
+  trackLead = (_: number, l: any) => l.id;
+
+  deleteSelectedLeads(): void {
+    const ids = [...this.selectedLeadIds];
+    if (!ids.length || this.deletingLeads) return;
+    if (!confirm(`Delete the ${ids.length} selected lead${ids.length === 1 ? '' : 's'}? This cannot be undone.`)) return;
+    this.deletingLeads = true;
+    this.apiService.bulkDeleteLeads(ids).subscribe({
+      next: (r: any) => {
+        this.deletingLeads = false;
+        this.afterLeadsDeleted(r.deletedIds || []);
+        const skipped = (r.skipped || []).length;
+        this.showToast(`${r.deleted} lead${r.deleted === 1 ? '' : 's'} deleted.${skipped ? ` ${skipped} could not be deleted (not yours or already gone).` : ''}`);
+      },
+      error: (e: any) => { this.deletingLeads = false; this.showToast(e?.error?.error || 'Could not delete the leads.'); }
+    });
+  }
+
+  /**
+   * After a delete: take the rows out where they are, keep the page (step back only if this page is now empty),
+   * then refresh the page quietly so it fills up again. Nothing else is reset.
+   */
+  private afterLeadsDeleted(ids: number[]): void {
+    if (!ids.length) return;
+    const gone = new Set(ids);
+    this.leads = this.leads.filter(l => !gone.has(l.id));
+    ids.forEach(id => this.selectedLeadIds.delete(id));
+    this.leadTotal = Math.max(0, this.leadTotal - ids.length);
+    if (!this.leads.length && this.leadPage > 1) this.leadPage = Math.min(this.leadPage - 1, this.leadPageCount);
+    this.loadLeads();
   }
   assignSelectedLeads(): void {
     const ids = [...this.selectedLeadIds];
@@ -1407,7 +1446,7 @@ export class AppComponent implements OnInit, OnDestroy {
   deleteLead(ld: any): void {
     if (!confirm(`Delete lead "${ld.name}"? This cannot be undone.`)) return;
     this.apiService.deleteLead(ld.id).subscribe({
-      next: () => { this.showToast('Lead deleted.'); this.loadLeads(); },
+      next: () => { this.showToast('Lead deleted.'); this.afterLeadsDeleted([ld.id]); },
       error: (err) => this.showToast(`Delete failed: ${err?.error?.error || err.message}`)
     });
   }

@@ -196,6 +196,10 @@ router.post('/:id/followups', requireCapability('leads.manage'), wrap(async (req
 router.patch('/:id/followups/:followupId', requireCapability('leads.manage'), wrap(async (req, res) => res.json({ success: true, ...(await followups.updateFollowup(req, req.params.id, req.params.followupId, req.body)) })));
 
 // ---- Ownership & access (changes: workspace Owners/Admins only; checked in leadOwnershipService) ----
+// Delete several leads at once (each with the same rule as deleting one).
+router.post('/bulk-delete', requireCapability('leads.manage'), body(z.object({ leadIds: z.array(z.number().int().positive()).min(1).max(500) })), wrap(async (req, res) => {
+  res.json({ success: true, ...(await leadService.deleteLeads(req, req.valid.leadIds)) });
+}));
 router.post('/bulk-owner', requireCapability('leads.view'), wrap(async (req, res) => {
   res.json({ success: true, ...(await ownership.bulkChangeOwner(req, req.body)) });
 }));
