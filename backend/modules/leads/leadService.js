@@ -222,7 +222,7 @@ async function leadWhere(ctx, { productId, status, q, source, country, view } = 
 /** The countries of the leads this person can see, with how many each, for the country filter (most first). */
 async function leadCountries(ctx) {
   const vis = leadAccess.visibleSql(ctx, 'l');
-  const rows = await all(`SELECT NULLIF(TRIM(l.country), '') AS country, COUNT(*) AS n FROM leads l WHERE l.workspace_id = ? AND ${vis.sql} GROUP BY NULLIF(TRIM(l.country), '') ORDER BY n DESC, country`, [ctx.auth.workspaceId, ...vis.params]);
+  const rows = await all(`SELECT NULLIF(TRIM(l.country), '') AS country, COUNT(*) AS n FROM leads l WHERE l.workspace_id = ? AND ${vis.sql} GROUP BY country ORDER BY n DESC, country`, [ctx.auth.workspaceId, ...vis.params]);
   return rows.map(r => ({ country: r.country || null, count: Number(r.n) }));
 }
 

@@ -388,6 +388,62 @@ export class TeamPerformanceComponent implements OnInit {
     const kinds: Record<string, string> = { calls: 'calls', emails: 'emails_sent', fu: 'followups_completed', notes: 'activities' };
     this.openDrill(kinds[key]);
   }
+  // ------------------------------------------------------------------ person page: every figure opens its records
+
+  private get uid(): number { return this.detail?.member?.userId; }
+  staffCard(label: string): void {
+    const m = this.detail?.summary;
+    const kinds: Record<string, [string, string?]> = { 'Leads converted': ['leads_converted'], 'Conversion rate': ['leads_contacted', 'Leads contacted (conversion = won ÷ contacted)'],
+      'Follow-ups completed': ['followups_completed'], 'On-time follow-ups': ['followups_completed', 'Follow-ups completed (on time or late)'], 'Connected calls': ['calls_connected'] };
+    if (kinds[label]) this.openDrill(kinds[label][0], { userId: this.uid, title: kinds[label][1] });
+    else if (label === 'Target achievement' && m) this.openTargetList({ ...m, userId: this.uid, name: this.detail.member.name });
+  }
+  funnelClick(i: number): void {
+    const o = [{ status: '', title: 'Leads assigned now' }, { status: 'contacted', title: 'Assigned leads contacted (ever)' }, { status: 'won', title: 'Assigned leads won' }][i];
+    if (o) this.openDrill('leads_assigned', { userId: this.uid, status: o.status || undefined, title: o.title });
+  }
+  fuClick(key: string): void {
+    const kinds: Record<string, string> = { onTime: 'followups_on_time', late: 'followups_late', overdue: 'followups_overdue', pending: 'followups_upcoming' };
+    if (kinds[key]) this.openDrill(kinds[key], { userId: this.uid });
+  }
+  commClick(what: string): void {
+    const kinds: Record<string, string> = { calls: 'calls', talk: 'calls_connected', emails: 'emails_sent' };
+    this.openDrill(kinds[what], { userId: this.uid });
+  }
+  changeClick(label: string): void {
+    const m = this.detail?.summary;
+    const kinds: Record<string, [string, string?]> = { 'Leads contacted': ['leads_contacted'], 'Leads converted': ['leads_converted'], 'Follow-ups completed': ['followups_completed'],
+      'On-time follow-ups': ['followups_completed', 'Follow-ups completed (on time or late)'], 'Calls connected': ['calls_connected'], 'Emails sent': ['emails_sent'] };
+    if (kinds[label]) this.openDrill(kinds[label][0], { userId: this.uid, title: kinds[label][1] });
+    else if (label === 'Performance score' && m) this.openScore({ ...m, userId: this.uid, name: this.detail.member.name });
+  }
+  headerScore(): void { const m = this.detail?.summary; if (m) this.openScore({ ...m, userId: this.uid, name: this.detail.member.name }); }
+  headerTargets(): void { const m = this.detail?.summary; if (m) this.openTargetList({ ...m, userId: this.uid, name: this.detail.member.name }); }
+  /** A day of the daily-activity chart → everything they did that day. */
+  staffDayClick(i: number): void {
+    const day = (this.detail?.daily || [])[i]?.day;
+    if (!day || !this.detail) return;
+    const name = this.detail.member.name;
+    this.pop = { title: 'Activity on the day', subtitle: `${name} · ${this.dlabel(day)}`, columns: [], rows: [], total: 0, page: 1, loading: true, userId: this.uid };
+    const p = this.pop;
+    this.http.get<any>(`${this.base}/members/${this.uid}/day`, { params: { date: day } }).subscribe({
+      next: r => {
+        const rows = [
+          ...r.calls.map((c: any) => ({ type: 'Call', lead: c.leadName || '—', at: c.at, detail: c.answered ? `Connected · ${this.dur(c.durationSeconds)}` : 'Not answered', callId: c.id, userId: this.uid })),
+          ...r.followupsCompleted.map((f: any) => ({ type: 'Follow-up completed', lead: f.leadName, at: f.at, detail: `${f.title} · ${f.onTime ? 'on time' : 'late'}`, leadId: f.leadId })),
+          ...r.emails.map((e: any) => ({ type: e.kind === 'product' ? 'Product email' : 'Email', lead: e.recipient, at: e.at, detail: e.subject || '(no subject)' })),
+          ...r.activities.map((a: any) => ({ type: this.timelineLabel(a.type), lead: a.leadName, at: a.at, detail: a.title || a.description || '', leadId: a.leadId })),
+          ...r.leadsCreated.map((l: any) => ({ type: 'Lead created', lead: l.leadName, at: l.at, detail: l.source, leadId: l.leadId })),
+          ...r.leadsAssigned.map((l: any) => ({ type: 'Lead assigned', lead: l.leadName, at: l.at, detail: l.status, leadId: l.leadId }))
+        ].sort((a, b) => String(b.at).localeCompare(String(a.at)));
+        if (this.pop !== p) return;
+        Object.assign(p, { columns: [{ key: 'type', label: 'What', type: 'text' }, { key: 'lead', label: 'Lead / recipient', type: 'text' }, { key: 'at', label: 'When', type: 'date' }, { key: 'detail', label: 'Detail', type: 'text' }],
+          rows, total: rows.length, loading: false });
+      },
+      error: e => { if (this.pop === p) Object.assign(p, { loading: false, error: e?.error?.error || 'Could not load that day.' }); }
+    });
+  }
+
   periodClick(label: string): void {
     const kinds: Record<string, [string, string?]> = { 'Leads contacted': ['leads_contacted'], 'Leads converted': ['leads_converted'], 'Conversion rate': ['leads_contacted', 'Leads contacted (conversion = won ÷ contacted)'],
       'Follow-ups completed': ['followups_completed'], 'Follow-ups on time': ['followups_on_time'], 'Calls connected': ['calls_connected'], 'Talk time (min)': ['calls_connected'], 'Emails sent': ['emails_sent'] };

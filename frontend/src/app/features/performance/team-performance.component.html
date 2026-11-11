@@ -47,10 +47,10 @@
     </div>
   </header>
   <nav class="tp-views" *ngIf="isTeam" aria-label="Team performance pages">
-    <button type="button" [class.on]="view === 'dashboard'" (click)="view = 'dashboard'">Dashboard</button>
-    <button type="button" *ngIf="can.compare" [class.on]="view === 'compare'" (click)="view = 'compare'">Staff Comparison</button>
-    <button type="button" [class.on]="view === 'targets'" (click)="openTargets()">Targets &amp; Goals</button>
-    <button type="button" [class.on]="view === 'settings'" (click)="openSettings()">Report Settings</button>
+    <button type="button" [class.on]="view === 'dashboard' || view === 'staff'" [attr.aria-current]="view === 'dashboard' || view === 'staff' ? 'page' : null" (click)="view = 'dashboard'"><svg class="tp-view-ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg>Dashboard</button>
+    <button type="button" *ngIf="can.compare" [class.on]="view === 'compare'" (click)="view = 'compare'"><svg class="tp-view-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Staff Comparison</button>
+    <button type="button" [class.on]="view === 'targets'" (click)="openTargets()"><svg class="tp-view-ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="0.8"/></svg>Targets &amp; Goals</button>
+    <button type="button" [class.on]="view === 'settings'" (click)="openSettings()"><svg class="tp-view-ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3h0a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8v0a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Report Settings</button>
     <span class="tp-spacer"></span>
     <span class="muted small" *ngIf="data">{{ data.from | date:'d MMM' }} – {{ data.to | date:'d MMM y' }} · {{ data.timezone }} time</span>
   </nav>
@@ -441,12 +441,12 @@
             <h3>{{ d.member.name }}<span class="tp-former" *ngIf="d.member.former"> · former member, history kept</span></h3>
             <p class="muted small">{{ d.member.role }} · {{ d.from | date:'d MMM' }} – {{ d.to | date:'d MMM y' }}</p>
           </div>
-          <div class="tp-staff-stat">
+          <div class="tp-staff-stat dc" role="button" tabindex="0" (click)="headerScore()" (keydown.enter)="headerScore()" title="How the score is made">
             <small>Performance</small>
             <ng-container *ngIf="levelOf(m) as lv; else noScoreH"><span class="tp-lv big" [ngClass]="'lv-' + lv"><span aria-hidden="true">{{ LEVELS[lv].icon }}</span> {{ m.score.score }}</span><small>{{ LEVELS[lv].label }}</small></ng-container>
             <ng-template #noScoreH><b class="muted">—</b><small>Not enough data</small></ng-template>
           </div>
-          <div class="tp-staff-stat"><small>Target achievement</small>
+          <div class="tp-staff-stat dc" role="button" tabindex="0" (click)="headerTargets()" (keydown.enter)="headerTargets()" title="Show the targets"><small>Target achievement</small>
             <ng-container *ngIf="m.targets?.total; else noTgtH"><b>{{ pct(m.targets.achievement) }}</b><small>{{ m.targets.met }} of {{ m.targets.total }} met</small></ng-container>
             <ng-template #noTgtH><b class="muted small">No target assigned</b></ng-template></div>
           <div class="tp-staff-stat"><small>Previous period</small>
@@ -469,7 +469,7 @@
         <!-- Overview -->
         <ng-container *ngIf="tab === 'overview' && d.summary as m">
           <div class="tp-kpis6 staff">
-            <div class="tp-k static" *ngFor="let c of staffCards(m)">
+            <div class="tp-k static dc" *ngFor="let c of staffCards(m)" role="button" tabindex="0" (click)="staffCard(c.label)" (keydown.enter)="staffCard(c.label)" title="Show the records">
               <span class="tp-k-label">{{ c.label }}</span>
               <b [class.tp-k-na]="c.cur === null && c.label === 'Target achievement'">{{ c.value }}</b>
               <span class="tp-k-delta" *ngIf="delta({ value: c.cur, previous: c.prev, unit: c.unit }) as dl" [class.good]="dl.good === true" [class.bad]="dl.good === false">
@@ -480,16 +480,16 @@
           <div class="tp-grid3">
             <section class="tp-card">
               <h3>Lead conversion</h3>
-              <app-perf-funnel [steps]="funnel(m)" empty="No leads assigned."></app-perf-funnel>
+              <app-perf-funnel [steps]="funnel(m)" empty="No leads assigned." [clickable]="true" (select)="funnelClick($event)"></app-perf-funnel>
               <p class="muted small">Assigned now · contacted (ever) · won (now).</p>
             </section>
             <section class="tp-card">
               <h3>Follow-up performance</h3>
               <ng-container *ngIf="fuSegments(m) as segs">
                 <div class="tp-stack" *ngIf="segs.length; else noFu" role="img" [attr.aria-label]="'Follow-ups: ' + m.followups.onTime + ' on time, ' + m.followups.late + ' late, ' + m.followups.overdueNow + ' overdue, ' + m.followups.upcoming + ' upcoming'">
-                  <i *ngFor="let s of segs" [style.flex-grow]="s.value" [style.background]="'var(' + s.color + ')'"></i>
+                  <i *ngFor="let s of segs" class="dc" [style.flex-grow]="s.value" [style.background]="'var(' + s.color + ')'" (click)="fuClick(s.key)" [title]="s.label + ': ' + s.value"></i>
                 </div>
-                <ul class="tp-legend-list" *ngIf="segs.length"><li *ngFor="let s of segs"><i [style.background]="'var(' + s.color + ')'"></i>{{ s.label }} <b>{{ s.value }}</b></li></ul>
+                <ul class="tp-legend-list" *ngIf="segs.length"><li *ngFor="let s of segs" class="dc" role="button" tabindex="0" (click)="fuClick(s.key)" (keydown.enter)="fuClick(s.key)"><i [style.background]="'var(' + s.color + ')'"></i>{{ s.label }} <b>{{ s.value }}</b></li></ul>
                 <ng-template #noFu><p class="tp-emptystate">No follow-ups in this period.</p></ng-template>
               </ng-container>
               <p class="muted small">{{ pct(m.followups.completionRate) }} completed · average delay when late {{ hours(m.followups.avgDelayHours) }}</p>
@@ -497,26 +497,26 @@
             <section class="tp-card">
               <h3>Communication</h3>
               <dl class="tp-dl">
-                <dt>Calls connected</dt><dd>{{ m.calls.answered }} of {{ m.calls.made }} <small>({{ pct(m.calls.answerRate) }})</small></dd>
-                <dt>Talk time</dt><dd>{{ m.calls.talkMinutes }} min <small>avg {{ m.calls.avgMinutes ?? '—' }} min</small></dd>
-                <dt>Emails sent</dt><dd>{{ m.emails.sent }} one-to-one · {{ m.emails.productEmails }} product</dd>
-                <dt>Delivered</dt><dd>{{ m.emails.delivered }}</dd>
-                <dt>Opened</dt><dd>{{ opensText(m) }}</dd>
-                <dt>Clicked</dt><dd>{{ m.emails.clicked }}</dd>
+                <dt class="dc" (click)="commClick('calls')">Calls connected</dt><dd class="dc" (click)="commClick('calls')">{{ m.calls.answered }} of {{ m.calls.made }} <small>({{ pct(m.calls.answerRate) }})</small></dd>
+                <dt class="dc" (click)="commClick('talk')">Talk time</dt><dd class="dc" (click)="commClick('talk')">{{ m.calls.talkMinutes }} min <small>avg {{ m.calls.avgMinutes ?? '—' }} min</small></dd>
+                <dt class="dc" (click)="commClick('emails')">Emails sent</dt><dd class="dc" (click)="commClick('emails')">{{ m.emails.sent }} one-to-one · {{ m.emails.productEmails }} product</dd>
+                <dt class="dc" (click)="commClick('emails')">Delivered</dt><dd class="dc" (click)="commClick('emails')">{{ m.emails.delivered }}</dd>
+                <dt class="dc" (click)="commClick('emails')">Opened</dt><dd class="dc" (click)="commClick('emails')">{{ opensText(m) }}</dd>
+                <dt class="dc" (click)="commClick('emails')">Clicked</dt><dd class="dc" (click)="commClick('emails')">{{ m.emails.clicked }}</dd>
               </dl>
             </section>
           </div>
           <div class="tp-two">
             <section class="tp-card">
               <h3>Daily activity <small class="muted">calls, follow-ups, emails, notes &amp; activities</small></h3>
-              <app-perf-columns *ngIf="staffTrendTotal(d) > 0; else noDaily" [points]="staffTrend(d)" unitLabel="Actions" [ariaLabel]="d.member.name + ': recorded actions per day'"></app-perf-columns>
+              <app-perf-columns *ngIf="staffTrendTotal(d) > 0; else noDaily" [clickable]="true" (select)="staffDayClick($event)" [points]="staffTrend(d)" unitLabel="Actions" [ariaLabel]="d.member.name + ': recorded actions per day'"></app-perf-columns>
               <ng-template #noDaily><p class="tp-emptystate">Nothing recorded in this period.</p></ng-template>
             </section>
             <section class="tp-card">
               <h3>Against the previous period</h3>
               <table class="tp-list">
                 <thead><tr><th>Measure</th><th class="num">Now</th><th class="num">Before</th><th class="num">Change</th></tr></thead>
-                <tbody><tr *ngFor="let c of staffChanges(m)">
+                <tbody><tr *ngFor="let c of staffChanges(m)" class="click" (click)="changeClick(c.label)" title="Show the records">
                   <td>{{ c.label }}</td><td class="num">{{ fmt(c.now, c.unit) }}</td><td class="num">{{ fmt(c.before, c.unit) }}</td>
                   <td class="num" *ngIf="delta({ value: c.now, previous: c.before, unit: c.unit }) as dl; else noCh" [class.good]="dl.good === true" [class.bad]="dl.good === false">{{ dl.dir === 'up' ? '▲' : dl.dir === 'down' ? '▼' : '' }} {{ dl.text }}</td>
                   <ng-template #noCh><td class="num muted">—</td></ng-template>

@@ -877,7 +877,7 @@ async function compare(ctx, query = {}) {
 const DRILL = {
   leads_assigned: 'Leads assigned', never_contacted: 'Leads never contacted', leads_created: 'Leads created', leads_contacted: 'Leads contacted',
   leads_converted: 'Leads converted', followups_due: 'Follow-ups due', followups_completed: 'Follow-ups completed', followups_on_time: 'Follow-ups completed on time',
-  followups_overdue: 'Overdue follow-ups', calls: 'Calls', calls_connected: 'Calls connected', emails_sent: 'Emails sent', activities: 'Notes & activities'
+  followups_overdue: 'Overdue follow-ups', followups_late: 'Follow-ups completed late', followups_upcoming: 'Upcoming follow-ups', calls: 'Calls', calls_connected: 'Calls connected', emails_sent: 'Emails sent', activities: 'Notes & activities'
 };
 async function drill(ctx, query = {}) {
   const kind = String(query.kind || '');
@@ -911,6 +911,7 @@ async function drill(ctx, query = {}) {
       FROM leads l WHERE l.workspace_id = ? AND l.owner_user_id IN ${IN}`;
     args = [W, ...ids];
     if (kind === 'never_contacted') sql += ` AND NOT ${CONTACT_EXISTS('l')}`;
+    if (st === 'contacted') sql += ` AND ${CONTACT_EXISTS('l')}`;
     if (st === 'won') sql += " AND l.status = 'Won'";
     if (st === 'lost') sql += " AND l.status = 'Lost'";
     if (st === 'open') sql += " AND COALESCE(l.status, '') NOT IN ('Won', 'Lost')";
@@ -940,11 +941,13 @@ async function drill(ctx, query = {}) {
       FROM lead_followups f JOIN leads l ON l.id = f.lead_id WHERE f.workspace_id = ? AND f.assigned_user_id IN ${IN}`;
     args = [W, ...ids];
     if (kind === 'followups_overdue') sql += " AND f.status = 'pending' AND f.due_at < UTC_TIMESTAMP()";
+    else if (kind === 'followups_upcoming') sql += " AND f.status = 'pending' AND f.due_at >= UTC_TIMESTAMP()";
     else {
       // by=completed: completed in the range (the trend counts follow-ups by the day they were done); else due in it.
       sql += query.by === 'completed' ? ' AND f.completed_at BETWEEN ? AND ?' : ' AND f.due_at BETWEEN ? AND ?'; args.push(p.s, p.e);
       if (kind === 'followups_completed') sql += " AND f.status = 'completed'";
       if (kind === 'followups_on_time') sql += " AND f.status = 'completed' AND f.completed_at <= f.due_at";
+      if (kind === 'followups_late') sql += " AND f.status = 'completed' AND f.completed_at > f.due_at";
     }
     order = 'f.due_at DESC';
     columns = [['person', 'Staff'], ['title', 'Follow-up'], ['lead', 'Lead'], ['due', 'Due', 'date'], ['at', 'Completed', 'date'], ['state', 'Status'], ['notes', 'Notes']];

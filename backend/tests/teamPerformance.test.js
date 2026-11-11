@@ -663,6 +663,9 @@ test('drill-down: the records behind each figure add up to the dashboard, for th
   assert.equal(await total('kind=activities'), t.activities.total);
   assert.equal(await total(`kind=calls&userId=${A.userId}`), a.calls.made);
   assert.equal(await total(`kind=leads_assigned&userId=${A.userId}&status=won`), a.leads.won);
+  assert.equal(await total(`kind=leads_assigned&userId=${A.userId}&status=contacted`), a.leads.contacted);
+  assert.equal(await total(`kind=followups_late&userId=${A.userId}`), a.followups.late);
+  assert.equal(await total(`kind=followups_upcoming&userId=${A.userId}`), a.followups.upcoming);
   // One day of the trend.
   const day = r.data.daily.find(x => x.calls);
   assert.equal(await total(`kind=calls&dayFrom=${day.day}`), day.calls);

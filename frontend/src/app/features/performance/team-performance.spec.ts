@@ -383,4 +383,34 @@ describe('TeamPerformanceComponent', () => {
     expect(c.view).toBe('staff');
     http.expectOne(r => r.url.endsWith('/api/v1/performance/members/2')).flush(DETAIL());
   });
+
+  it('person page: cards, funnel, follow-ups, communication, a day and the comparison rows open popups', () => {
+    team();
+    c.openMember(1);
+    http.expectOne(r => r.url.endsWith('/api/v1/performance/members/1')).flush(DETAIL());
+    fixture.detectChanges();
+    const drill = (kind: string) => http.expectOne(r => r.url.endsWith('/api/v1/performance/drill') && r.params.get('kind') === kind);
+    (el().querySelector('.tp-kpis6.staff .tp-k') as HTMLElement).click();
+    expect(drill('leads_converted').request.params.get('userId')).toBe('1');
+    c.funnelClick(1);
+    expect(drill('leads_assigned').request.params.get('status')).toBe('contacted');
+    c.fuClick('late'); drill('followups_late');
+    c.fuClick('pending'); drill('followups_upcoming');
+    c.commClick('emails'); drill('emails_sent');
+    c.changeClick('Calls connected'); drill('calls_connected');
+    c.changeClick('Performance score');
+    expect(c.pop!.title).toBe('Performance score: 85');
+    c.staffDayClick(1);
+    const day = http.expectOne(r => r.url.endsWith('/api/v1/performance/members/1/day'));
+    expect(day.request.params.get('date')).toBe('2026-11-10');
+    day.flush({ date: '2026-11-10', leadsCreated: [], leadsAssigned: [], followupsCompleted: [], emails: [{ id: 3, subject: 'Quote', recipient: 'a@b.io', at: '2026-11-10T09:00:00Z', kind: 'individual' }], activities: [],
+      calls: [{ id: 55, leadName: 'Acme', at: '2026-11-10T10:00:00Z', answered: true, durationSeconds: 95 }] });
+    expect(c.pop!.rows.map(r => r.type)).toEqual(['Call', 'Email']);
+    expect(c.pop!.rows[0].callId).toBe(55);
+    // The page tabs are a highlighted control.
+    c.view = 'dashboard';
+    fixture.detectChanges();
+    expect(el().querySelector('.tp-views button.on')!.textContent).toContain('Dashboard');
+    expect(el().querySelectorAll('.tp-views svg.tp-view-ic').length).toBe(4);
+  });
 });

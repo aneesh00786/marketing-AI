@@ -343,3 +343,23 @@ app-perf-gauge.dc:hover { opacity: .85; }
 .tp-pop .tp-detail-head p { margin: 2px 0 0; }
 .tp-pop-body { max-height: 60vh; overflow: auto; }
 .tp-pop-body thead th { position: sticky; top: 0; background: var(--surface); z-index: 1; }
+
+/* Page tabs: a clear segmented control, the active page filled with the accent colour */
+.tp-views { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 4px; border: 1px solid var(--border); border-bottom: 1px solid var(--border);
+  border-radius: 12px; background: var(--surface-hover, rgba(148, 163, 184, .1)); width: 100%; }
+.tp-views button { border: none; border-radius: 9px; padding: 9px 18px; font: inherit; font-size: 0.9rem; font-weight: 600; color: var(--text-muted);
+  background: transparent; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; transition: background .15s, color .15s; }
+.tp-views button:hover { color: var(--text); background: var(--surface); }
+.tp-views button.on { background: var(--accent); color: #fff; box-shadow: 0 1px 3px rgba(16, 24, 40, .18); }
+.tp-views button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tp-views > .muted { margin-left: auto; padding-right: 8px; }
+.tp-view-ic { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+/* Person page: clickable figures */
+.tp-k.static.dc { cursor: pointer; }
+.tp-k.static.dc:hover, .tp-k.static.dc:focus-visible { border-color: var(--accent); }
+.tp-staff-stat.dc { cursor: pointer; border-radius: 8px; padding: 4px 6px; margin: -4px -6px; }
+.tp-staff-stat.dc:hover { background: var(--surface-hover, rgba(148, 163, 184, .1)); }
+.tp-dl .dc:hover { color: var(--accent-text, var(--text)); text-decoration: underline; text-underline-offset: 3px; }
+.tp-legend-list li.dc { border-radius: 6px; padding: 2px 4px; }
+.tp-legend-list li.dc:hover { background: var(--surface-hover, rgba(148, 163, 184, .1)); }
+@media (max-width: 720px) { .tp-views button { padding: 8px 12px; } .tp-views > .muted { width: 100%; margin: 4px 0 0; } }

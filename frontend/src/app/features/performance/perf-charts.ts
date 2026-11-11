@@ -274,7 +274,8 @@ export class PerfRingComponent {
   imports: [CommonModule],
   styles: [VIZ_STYLES + `
     .fn { display: flex; flex-direction: column; gap: 8px; }
-    .fn-row { display: grid; grid-template-columns: 90px 1fr 92px; gap: 10px; align-items: center; font-size: 0.82rem; }
+    .fn-row { display: grid; grid-template-columns: 90px 1fr 92px; gap: 10px; align-items: center; font-size: 0.82rem; border-radius: 6px; }
+    .fn-row.click { cursor: pointer; } .fn-row.click:hover { background: rgba(148, 163, 184, .1); }
     .fn-track { height: 18px; }
     .fn-bar { height: 100%; background: var(--s1); border-radius: 0 4px 4px 0; min-width: 2px; }
     .fn-val { text-align: right; font-variant-numeric: tabular-nums; }
@@ -283,7 +284,7 @@ export class PerfRingComponent {
   template: `
     <p class="viz-empty" *ngIf="!steps.length || !steps[0].value">{{ empty }}</p>
     <div class="fn" *ngIf="steps.length && steps[0].value">
-      <div class="fn-row" *ngFor="let s of steps">
+      <div class="fn-row" *ngFor="let s of steps; let i = index" [class.click]="clickable" (click)="clickable && select.emit(i)" [attr.role]="clickable ? 'button' : null" [attr.tabindex]="clickable ? 0 : null" (keydown.enter)="clickable && select.emit(i)">
         <span>{{ s.label }}</span>
         <span class="fn-track"><i class="fn-bar" [style.display]="'block'" [style.width.%]="(s.value / steps[0].value) * 100"></i></span>
         <span class="fn-val">{{ s.value }}<small>{{ s === steps[0] ? '' : (s.value / steps[0].value * 100 | number:'1.0-0') + '%' }}</small></span>
@@ -291,6 +292,9 @@ export class PerfRingComponent {
     </div>`
 })
 export class PerfFunnelComponent {
+  @Input() clickable = false;
+  /** Click on a step: its index. */
+  @Output() select = new EventEmitter<number>();
   @Input() steps: { label: string; value: number }[] = [];
   @Input() empty = 'No email campaigns sent in this period.';
 }
@@ -430,7 +434,7 @@ export interface ColumnPoint { label: string; value: number; }
         <g *ngFor="let p of points; let i = index">
           <rect [attr.x]="x(i)" [attr.y]="y(p.value)" [attr.width]="bw" [attr.height]="Math.max(0, y(0) - y(p.value))" rx="3" [attr.fill]="'var(' + color + ')'"
             [attr.opacity]="hover === null || hover === i ? 1 : 0.45" />
-          <rect class="hit" [attr.x]="x(i) - gap / 2" [attr.y]="T" [attr.width]="bw + gap" [attr.height]="H - T - B" fill="transparent" (mouseenter)="hover = i" />
+          <rect class="hit" [attr.x]="x(i) - gap / 2" [attr.y]="T" [attr.width]="bw + gap" [attr.height]="H - T - B" fill="transparent" (mouseenter)="hover = i" (click)="select.emit(i)" [style.cursor]="clickable ? 'pointer' : null" />
           <text *ngIf="showLabel(i)" [attr.x]="x(i) + bw / 2" [attr.y]="H - 8" text-anchor="middle" font-size="10" fill="var(--ink2)">{{ p.label }}</text>
         </g>
         <line [attr.x1]="L" [attr.x2]="W - R" [attr.y1]="y(0)" [attr.y2]="y(0)" stroke="var(--axis)" stroke-width="1" />
@@ -441,6 +445,9 @@ export interface ColumnPoint { label: string; value: number; }
     </div>`
 })
 export class PerfColumnsComponent implements OnChanges {
+  @Input() clickable = false;
+  /** Click on a column: its index. */
+  @Output() select = new EventEmitter<number>();
   @Input() points: ColumnPoint[] = [];
   @Input() color = '--s1';
   @Input() unitLabel = '';

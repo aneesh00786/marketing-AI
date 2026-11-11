@@ -137,7 +137,7 @@ async function mailListsOf(workspaceId, ids) {
      LEFT JOIN mail_contacts c ON c.id = m.contact_id
      LEFT JOIN email_suppressions s ON s.workspace_id = l.workspace_id AND s.email = c.email
      WHERE l.workspace_id = ? AND l.id IN (${ids.map(() => '?').join(',')})
-     GROUP BY l.id`, [workspaceId, ...ids]);
+     GROUP BY l.id, l.name`, [workspaceId, ...ids]);
   const byId = new Map(rows.map(r => [r.id, r]));
   return ids.map(id => byId.get(id)).filter(Boolean).map(r => ({ id: r.id, name: r.name, reachable: Number(r.reachable) || 0, noConsent: Number(r.no_consent) || 0 }));
 }
