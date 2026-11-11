@@ -155,14 +155,14 @@ async function collect(W, s, e) {
        WHERE e.workspace_id = ? AND e.status = 'Sent' AND e.sent_by_user_id IS NOT NULL AND e.sent_at BETWEEN ? AND ? GROUP BY e.sent_by_user_id`, [W, s, e]),
     q(`SELECT b.sent_by u, COUNT(DISTINCT b.id) batches, (SELECT COUNT(*) FROM email_drafts d WHERE d.workspace_id = b.workspace_id AND d.batch_id IN
          (SELECT id FROM mail_draft_batches x WHERE x.workspace_id = b.workspace_id AND x.sent_by = b.sent_by AND x.sent_at BETWEEN ? AND ?) AND d.status = 'Sent') emails
-       FROM mail_draft_batches b WHERE b.workspace_id = ? AND b.sent_by IS NOT NULL AND b.sent_at BETWEEN ? AND ? GROUP BY b.sent_by`, [s, e, W, s, e]),
+       FROM mail_draft_batches b WHERE b.workspace_id = ? AND b.sent_by IS NOT NULL AND b.sent_at BETWEEN ? AND ? GROUP BY b.workspace_id, b.sent_by`, [s, e, W, s, e]),
     q(`SELECT created_by u, COUNT(*) total FROM mail_campaigns WHERE workspace_id = ? AND created_at BETWEEN ? AND ? GROUP BY created_by`, [W, s, e]),
     q(`SELECT m.submitted_by u, COUNT(DISTINCT m.id) campaigns,
          (SELECT COUNT(*) FROM mail_campaign_recipients r WHERE r.campaign_id IN (SELECT id FROM mail_campaigns y WHERE y.workspace_id = m.workspace_id AND y.submitted_by = m.submitted_by AND y.submitted_at BETWEEN ? AND ?) AND r.status = 'sent') sent,
          (SELECT COUNT(*) FROM mail_message_tracking t WHERE t.workspace_id = m.workspace_id AND t.campaign_id IN (SELECT id FROM mail_campaigns y WHERE y.workspace_id = m.workspace_id AND y.submitted_by = m.submitted_by AND y.submitted_at BETWEEN ? AND ?) AND t.delivered_at IS NOT NULL) delivered,
          (SELECT COUNT(*) FROM mail_message_tracking t WHERE t.workspace_id = m.workspace_id AND t.campaign_id IN (SELECT id FROM mail_campaigns y WHERE y.workspace_id = m.workspace_id AND y.submitted_by = m.submitted_by AND y.submitted_at BETWEEN ? AND ?) AND t.first_open_at IS NOT NULL) opened,
          (SELECT COUNT(*) FROM mail_message_tracking t WHERE t.workspace_id = m.workspace_id AND t.campaign_id IN (SELECT id FROM mail_campaigns y WHERE y.workspace_id = m.workspace_id AND y.submitted_by = m.submitted_by AND y.submitted_at BETWEEN ? AND ?) AND t.first_click_at IS NOT NULL) clicked
-       FROM mail_campaigns m WHERE m.workspace_id = ? AND m.submitted_by IS NOT NULL AND m.submitted_at BETWEEN ? AND ? GROUP BY m.submitted_by`, [s, e, s, e, s, e, s, e, W, s, e]),
+       FROM mail_campaigns m WHERE m.workspace_id = ? AND m.submitted_by IS NOT NULL AND m.submitted_at BETWEEN ? AND ? GROUP BY m.workspace_id, m.submitted_by`, [s, e, s, e, s, e, s, e, W, s, e]),
     q(`SELECT created_by u, COUNT(*) total FROM campaigns WHERE workspace_id = ? AND created_at BETWEEN ? AND ? GROUP BY created_by`, [W, s, e]),
     q(`SELECT created_by u, COUNT(*) total FROM content_items WHERE workspace_id = ? AND created_at BETWEEN ? AND ? GROUP BY created_by`, [W, s, e]),
     q(`SELECT requested_by u, COUNT(*) total FROM publishing_jobs WHERE workspace_id = ? AND status = 'succeeded' AND completed_at BETWEEN ? AND ? GROUP BY requested_by`, [W, s, e]),
@@ -175,8 +175,8 @@ async function collect(W, s, e) {
          AND ev.subject_type = 'lead' AND ev.subject_id = l.id AND JSON_UNQUOTE(JSON_EXTRACT(ev.payload_json, '$.to')) = 'Won'
        WHERE l.workspace_id = ? AND l.owner_user_id IS NOT NULL AND l.status = 'Won' AND ev.created_at BETWEEN ? AND ? GROUP BY l.owner_user_id`, [W, s, e]),
     // Distinct leads each member contacted in the period: their calls, contact activities and emails to the lead's address.
-    q(`SELECT x.u, COUNT(DISTINCT x.lead) total FROM (
-         SELECT c.user_id u, c.lead_id lead FROM crm_call_logs c WHERE c.lead_workspace_id = ? AND c.lead_id IS NOT NULL AND c.started_at BETWEEN ? AND ?
+    q(`SELECT x.u, COUNT(DISTINCT x.lead_ref) total FROM (
+         SELECT c.user_id u, c.lead_id lead_ref FROM crm_call_logs c WHERE c.lead_workspace_id = ? AND c.lead_id IS NOT NULL AND c.started_at BETWEEN ? AND ?
          UNION ALL SELECT a.performed_by, a.lead_id FROM lead_activities a WHERE a.workspace_id = ? AND a.activity_type IN ('meeting', 'call', 'email', 'whatsapp', 'sms') AND a.activity_at BETWEEN ? AND ?
          UNION ALL SELECT e.sent_by_user_id, l.id FROM emails e JOIN leads l ON l.workspace_id = e.workspace_id AND l.email IS NOT NULL AND l.email <> '' AND LOWER(TRIM(l.email)) = LOWER(TRIM(e.recipient_email))
            WHERE e.workspace_id = ? AND e.status = 'Sent' AND e.sent_by_user_id IS NOT NULL AND e.sent_at BETWEEN ? AND ?) x WHERE x.u IS NOT NULL GROUP BY x.u`, [W, s, e, W, s, e, W, s, e])
@@ -309,8 +309,8 @@ async function daily(W, p, userIds = null) {
     series(`SELECT ${D('created_at')} d, COUNT(*) n FROM audit_logs WHERE workspace_id = ? AND action = 'leads.owner_changed' AND created_at BETWEEN ? AND ?
       AND JSON_EXTRACT(metadata_json, '$.owner') IS NOT NULL${only("CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.owner')) AS UNSIGNED)")} GROUP BY d`, [W, p.s, p.e, ...ids]),
     // Leads contacted that day (each lead once per day): a call, a contact activity or an email to its address.
-    series(`SELECT x.d, COUNT(DISTINCT x.lead) n FROM (
-        SELECT ${D('c.started_at')} d, c.lead_id lead FROM crm_call_logs c WHERE c.lead_workspace_id = ? AND c.lead_id IS NOT NULL AND c.started_at BETWEEN ? AND ?${only('c.user_id')}
+    series(`SELECT x.d, COUNT(DISTINCT x.lead_ref) n FROM (
+        SELECT ${D('c.started_at')} d, c.lead_id lead_ref FROM crm_call_logs c WHERE c.lead_workspace_id = ? AND c.lead_id IS NOT NULL AND c.started_at BETWEEN ? AND ?${only('c.user_id')}
         UNION ALL SELECT ${D('a.activity_at')} d, a.lead_id FROM lead_activities a WHERE a.workspace_id = ? AND a.activity_type IN ('meeting', 'call', 'email', 'whatsapp', 'sms') AND a.activity_at BETWEEN ? AND ?${only('a.performed_by')}
         UNION ALL SELECT ${D('e.sent_at')} d, l.id FROM emails e JOIN leads l ON l.workspace_id = e.workspace_id AND l.email IS NOT NULL AND l.email <> '' AND LOWER(TRIM(l.email)) = LOWER(TRIM(e.recipient_email))
           WHERE e.workspace_id = ? AND e.status = 'Sent' AND e.sent_by_user_id IS NOT NULL AND e.sent_at BETWEEN ? AND ?${only('e.sent_by_user_id')}) x GROUP BY x.d`,
@@ -907,7 +907,7 @@ async function drill(ctx, query = {}) {
   let sql; let args; let order; let columns;
   const leadCols = [['person', 'Staff'], ['lead', 'Lead'], ['company', 'Company'], ['status', 'Status'], ['source', 'Source']];
   if (kind === 'leads_assigned' || kind === 'never_contacted') {
-    sql = `SELECT l.owner_user_id userId, l.id leadId, l.name lead, l.company_name company, l.status, COALESCE(NULLIF(l.lead_source, ''), 'unknown') source, l.created_at at, ${LAST_CONTACT('l')} lastContact
+    sql = `SELECT l.owner_user_id userId, l.id leadId, l.name leadName, l.company_name company, l.status, COALESCE(NULLIF(l.lead_source, ''), 'unknown') source, l.created_at at, ${LAST_CONTACT('l')} lastContact
       FROM leads l WHERE l.workspace_id = ? AND l.owner_user_id IN ${IN}`;
     args = [W, ...ids];
     if (kind === 'never_contacted') sql += ` AND NOT ${CONTACT_EXISTS('l')}`;
@@ -916,27 +916,27 @@ async function drill(ctx, query = {}) {
     if (st === 'open') sql += " AND COALESCE(l.status, '') NOT IN ('Won', 'Lost')";
     order = 'l.id DESC'; columns = [...leadCols, ['at', 'Added', 'date'], ['lastContact', 'Last contact', 'date']];
   } else if (kind === 'leads_created') {
-    sql = `SELECT l.created_by_user_id userId, l.id leadId, l.name lead, l.company_name company, l.status, COALESCE(NULLIF(l.lead_source, ''), 'unknown') source, l.created_at at
+    sql = `SELECT l.created_by_user_id userId, l.id leadId, l.name leadName, l.company_name company, l.status, COALESCE(NULLIF(l.lead_source, ''), 'unknown') source, l.created_at at
       FROM leads l WHERE l.workspace_id = ? AND l.created_by_user_id IN ${IN} AND l.created_at BETWEEN ? AND ?`;
     args = [W, ...ids, p.s, p.e]; order = 'l.created_at DESC'; columns = [...leadCols, ['at', 'Created', 'date']];
   } else if (kind === 'leads_contacted') {
-    sql = `SELECT x.u userId, l.id leadId, l.name lead, l.company_name company, l.status, COALESCE(NULLIF(l.lead_source, ''), 'unknown') source, MIN(x.at) at, COUNT(*) touches,
+    sql = `SELECT x.u userId, l.id leadId, l.name leadName, l.company_name company, l.status, COALESCE(NULLIF(l.lead_source, ''), 'unknown') source, MIN(x.at) at, COUNT(*) touches,
         GROUP_CONCAT(DISTINCT x.how ORDER BY x.how SEPARATOR ', ') how
-      FROM (SELECT c.user_id u, c.lead_id lead, c.started_at at, 'call' how FROM crm_call_logs c WHERE c.lead_workspace_id = ? AND c.lead_id IS NOT NULL AND c.started_at BETWEEN ? AND ?
+      FROM (SELECT c.user_id u, c.lead_id lead_ref, c.started_at at, 'call' how FROM crm_call_logs c WHERE c.lead_workspace_id = ? AND c.lead_id IS NOT NULL AND c.started_at BETWEEN ? AND ?
         UNION ALL SELECT a.performed_by, a.lead_id, a.activity_at, a.activity_type FROM lead_activities a WHERE a.workspace_id = ? AND a.activity_type IN ('meeting', 'call', 'email', 'whatsapp', 'sms') AND a.activity_at BETWEEN ? AND ?
         UNION ALL SELECT e.sent_by_user_id, l2.id, e.sent_at, 'email' FROM emails e JOIN leads l2 ON l2.workspace_id = e.workspace_id AND l2.email IS NOT NULL AND l2.email <> '' AND LOWER(TRIM(l2.email)) = LOWER(TRIM(e.recipient_email))
           WHERE e.workspace_id = ? AND e.status = 'Sent' AND e.sent_by_user_id IS NOT NULL AND e.sent_at BETWEEN ? AND ?) x
-      JOIN leads l ON l.id = x.lead AND l.workspace_id = ? WHERE x.u IN ${IN} GROUP BY x.u, l.id, l.name, l.company_name, l.status, source`;
+      JOIN leads l ON l.id = x.lead_ref AND l.workspace_id = ? WHERE x.u IN ${IN} GROUP BY x.u, l.id, l.name, l.company_name, l.status, source`;
     args = [W, p.s, p.e, W, p.s, p.e, W, p.s, p.e, W, ...ids]; order = 'at DESC';
     columns = [...leadCols, ['at', 'First contact in period', 'date'], ['how', 'How'], ['touches', 'Contacts']];
   } else if (kind === 'leads_converted') {
-    sql = `SELECT l.owner_user_id userId, l.id leadId, l.name lead, l.company_name company, l.status, COALESCE(NULLIF(l.lead_source, ''), 'unknown') source, MIN(ev.created_at) at
+    sql = `SELECT l.owner_user_id userId, l.id leadId, l.name leadName, l.company_name company, l.status, COALESCE(NULLIF(l.lead_source, ''), 'unknown') source, MIN(ev.created_at) at
       FROM leads l JOIN automation_events ev ON ev.workspace_id = l.workspace_id AND ev.event_type = 'lead.status_changed' AND ev.subject_type = 'lead' AND ev.subject_id = l.id
         AND JSON_UNQUOTE(JSON_EXTRACT(ev.payload_json, '$.to')) = 'Won'
       WHERE l.workspace_id = ? AND l.owner_user_id IN ${IN} AND l.status = 'Won' AND ev.created_at BETWEEN ? AND ? GROUP BY l.id, l.owner_user_id, l.name, l.company_name, l.status, source`;
     args = [W, ...ids, p.s, p.e]; order = 'at DESC'; columns = [...leadCols, ['at', 'Won on', 'date']];
   } else if (kind.startsWith('followups_')) {
-    sql = `SELECT f.assigned_user_id userId, f.id, f.title, f.followup_type type, f.priority, f.status, f.due_at due, f.completed_at at, f.completion_notes notes, l.id leadId, l.name lead
+    sql = `SELECT f.assigned_user_id userId, f.id, f.title, f.followup_type type, f.priority, f.status, f.due_at due, f.completed_at at, f.completion_notes notes, l.id leadId, l.name leadName
       FROM lead_followups f JOIN leads l ON l.id = f.lead_id WHERE f.workspace_id = ? AND f.assigned_user_id IN ${IN}`;
     args = [W, ...ids];
     if (kind === 'followups_overdue') sql += " AND f.status = 'pending' AND f.due_at < UTC_TIMESTAMP()";
@@ -949,7 +949,7 @@ async function drill(ctx, query = {}) {
     order = 'f.due_at DESC';
     columns = [['person', 'Staff'], ['title', 'Follow-up'], ['lead', 'Lead'], ['due', 'Due', 'date'], ['at', 'Completed', 'date'], ['state', 'Status'], ['notes', 'Notes']];
   } else if (kind === 'calls' || kind === 'calls_connected') {
-    sql = `SELECT c.user_id userId, c.id callId, c.started_at at, c.answered, c.duration_seconds seconds, c.transcript_status transcript, c.lead_id leadId, COALESCE(l.name, c.name, c.phone) lead
+    sql = `SELECT c.user_id userId, c.id callId, c.started_at at, c.answered, c.duration_seconds seconds, c.transcript_status transcript, c.lead_id leadId, COALESCE(l.name, c.name, c.phone) leadName
       FROM crm_call_logs c LEFT JOIN leads l ON l.id = c.lead_id WHERE ${CALL_SCOPE} AND c.user_id IN ${IN} AND c.started_at BETWEEN ? AND ?${kind === 'calls_connected' ? ' AND c.answered = 1' : ''}`;
     args = [W, W, ...ids, p.s, p.e]; order = 'c.started_at DESC';
     columns = [['person', 'Staff'], ['lead', 'Lead'], ['at', 'When', 'date'], ['result', 'Result'], ['duration', 'Duration'], ['transcriptLabel', 'Transcript']];
@@ -962,7 +962,7 @@ async function drill(ctx, query = {}) {
     args = [W, ...ids, p.s, p.e]; order = 'e.sent_at DESC';
     columns = [['person', 'Staff'], ['subject', 'Subject'], ['recipient', 'To'], ['at', 'Sent', 'date'], ['kindLabel', 'Kind'], ['state', 'Status']];
   } else {
-    sql = `SELECT a.performed_by userId, a.id, a.activity_type type, COALESCE(NULLIF(a.title, ''), LEFT(a.description, 160)) title, a.activity_at at, l.id leadId, l.name lead
+    sql = `SELECT a.performed_by userId, a.id, a.activity_type type, COALESCE(NULLIF(a.title, ''), LEFT(a.description, 160)) title, a.activity_at at, l.id leadId, l.name leadName
       FROM lead_activities a JOIN leads l ON l.id = a.lead_id WHERE a.workspace_id = ? AND a.performed_by IN ${IN} AND a.activity_at BETWEEN ? AND ?`;
     args = [W, ...ids, p.s, p.e];
     if (query.type) { sql += ' AND a.activity_type = ?'; args.push(String(query.type)); }
@@ -975,7 +975,9 @@ async function drill(ctx, query = {}) {
   ]);
   const dur = s0 => (!s0 ? '—' : s0 >= 60 ? `${Math.floor(s0 / 60)}m ${s0 % 60}s` : `${s0}s`);
   const out = rows.map(r => {
-    const o = { ...r, person: names.get(Number(r.userId)) || `Member ${r.userId}` };
+    // The lead's name is selected as leadName (LEAD is a reserved word in MySQL 8).
+    const o = { ...r, lead: r.leadName, person: names.get(Number(r.userId)) || `Member ${r.userId}` };
+    delete o.leadName;
     if (o.lastContact && String(o.lastContact).startsWith('1970')) o.lastContact = null;
     if ('answered' in o) { o.answered = !!o.answered; o.result = o.answered ? 'Connected' : 'Not answered'; o.duration = o.answered ? dur(o.seconds) : '—';
       o.transcriptLabel = o.transcript === 'done' ? 'Available' : o.transcript === 'failed' ? 'Failed' : o.transcript === 'pending' ? 'Processing' : '—'; }
