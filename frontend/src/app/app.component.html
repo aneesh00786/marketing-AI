@@ -618,6 +618,7 @@
   </section>
 
   <app-members *ngIf="currentRoute === 'members'" (toast)="showToast($event)"></app-members>
+  <app-team-performance *ngIf="currentRoute === 'performance'" (openLead)="openFollowupLead($event)" (toast)="showToast($event)"></app-team-performance>
 
   <!-- =================================================================== -->
   <!-- TAB 6: NEURAL VOICE CENTER (ELEVENLABS + MARK AI ORB) -->

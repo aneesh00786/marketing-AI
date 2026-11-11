@@ -1,0 +1,805 @@
+<section class="hud-panel full-width-panel tp">
+  <!-- A. Header: title and subtitle; date range, comparison toggle and export in one compact row -->
+  <header class="tp-head">
+    <div class="tp-title">
+      <h2>{{ isTeam || !data ? 'Team Performance' : 'My Performance' }}</h2>
+      <p class="subtitle">Monitor employee productivity, lead conversion, follow-up discipline and communication performance.</p>
+    </div>
+    <div class="tp-controls" role="group" aria-label="Filters">
+      <ng-container *ngIf="isTeam">
+        <select class="hud-input sm" [(ngModel)]="role" (ngModelChange)="load()" aria-label="Role" *ngIf="data?.roles?.length > 1 || role">
+          <option value="">All roles</option>
+          <option *ngFor="let r of data.roles" [value]="r">{{ r }}</option>
+        </select>
+        <select class="hud-input sm" [(ngModel)]="staff" (ngModelChange)="load()" aria-label="Staff">
+          <option value="">All staff</option>
+          <option *ngFor="let m of staffOptions" [value]="'' + m.userId">{{ m.name }}{{ m.former ? ' (former)' : '' }}</option>
+        </select>
+      </ng-container>
+      <label class="tp-date">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="2.5" /><path d="M3.5 10h17M8 3v4M16 3v4" /></svg>
+        <select [ngModel]="preset" (ngModelChange)="setPreset($event)" aria-label="Date range">
+          <option *ngFor="let p of presets" [value]="p[0]">{{ p[1] }}</option>
+        </select>
+      </label>
+      <ng-container *ngIf="preset === 'custom'">
+        <input class="hud-input sm" type="date" [(ngModel)]="from" aria-label="From" />
+        <input class="hud-input sm" type="date" [(ngModel)]="to" aria-label="To" />
+        <button class="btn btn-secondary btn-sm" type="button" (click)="load()" [disabled]="!from || !to">Apply</button>
+      </ng-container>
+      <label class="tp-toggle-sw" *ngIf="isTeam" [title]="data ? 'Compared with ' + (data.previous?.from | date:'d MMM') + ' – ' + (data.previous?.to | date:'d MMM') : ''">
+        <input type="checkbox" role="switch" [(ngModel)]="comparePeriod" [attr.aria-checked]="comparePeriod" />
+        <span class="tp-sw" aria-hidden="true"></span> vs {{ comparisonRange ? (comparisonRange.from | date:'d MMM') + ' – ' + (comparisonRange.to | date:'d MMM') : 'previous ' + periodDays + ' days' }}
+      </label>
+      <ng-container *ngIf="isTeam && comparePeriod">
+        <select class="hud-input sm" [(ngModel)]="compareWith" (ngModelChange)="$event === 'previous' && load()" aria-label="Compare with">
+          <option value="previous">{{ ['month', 'last_month', 'this_quarter', 'this_year'].includes(preset) ? 'Same span before' : 'Previous period' }}</option>
+          <option value="custom">Custom dates</option>
+        </select>
+        <ng-container *ngIf="compareWith === 'custom'">
+          <input class="hud-input sm" type="date" [(ngModel)]="compareFrom" aria-label="Compare from" />
+          <input class="hud-input sm" type="date" [(ngModel)]="compareTo" aria-label="Compare to" />
+          <button class="btn btn-secondary btn-sm" type="button" (click)="load()" [disabled]="!compareFrom || !compareTo">Compare</button>
+        </ng-container>
+      </ng-container>
+      <button class="btn btn-primary btn-sm tp-export" type="button" *ngIf="canExport" (click)="exportExcel()" [disabled]="!data?.members?.length || exporting">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M5 19h14" /></svg>{{ exporting ? 'Preparing…' : 'Export Report' }}</button>
+    </div>
+  </header>
+  <nav class="tp-views" *ngIf="isTeam" aria-label="Team performance pages">
+    <button type="button" [class.on]="view === 'dashboard'" (click)="view = 'dashboard'">Dashboard</button>
+    <button type="button" *ngIf="can.compare" [class.on]="view === 'compare'" (click)="view = 'compare'">Staff Comparison</button>
+    <button type="button" [class.on]="view === 'targets'" (click)="openTargets()">Targets &amp; Goals</button>
+    <button type="button" [class.on]="view === 'settings'" (click)="openSettings()">Report Settings</button>
+    <span class="tp-spacer"></span>
+    <span class="muted small" *ngIf="data">{{ data.from | date:'d MMM' }} – {{ data.to | date:'d MMM y' }} · {{ data.timezone }} time</span>
+  </nav>
+
+  <div class="note error" *ngIf="error" role="alert">{{ error }}</div>
+  <p class="muted" *ngIf="loading && !data">Loading…</p>
+
+  <ng-container *ngIf="data">
+    <!-- ================================================================== DASHBOARD -->
+    <ng-container *ngIf="view === 'dashboard' && isTeam">
+      <!-- B. Summary cards (Target achievement appears once targets exist) -->
+      <div class="tp-kpis6">
+        <button type="button" class="tp-k" *ngFor="let k of kpis" (click)="openKpi(k)" [attr.aria-label]="k.label + ': ' + fmt(k.value, k.unit) + (comparePeriod && delta(k) ? '. ' + delta(k)!.label : '')">
+          <span class="tp-k-icon" [ngClass]="'ic-' + k.key" aria-hidden="true" [innerHTML]="icons[k.key]"></span>
+          <span class="tp-k-main">
+            <b>{{ fmt(k.value, k.unit) }}</b>
+            <span class="tp-k-label">{{ k.label }}</span>
+            <span class="tp-k-delta" *ngIf="comparePeriod && delta(k) as dl" [class.good]="dl.good === true" [class.bad]="dl.good === false" [title]="'Previous period: ' + fmt(k.previous, k.unit)">
+              <span aria-hidden="true">{{ dl.dir === 'up' ? '▲' : dl.dir === 'down' ? '▼' : '■' }}</span> {{ dl.text }}</span>
+            <span class="tp-k-sub" *ngIf="k.sub">{{ k.sub }}</span>
+          </span>
+        </button>
+      </div>
+
+      <!-- C. Leaderboard, with the overview and the alerts beside it -->
+      <div class="tp-main">
+        <section class="tp-card tp-board">
+          <div class="tp-card-head">
+            <h3>Staff Performance Leaderboard</h3>
+          </div>
+          <div class="tp-board-tools">
+            <div class="tp-seg-tabs" role="group" aria-label="Show">
+              <button type="button" [class.on]="quick === 'all'" (click)="quick = 'all'">All Staff</button>
+              <button type="button" [class.on]="quick === 'top'" (click)="quick = 'top'">Top Performers</button>
+              <button type="button" [class.on]="quick === 'attention'" (click)="quick = 'attention'">Needs Attention</button>
+            </div>
+            <label class="tp-searchbox"><input type="search" [(ngModel)]="search" placeholder="Search staff…" aria-label="Search staff" />
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5" /><path d="m16 16 4 4" /></svg></label>
+          </div>
+          <div class="tp-selbar" *ngIf="selected.size">
+            <span>{{ selected.size }} selected</span>
+            <ng-container *ngIf="can.compare"><button type="button" class="btn btn-primary btn-sm" (click)="compareSelected()" [disabled]="!canCompareSelected || compareLoading">{{ compareLoading ? 'Comparing…' : 'Compare' }}</button>
+            <small class="muted" *ngIf="!canCompareSelected">Pick 2 to 5 to compare.</small></ng-container>
+            <button type="button" class="btn btn-secondary btn-sm" *ngIf="can.exportTeam" (click)="exportExcel(true)" [disabled]="exporting">Export selected</button>
+            <button type="button" class="tp-link" (click)="clearSelection()">Clear</button>
+          </div>
+          <div class="tp-table-wrap">
+            <table class="tp-lb" aria-label="Staff leaderboard">
+              <thead><tr>
+                <th class="sel"><span class="sr-only">Select</span></th>
+                <th class="num">#</th>
+                <th>Staff Member</th>
+                <th *ngFor="let c of columns" class="num" [attr.aria-sort]="ariaSort(c[0])" [title]="c[2]">
+                  <button type="button" *ngIf="c[0] !== 'target'; else plainHead" (click)="sort(c[0])">{{ c[1] }}{{ sortMark(c[0]) }}</button>
+                  <ng-template #plainHead>{{ c[1] }}</ng-template>
+                </th>
+              </tr></thead>
+              <tbody>
+                <tr *ngFor="let m of board" (click)="openMember(m.userId)" tabindex="0" (keydown.enter)="openMember(m.userId)" [class.picked]="selected.has(m.userId)">
+                  <td class="sel" (click)="$event.stopPropagation()"><input type="checkbox" [checked]="selected.has(m.userId)" (change)="toggleSelect(m.userId)" [attr.aria-label]="'Select ' + m.name" /></td>
+                  <td class="num"><span class="tp-rankb" [ngClass]="'r' + (rankOf(m) ?? 0)">{{ rankOf(m) ?? '—' }}</span></td>
+                  <td class="emp">
+                    <span class="tp-avatar" aria-hidden="true">{{ initials(m.name) }}</span>
+                    <span><b>{{ m.name }}</b><small>{{ m.role }}<span class="tp-former" *ngIf="m.former"> · former</span></small></span>
+                  </td>
+                  <td class="num dc" (click)="cell($event, m, 'leads.assigned')" title="Show the records">{{ m.leads.assigned }}</td>
+                  <td class="num dc" (click)="cell($event, m, 'leads.contactedInPeriod')" title="Show the records">{{ m.leads.contactedInPeriod }}</td>
+                  <td class="num dc" (click)="cell($event, m, 'leads.wonInPeriod')" title="Show the records">{{ m.leads.wonInPeriod }}</td>
+                  <td class="num dc" (click)="cell($event, m, 'leads.periodConversionRate')" title="Show the records" [ngClass]="rateClass(m.leads.periodConversionRate, 'conversion')">{{ pct(m.leads.periodConversionRate) }}</td>
+                  <td class="num dc" (click)="cell($event, m, 'followups.completed')" title="Show the records">{{ m.followups.completed }}</td>
+                  <td class="num dc" (click)="cell($event, m, 'followups.onTimeRate')" title="Show the records" [ngClass]="rateClass(m.followups.onTimeRate, 'followupOnTime')">{{ pct(m.followups.onTimeRate) }}</td>
+                  <td class="num dc" (click)="cell($event, m, 'calls.answered')" title="Show the records">{{ m.calls.answered }}</td>
+                  <td class="num dc" (click)="cell($event, m, 'targets.achievement')" title="Show the targets" [ngClass]="targetClass(m)">
+                    <ng-container *ngIf="m.targets?.total && m.targets.achievement !== null; else noTgt"><span [title]="m.targets.met + ' of ' + m.targets.total + ' targets met' + (m.targets.atRisk ? ', ' + m.targets.atRisk + ' at risk' : '')">{{ m.targets.achievement }}%</span></ng-container>
+                    <ng-template #noTgt><span class="tp-na" title="No target assigned">No target</span></ng-template></td>
+                  <td class="perf dc" (click)="cell($event, m, 'score.score')" title="How the score is made">
+                    <span class="tp-pillv" *ngIf="levelOf(m) as lv; else noScore" [ngClass]="'lv-' + lv" [title]="LEVELS[lv].label + ' · performance score ' + m.score.score + ' of 100'">{{ LEVELS[lv].short }} <small>{{ m.score.score }}</small></span>
+                    <ng-template #noScore><span class="tp-pillv lv-none" title="Fewer than two scored measures have data in this period">No data yet</span></ng-template>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="muted small tp-empty" *ngIf="!board.length">{{ boardEmpty }}</p>
+          <p class="muted small tp-foot">Ranked by performance score: conversion, follow-up discipline, first contact and productivity, not volume alone. Contacted, Converted, Follow-ups and Calls count {{ data.from | date:'d MMM' }} – {{ data.to | date:'d MMM' }}; Leads is the number assigned now. Tick people to compare or export them.
+            <button type="button" class="tp-link" (click)="openSettings()">Scoring settings</button></p>
+        </section>
+
+        <aside class="tp-side">
+          <section class="tp-card">
+            <h3>Performance Overview</h3>
+            <app-perf-donut [slices]="leadSlices" centerLabel="leads" ariaLabel="Leads assigned now: won, open and lost" empty="No leads are assigned." (select)="leadSlice($event)"></app-perf-donut>
+          </section>
+          <section class="tp-card tp-alerts">
+            <div class="tp-card-head"><h3 class="tp-att-h"><span aria-hidden="true">▲</span> Needs Attention ({{ alertGroups.length }})</h3><span class="tp-spacer"></span>
+              <button type="button" class="tp-link" *ngIf="alertGroups.length > 3" (click)="showAllAlerts = !showAllAlerts">{{ showAllAlerts ? 'Show less' : 'View all' }}</button></div>
+            <p class="tp-ok" *ngIf="!alertGroups.length">✓ No overdue follow-ups, uncontacted leads or slow responses.</p>
+            <button type="button" class="tp-alert" *ngFor="let g of shownAlerts" [class.crit]="g.severity === 'crit'" (click)="openAlert(g)" [attr.aria-label]="g.name + ': ' + issueText(g)">
+              <span class="tp-avatar sm" aria-hidden="true">{{ initials(g.name) }}</span>
+              <span class="tp-alert-text"><b>{{ g.name }}</b>
+                <small><span class="tp-ai" [class.crit-t]="g.issues[0].severity === 'crit'" aria-hidden="true">{{ g.issues[0].severity === 'crit' ? '!' : '◷' }}</span>{{ g.issues[0].text }}<em *ngIf="g.issues.length > 1" [title]="issueText(g)">+{{ g.issues.length - 1 }} more</em></small></span>
+              <span class="tp-alert-go" aria-hidden="true">›</span>
+            </button>
+          </section>
+        </aside>
+      </div>
+
+      <!-- D. Comparison of the ticked staff -->
+      <section class="tp-card tp-cmp" *ngIf="compareData">
+        <div class="tp-card-head"><h3>Comparison</h3>
+          <span class="muted small">{{ compareData.members.length }} people · vs {{ compareData.previous.from | date:'d MMM' }} – {{ compareData.previous.to | date:'d MMM' }}</span>
+          <span class="tp-spacer"></span>
+          <button type="button" class="tp-link" (click)="openFullComparison()">Open full comparison →</button>
+          <button type="button" class="tp-link" (click)="compareData = null">Close</button></div>
+        <div class="tp-cmp-grid">
+          <app-perf-grouped [groups]="compareGroups" [series]="compareSeries"></app-perf-grouped>
+          <div class="tp-table-wrap">
+            <table class="tp-list tp-cmp-table">
+              <thead><tr><th>Measure</th><th class="num" *ngFor="let m of compareData.members">{{ m.name }}</th></tr></thead>
+              <tbody>
+                <tr *ngFor="let k of compareMetrics"><td>{{ k.label }}</td><td class="num" *ngFor="let m of compareData.members">{{ fmtUnit(k.get(m), k.unit) }}</td></tr>
+                <tr><td>Target achievement</td><td class="num muted small" *ngFor="let m of compareData.members">No target</td></tr>
+                <tr class="sum"><td>Score vs previous period</td><td class="num" *ngFor="let m of compareData.members" [class.good]="scoreChange(m).startsWith('▲')" [class.bad]="scoreChange(m).startsWith('▼')">{{ scoreChange(m) }}</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- E. Trend and activity mix -->
+      <div class="tp-bottom" [class.three]="!!teamTarget">
+        <section class="tp-card">
+          <div class="tp-card-head"><h3>Performance Trend</h3><span class="tp-spacer"></span>
+            <select class="hud-input sm" [(ngModel)]="trendMeasure" aria-label="Measure"><option *ngFor="let t of trendMeasures" [value]="t[0]">{{ t[1] }}</option></select></div>
+          <app-perf-trend *ngIf="trendTotal > 0; else noTrend" [clickable]="true" (select)="trendClick($event)" [points]="trendLine" [series]="trendSeries" [ariaLabel]="trendLabel + ' per ' + trendBucket + (comparePeriod ? ', this period and the previous one' : '')"></app-perf-trend>
+          <ng-template #noTrend><p class="tp-emptystate">No {{ trendLabel.toLowerCase() }} recorded in this period{{ trendMeasure === 'won' ? ' (a win counts when a lead’s status is changed to Won)' : '' }}.</p></ng-template>
+          <p class="muted small" *ngIf="trendTotal > 0">By {{ trendBucket }}{{ comparePeriod ? '; the previous period is lined up day for day' : '' }}. Click a point for its records.</p>
+        </section>
+        <section class="tp-card tp-gauge-card" *ngIf="teamTarget as tt">
+          <div class="tp-card-head"><h3>Team Target Achievement</h3><span class="tp-spacer"></span>
+            <select class="hud-input sm" *ngIf="data.teamTargets.length > 1" [(ngModel)]="teamTargetIdx" aria-label="Team target">
+              <option *ngFor="let g of data.teamTargets; let i = index" [ngValue]="i">{{ g.label }} · {{ g.periodLabel }}</option></select></div>
+          <div class="tp-gauge-row">
+            <app-perf-gauge class="dc" [value]="tt.pct" [label]="'Team · ' + tt.cycle.label" (click)="openTargetList(null, tt.metric)" title="Show everyone's target"></app-perf-gauge>
+            <dl class="tp-dl">
+              <dt>Target {{ tt.label.toLowerCase() }}</dt><dd><b>{{ fmtUnit(tt.target, tt.unit) }}</b></dd>
+              <dt>Achieved</dt><dd><b>{{ fmtUnit(tt.actual, tt.unit) }}</b></dd>
+              <dt>Remaining</dt><dd><b>{{ fmtUnit(tt.remaining, tt.unit) }}</b></dd>
+            </dl>
+          </div>
+          <p class="muted small">{{ tt.people }} {{ tt.people === 1 ? 'person' : 'people' }} with a {{ tt.periodLabel.toLowerCase() }} target. <button type="button" class="tp-link" (click)="openTargets()">All targets →</button></p>
+        </section>
+        <section class="tp-card">
+          <h3>Activity by Type</h3>
+          <ng-container *ngIf="activityMix.total; else noMix">
+            <div class="tp-mix dc" *ngFor="let a of activityMix.rows" role="button" tabindex="0" (click)="mixClick(a.key)" (keydown.enter)="mixClick(a.key)" [title]="'Show the ' + a.label.toLowerCase()">
+              <span class="tp-mix-ic" [ngClass]="'ic-' + a.key" aria-hidden="true" [innerHTML]="icons[a.key]"></span>
+              <span class="tp-mix-label">{{ a.label }}</span>
+              <span class="tp-mix-track"><i [style.width.%]="a.share" [style.background]="'var(' + a.color + ')'"></i></span>
+              <span class="tp-mix-val" [title]="a.value + ' of ' + activityMix.total">{{ a.share }}%</span>
+            </div>
+            <p class="muted small">{{ activityMix.total }} recorded actions in the period.</p>
+          </ng-container>
+          <ng-template #noMix><p class="tp-emptystate">Nothing recorded in this period.</p></ng-template>
+        </section>
+      </div>
+
+      <!-- Period comparison details (vs previous period on) -->
+      <section class="tp-card tp-periods" *ngIf="comparePeriod">
+        <div class="tp-card-head"><h3>Period comparison</h3>
+          <span class="muted small">{{ data.from | date:'d MMM' }} – {{ data.to | date:'d MMM' }} vs {{ data.previous.from | date:'d MMM' }} – {{ data.previous.to | date:'d MMM y' }}</span>
+          <span class="tp-spacer"></span>
+          <span class="tp-pill good">▲ {{ improved.length }} improved</span><span class="tp-pill bad">▼ {{ declined.length }} declined</span><span class="tp-pill">■ {{ unchanged.length }} unchanged</span></div>
+        <div class="tp-period-grid">
+          <div>
+          <table class="tp-list">
+            <thead><tr><th>Measure</th><th class="num">Now</th><th class="num">Before</th><th class="num">Change</th></tr></thead>
+            <tbody><tr *ngFor="let c of periodRows" class="click" (click)="periodClick(c.label)" title="Show the records">
+              <td>{{ c.label }}</td><td class="num">{{ fmtUnit(c.now, c.unit === 'pt' ? undefined : c.unit) }}</td><td class="num">{{ fmtUnit(c.before, c.unit === 'pt' ? undefined : c.unit) }}</td>
+              <td class="num" [class.good]="c.d?.good === true" [class.bad]="c.d?.good === false"><span aria-hidden="true">{{ c.d?.dir === 'up' ? '▲' : c.d?.dir === 'down' ? '▼' : '' }}</span> {{ c.d?.text || '—' }}</td>
+            </tr></tbody>
+          </table>
+          </div>
+          <dl class="tp-moves">
+            <dt>Biggest improvement</dt><dd>{{ biggestImprovement ? biggestImprovement.label + ' (' + biggestImprovement.d?.text + ')' : 'None' }}</dd>
+            <dt>Biggest decline</dt><dd>{{ biggestDecline ? biggestDecline.label + ' (' + biggestDecline.d?.text + ')' : 'None' }}</dd>
+            <dt>Most improved</dt><dd><ng-container *ngIf="scoreMoversTop.up.length; else noneUp"><button type="button" class="tp-link tp-mover" *ngFor="let u of scoreMoversTop.up" (click)="openMember(u.m.userId)">{{ u.m.name }} · <span class="good">score +{{ u.d }}</span></button></ng-container><ng-template #noneUp>No score rose</ng-template></dd>
+            <dt>Largest decline</dt><dd><ng-container *ngIf="scoreMoversTop.down.length; else noneDown"><button type="button" class="tp-link tp-mover" *ngFor="let dn of scoreMoversTop.down" (click)="openMember(dn.m.userId)">{{ dn.m.name }} · <span class="bad">score {{ dn.d }}</span></button></ng-container><ng-template #noneDown>No score fell</ng-template></dd>
+          </dl>
+        </div>
+      </section>
+    </ng-container>
+
+    <!-- ================================================================== STAFF COMPARISON PAGE -->
+    <ng-container *ngIf="view === 'compare' && isTeam">
+      <button type="button" class="tp-back" (click)="backToDashboard()">← Dashboard</button>
+      <app-staff-comparison [members]="data.members" [from]="from" [to]="to" [preselect]="preselectIds" (openMember)="openMember($event)"></app-staff-comparison>
+    </ng-container>
+
+    <!-- ================================================================== REPORT SETTINGS -->
+    <ng-container *ngIf="view === 'settings' && isTeam">
+      <button type="button" class="tp-back" (click)="backToDashboard()">← Dashboard</button>
+      <section class="tp-card">
+        <div class="tp-card-head"><h3>Performance scoring</h3>
+          <span class="muted small" *ngIf="scoringCfg">{{ scoringCfg.customised ? 'Customised for this workspace' : 'Default scoring' }}</span></div>
+        <p class="muted small">The score (0–100) is a weighted average of the measures turned on. Each measure scores 0 at its minimum and 100 at its target. Measures without data in the period are left out; with fewer than two, there is no score. Volume alone never makes a good score.</p>
+        <div class="note error" *ngIf="scoringError" role="alert">{{ scoringError }}</div>
+        <ng-container *ngIf="scoringCfg && scoringMeta">
+          <div class="tp-table-wrap">
+            <table class="tp-list tp-scoring">
+              <thead><tr><th>Measure</th><th>On</th><th class="num">Weight</th><th class="num">Share</th><th class="num">Minimum (0 points)</th><th class="num">Target (100 points)</th></tr></thead>
+              <tbody>
+                <tr *ngFor="let k of measureKeys">
+                  <td>{{ scoringMeta.measures[k].label }}<small class="muted" *ngIf="scoringMeta.measures[k].lowerIsBetter"> · lower is better</small></td>
+                  <td><input type="checkbox" [(ngModel)]="scoringCfg.measures[k].enabled" [disabled]="!scoringMeta.canEdit" [attr.aria-label]="'Use ' + scoringMeta.measures[k].label" /></td>
+                  <td class="num"><input class="hud-input sm tp-num" type="number" min="0" max="100" [(ngModel)]="scoringCfg.measures[k].weight" [disabled]="!scoringMeta.canEdit || !scoringCfg.measures[k].enabled" [attr.aria-label]="'Weight of ' + scoringMeta.measures[k].label" /></td>
+                  <td class="num muted">{{ share(k) }}</td>
+                  <td class="num"><input class="hud-input sm tp-num" type="number" [(ngModel)]="scoringCfg.measures[k].min" [disabled]="!scoringMeta.canEdit" [attr.aria-label]="'Minimum of ' + scoringMeta.measures[k].label" /> {{ scoringMeta.measures[k].unit }}</td>
+                  <td class="num"><input class="hud-input sm tp-num" type="number" [(ngModel)]="scoringCfg.measures[k].target" [disabled]="!scoringMeta.canEdit" [attr.aria-label]="'Target of ' + scoringMeta.measures[k].label" /> {{ scoringMeta.measures[k].unit }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="tp-levels">
+            <label>★ Excellent from <input class="hud-input sm tp-num" type="number" [(ngModel)]="scoringCfg.levels.excellent" [disabled]="!scoringMeta.canEdit" /></label>
+            <label>✓ On track from <input class="hud-input sm tp-num" type="number" [(ngModel)]="scoringCfg.levels.onTrack" [disabled]="!scoringMeta.canEdit" /></label>
+            <label>◷ Needs improvement from <input class="hud-input sm tp-num" type="number" [(ngModel)]="scoringCfg.levels.needsImprovement" [disabled]="!scoringMeta.canEdit" /></label>
+            <span class="muted small">below that: ! Critical attention</span>
+            <label>Working week <select class="hud-input sm" [(ngModel)]="scoringCfg.workweek" [disabled]="!scoringMeta.canEdit"><option [ngValue]="5">Mon–Fri</option><option [ngValue]="6">Mon–Sat</option><option [ngValue]="7">Every day</option></select></label>
+          </div>
+          <div class="tp-actions" *ngIf="scoringMeta.canEdit">
+            <button type="button" class="btn btn-primary btn-sm" (click)="saveScoring()" [disabled]="scoringSaving">{{ scoringSaving ? 'Saving…' : 'Save scoring' }}</button>
+            <button type="button" class="btn btn-secondary btn-sm" (click)="saveScoring(true)" [disabled]="scoringSaving || !scoringCfg.customised">Back to defaults</button>
+          </div>
+          <p class="muted small" *ngIf="!scoringMeta.canEdit">Only Owners and Admins change the scoring.</p>
+        </ng-container>
+      </section>
+      <section class="tp-card" *ngIf="can.schedule">
+        <div class="tp-card-head"><h3>Scheduled reports</h3><span class="muted small">Emailed through your mail settings · {{ sched?.timezone }} time</span><span class="tp-spacer"></span>
+          <button type="button" class="btn btn-primary btn-sm" (click)="newSchedule()">+ New schedule</button></div>
+        <div class="note error" *ngIf="schedError" role="alert">{{ schedError }}</div>
+        <div class="tp-tform" *ngIf="schedForm as f">
+          <div class="tp-tform-grid">
+            <label class="wide">Name<input class="hud-input sm" [(ngModel)]="f.name" maxlength="120" /></label>
+            <label>How often<select class="hud-input sm" [(ngModel)]="f.frequency"><option value="weekly">Weekly (last week)</option><option value="monthly">Monthly (last month)</option></select></label>
+            <label *ngIf="f.frequency === 'weekly'">Day<select class="hud-input sm" [(ngModel)]="f.weekday"><option *ngFor="let w of weekdays" [ngValue]="w[0]">{{ w[1] }}</option></select></label>
+            <label *ngIf="f.frequency === 'monthly'">Day of month<input class="hud-input sm" type="number" min="1" max="28" [(ngModel)]="f.dayOfMonth" /></label>
+            <label>Hour<input class="hud-input sm" type="number" min="0" max="23" [(ngModel)]="f.sendHour" /></label>
+            <label>Covers<select class="hud-input sm" [(ngModel)]="f.scope"><option value="team">The whole team</option><option value="role">A role</option><option value="members">Chosen people</option></select></label>
+            <label *ngIf="f.scope === 'role'">Role<select class="hud-input sm" [(ngModel)]="f.scopeRole"><option *ngFor="let r of sched?.roles" [value]="r">{{ r }}</option></select></label>
+            <label>Format<select class="hud-input sm" [(ngModel)]="f.format"><option value="summary">Summary (top 10)</option><option value="detailed">Detailed (everyone)</option></select></label>
+            <label class="tp-check"><input type="checkbox" [(ngModel)]="f.active" /> Active</label>
+          </div>
+          <div *ngIf="f.scope === 'members'"><p class="small muted">People covered</p>
+            <div class="tp-filters"><label class="tp-chip" *ngFor="let m of sched?.members" [class.on]="f.scopeMembers.includes(m.userId)"><input type="checkbox" class="sr-only" [checked]="f.scopeMembers.includes(m.userId)" (change)="toggleIn(f.scopeMembers, m.userId)" />{{ m.name }}</label></div></div>
+          <p class="small muted">Recipients (only those with team access receive it)</p>
+          <div class="tp-filters"><label class="tp-chip" *ngFor="let m of sched?.members" [class.on]="f.recipients.includes(m.userId)"><input type="checkbox" class="sr-only" [checked]="f.recipients.includes(m.userId)" (change)="toggleIn(f.recipients, m.userId)" />{{ m.name }} <small class="muted">{{ m.role }}</small></label></div>
+          <div class="tp-actions">
+            <button type="button" class="btn btn-primary btn-sm" (click)="saveSchedule()" [disabled]="schedSaving || !f.name || !f.recipients.length">{{ schedSaving ? 'Saving…' : 'Save schedule' }}</button>
+            <button type="button" class="btn btn-secondary btn-sm" (click)="schedForm = null">Cancel</button>
+          </div>
+        </div>
+        <p class="muted small" *ngIf="sched && !sched.schedules.length && !schedForm">No scheduled reports. A report covers overall performance, rankings, target achievement, improvements and declines, overdue follow-ups, leads without contact and key observations.</p>
+        <table class="tp-list" *ngIf="sched?.schedules?.length">
+          <thead><tr><th>Report</th><th>When</th><th>Recipients</th><th>Last sent</th><th></th></tr></thead>
+          <tbody><tr *ngFor="let x of sched.schedules">
+            <td><b>{{ x.name }}</b><small>{{ x.scope === 'team' ? 'Whole team' : x.scope === 'role' ? 'Role: ' + x.scopeRole : x.scopeMembers.length + ' people' }} · {{ x.format }}{{ x.active ? '' : ' · paused' }}</small></td>
+            <td>{{ schedWhen(x) }}</td><td class="small">{{ recipientNames(x.recipients) }}</td>
+            <td>{{ x.lastSentAt ? (x.lastSentAt | date:'d MMM, h:mm a') : '—' }}<small class="bad" *ngIf="x.lastError">{{ x.lastError }}</small></td>
+            <td class="num"><button type="button" class="tp-link" (click)="previewSchedule(x)">Preview</button> · <button type="button" class="tp-link" (click)="testSchedule(x)">Send me a test</button> ·
+              <button type="button" class="tp-link" (click)="editSchedule(x)">Change</button> · <button type="button" class="tp-link" (click)="deleteSchedule(x)">Remove</button></td>
+          </tr></tbody>
+        </table>
+      </section>
+      <section class="tp-card">
+        <h3>Access</h3>
+        <p class="muted small">Owners and Admins can do everything here. For anyone else, Members → Permissions has: View team performance (the team and everyone's pages), Compare staff, Export team reports, View call transcripts of others, Manage staff targets, Configure performance scoring and Schedule performance reports. Without them, people see and export only their own performance. Every permission is checked on the server.</p>
+      </section>
+    </ng-container>
+
+    <!-- Target form (Targets & Goals page and a person's Targets tab) -->
+    <ng-template #targetForm>
+      <section class="tp-card tp-tform" *ngIf="tgForm as f">
+        <h3>{{ f.id ? 'Change target' : 'New target' }}</h3>
+        <div class="note error" *ngIf="tgError" role="alert">{{ tgError }}</div>
+        <div class="tp-tform-grid" *ngIf="tg; else tgWait">
+          <label>For
+            <select class="hud-input sm" [(ngModel)]="f.scope" [disabled]="!!f.id"><option value="member">A person</option><option value="role">Everyone with a role</option></select></label>
+          <label *ngIf="f.scope === 'member'">Person
+            <select class="hud-input sm" [(ngModel)]="f.userId" [disabled]="!!f.id"><option value="" disabled>Choose…</option><option *ngFor="let m of tg.members" [value]="'' + m.userId">{{ m.name }}</option></select></label>
+          <label *ngIf="f.scope === 'role'">Role
+            <select class="hud-input sm" [(ngModel)]="f.role" [disabled]="!!f.id"><option value="" disabled>Choose…</option><option *ngFor="let r of tg.roles" [value]="r">{{ r }}</option></select></label>
+          <label>Measure
+            <select class="hud-input sm" [(ngModel)]="f.metric"><option *ngFor="let x of tg.metrics" [value]="x.key">{{ x.label }}</option></select></label>
+          <label>Period
+            <select class="hud-input sm" [(ngModel)]="f.periodType"><option *ngFor="let x of tg.periods" [value]="x.key">{{ x.label }}</option></select></label>
+          <label>Target
+            <span class="tp-inunit"><input class="hud-input sm tp-num" type="number" min="0" [max]="metricInfo(f.metric).rate ? 100 : null" [(ngModel)]="f.target" /> {{ metricInfo(f.metric).unit || '' }}</span></label>
+          <label>{{ f.periodType === 'custom' ? 'From' : 'Starts' }}<input class="hud-input sm" type="date" [(ngModel)]="f.startDate" /></label>
+          <label>{{ f.periodType === 'custom' ? 'To' : 'Ends (optional)' }}<input class="hud-input sm" type="date" [(ngModel)]="f.endDate" /></label>
+          <label class="wide">Note<input class="hud-input sm" type="text" maxlength="300" [(ngModel)]="f.note" placeholder="Optional" /></label>
+        </div>
+        <ng-template #tgWait><p class="muted small">Loading…</p></ng-template>
+        <p class="muted small">A person's own target replaces their role's target for the same measure and period. Progress is counted from recorded activity in each period.</p>
+        <div class="tp-actions">
+          <button type="button" class="btn btn-primary btn-sm" (click)="saveTarget()" [disabled]="tgSaving || !f.target || (f.scope === 'member' ? !f.userId : !f.role)">{{ tgSaving ? 'Saving…' : 'Save target' }}</button>
+          <button type="button" class="btn btn-secondary btn-sm" (click)="tgForm = null">Cancel</button>
+        </div>
+      </section>
+    </ng-template>
+
+    <!-- ================================================================== TARGETS & GOALS -->
+    <ng-container *ngIf="view === 'targets'">
+      <button type="button" class="tp-back" (click)="backToDashboard()">← Dashboard</button>
+      <div class="note error" *ngIf="tgError && !tgForm" role="alert">{{ tgError }}</div>
+      <p class="muted" *ngIf="tgLoading && !tg">Loading…</p>
+      <ng-container *ngIf="tg">
+        <div class="tp-card-head">
+          <h3>Targets &amp; Goals</h3><span class="muted small">Progress as of {{ tg.asOf | date:'d MMM y' }}</span><span class="tp-spacer"></span>
+          <button type="button" class="btn btn-primary btn-sm" *ngIf="tg.canManage" (click)="newTarget()">+ Add target</button>
+        </div>
+        <ng-container *ngTemplateOutlet="targetForm"></ng-container>
+        <section class="tp-card tp-emptycard" *ngIf="!tg.definitions.length && !tgForm">
+          <h3>No targets yet</h3>
+          <p class="muted">{{ tg.canManage ? 'Set a target for a person or for everyone with a role: leads converted, calls connected, follow-ups on time and more, per day, week, month, quarter or a date range.' : 'No targets have been set for you yet.' }}</p>
+        </section>
+        <ng-container *ngIf="tg.definitions.length">
+          <div class="tp-kpis6" *ngIf="tg.totals">
+            <div class="tp-k static"><span class="tp-k-label">Targets met</span><b>{{ tg.totals.met }} / {{ tg.totals.total }}</b><small class="tp-k-sub">{{ pct(tg.totals.rate) }}</small></div>
+            <div class="tp-k static"><span class="tp-k-label">At risk</span><b>{{ tg.totals.atRisk }}</b><small class="tp-k-sub">behind the pace</small></div>
+            <div class="tp-k static"><span class="tp-k-label">Previous period</span><b>{{ tg.totals.previous.met }} / {{ tg.totals.previous.total }}</b><small class="tp-k-sub">{{ pct(tg.totals.previous.rate) }} met</small></div>
+          </div>
+          <div class="tp-tgrid" *ngIf="tg.team.length">
+            <article class="tp-tcard team" *ngFor="let g of tg.team">
+              <app-perf-gauge [value]="g.pct" [label]="g.cycle.label"></app-perf-gauge>
+              <div class="tp-tcard-body"><b>Team: {{ g.label }}</b><small class="muted">{{ g.periodLabel }} · {{ g.people }} {{ g.people === 1 ? 'person' : 'people' }}</small>
+                <dl class="tp-dl"><dt>Target</dt><dd>{{ fmtUnit(g.target, g.unit) }}</dd><dt>Achieved</dt><dd>{{ fmtUnit(g.actual, g.unit) }}</dd><dt>Remaining</dt><dd>{{ fmtUnit(g.remaining, g.unit) }}</dd></dl></div>
+            </article>
+          </div>
+          <section class="tp-card" *ngIf="targetBoard.length">
+            <h3>Achievement by person</h3>
+            <div class="tp-tcmp" *ngFor="let m of targetBoard">
+              <button type="button" class="tp-link" (click)="openMember(m.userId, 'targets')">{{ m.name }}</button>
+              <span class="tp-tbar"><i [ngClass]="m.targets.atRisk ? 'ts-risk' : (m.targets.achievement ?? 0) >= 100 ? 'ts-ok' : 'ts-track'" [style.width.%]="(m.targets.achievement ?? 0) > 100 ? 100 : (m.targets.achievement ?? 0)"></i></span>
+              <span class="num"><b>{{ pct(m.targets.achievement) }}</b> <small class="muted">{{ m.targets.met }}/{{ m.targets.total }} met{{ m.targets.atRisk ? ' · ' + m.targets.atRisk + ' at risk' : '' }}</small></span>
+            </div>
+          </section>
+          <section class="tp-card">
+            <h3>Progress</h3>
+            <div class="tp-table-wrap">
+              <table class="tp-list">
+                <thead><tr><th>Person</th><th>Target</th><th>Period</th><th class="num">Target</th><th class="num">Achieved</th><th class="num">Remaining</th><th class="num">%</th><th>Status</th></tr></thead>
+                <tbody>
+                  <ng-container *ngFor="let m of tg.members">
+                    <tr *ngFor="let t of m.targets?.items; let first = first" class="click" (click)="openMember(m.userId, 'targets')">
+                      <td><b *ngIf="first">{{ m.name }}</b></td><td>{{ t.label }}<small *ngIf="t.from === 'role'">role target</small></td><td>{{ t.periodLabel }} · {{ t.cycle.label }}</td>
+                      <td class="num">{{ fmtUnit(t.target, t.unit) }}</td><td class="num">{{ fmtUnit(t.actual, t.unit) }}</td><td class="num">{{ t.remaining === null ? '—' : fmtUnit(t.remaining, t.unit) }}</td>
+                      <td class="num">{{ pct(t.pct) }}</td><td><span class="tp-ts" [ngClass]="TS[t.status].cls">{{ TS[t.status].label }}</span></td>
+                    </tr>
+                  </ng-container>
+                </tbody>
+              </table>
+            </div>
+          </section>
+          <section class="tp-card">
+            <h3>Targets set</h3>
+            <table class="tp-list">
+              <thead><tr><th>For</th><th>Measure</th><th>Period</th><th class="num">Target</th><th>Dates</th><th *ngIf="tg.canManage"></th></tr></thead>
+              <tbody><tr *ngFor="let t of tg.definitions">
+                <td>{{ whoOf(t) }}</td><td>{{ t.metricLabel }}<small *ngIf="t.note">{{ t.note }}</small></td><td>{{ t.periodLabel }}</td><td class="num">{{ fmtUnit(t.target, t.unit) }}</td>
+                <td>{{ t.startDate | date:'d MMM y' }}{{ t.endDate ? ' – ' + (t.endDate | date:'d MMM y') : ' onwards' }}</td>
+                <td *ngIf="tg.canManage" class="num"><button type="button" class="tp-link" (click)="editTarget(t)">Change</button> · <button type="button" class="tp-link" (click)="deleteTarget(t)">Remove</button></td>
+              </tr></tbody>
+            </table>
+          </section>
+        </ng-container>
+      </ng-container>
+    </ng-container>
+
+    <!-- ================================================================== INDIVIDUAL STAFF PAGE -->
+    <ng-container *ngIf="view === 'staff'">
+      <button type="button" class="tp-back" *ngIf="isTeam" (click)="backToDashboard()">← Dashboard</button>
+      <p class="muted" *ngIf="detailLoading && !detail">Loading…</p>
+      <div class="tp-staff" *ngIf="detail as d">
+        <header class="tp-staff-head" *ngIf="d.summary as m">
+          <span class="tp-avatar lg" aria-hidden="true">{{ initials(d.member.name) }}</span>
+          <div class="tp-staff-who">
+            <h3>{{ d.member.name }}<span class="tp-former" *ngIf="d.member.former"> · former member, history kept</span></h3>
+            <p class="muted small">{{ d.member.role }} · {{ d.from | date:'d MMM' }} – {{ d.to | date:'d MMM y' }}</p>
+          </div>
+          <div class="tp-staff-stat">
+            <small>Performance</small>
+            <ng-container *ngIf="levelOf(m) as lv; else noScoreH"><span class="tp-lv big" [ngClass]="'lv-' + lv"><span aria-hidden="true">{{ LEVELS[lv].icon }}</span> {{ m.score.score }}</span><small>{{ LEVELS[lv].label }}</small></ng-container>
+            <ng-template #noScoreH><b class="muted">—</b><small>Not enough data</small></ng-template>
+          </div>
+          <div class="tp-staff-stat"><small>Target achievement</small>
+            <ng-container *ngIf="m.targets?.total; else noTgtH"><b>{{ pct(m.targets.achievement) }}</b><small>{{ m.targets.met }} of {{ m.targets.total }} met</small></ng-container>
+            <ng-template #noTgtH><b class="muted small">No target assigned</b></ng-template></div>
+          <div class="tp-staff-stat"><small>Previous period</small>
+            <b>{{ m.previous?.score?.score ?? '—' }}</b><small>{{ m.previous?.from | date:'d MMM' }} – {{ m.previous?.to | date:'d MMM' }}</small></div>
+        </header>
+
+        <nav class="tp-tabs" role="tablist">
+          <button role="tab" *ngFor="let t of staffTabs" [class.on]="tab === t[0]" [attr.aria-selected]="tab === t[0]" (click)="tab = t[0]">{{ t[1] }}</button>
+        </nav>
+
+        <!-- Pager for a server-paged list -->
+        <ng-template #pager let-kind>
+          <div class="tp-pager" *ngIf="pages(kind) > 1">
+            <button type="button" class="btn btn-secondary btn-sm" [disabled]="(recs[kind]?.page || 1) <= 1 || recs[kind]?.loading" (click)="loadRecords(kind, (recs[kind]?.page || 1) - 1)">‹ Previous</button>
+            <span class="muted small">Page {{ recs[kind]?.page || 1 }} of {{ pages(kind) }} · {{ listTotal(kind) }} in all</span>
+            <button type="button" class="btn btn-secondary btn-sm" [disabled]="(recs[kind]?.page || 1) >= pages(kind) || recs[kind]?.loading" (click)="loadRecords(kind, (recs[kind]?.page || 1) + 1)">Next ›</button>
+          </div>
+        </ng-template>
+
+        <!-- Overview -->
+        <ng-container *ngIf="tab === 'overview' && d.summary as m">
+          <div class="tp-kpis6 staff">
+            <div class="tp-k static" *ngFor="let c of staffCards(m)">
+              <span class="tp-k-label">{{ c.label }}</span>
+              <b [class.tp-k-na]="c.cur === null && c.label === 'Target achievement'">{{ c.value }}</b>
+              <span class="tp-k-delta" *ngIf="delta({ value: c.cur, previous: c.prev, unit: c.unit }) as dl" [class.good]="dl.good === true" [class.bad]="dl.good === false">
+                <span aria-hidden="true">{{ dl.dir === 'up' ? '▲' : dl.dir === 'down' ? '▼' : '■' }}</span> {{ dl.text }} <small>vs {{ fmt(c.prev, c.unit) }}</small></span>
+              <small class="tp-k-sub" *ngIf="c.sub">{{ c.sub }}</small>
+            </div>
+          </div>
+          <div class="tp-grid3">
+            <section class="tp-card">
+              <h3>Lead conversion</h3>
+              <app-perf-funnel [steps]="funnel(m)" empty="No leads assigned."></app-perf-funnel>
+              <p class="muted small">Assigned now · contacted (ever) · won (now).</p>
+            </section>
+            <section class="tp-card">
+              <h3>Follow-up performance</h3>
+              <ng-container *ngIf="fuSegments(m) as segs">
+                <div class="tp-stack" *ngIf="segs.length; else noFu" role="img" [attr.aria-label]="'Follow-ups: ' + m.followups.onTime + ' on time, ' + m.followups.late + ' late, ' + m.followups.overdueNow + ' overdue, ' + m.followups.upcoming + ' upcoming'">
+                  <i *ngFor="let s of segs" [style.flex-grow]="s.value" [style.background]="'var(' + s.color + ')'"></i>
+                </div>
+                <ul class="tp-legend-list" *ngIf="segs.length"><li *ngFor="let s of segs"><i [style.background]="'var(' + s.color + ')'"></i>{{ s.label }} <b>{{ s.value }}</b></li></ul>
+                <ng-template #noFu><p class="tp-emptystate">No follow-ups in this period.</p></ng-template>
+              </ng-container>
+              <p class="muted small">{{ pct(m.followups.completionRate) }} completed · average delay when late {{ hours(m.followups.avgDelayHours) }}</p>
+            </section>
+            <section class="tp-card">
+              <h3>Communication</h3>
+              <dl class="tp-dl">
+                <dt>Calls connected</dt><dd>{{ m.calls.answered }} of {{ m.calls.made }} <small>({{ pct(m.calls.answerRate) }})</small></dd>
+                <dt>Talk time</dt><dd>{{ m.calls.talkMinutes }} min <small>avg {{ m.calls.avgMinutes ?? '—' }} min</small></dd>
+                <dt>Emails sent</dt><dd>{{ m.emails.sent }} one-to-one · {{ m.emails.productEmails }} product</dd>
+                <dt>Delivered</dt><dd>{{ m.emails.delivered }}</dd>
+                <dt>Opened</dt><dd>{{ opensText(m) }}</dd>
+                <dt>Clicked</dt><dd>{{ m.emails.clicked }}</dd>
+              </dl>
+            </section>
+          </div>
+          <div class="tp-two">
+            <section class="tp-card">
+              <h3>Daily activity <small class="muted">calls, follow-ups, emails, notes &amp; activities</small></h3>
+              <app-perf-columns *ngIf="staffTrendTotal(d) > 0; else noDaily" [points]="staffTrend(d)" unitLabel="Actions" [ariaLabel]="d.member.name + ': recorded actions per day'"></app-perf-columns>
+              <ng-template #noDaily><p class="tp-emptystate">Nothing recorded in this period.</p></ng-template>
+            </section>
+            <section class="tp-card">
+              <h3>Against the previous period</h3>
+              <table class="tp-list">
+                <thead><tr><th>Measure</th><th class="num">Now</th><th class="num">Before</th><th class="num">Change</th></tr></thead>
+                <tbody><tr *ngFor="let c of staffChanges(m)">
+                  <td>{{ c.label }}</td><td class="num">{{ fmt(c.now, c.unit) }}</td><td class="num">{{ fmt(c.before, c.unit) }}</td>
+                  <td class="num" *ngIf="delta({ value: c.now, previous: c.before, unit: c.unit }) as dl; else noCh" [class.good]="dl.good === true" [class.bad]="dl.good === false">{{ dl.dir === 'up' ? '▲' : dl.dir === 'down' ? '▼' : '' }} {{ dl.text }}</td>
+                  <ng-template #noCh><td class="num muted">—</td></ng-template>
+                </tr></tbody>
+              </table>
+            </section>
+          </div>
+          <section class="tp-card" *ngIf="m.score?.categories?.length">
+            <h3>Score by category</h3>
+            <div class="tp-mix" *ngFor="let c of m.score.categories">
+              <span></span><span class="tp-mix-label">{{ c.label }}</span>
+              <span class="tp-mix-track"><i [style.width.%]="c.score ?? 0" [style.background]="c.score === null ? 'var(--neutral)' : c.score >= 80 ? 'var(--good)' : c.score >= 50 ? 'var(--s1)' : 'var(--warn)'"></i></span>
+              <span class="tp-mix-val">{{ c.score === null ? 'no data' : c.score }}</span>
+            </div>
+            <p class="muted small">Each category is 0–100 from its measures below; weights decide how much each counts toward the overall score.</p>
+          </section>
+          <section class="tp-card" *ngIf="m.score?.parts?.length">
+            <h3>How the score is made</h3>
+            <table class="tp-list">
+              <thead><tr><th>Measure</th><th class="num">Value</th><th class="num">Points</th><th class="num">Weight</th></tr></thead>
+              <tbody><tr *ngFor="let p of m.score.parts"><td>{{ p.label }}</td><td class="num">{{ p.value === null ? 'no data' : p.value }}</td><td class="num">{{ p.points ?? '—' }}</td><td class="num">{{ p.weight }}</td></tr></tbody>
+            </table>
+          </section>
+        </ng-container>
+
+        <!-- Leads -->
+        <ng-container *ngIf="tab === 'leads'">
+          <div class="tp-filters">
+            <button type="button" class="tp-chip" *ngFor="let v of leadViews" [class.on]="leadView === v[0]" (click)="setLeadView(v[0])">{{ v[1] }}</button>
+            <button type="button" class="tp-link" (click)="showLeadFilters = !showLeadFilters">{{ showLeadFilters ? 'Fewer filters' : 'More filters' }}</button>
+          </div>
+          <div class="tp-filters tp-form" *ngIf="showLeadFilters">
+            <select class="hud-input sm" [(ngModel)]="leadQ['source']" (ngModelChange)="loadRecords('leads', 1)" aria-label="Lead source">
+              <option value="">All sources</option><option *ngFor="let x of d.leadSources" [value]="x.source">{{ x.source | titlecase }} ({{ x.count }})</option></select>
+            <label class="small">Created <input class="hud-input sm" type="date" [(ngModel)]="leadQ['createdFrom']" (ngModelChange)="loadRecords('leads', 1)" aria-label="Created from" />
+              – <input class="hud-input sm" type="date" [(ngModel)]="leadQ['createdTo']" (ngModelChange)="loadRecords('leads', 1)" aria-label="Created to" /></label>
+            <label class="small">Assigned <input class="hud-input sm" type="date" [(ngModel)]="leadQ['assignedFrom']" (ngModelChange)="loadRecords('leads', 1)" aria-label="Assigned from" />
+              – <input class="hud-input sm" type="date" [(ngModel)]="leadQ['assignedTo']" (ngModelChange)="loadRecords('leads', 1)" aria-label="Assigned to" /></label>
+            <button type="button" class="tp-link" (click)="clearLeadFilters()">Clear</button>
+          </div>
+          <div class="tp-table-wrap">
+            <table class="tp-list">
+              <thead><tr><th>Lead</th><th>Company</th><th>Source</th><th>Assigned</th><th>First contact</th><th>Last contact</th><th>Status</th><th>Follow-ups</th></tr></thead>
+              <tbody><tr *ngFor="let l of list('leads')" (click)="openLead.emit(l.leadId)" class="click">
+                <td><b>{{ l.leadName }}</b></td><td>{{ l.company || '—' }}</td><td>{{ (l.source || '—') | titlecase }}</td>
+                <td>{{ l.assignedAt ? (l.assignedAt | date:'d MMM y') : '—' }}</td>
+                <td [class.warn]="!l.firstContactAt">{{ l.firstContactAt ? (l.firstContactAt | date:'d MMM, h:mm a') : 'Never' }}</td>
+                <td>{{ l.lastContact ? (l.lastContact | date:'d MMM, h:mm a') : '—' }}</td>
+                <td><span class="tp-tag" [class.ok]="l.status === 'Won'" [class.bad]="l.status === 'Lost'">{{ l.status }}</span></td>
+                <td><span class="tp-tag bad" *ngIf="l.overdueFollowups">{{ l.overdueFollowups }} overdue</span><span *ngIf="!l.overdueFollowups">{{ l.pendingFollowups ? l.pendingFollowups + ' pending' : '—' }}</span></td>
+              </tr></tbody>
+            </table>
+          </div>
+          <p class="tp-emptystate" *ngIf="!list('leads').length && !recs['leads']?.loading">No leads match.</p>
+          <ng-container *ngTemplateOutlet="pager; context: { $implicit: 'leads' }"></ng-container>
+        </ng-container>
+
+        <!-- Follow-ups -->
+        <ng-container *ngIf="tab === 'followups'">
+          <div class="tp-stats" *ngIf="d.summary as m">
+            <span><b>{{ m.followups.onTime }}</b> completed on time</span><span><b>{{ m.followups.late }}</b> late</span>
+            <span><b>{{ m.followups.upcoming }}</b> pending</span><span><b>{{ m.followups.overdueNow }}</b> overdue</span><span><b>{{ m.followups.cancelled }}</b> cancelled</span>
+          </div>
+          <div class="tp-filters">
+            <button type="button" class="tp-chip" [class.on]="!followupFilter" (click)="setFollowupFilter('')">All</button>
+            <button type="button" class="tp-chip" *ngFor="let st of followupViews" [class.on]="followupFilter === st[0]" (click)="setFollowupFilter(st[0])">{{ st[1] }}</button>
+          </div>
+          <div class="tp-table-wrap">
+            <table class="tp-list">
+              <thead><tr><th>Follow-up</th><th>Lead</th><th>Due</th><th>Completed</th><th>Status</th><th>Notes</th></tr></thead>
+              <tbody><tr *ngFor="let f of list('followups')" (click)="openLead.emit(f.leadId)" class="click">
+                <td><b>{{ f.title }}</b><small>{{ f.type }} · {{ f.priority }}</small></td><td>{{ f.leadName }}</td><td>{{ f.dueAt | date:'d MMM, h:mm a' }}</td>
+                <td>{{ f.completedAt ? (f.completedAt | date:'d MMM, h:mm a') : '—' }}<small *ngIf="f.completedAt">{{ f.completedAt <= f.dueAt ? 'on time' : 'late' + (f.lateMinutes ? ' by ' + hours(f.lateMinutes / 60) : '') }}</small></td>
+                <td><span class="tp-tag" [class.bad]="f.status === 'overdue'" [class.ok]="f.status === 'completed'">{{ f.status }}</span></td>
+                <td class="small">{{ f.completionNotes || '—' }}</td>
+              </tr></tbody>
+            </table>
+          </div>
+          <p class="tp-emptystate" *ngIf="!list('followups').length && !recs['followups']?.loading">None.</p>
+          <ng-container *ngTemplateOutlet="pager; context: { $implicit: 'followups' }"></ng-container>
+        </ng-container>
+
+        <!-- Calls -->
+        <ng-container *ngIf="tab === 'calls'">
+          <div class="tp-stats" *ngIf="d.summary as m">
+            <span><b>{{ m.calls.answered }}</b> connected</span><span><b>{{ m.calls.missed }}</b> unanswered</span>
+            <span><b>{{ m.calls.talkMinutes }}</b> min talk time</span><span>average <b>{{ m.calls.avgMinutes ?? '—' }}</b> min</span>
+            <span><b>{{ d.callOutcomes?.transcripts?.done || 0 }}</b> transcribed</span>
+          </div>
+          <div class="tp-filters">
+            <select class="hud-input sm" [(ngModel)]="callQ['answered']" (ngModelChange)="loadRecords('calls', 1)" aria-label="Result">
+              <option value="">All calls</option><option value="yes">Connected</option><option value="no">Unanswered</option></select>
+            <select class="hud-input sm" [(ngModel)]="callQ['transcript']" (ngModelChange)="loadRecords('calls', 1)" aria-label="Transcript">
+              <option value="">With or without transcript</option><option value="yes">With transcript</option></select>
+          </div>
+          <div class="tp-table-wrap">
+            <table class="tp-list">
+              <thead><tr><th>Lead</th><th>When</th><th>Result</th><th>Duration</th><th>Transcript</th></tr></thead>
+              <tbody><tr *ngFor="let c of list('calls')" (click)="openCall(c)" class="click">
+                <td><b>{{ c.leadName || 'Call' }}</b></td><td>{{ c.startedAt | date:'d MMM, h:mm a' }}</td>
+                <td><span class="tp-tag" [class.ok]="c.answered">{{ c.answered ? 'Connected' : 'Unanswered' }}</span></td><td>{{ c.answered ? dur(c.durationSeconds) : '—' }}</td>
+                <td>{{ c.transcriptStatus === 'done' ? (canOpenCall(c) ? '📝 View transcript' : 'Transcript (no access)') : c.transcriptStatus === 'failed' ? 'Failed' : c.transcriptStatus === 'pending' ? 'Processing' : '—' }}</td>
+              </tr></tbody>
+            </table>
+          </div>
+          <p class="tp-emptystate" *ngIf="!list('calls').length && !recs['calls']?.loading">No calls in this period.</p>
+          <ng-container *ngTemplateOutlet="pager; context: { $implicit: 'calls' }"></ng-container>
+        </ng-container>
+
+        <!-- Emails -->
+        <ng-container *ngIf="tab === 'emails'">
+          <div class="tp-stats" *ngIf="d.summary as m">
+            <span><b>{{ m.emails.sent }}</b> one-to-one</span><span><b>{{ m.emails.productEmails }}</b> product emails</span>
+            <span><b>{{ m.emails.delivered }}</b> delivered</span><span>unique opens: <b>{{ opensText(m) }}</b></span><span><b>{{ m.emails.clicked }}</b> unique clicks</span>
+          </div>
+          <p class="muted small">Each email counts once, whichever way it was sent. Opens are an estimate (image blocking and privacy features affect them).</p>
+          <div class="tp-filters">
+            <select class="hud-input sm" [(ngModel)]="emailQ['kind']" (ngModelChange)="loadRecords('emails', 1)" aria-label="Kind">
+              <option value="">One-to-one and product</option><option value="individual">One-to-one</option><option value="product">Product emails</option></select>
+            <select class="hud-input sm" [(ngModel)]="emailQ['engagement']" (ngModelChange)="loadRecords('emails', 1)" aria-label="Engagement">
+              <option value="">Any engagement</option><option value="opened">Opened</option><option value="clicked">Clicked</option><option value="bounced">Bounced</option></select>
+          </div>
+          <div class="tp-table-wrap">
+            <table class="tp-list">
+              <thead><tr><th>Subject</th><th>To</th><th>Sent</th><th>Kind</th><th>Status</th></tr></thead>
+              <tbody><tr *ngFor="let e of list('emails')" [class.click]="!!e.leadId" (click)="e.leadId && openLead.emit(e.leadId)">
+                <td><b>{{ e.subject || '(no subject)' }}</b></td><td>{{ e.recipientName || e.recipient }}</td><td>{{ e.sentAt | date:'d MMM, h:mm a' }}</td>
+                <td>{{ e.kind === 'product' ? 'Product' : 'One-to-one' }}</td>
+                <td><span class="tp-tag" [class.bad]="e.status === 'bounced'" [class.ok]="e.status === 'delivered'">{{ e.status }}</span>{{ e.openedAt ? ' · opened' : '' }}{{ e.clickedAt ? ' · clicked' : '' }}</td>
+              </tr></tbody>
+            </table>
+          </div>
+          <p class="tp-emptystate" *ngIf="!list('emails').length && !recs['emails']?.loading">No emails sent in this period.</p>
+          <ng-container *ngTemplateOutlet="pager; context: { $implicit: 'emails' }"></ng-container>
+          <ng-container *ngIf="d.campaigns?.length">
+            <h4 class="tp-h4">Email campaigns</h4>
+            <table class="tp-list">
+              <thead><tr><th>Campaign</th><th>Sent</th><th class="num">Recipients</th><th class="num">Delivered</th><th class="num">Opened</th><th class="num">Clicked</th></tr></thead>
+              <tbody><tr *ngFor="let c of d.campaigns">
+                <td><b>{{ c.name }}</b><small>{{ c.subject }} · {{ c.status }}</small></td><td>{{ c.submittedAt ? (c.submittedAt | date:'d MMM, h:mm a') : 'Not sent' }}</td>
+                <td class="num">{{ c.recipients }}</td><td class="num">{{ c.delivered }}</td><td class="num">{{ c.opened }}</td><td class="num">{{ c.clicked }}</td>
+              </tr></tbody>
+            </table>
+          </ng-container>
+        </ng-container>
+
+        <!-- Activities: chronological timeline, and any one day in detail -->
+        <ng-container *ngIf="tab === 'activities'">
+          <div class="tp-filters">
+            <button type="button" class="tp-chip" *ngFor="let t of timelineViews" [class.on]="timelineType === t[0]" (click)="setTimelineType(t[0])">{{ t[1] }}</button>
+            <span class="tp-spacer"></span>
+            <label class="small">A day in detail <input class="hud-input sm" type="date" [(ngModel)]="dayPick" [min]="d.from" [max]="d.to" (ngModelChange)="openDay($event)" aria-label="Pick a day" /></label>
+          </div>
+          <section class="tp-card tp-day" *ngIf="day as dy">
+            <div class="tp-card-head"><h3>{{ dy.date | date:'EEEE d MMMM y' }}</h3><span class="muted small">{{ dayCount(dy) }} records</span><span class="tp-spacer"></span><button type="button" class="tp-link" (click)="day = null">Close</button></div>
+            <p class="muted small" *ngIf="!dayCount(dy)">Nothing recorded on this day.</p>
+            <p class="small" *ngIf="dayCount(dy)">{{ dy.leadsCreated.length }} leads created · {{ dy.leadsAssigned.length }} assigned · {{ dy.calls.length }} calls · {{ dy.followupsCompleted.length }} follow-ups completed · {{ dy.emails.length }} emails · {{ dy.activities.length }} notes &amp; activities</p>
+          </section>
+          <ol class="tp-timeline">
+            <li *ngFor="let x of list('timeline')" (click)="openTimelineItem(x)" [class.click]="x.kind === 'call' || !!x.leadId">
+              <span class="tp-tl-icon" aria-hidden="true">{{ timelineIcons[x.kind] || '•' }}</span>
+              <span class="tp-tl-body"><b>{{ timelineLabel(x.kind) }}</b><span *ngIf="x.leadName"> · {{ x.leadName }}</span>
+                <small>{{ x.at | date:'EEE d MMM, h:mm a' }}{{ x.detail ? ' · ' + x.detail : '' }}{{ x.kind === 'call' && x.extra === 'done' ? ' · 📝 transcript' : '' }}</small></span>
+            </li>
+          </ol>
+          <p class="tp-emptystate" *ngIf="!list('timeline').length && !recs['timeline']?.loading">Nothing recorded in this period.</p>
+          <ng-container *ngTemplateOutlet="pager; context: { $implicit: 'timeline' }"></ng-container>
+          <ng-container *ngIf="d.posts?.length">
+            <h4 class="tp-h4">Social posts created</h4>
+            <p class="small" *ngFor="let p of d.posts">{{ p.title || '(untitled)' }} <small class="muted">· {{ p.platform }} · {{ p.status }} · {{ p.createdAt | date:'d MMM' }}</small></p>
+          </ng-container>
+        </ng-container>
+
+        <!-- Targets -->
+        <ng-container *ngIf="tab === 'targets' && d.summary as m">
+          <div class="tp-card-head">
+            <span class="muted small" *ngIf="m.targets?.total">{{ m.targets.met }} of {{ m.targets.total }} met · {{ m.targets.atRisk }} at risk · average {{ pct(m.targets.achievement) }}</span>
+            <span class="tp-spacer"></span>
+            <button type="button" class="btn btn-primary btn-sm" *ngIf="canManageTargets" (click)="newTarget(d.member.userId)">+ Add target</button>
+          </div>
+          <ng-container *ngTemplateOutlet="targetForm"></ng-container>
+          <section class="tp-card tp-emptycard" *ngIf="!m.targets?.items?.length">
+            <h3>No target assigned</h3>
+            <p class="muted">{{ d.member.name }} has no target in this period{{ canManageTargets ? '. Add one above, or set one for their role under Targets & Goals.' : '.' }}</p>
+          </section>
+          <div class="tp-tgrid">
+            <article class="tp-tcard" *ngFor="let t of m.targets?.items">
+              <app-perf-ring [value]="t.pct === null ? null : (t.pct > 100 ? 100 : t.pct)" [label]="t.pct === null ? 'no data yet' : (t.pct > 100 ? t.pct + '% of target' : '')" [color]="statusColor(t.status)"></app-perf-ring>
+              <div class="tp-tcard-body">
+                <div class="tp-tcard-top"><b>{{ t.label }}</b><span class="tp-ts" [ngClass]="TS[t.status].cls">{{ TS[t.status].label }}</span></div>
+                <small class="muted">{{ t.periodLabel }} · {{ t.cycle.label }}{{ t.from === 'role' ? ' · set for their role' : '' }}</small>
+                <dl class="tp-dl">
+                  <dt>Target</dt><dd>{{ fmtUnit(t.target, t.unit) }}</dd>
+                  <dt>Achieved</dt><dd>{{ fmtUnit(t.actual, t.unit) }}</dd>
+                  <ng-container *ngIf="t.remaining !== null"><dt>Remaining</dt><dd>{{ fmtUnit(t.remaining, t.unit) }}</dd></ng-container>
+                  <ng-container *ngIf="t.status === 'on_track' || t.status === 'at_risk'"><dt>Expected by now</dt><dd>{{ t.unit === '%' ? fmtUnit(t.target, '%') : fmtUnit(t.expected, t.unit) }} <small>({{ t.elapsed }}% of the period gone)</small></dd></ng-container>
+                </dl>
+                <div class="tp-tbar" role="img" [attr.aria-label]="t.label + ' ' + (t.pct ?? 0) + '% of target'"><i [ngClass]="TS[t.status].cls" [style.width.%]="t.pct === null ? 0 : (t.pct > 100 ? 100 : t.pct)"></i></div>
+              </div>
+            </article>
+          </div>
+          <section class="tp-card" *ngIf="m.previous?.targets?.items?.length">
+            <h3>Previous period</h3>
+            <table class="tp-list">
+              <thead><tr><th>Target</th><th>Period</th><th class="num">Target</th><th class="num">Achieved</th><th class="num">%</th><th>Status</th></tr></thead>
+              <tbody><tr *ngFor="let t of m.previous.targets.items"><td>{{ t.label }}</td><td>{{ t.cycle.label }}</td><td class="num">{{ fmtUnit(t.target, t.unit) }}</td>
+                <td class="num">{{ fmtUnit(t.actual, t.unit) }}</td><td class="num">{{ pct(t.pct) }}</td><td><span class="tp-ts" [ngClass]="TS[t.status].cls">{{ TS[t.status].label }}</span></td></tr></tbody>
+            </table>
+          </section>
+        </ng-container>
+      </div>
+    </ng-container>
+
+    <!-- Drill-down popup: the records behind a figure -->
+    <div class="tp-modal" *ngIf="pop as p" (click)="closePop()" (keydown.escape)="closePop()">
+      <div class="tp-modal-card tp-pop" role="dialog" aria-modal="true" aria-labelledby="tp-pop-title" (click)="$event.stopPropagation()">
+        <div class="tp-detail-head">
+          <div><h3 id="tp-pop-title">{{ p.title || 'Loading…' }}</h3><p class="muted small">{{ p.subtitle }}{{ !p.loading ? ' · ' + p.total + (p.total === 1 ? ' record' : ' records') : '' }}</p></div>
+          <span class="tp-spacer"></span>
+          <button type="button" class="btn btn-secondary btn-sm" *ngIf="p.userId && isTeam && view !== 'staff'" (click)="openPopMember()">Open staff page</button>
+          <button type="button" class="btn btn-secondary btn-sm" (click)="closePop()">Close</button>
+        </div>
+        <div class="note error" *ngIf="p.error" role="alert">{{ p.error }}</div>
+        <p class="muted" *ngIf="p.loading && !p.rows.length">Loading…</p>
+        <div class="tp-table-wrap tp-pop-body" *ngIf="p.rows.length">
+          <table class="tp-list">
+            <thead><tr><th *ngFor="let c of p.columns" [class.num]="c.type === 'number'">{{ c.label }}</th></tr></thead>
+            <tbody><tr *ngFor="let row of p.rows" [class.click]="popRowClickable(row)" (click)="popRow(row)">
+              <td *ngFor="let c of p.columns">
+                <ng-container [ngSwitch]="c.type">
+                  <ng-container *ngSwitchCase="'date'">{{ row[c.key] ? (row[c.key] | date:'d MMM y, h:mm a') : '—' }}</ng-container>
+                  <ng-container *ngSwitchDefault>
+                    <span *ngIf="c.key === 'status' || c.key === 'state' || c.key === 'result'; else plainCell" class="tp-tag" [class.ok]="['Won', 'On time', 'Connected', 'Achieved', 'Exceeded', 'Delivered', 'Opened', 'Clicked'].includes(row[c.key])"
+                      [class.bad]="['Lost', 'Overdue', 'Late', 'Not answered', 'At risk', 'Missed', 'Bounced'].includes(row[c.key])">{{ row[c.key] ?? '—' }}</span>
+                    <ng-template #plainCell>{{ row[c.key] === null || row[c.key] === undefined || row[c.key] === '' ? '—' : row[c.key] }}</ng-template>
+                  </ng-container>
+                </ng-container>
+              </td>
+            </tr></tbody>
+          </table>
+        </div>
+        <p class="tp-emptystate" *ngIf="!p.loading && !p.rows.length && !p.error">No records.</p>
+        <div class="tp-pager" *ngIf="p.kind && popPages > 1">
+          <button type="button" class="btn btn-secondary btn-sm" [disabled]="p.page <= 1 || p.loading" (click)="loadPop(p.page - 1)">‹ Previous</button>
+          <span class="muted small">Page {{ p.page }} of {{ popPages }}</span>
+          <button type="button" class="btn btn-secondary btn-sm" [disabled]="p.page >= popPages || p.loading" (click)="loadPop(p.page + 1)">Next ›</button>
+        </div>
+        <p class="muted small" *ngIf="p.rows.length && (p.rows[0].leadId || p.rows[0].callId || p.rows[0].memberId)">Click a row to open {{ p.rows[0].callId ? 'the call' : p.rows[0].memberId ? 'the person' : 'the lead' }}.</p>
+      </div>
+    </div>
+
+    <!-- Scheduled report preview -->
+    <div class="tp-modal" *ngIf="previewDoc" (click)="schedPreview = null">
+      <div class="tp-modal-card tp-preview" role="dialog" aria-modal="true" aria-label="Report preview" (click)="$event.stopPropagation()">
+        <div class="tp-detail-head"><h3>Report preview</h3><button type="button" class="btn btn-secondary btn-sm" (click)="schedPreview = null">Close</button></div>
+        <iframe class="tp-preview-body" sandbox="" title="Report preview" [attr.srcdoc]="schedPreview"></iframe>
+      </div>
+    </div>
+
+    <!-- Call transcript viewer -->
+    <div class="tp-modal" *ngIf="transcript || transcriptLoading" (click)="transcript = null; transcriptLoading = false">
+      <div class="tp-modal-card" role="dialog" aria-modal="true" aria-labelledby="tp-tr-title" (click)="$event.stopPropagation()">
+        <div class="tp-detail-head">
+          <h3 id="tp-tr-title">{{ transcript ? 'Call with ' + (transcript.leadName || transcript.name || transcript.phone) : 'Loading the call…' }}</h3>
+          <button type="button" class="btn btn-secondary btn-sm" (click)="transcript = null; transcriptLoading = false">Close</button>
+        </div>
+        <ng-container *ngIf="transcript as t">
+          <p class="muted small">{{ t.startedAt | date:'EEE d MMM y, h:mm a' }} · by {{ t.callerName || '—' }} · {{ t.answered ? dur(t.durationSeconds) : 'not answered' }} · {{ t.phone }}{{ t.transcriptModel ? ' · transcribed with ' + t.transcriptModel : '' }}</p>
+          <ng-container *ngIf="t.conversation?.length; else noText">
+            <div class="tp-row">
+              <input class="hud-input" type="search" [(ngModel)]="transcriptSearch" placeholder="Search the transcript" aria-label="Search the transcript" />
+              <button class="btn btn-secondary btn-sm" type="button" (click)="copyTranscript()">Copy</button>
+              <button class="btn btn-secondary btn-sm" type="button" (click)="downloadTranscript()">Download</button>
+              <button class="btn btn-secondary btn-sm" type="button" *ngIf="t.leadId" (click)="openLead.emit(t.leadId); transcript = null">Open the lead</button>
+            </div>
+            <div class="tp-convo">
+              <p *ngFor="let l of transcriptLines" [class.them]="l.speaker !== 'agent'"><small class="muted" *ngIf="transcriptTimed">{{ mmss(l.start) }} </small><b>{{ speaker(l) }}:</b> {{ l.text }}</p>
+              <p class="muted small" *ngIf="!transcriptLines.length">No line matches “{{ transcriptSearch }}”.</p>
+            </div>
+          </ng-container>
+          <ng-template #noText><p class="muted">{{ !t.answered ? 'The call was not answered.' : !t.transcribed ? 'This call was not transcribed ("Transcribe this call" was off).' : t.transcriptStatus === 'failed' ? 'The transcript could not be made' + (t.transcriptError ? ': ' + t.transcriptError : '.') : t.transcriptStatus === 'pending' ? 'The transcript is still being made.' : 'No speech was recognised.' }}</p></ng-template>
+        </ng-container>
+      </div>
+    </div>
+  </ng-container>
+</section>

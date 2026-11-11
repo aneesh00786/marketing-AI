@@ -117,9 +117,21 @@ export class MembersComponent implements OnInit {
   grantHelp(m: any, cap: string): string {
     const g = this.perm?.grants[cap];
     if (g === 'role') return `Included in the ${m.role} role.`;
+    const perf: Record<string, string> = {
+      'performance.view_team': 'See every member in Team Performance and their individual pages, not only their own.',
+      'performance.manage_targets': 'Set and change staff targets (per person or role).',
+      'performance.compare': 'Compare staff side by side (with team access).',
+      'performance.export': 'Export the team report to Excel (with team access). Everyone can export their own.',
+      'performance.view_transcripts': 'Open other people\'s call transcripts (with team access). Everyone can open their own.',
+      'performance.configure_scoring': 'Change how the performance score is calculated.',
+      'performance.schedule_reports': 'Set up weekly or monthly performance report emails (with team access).'
+    };
+    if (perf[cap]) return g === 'not_eligible' ? `The ${m.role} role cannot see analytics.` : perf[cap];
     if (g === 'not_eligible') return cap === 'mail.send' ? `The ${m.role} role cannot write email.` : `Needs a role that sends email (Marketing Manager, Approver).`;
     return cap === 'mail.send' ? 'Send email themselves, not only write drafts.' : 'Compose email that can reach people who opted out of marketing.';
   }
+
+  grantIcon(cap: string): string { return cap.startsWith('performance.') ? '📊' : '✉'; }
 
   toggleGrant(cap: string): void {
     if (!this.perm) return;

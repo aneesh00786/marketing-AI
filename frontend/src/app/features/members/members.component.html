@@ -97,7 +97,7 @@
                 <ng-container *ngFor="let g of data.grantable">
                   <label class="mod" [class.on]="grantOn(m, g.capability)" [class.off]="perm!.grants[g.capability] === 'not_eligible'">
                     <input type="checkbox" [checked]="grantOn(m, g.capability)" (change)="toggleGrant(g.capability)" [disabled]="perm!.grants[g.capability] === 'role' || perm!.grants[g.capability] === 'not_eligible' || !grantPossible(g.capability)" />
-                    {{ g.capability === 'mail.send' ? '✉ Send email' : '✉ Send transactional email' }}
+                    {{ grantIcon(g.capability) }} {{ g.label }}
                     <small class="muted">{{ grantHelp(m, g.capability) }}</small>
                   </label>
                 </ng-container>

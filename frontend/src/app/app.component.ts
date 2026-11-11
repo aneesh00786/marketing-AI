@@ -6,6 +6,7 @@ import { readWorkbook, SheetData, LeadSheetRow } from './features/leads/lead-she
 import { LeadImportMapperComponent } from './features/leads/lead-import-mapper.component';
 import { LeadAccessComponent } from './features/leads/lead-access.component';
 import { LeadFollowupsComponent } from './features/leads/lead-followups.component';
+import { TeamPerformanceComponent } from './features/performance/team-performance.component';
 import { CrmPhoneInputComponent, phoneProblem } from './features/crm/crm-phone-input.component';
 import { ImportSync, importSyncBody, importSyncProblem, newImportSync } from './features/leads/import-sync';
 import { ImportSyncOptionsComponent } from './features/leads/import-sync-options.component';
@@ -38,7 +39,7 @@ import { findTokens, fillTokens, defaultTokenValues } from './features/mail/temp
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [CommonModule, FormsModule, LoginComponent, LeadImportMapperComponent, LeadAccessComponent, LeadFollowupsComponent, CrmPhoneInputComponent, SocialHubComponent, CommandCenterComponent, IconComponent, DashboardComponent, LeadDiscoveryComponent, CrmComponent, PlatformAdminComponent, CallButtonComponent, SoftphoneComponent, MembersComponent, TemplatePickerComponent, MailCenterComponent, EmailPreviewComponent, ImportSyncOptionsComponent, LeadsToListComponent, CountryFilterComponent],
+  imports: [CommonModule, FormsModule, LoginComponent, LeadImportMapperComponent, LeadAccessComponent, LeadFollowupsComponent, TeamPerformanceComponent, CrmPhoneInputComponent, SocialHubComponent, CommandCenterComponent, IconComponent, DashboardComponent, LeadDiscoveryComponent, CrmComponent, PlatformAdminComponent, CallButtonComponent, SoftphoneComponent, MembersComponent, TemplatePickerComponent, MailCenterComponent, EmailPreviewComponent, ImportSyncOptionsComponent, LeadsToListComponent, CountryFilterComponent],
   templateUrl: './app.component.html',
   styleUrls: ['./app.component.css']
 })
@@ -52,7 +53,7 @@ export class AppComponent implements OnInit, OnDestroy {
   draftTemplate: { id: number; name: string } | null = null;
   composeTemplateName = '';
   composeTokenValues: Record<string, string> = {};
-  currentRoute: 'dashboard' | 'products' | 'crm' | 'admin' | 'leads' | 'emails' | 'businesses' | 'social' | 'voice' | 'appointments' | 'members' = 'dashboard';
+  currentRoute: 'dashboard' | 'products' | 'crm' | 'admin' | 'leads' | 'emails' | 'businesses' | 'social' | 'voice' | 'appointments' | 'members' | 'performance' = 'dashboard';
 
   // ---------- App shell (sidebar, top bar, menus) ----------
   readonly navGroups: { label: string; items: { route: AppComponent['currentRoute']; label: string; icon: string; subtitle: string }[] }[] = [
@@ -94,6 +95,7 @@ export class AppComponent implements OnInit, OnDestroy {
       label: 'Workspace',
       items: [
         { route: 'members', label: 'Members', icon: 'building', subtitle: 'People in this workspace, roles and invitations' },
+        { route: 'performance', label: 'Team Performance', icon: 'dashboard', subtitle: 'Staff performance: conversion, follow-up discipline and communication' },
         { route: 'admin', label: 'Platform Admin', icon: 'settings', subtitle: 'All workspaces, users and activity' }
       ]
     }
