@@ -54,12 +54,43 @@ describe('MembersComponent: permissions panel', () => {
     c().editPermissions(m);
     fixture.detectChanges();
     // Grouped: Sections, Email, (Team Performance when offered), Calls & CRM; each group with its count.
+    // One group per menu item, in the sidebar's order; each section's switch is in its header.
     const groups = Array.from(el().querySelectorAll('.pm-group h4')).map(h => h.textContent!.trim());
-    expect(groups[0]).toBe('Sections they can open');
-    expect(groups).toContain('Email');
-    expect(groups[groups.length - 1]).toBe('Calls & CRM');
-    expect(el().querySelector('.pm-group')!.textContent).toContain('1 of 1 on');
+    expect(groups).toEqual(['CRM', 'Leads']);
+    const leads = Array.from(el().querySelectorAll('.pm-group')).find(g => g.querySelector('h4')!.textContent!.trim() === 'Leads') as HTMLElement;
+    expect((leads.querySelector('.pm-switch input') as HTMLInputElement).checked).toBeTrue();
+    expect(leads.querySelector('.pm-state')!.textContent).toContain('On');
+    // CRM: the header checkbox gives Viewer access (the level is chosen below) and removes it; calls stay visible.
+    const crm = () => Array.from(el().querySelectorAll('.pm-group')).find(g => g.querySelector('h4')!.textContent!.trim() === 'CRM') as HTMLElement;
+    expect((crm().querySelector('.pm-switch input') as HTMLInputElement).checked).toBeFalse();
+    expect(crm().textContent).toContain('Make calls');
+    (crm().querySelector('.pm-switch input') as HTMLInputElement).click();
+    fixture.detectChanges();
+    expect(c().perm!.crmRole).toBe('viewer');
+    expect(crm().querySelector('.pm-state')!.textContent).toContain('Viewer');
+    expect(crm().querySelector('select')).toBeTruthy();
+    (crm().querySelector('.pm-switch input') as HTMLInputElement).click();
+    fixture.detectChanges();
+    expect(c().perm!.crmRole).toBeNull();
+    // Ticking Make calls while CRM is off turns CRM on too (Viewer).
+    const calls = Array.from(crm().querySelectorAll('.pm-list li')).find(li => li.textContent!.includes('Make calls'))!.querySelector('input') as HTMLInputElement;
+    calls.click();
+    fixture.detectChanges();
+    expect(c().perm!.calls).toBeTrue();
+    expect(c().perm!.crmRole).toBe('viewer');
+    expect((crm().querySelector('.pm-switch input') as HTMLInputElement).checked).toBeTrue();
+    // Unticking Make calls removes the CRM access it gave; a level chosen by hand stays.
+    (Array.from(crm().querySelectorAll('.pm-list li')).find(li => li.textContent!.includes('Make calls'))!.querySelector('input') as HTMLInputElement).click();
+    fixture.detectChanges();
+    expect(c().perm!.calls).toBeFalse();
+    expect(c().perm!.crmRole).toBeNull();
+    (crm().querySelector('.pm-switch input') as HTMLInputElement).click(); fixture.detectChanges(); // CRM on by hand
+    const calls2 = () => Array.from(crm().querySelectorAll('.pm-list li')).find(li => li.textContent!.includes('Make calls'))!.querySelector('input') as HTMLInputElement;
+    calls2().click(); fixture.detectChanges();
+    calls2().click(); fixture.detectChanges();
+    expect(c().perm!.crmRole).withContext('chosen by hand: kept').toBe('viewer');
     expect(el().textContent).toContain('Make calls');
+    c().perm!.crmRole = null; // back to no CRM access (the checks above turned it on)
     c().perm!.calls = true;
     c().toggleGrant(SEND);
     const done = c().savePermissions(m);
@@ -108,7 +139,8 @@ describe('MembersComponent: Mail Center tabs', () => {
     c().editPermissions(m);
     fixture.detectChanges();
     const sub = el().querySelector('.pm-sub') as HTMLElement;
-    expect(sub.textContent).toContain('Mail Center tabs');
+    expect(sub.closest('.pm-group')!.querySelector('h4')!.textContent).toContain('Mail Center & email campaigns');
+    expect(sub.textContent).toContain('Tabs');
     expect(sub.textContent).toContain('2 of 5 on');
     const boxes = Array.from(sub.querySelectorAll('.pm-chip input')) as HTMLInputElement[];
     expect(boxes.map(b => b.checked)).toEqual([true, true, false, false, false]);
@@ -122,11 +154,36 @@ describe('MembersComponent: Mail Center tabs', () => {
     http.expectOne(r => r.url.endsWith('/workspace/members')).flush(d(['inbox', 'campaigns', 'logs']));
   });
 
-  it('the tabs are hidden while Mail Center is not ticked', () => {
+  it('a section that is off shows its permissions dimmed; ticking one turns the section on, unticking does not', () => {
     c().editPermissions(c().data.members[1]);
-    c().perm!.modules.delete('mail');
     fixture.detectChanges();
-    expect(el().querySelector('.pm-sub')).toBeNull();
+    const mail = () => Array.from(el().querySelectorAll('.pm-group')).find(g => g.querySelector('h4')!.textContent!.includes('Mail Center')) as HTMLElement;
+    const main = () => mail().querySelector('.pm-switch input') as HTMLInputElement;
+    main().click();
+    fixture.detectChanges();
+    expect(c().perm!.modules.has('mail')).toBeFalse();
+    expect(mail().classList).toContain('closed');
+    expect(mail().textContent).toContain('Ticking any permission below turns it on');
+    const tabs = () => Array.from(mail().querySelectorAll('.pm-sub .pm-chip input')) as HTMLInputElement[];
+    tabs()[0].click(); // untick Inbox (was on): the section stays off
+    fixture.detectChanges();
+    expect(c().perm!.modules.has('mail')).toBeFalse();
+    tabs()[4].click(); // tick Logs: the section turns on
+    fixture.detectChanges();
+    expect(c().perm!.modules.has('mail')).toBeTrue();
+    expect(main().checked).toBeTrue();
+    expect(c().perm!.mailTabs.has('logs')).toBeTrue();
+    // Unticking everything again (Clear, then the last tab) turns the section off too.
+    (Array.from(mail().querySelectorAll('.pm-sub .link-btn')).find(b => b.textContent!.includes('Clear')) as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect(c().perm!.mailTabs.size).toBe(0);
+    expect(c().perm!.modules.has('mail')).toBeFalse();
+    expect(main().checked).toBeFalse();
+    // One tab back on, then off: on, then off again.
+    tabs()[1].click(); fixture.detectChanges();
+    expect(c().perm!.modules.has('mail')).toBeTrue();
+    tabs()[1].click(); fixture.detectChanges();
+    expect(c().perm!.modules.has('mail')).toBeFalse();
   });
 });
 

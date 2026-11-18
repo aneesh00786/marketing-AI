@@ -361,7 +361,8 @@ app.post('/api/v1/auth/change-password', async (req, res) => {
 app.get(['/api/v1/auth/me', '/api/auth/me'], async (req, res) => {
   try {
     const me = await authService.getUserMe(req.auth.userId, req.auth.workspaceId);
-    res.json({ ...me, role: req.auth.role, capabilities: [...req.auth.capabilities], modules: [...(req.auth.modules || [])], mailTabs: [...(req.auth.mailTabs || require('./lib/mailTabs').KEYS)] });
+    res.json({ ...me, role: req.auth.role, capabilities: [...req.auth.capabilities], modules: [...(req.auth.modules || [])], mailTabs: [...(req.auth.mailTabs || require('./lib/mailTabs').KEYS)],
+      impersonatedBy: req.auth.impersonatedBy ? { email: req.auth.impersonatedBy.email, displayName: req.auth.impersonatedBy.displayName || null } : null });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

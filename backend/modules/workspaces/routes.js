@@ -87,6 +87,11 @@ router.patch('/api/v1/workspace/members/:userId', member, requireCapability('mem
 router.put('/api/v1/workspace/members/:userId/grants/:capability', member, requireCapability('members.manage'), wrap(async (req, res) => res.json({ success: true, ...(await members.grantCapability(req, req.params.userId, req.params.capability)) })));
 router.delete('/api/v1/workspace/members/:userId/grants/:capability', member, requireCapability('members.manage'), wrap(async (req, res) => res.json({ success: true, ...(await members.revokeCapability(req, req.params.userId, req.params.capability)) })));
 // Sections a member can open (Owners/Admins: members.manage), and CRM access (platform admin only).
+// "Log in as user" (Owners/Admins): signs the caller out and returns a session as that member.
+router.post('/api/v1/workspace/members/:userId/login-as', member, requireCapability('members.manage'), wrap(async (req, res) => {
+  const session = await members.loginAs(req, req.params.userId);
+  res.json({ success: true, ...session, workspace: describe(session.workspace), workspaces: session.workspaces.map(describe), impersonating: true });
+}));
 router.put('/api/v1/workspace/members/:userId/modules', member, requireCapability('members.manage'), wrap(async (req, res) => res.json({ success: true, ...(await members.setModules(req, req.params.userId, req.body)) })));
 router.put('/api/v1/workspace/members/:userId/calling', member, requireCapability('members.manage'), wrap(async (req, res) => res.json({ success: true, ...(await members.setCalling(req, req.params.userId, req.body)) })));
 router.put('/api/v1/workspace/members/:userId/crm', member, requireCapability('members.manage'), wrap(async (req, res) => res.json({ success: true, ...(await members.setCrmAccess(req, req.params.userId, req.body)) })));

@@ -376,6 +376,29 @@ async function setModules(ctx, rawUserId, input) {
     mailTabs: mailTabsView(m.role, stored === null ? null : (typeof stored === 'string' ? stored : JSON.stringify(stored))) };
 }
 
+/**
+ * "Log in as user": an Owner/Admin opens this workspace as one of its members, to check what that person can
+ * see and do, without their password. Only members of a lower role (an Admin cannot open an Owner or another
+ * Admin), never the platform admin, never from a "Log in as user" session. The opener's own session ends
+ * (they are signed out); the new one is marked, lasts an hour and stays in this workspace.
+ */
+const RANK = { 'Workspace Owner': 3, 'Workspace Admin': 2 };
+async function loginAs(ctx, rawUserId) {
+  if (ctx.auth.platformAccess) throw httpError(403, 'Open the workspace as a member to use this.', 'PLATFORM_ACCESS');
+  const m = await requireOtherMember(ctx, rawUserId);
+  if ((RANK[m.role] || 1) >= (RANK[ctx.auth.role] || 1)) {
+    throw httpError(403, `You can only log in as members with a lower role than yours (${ctx.auth.role}).`, 'ROLE_TOO_HIGH');
+  }
+  if (await isPlatformAdmin(m.user_id)) throw httpError(403, 'You cannot log in as the platform admin.', 'PLATFORM_ADMIN');
+  const target = await get('SELECT * FROM users WHERE id = ?', [m.user_id]);
+  if (!target || (target.status && target.status !== 'Active')) throw httpError(409, 'This account is not active.', 'USER_INACTIVE');
+  const session = await authService.impersonationSession(target, ws(ctx), ctx.auth.userId);
+  await audit(ctx, 'auth.login_as_started', { resourceType: 'workspace_member', resourceId: m.user_id, metadata: { email: target.email, role: m.role, minutes: authService.IMPERSONATION_TTL_SECONDS / 60 } });
+  // The opener is signed out: one person per browser at a time.
+  await authService.signOut(ctx.auth).catch(() => null);
+  return session;
+}
+
 /** "Make calls" (charged to the company's Telnyx account): only the platform admin turns it on or off. */
 async function setCalling(ctx, rawUserId, input) {
   const v = z.object({ enabled: z.boolean() }).strict().parse(input || {});
@@ -503,4 +526,5 @@ module.exports = {
   publicPreview,
   signUpWithInvitation,
   setModules,
+  loginAs,
   setCrmAccess, listMembers, invite, resend, cancel, changeRole, removeMember, grantCapability, revokeCapability, myInvitations, preview, accept, decline, hashToken, OWNER };

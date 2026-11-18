@@ -79,3 +79,22 @@ tr.access-edit td { background: rgba(79, 70, 229, .04); }
 .pm-sub .pm-sections { padding: 10px; }
 .pm-sub-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 10px 0; }
 .pm-sub-head > span:first-child { flex: 1 1 260px; min-width: 0; font-size: 0.85rem; }
+
+/* One group per menu item */
+.pm-all { display: flex; justify-content: flex-end; align-items: center; gap: 12px; margin: 0 0 8px; }
+.pm-switch { display: inline-flex; align-items: center; cursor: pointer; }
+.pm-switch input { width: 18px; height: 18px; cursor: pointer; }
+.pm-switch-gap { width: 18px; flex: 0 0 auto; }
+.pm-state { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: var(--surface); border: 1px solid var(--border); color: var(--text-muted); }
+.pm-state.on { background: var(--accent-soft); color: var(--text); border-color: transparent; }
+.pm-group.closed .pm-group-head { border-bottom: 1px solid var(--border); }
+.pm-group.closed .pm-ic, .pm-group.closed h4 { opacity: .65; }
+.pm-empty { margin: 0; padding: 10px 14px; }
+.pm-group > .pm-sub { margin-top: 12px; }
+
+/* A section that is off: its permissions are shown dimmed; ticking one turns the section on */
+.pm-group.closed .pm-sub, .pm-group.closed .pm-list { opacity: .6; }
+.pm-group.closed .pm-sub:hover, .pm-group.closed .pm-list:hover { opacity: 1; }
+.pm-hint { padding-bottom: 0; }
+
+.login-as { margin-left: 6px; white-space: nowrap; }

@@ -931,6 +931,7 @@ export class AppComponent implements OnInit, OnDestroy {
         this.myCaps = Array.isArray(me?.capabilities) ? new Set(me.capabilities) : null;
         this.myModules = Array.isArray(me?.modules) ? new Set(me.modules) : null;
         this.myMailTabs = Array.isArray(me?.mailTabs) ? new Set(me.mailTabs) : null;
+        this.impersonatedBy = me?.impersonatedBy || null;
         loadSections();
       },
       error: () => { this.myCaps = null; loadSections(); }
@@ -1744,6 +1745,8 @@ export class AppComponent implements OnInit, OnDestroy {
   /** Capabilities of the signed-in member (null = unknown; the server still decides). */
   /** Mail Center tabs this person may open (from /auth/me; null = all). */
   myMailTabs: Set<string> | null = null;
+  /** Set while an Owner/Admin is logged in as this user ("Log in as user"): shown in a banner. */
+  impersonatedBy: { email: string; displayName: string | null } | null = null;
   myCaps: Set<string> | null = null;
   /** Sending Compose email as transactional needs mail.send_transactional (Owners/Admins by default). */
   get canSendTransactional(): boolean { return this.myCaps === null || this.myCaps.has('mail.send_transactional'); }

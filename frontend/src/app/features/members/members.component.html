@@ -73,6 +73,8 @@
             </td>
             <td *ngIf="data.canManage" class="right">
               <button *ngIf="canEdit(m)" class="btn btn-danger btn-sm" type="button" (click)="remove(m)">Remove</button>
+              <button *ngIf="canLoginAs(m)" class="btn btn-secondary btn-sm login-as" type="button" (click)="loginAs(m)" [disabled]="busy === 'login-as'"
+                [title]="'See Marketech.ai as ' + (m.displayName || m.email) + ' sees it (you are signed out)'">{{ busy === 'login-as' ? 'Opening…' : 'Log in as user' }}</button>
             </td>
           </tr>
           <tr *ngIf="perm?.userId === m.userId" class="access-edit">
@@ -82,92 +84,106 @@
                 <span class="muted small">Role: {{ m.role }}. The role decides what they can do inside each section; these add to it.</span>
               </div>
 
-              <!-- 1. Sections -->
-              <section class="pm-group">
+              <p class="muted small pm-note" *ngIf="m.modules?.fullAccessRole">{{ m.role }}s always open every section.</p>
+              <span class="pm-actions pm-all" *ngIf="!m.modules?.fullAccessRole">
+                <span class="muted small">{{ perm!.modules.size }} of {{ data.modules?.length || 0 }} sections on</span>
+                <button type="button" class="link-btn" (click)="setAllModules(true)">Turn all on</button>
+                <button type="button" class="link-btn" (click)="setAllModules(false)">Turn all off</button>
+              </span>
+
+              <!-- One group per menu item: the section's checkbox in the header, its permissions under it -->
+              <section class="pm-group" *ngFor="let grp of shownMenuGroups" [class.closed]="!groupOn(m, grp)">
                 <header class="pm-group-head">
-                  <span class="pm-ic" aria-hidden="true">▦</span>
-                  <div><h4>Sections they can open</h4><small class="muted">Pages in the menu.</small></div>
-                  <span class="pm-count" *ngIf="!m.modules?.fullAccessRole">{{ perm!.modules.size }} of {{ data.modules?.length || 0 }} on</span>
-                  <span class="pm-actions" *ngIf="!m.modules?.fullAccessRole">
-                    <button type="button" class="link-btn" (click)="setAllModules(true)">Select all</button>
-                    <button type="button" class="link-btn" (click)="setAllModules(false)">Clear</button>
-                  </span>
-                </header>
-                <p class="muted small pm-note" *ngIf="m.modules?.fullAccessRole">{{ m.role }}s always open every section.</p>
-                <div class="pm-sections" *ngIf="!m.modules?.fullAccessRole">
-                  <label class="pm-chip" *ngFor="let mod of data.modules" [class.on]="perm!.modules.has(mod.key)" [title]="mod.description">
-                    <input type="checkbox" [checked]="perm!.modules.has(mod.key)" (change)="toggle(perm!.modules, mod.key)" />
-                    <span>{{ mod.label }}</span>
+                  <label class="pm-switch" *ngIf="grp.module" [title]="m.modules?.fullAccessRole ? 'Always on for ' + m.role + 's' : 'Show this section to them'">
+                    <input type="checkbox" [checked]="groupOn(m, grp)" [disabled]="!!m.modules?.fullAccessRole" (change)="toggle(perm!.modules, grp.module!)"
+                      [attr.aria-label]="'Section: ' + grp.title" />
                   </label>
-                </div>
-
-                <!-- Mail Center tabs (while Mail Center is ticked) -->
-                <div class="pm-sub" *ngIf="!m.modules?.fullAccessRole && data.mailTabs?.length && perm!.modules.has('mail')">
-                  <div class="pm-sub-head">
-                    <span><b>Mail Center tabs</b> <small class="muted">Overview, Sent Mail, Drafts and Approvals are always there; their role decides what they can do.</small></span>
-                    <span class="pm-count">{{ perm!.mailTabs.size }} of {{ data.mailTabs.length }} on</span>
-                    <span class="pm-actions">
-                      <button type="button" class="link-btn" (click)="setAllMailTabs(true)">Select all</button>
-                      <button type="button" class="link-btn" (click)="setAllMailTabs(false)">Clear</button>
-                    </span>
-                  </div>
-                  <div class="pm-sections">
-                    <label class="pm-chip" *ngFor="let t of data.mailTabs" [class.on]="perm!.mailTabs.has(t.key)" [title]="t.description">
-                      <input type="checkbox" [checked]="perm!.mailTabs.has(t.key)" (change)="toggle(perm!.mailTabs, t.key)" />
-                      <span>{{ t.label }}</span>
-                    </label>
-                  </div>
-                </div>
-              </section>
-
-              <!-- 2. Email, Team Performance (and anything else the server offers) -->
-              <section class="pm-group" *ngFor="let grp of shownGrantGroups">
-                <header class="pm-group-head">
+                  <!-- CRM: on = an access level (Viewer to start), off = No access -->
+                  <label class="pm-switch" *ngIf="grp.crm" [title]="m.isYou ? 'Your own CRM access cannot be changed here' : 'Give CRM access'">
+                    <input type="checkbox" [checked]="!!perm!.crmRole" [disabled]="m.isYou" (change)="toggleCrm()" aria-label="Section: CRM" />
+                  </label>
+                  <span class="pm-switch-gap" *ngIf="!grp.module && !grp.crm" aria-hidden="true"></span>
                   <span class="pm-ic" aria-hidden="true">{{ grp.icon }}</span>
-                  <div><h4>{{ grp.title }}</h4><small class="muted" *ngIf="grp.desc">{{ grp.desc }}</small></div>
-                  <span class="pm-count">{{ groupCount(m, grp) }}</span>
+                  <div>
+                    <h4>{{ grp.title }}</h4>
+                    <small class="muted">{{ grp.module ? moduleDesc(grp.module) : grp.note }}</small>
+                  </div>
+                  <span class="pm-count" *ngIf="groupGrants(grp).length && groupOn(m, grp)">{{ groupCount(m, grp) }}</span>
+                  <span class="pm-state" *ngIf="grp.module || grp.crm" [class.on]="groupOn(m, grp)">{{ groupOn(m, grp) ? (grp.crm ? (perm!.crmRole | titlecase) : 'On') : 'Off' }}</span>
                 </header>
-                <ul class="pm-list">
-                  <li *ngFor="let g of groupGrants(grp)" [class.on]="grantOn(m, g.capability)" [class.off]="!!grantTag(m, g.capability) && !grantOn(m, g.capability)">
-                    <label>
-                      <input type="checkbox" [checked]="grantOn(m, g.capability)" (change)="toggleGrant(g.capability)"
-                        [disabled]="perm!.grants[g.capability] === 'role' || perm!.grants[g.capability] === 'not_eligible' || !grantPossible(g.capability)" />
-                      <span class="pm-text">
-                        <span class="pm-title">{{ grantTitle(g) }} <span class="pm-tag" *ngIf="grantTag(m, g.capability) as t" [class.role]="t === 'In role'">{{ t }}</span></span>
-                        <small class="muted">{{ grantHelp(m, g.capability) }}</small>
-                      </span>
-                    </label>
-                  </li>
-                </ul>
-              </section>
 
-              <!-- 3. Calls & CRM -->
-              <section class="pm-group" *ngIf="data.crmRoles">
-                <header class="pm-group-head">
-                  <span class="pm-ic" aria-hidden="true">📞</span>
-                  <div><h4>Calls &amp; CRM</h4><small class="muted">Calls use the company phone line. CRM is the platform-wide contacts, companies and deals.</small></div>
-                </header>
-                <ul class="pm-list">
-                  <li [class.on]="perm!.calls || crmAllowsCalls(perm!.crmRole)">
-                    <label>
-                      <input type="checkbox" [checked]="perm!.calls || crmAllowsCalls(perm!.crmRole)" (change)="perm!.calls = !perm!.calls" [disabled]="m.isYou || crmAllowsCalls(perm!.crmRole)" />
-                      <span class="pm-text">
-                        <span class="pm-title">Make calls <span class="pm-tag role" *ngIf="crmAllowsCalls(perm!.crmRole)">With CRM access</span></span>
-                        <small class="muted">The call button next to phone numbers.</small>
+                <ng-container *ngIf="groupOn(m, grp) || !grp.crm">
+                  <!-- Mail Center tabs -->
+                  <div class="pm-sub" *ngIf="grp.tabs && !m.modules?.fullAccessRole && data.mailTabs?.length">
+                    <div class="pm-sub-head">
+                      <span><b>Tabs</b> <small class="muted">Overview, Sent Mail, Drafts and Approvals are always there.</small></span>
+                      <span class="pm-count">{{ perm!.mailTabs.size }} of {{ data.mailTabs.length }} on</span>
+                      <span class="pm-actions">
+                        <button type="button" class="link-btn" (click)="setAllMailTabs(true)">Select all</button>
+                        <button type="button" class="link-btn" (click)="setAllMailTabs(false); afterUntick(m, grp)">Clear</button>
                       </span>
-                    </label>
-                  </li>
-                  <li class="pm-select">
-                    <span class="pm-text">
-                      <span class="pm-title">CRM access</span>
-                      <small class="muted">Sales, Support and Manager can also make calls.</small>
-                    </span>
-                    <select class="hud-input sm" [(ngModel)]="perm!.crmRole" [disabled]="m.isYou" aria-label="CRM access">
-                      <option [ngValue]="null">No access</option>
-                      <option *ngFor="let r of data.crmRoles" [ngValue]="r">{{ r | titlecase }}</option>
-                    </select>
-                  </li>
+                    </div>
+                    <div class="pm-sections">
+                      <label class="pm-chip" *ngFor="let t of data.mailTabs" [class.on]="perm!.mailTabs.has(t.key)" [title]="t.description">
+                        <input type="checkbox" [checked]="perm!.mailTabs.has(t.key)" (change)="toggleSub(m, grp, !perm!.mailTabs.has(t.key)); toggle(perm!.mailTabs, t.key); afterUntick(m, grp)" />
+                        <span>{{ t.label }}</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  <!-- Permissions of this section -->
+                  <ul class="pm-list" *ngIf="groupGrants(grp).length">
+                    <li *ngFor="let g of groupGrants(grp)" [class.on]="grantOn(m, g.capability)" [class.off]="!!grantTag(m, g.capability) && !grantOn(m, g.capability)">
+                      <label>
+                        <input type="checkbox" [checked]="grantOn(m, g.capability)" (change)="toggleSub(m, grp, !grantOn(m, g.capability)); toggleGrant(g.capability); afterUntick(m, grp)"
+                          [disabled]="perm!.grants[g.capability] === 'role' || perm!.grants[g.capability] === 'not_eligible' || !grantPossible(g.capability)" />
+                        <span class="pm-text">
+                          <span class="pm-title">{{ grantTitle(g) }} <span class="pm-tag" *ngIf="grantTag(m, g.capability) as t" [class.role]="t === 'In role'">{{ t }}</span></span>
+                          <small class="muted">{{ grantHelp(m, g.capability) }}</small>
+                        </span>
+                      </label>
+                    </li>
+                  </ul>
+
+                  <!-- CRM: access level and calls -->
+                  <ul class="pm-list" *ngIf="grp.crm">
+                    <li class="pm-select">
+                      <span class="pm-text">
+                        <span class="pm-title">Access level</span>
+                        <small class="muted">Viewer only reads. Sales, Support and Manager can also make calls.</small>
+                      </span>
+                      <select class="hud-input sm" [(ngModel)]="perm!.crmRole" [disabled]="m.isYou" aria-label="CRM access level">
+                        <option *ngFor="let r of data.crmRoles" [ngValue]="r">{{ r | titlecase }}</option>
+                      </select>
+                    </li>
+                    <li [class.on]="perm!.calls || crmAllowsCalls(perm!.crmRole)">
+                      <label>
+                        <input type="checkbox" [checked]="perm!.calls || crmAllowsCalls(perm!.crmRole)" (change)="toggleCalls()" [disabled]="m.isYou || crmAllowsCalls(perm!.crmRole)" />
+                        <span class="pm-text">
+                          <span class="pm-title">Make calls <span class="pm-tag role" *ngIf="crmAllowsCalls(perm!.crmRole)">With CRM access</span></span>
+                          <small class="muted">The call button next to phone numbers (Leads, campaigns).</small>
+                        </span>
+                      </label>
+                    </li>
+
+                  </ul>
+
+                  <p class="muted small pm-empty" *ngIf="groupOn(m, grp) && !grp.tabs && !grp.crm && !groupGrants(grp).length">No other permissions: their role decides what they can do here.</p>
+                </ng-container>
+                <!-- Make calls does not need CRM access: it stays here when CRM is off -->
+                <ul class="pm-list" *ngIf="grp.crm && !groupOn(m, grp)">
+                    <li [class.on]="perm!.calls || crmAllowsCalls(perm!.crmRole)">
+                      <label>
+                        <input type="checkbox" [checked]="perm!.calls || crmAllowsCalls(perm!.crmRole)" (change)="toggleCalls()" [disabled]="m.isYou || crmAllowsCalls(perm!.crmRole)" />
+                        <span class="pm-text">
+                          <span class="pm-title">Make calls <span class="pm-tag role" *ngIf="crmAllowsCalls(perm!.crmRole)">With CRM access</span></span>
+                          <small class="muted">The call button next to phone numbers (Leads, campaigns).</small>
+                        </span>
+                      </label>
+                    </li>
                 </ul>
+                <p class="muted small pm-empty" *ngIf="!groupOn(m, grp) && (grp.crm || (!grp.tabs && !groupGrants(grp).length))">{{ grp.crm ? 'No CRM access. Tick it to give access (Viewer to start), then choose the level.' : 'Turn it on to show this section to them.' }}</p>
+                <p class="muted small pm-empty pm-hint" *ngIf="!groupOn(m, grp) && !grp.crm && (grp.tabs || groupGrants(grp).length)">Section is off. Ticking any permission below turns it on.</p>
               </section>
 
               <div class="row-actions pm-save">

@@ -83,6 +83,14 @@ async function resolveAuth(token) {
   );
   if (!member || member.status !== 'Active') return null;
   if (member.user_status && member.user_status !== 'Active') return null;
+  // "Log in as user": the opener must still be an active Owner/Admin of this workspace (ends the moment they are not).
+  let impersonatedBy = null;
+  if (payload.impersonatedBy) {
+    const by = await get(`SELECT m.role, u.email, u.display_name FROM workspace_members m JOIN users u ON u.id = m.user_id
+      WHERE m.workspace_id = ? AND m.user_id = ? AND m.status = 'Active' AND (u.status IS NULL OR u.status = 'Active')`, [member.workspace_id, payload.impersonatedBy]);
+    if (!by || !['Workspace Owner', 'Workspace Admin'].includes(by.role)) return null;
+    impersonatedBy = { userId: Number(payload.impersonatedBy), email: by.email, displayName: by.display_name };
+  }
 
   return {
     userId: member.user_id,
@@ -94,12 +102,21 @@ async function resolveAuth(token) {
     // Role capabilities plus per-member grants the role currently qualifies for (fails closed).
     capabilities: await require('../lib/capabilityGrants').effectiveCapabilities(member.workspace_id, member.user_id, member.role),
     // Sections this member may open (Owners/Admins: all). Read on every request, so changes apply at once.
+    ...(impersonatedBy ? { impersonatedBy } : {}),
     modules: require('../lib/moduleAccess').modulesFor(member.role, member.module_access_json),
     // Mail Center tabs (Owners/Admins: all). Read separately so a server without migration 066 keeps working (all tabs).
     mailTabs: require('../lib/mailTabs').tabsFor(member.role,
       (await get('SELECT mail_tabs_json FROM workspace_members WHERE workspace_id = ? AND user_id = ?', [member.workspace_id, member.user_id]).catch(() => null))?.mail_tabs_json ?? null)
   };
 }
+
+/** Account-level actions refused while logged in as another user ("Log in as user"). */
+const IMPERSONATION_BLOCKED = [
+  /^\/api\/(v1\/)?auth\/(change-password|logout-all|switch-workspace)$/,
+  /^\/api\/v1\/invitations\/(accept|decline)$/,
+  /^\/api\/v1\/workspaces$/,
+  /^\/api\/v1\/workspace\/members\/\d+\/login-as$/
+];
 
 function requireAuth() {
   return async function requireAuthMiddleware(req, res, next) {
@@ -117,6 +134,10 @@ function requireAuth() {
         return res.status(401).json({ success: false, error: 'Authentication required.', code: 'UNAUTHENTICATED' });
       }
       req.auth = auth;
+      // Logged in as someone else: nothing that changes their account or reaches beyond this workspace.
+      if (auth.impersonatedBy && IMPERSONATION_BLOCKED.some(re => re.test(req.originalUrl.split('?')[0])) && req.method !== 'GET') {
+        return res.status(403).json({ success: false, error: 'Not available while logged in as another user. Sign out and sign in as yourself.', code: 'IMPERSONATION_BLOCKED' });
+      }
       next();
     } catch (err) {
       next(err);

@@ -164,6 +164,11 @@
 
     <app-softphone></app-softphone>
     <main class="content">
+      <div class="admin-access-banner login-as-banner" *ngIf="impersonatedBy" role="status">
+        <app-icon name="leads" [size]="16"></app-icon>
+        <span>You are logged in as <b>{{ auth.user?.displayName || auth.user?.email }}</b> (opened by {{ impersonatedBy.displayName || impersonatedBy.email }}). What you do is recorded as done on their behalf. This ends after an hour.</span>
+        <button type="button" class="link-btn" (click)="logout()">Sign out</button>
+      </div>
       <div class="admin-access-banner" *ngIf="auth.workspace?.adminAccess" role="status">
         <app-icon name="settings" [size]="16"></app-icon>
         <span>Admin access: you are inside <b>{{ auth.workspace?.name }}</b>. Changes here are real and logged under your name.</span>

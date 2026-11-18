@@ -4,12 +4,16 @@ import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { apiRoot } from '../../core/api-base';
+import { AuthStateService } from '../../core/auth-state.service';
 
 /**
  * Members of the current workspace. Everyone sees the list; Owners and Admins invite, change
  * roles and remove (the server enforces every rule; controls are only hidden here). Only Owners
  * see Owner-related controls, and nobody gets controls for their own membership.
  */
+/** One group of the permissions panel: a menu item (section) and the permissions that belong to it. */
+interface MenuGroup { key: string; title: string; icon: string; module?: string; caps: string[]; tabs?: boolean; crm?: boolean; note?: string }
+
 @Component({
   selector: 'app-members',
   standalone: true,
@@ -33,7 +37,7 @@ export class MembersComponent implements OnInit {
   // The link of the last invitation created or resent (shown once, for sharing when not emailed).
   lastLink: { email: string; link: string; emailed: boolean; emailError: string | null } | null = null;
 
-  constructor(private http: HttpClient) {}
+  constructor(private http: HttpClient, private auth: AuthStateService) {}
 
   ngOnInit(): void { this.load(); }
 
@@ -53,6 +57,26 @@ export class MembersComponent implements OnInit {
   get assignableRoles(): string[] {
     const roles: string[] = this.data?.roles || [];
     return this.data?.canManageOwners ? roles : roles.filter(r => r !== 'Workspace Owner');
+  }
+
+  /**
+   * "Log in as user" (Owners/Admins): only members with a lower role than yours. The server checks it too
+   * (and never allows the platform admin or a session opened this way).
+   */
+  canLoginAs(m: any): boolean {
+    const rank = (r: string) => (r === 'Workspace Owner' ? 3 : r === 'Workspace Admin' ? 2 : 1);
+    const me = (this.data?.members || []).find((x: any) => x.isYou);
+    return !!this.data?.canManage && !!me && !m.isYou && m.status === 'Active' && rank(m.role) < rank(me.role);
+  }
+
+  loginAs(m: any): void {
+    const who = m.displayName || m.email;
+    if (!confirm(`Log in as ${who}?\n\nYou will be signed out and see Marketech.ai exactly as ${who} does, in this workspace, for up to an hour. Their password is not changed. Everything you do is recorded as done by you on their behalf. Sign out to end it, then sign in as yourself.`)) return;
+    this.busy = 'login-as';
+    this.http.post<any>(`${this.base}/members/${m.userId}/login-as`, {}).subscribe({
+      next: r => { this.auth.setSession(r); window.location.href = '/'; },
+      error: e => { this.busy = ''; this.toast.emit(this.err(e)); }
+    });
   }
 
   canEdit(m: any): boolean {
@@ -99,6 +123,7 @@ export class MembersComponent implements OnInit {
 
   editPermissions(m: any): void {
     if (this.perm?.userId === m.userId) { this.perm = null; return; }
+    this.crmAuto = false;
     this.perm = { userId: m.userId, modules: new Set(m.modules?.keys || []), mailTabs: new Set(m.mailTabs?.keys || (this.data?.mailTabs || []).map((t: any) => t.key)),
       calls: !!m.callGrant, crmRole: m.crmRole || null, grants: { ...(m.grants || {}) } };
   }
@@ -136,11 +161,88 @@ export class MembersComponent implements OnInit {
 
   grantIcon(cap: string): string { return cap.startsWith('performance.') ? '📊' : '✉'; }
 
-  /** Permission groups in the panel, in a sensible order; anything the server adds later lands in "Other". */
-  readonly grantGroups: { key: string; title: string; icon: string; desc: string; caps: string[] }[] = [
-    { key: 'mail', title: 'Email', icon: '✉', desc: 'Sending email and what they see in Mail Center.', caps: ['mail.send', 'mail.send_transactional', 'mail.view_all', 'mail.configure'] },
-    { key: 'perf', title: 'Team Performance', icon: '📊', desc: 'Most of these need “View team performance” first.', caps: ['performance.view_team', 'performance.compare', 'performance.export', 'performance.view_transcripts', 'performance.manage_targets', 'performance.configure_scoring', 'performance.schedule_reports'] }
+  /**
+   * The permissions panel, one group per menu item in the sidebar's order. A group with a section
+   * (module) has its on/off checkbox in the header; the related permissions are listed under it.
+   */
+  readonly menuGroups: MenuGroup[] = [
+    { key: 'products', title: 'Digital Products', icon: '📦', module: 'products', caps: [] },
+    { key: 'crm', title: 'CRM', icon: '💼', caps: [], crm: true, note: 'Platform-wide contacts, companies and deals. Calls use the company phone line.' },
+    { key: 'leads', title: 'Leads', icon: '👥', module: 'leads', caps: [] },
+    { key: 'appointments', title: 'Demos', icon: '📅', module: 'appointments', caps: [] },
+    { key: 'mail', title: 'Mail Center & email campaigns', icon: '✉', module: 'mail', tabs: true, caps: ['mail.send', 'mail.send_transactional', 'mail.view_all', 'mail.configure'] },
+    { key: 'social', title: 'Social Media Marketing', icon: '📣', module: 'social', caps: [] },
+    { key: 'campaigns', title: 'AI Campaigns', icon: '🎯', module: 'campaigns', caps: [] },
+    { key: 'voice', title: 'Mark Voice Center', icon: '🎙', module: 'voice', caps: [] },
+    { key: 'perf', title: 'Team Performance', icon: '📊', caps: ['performance.view_team', 'performance.compare', 'performance.export', 'performance.view_transcripts', 'performance.manage_targets', 'performance.configure_scoring', 'performance.schedule_reports'],
+      note: 'Everyone can open it and see their own figures. Most of these need “View team performance” first.' }
   ];
+
+  /** Groups shown: sections the server knows, CRM only for the platform admin, plus "Other" for new permissions. */
+  get shownMenuGroups(): MenuGroup[] {
+    const mods = new Set((this.data?.modules || []).map((x: any) => x.key));
+    const known = new Set(this.menuGroups.flatMap(g => g.caps));
+    const other = (this.data?.grantable || []).filter((g: any) => !known.has(g.capability)).map((g: any) => g.capability);
+    return [
+      ...this.menuGroups.filter(g => (g.module ? mods.has(g.module) : true) && (!g.crm || !!this.data?.crmRoles) && (g.module || g.crm || this.groupGrants(g).length)),
+      ...(other.length ? [{ key: 'other', title: 'Other', icon: '⚙', caps: other } as MenuGroup] : [])
+    ];
+  }
+
+  /** The section's description from the server (shown under the group title). */
+  moduleDesc(key?: string): string { return key ? (this.data?.modules || []).find((x: any) => x.key === key)?.description || '' : ''; }
+
+  /** Whether a group's section is on (groups without a section are always open). */
+  groupOn(m: any, g: any): boolean {
+    if (g.crm) return !!this.perm?.crmRole;
+    return !g.module || !!m.modules?.fullAccessRole || !!this.perm?.modules.has(g.module);
+  }
+
+  /** Ticking a permission or tab of a section that is off also turns the section on (its header checkbox). */
+  toggleSub(m: any, g: any, ticking: boolean): void {
+    if (!ticking || !this.perm || !g.module || m.modules?.fullAccessRole) return;
+    this.perm.modules.add(g.module);
+  }
+
+  /** True while CRM access was turned on by ticking Make calls (not chosen by hand). */
+  private crmAuto = false;
+
+  /**
+   * Make calls: ticking it while CRM is off also gives CRM access (Viewer, the lowest level), like every other
+   * section; unticking it removes that access again only when it was given that way.
+   */
+  toggleCalls(): void {
+    if (!this.perm) return;
+    this.perm.calls = !this.perm.calls;
+    if (this.perm.calls && !this.perm.crmRole) {
+      const levels: string[] = this.data?.crmRoles || [];
+      this.perm.crmRole = levels.includes('viewer') ? 'viewer' : levels[0] || null;
+      this.crmAuto = true;
+    } else if (!this.perm.calls && this.crmAuto) {
+      this.perm.crmRole = null;
+      this.crmAuto = false;
+    }
+  }
+
+  /**
+   * After unticking: a section with nothing left ticked (no tab, no permission) is turned off too.
+   * Permissions that come with the role cannot be unticked, so they keep their section on.
+   */
+  afterUntick(m: any, g: any): void {
+    if (!this.perm || !g.module || m.modules?.fullAccessRole || !this.perm.modules.has(g.module)) return;
+    const tabsOn = g.tabs ? this.perm.mailTabs.size > 0 : false;
+    const grantsOn = this.groupGrants(g).some((x: any) => this.grantOn(m, x.capability));
+    const hasSubs = (g.tabs && (this.data?.mailTabs || []).length) || this.groupGrants(g).length;
+    if (hasSubs && !tabsOn && !grantsOn) this.perm.modules.delete(g.module);
+  }
+
+  /** CRM header checkbox: on gives the lowest level (Viewer; the level is chosen below), off removes access. */
+  toggleCrm(): void {
+    if (!this.perm) return;
+    this.crmAuto = false; // chosen by hand from now on
+    const levels: string[] = this.data?.crmRoles || [];
+    this.perm.crmRole = this.perm.crmRole ? null : (levels.includes('viewer') ? 'viewer' : levels[0] || null);
+  }
 
   /** Short titles (the server's labels are longer); falls back to the server label. */
   private readonly shortLabels: Record<string, string> = {
@@ -159,19 +261,9 @@ export class MembersComponent implements OnInit {
   grantTitle(g: any): string { return this.shortLabels[g.capability] || g.label; }
 
   /** The grantable permissions of one group, in the group's order. */
-  groupGrants(group: { key: string; caps: string[] }): any[] {
+  groupGrants(group: { caps: string[] }): any[] {
     const all = this.data?.grantable || [];
-    if (group.key === 'other') {
-      const known = new Set(this.grantGroups.flatMap(x => x.caps));
-      return all.filter((g: any) => !known.has(g.capability));
-    }
     return group.caps.map(c => all.find((g: any) => g.capability === c)).filter(Boolean);
-  }
-
-  /** Groups to show: the fixed ones plus "Other" when the server offers anything else. */
-  get shownGrantGroups() {
-    const other = { key: 'other', title: 'Other', icon: '⚙', desc: '', caps: [] as string[] };
-    return [...this.grantGroups, other].filter(g => this.groupGrants(g).length);
   }
 
   /** "2 of 4 on" for a group header. */

@@ -30,10 +30,10 @@ function verifyPassword(password, storedHash) {
   return crypto.timingSafeEqual(keyBuffer, derivedKey);
 }
 
-function createToken(payload) {
+function createToken(payload, { ttlSeconds = null } = {}) {
   const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
   const iat = Math.floor(Date.now() / 1000);
-  const exp = iat + TOKEN_TTL_SECONDS;
+  const exp = iat + (ttlSeconds && ttlSeconds < TOKEN_TTL_SECONDS ? ttlSeconds : TOKEN_TTL_SECONDS);
   // jti: this sign-in's ID, so it alone can be signed out; sv: the user's session version at sign-in.
   const jti = crypto.randomBytes(16).toString('hex');
   const body = Buffer.from(JSON.stringify({ ...payload, sv: Number(payload.sv) || 0, jti, iat, exp })).toString('base64url');
@@ -242,6 +242,27 @@ async function createWorkspaceForUser(userId, { name, industry } = {}) {
   return sessionFor(user, workspace.id);
 }
 
+/**
+ * "Log in as user" (Members): a session as another member of this workspace, opened by an Owner/Admin
+ * without the member's password. Marked with the opener (impersonatedBy), limited to this workspace and
+ * to one hour; checked again on every request (middleware/auth.js).
+ */
+const IMPERSONATION_TTL_SECONDS = 60 * 60;
+async function impersonationSession(target, workspaceId, byUserId) {
+  const workspaces = await listMemberships(target.id);
+  const membership = workspaces.find(w => w.id === Number(workspaceId));
+  if (!membership) throw authError('That person is not an active member of this workspace.', 403, 'NOT_A_MEMBER');
+  const token = createToken({ userId: target.id, email: target.email, workspaceId: membership.id, role: membership.role, impersonatedBy: byUserId, sv: target.session_version },
+    { ttlSeconds: IMPERSONATION_TTL_SECONDS });
+  return {
+    token,
+    user: { id: target.id, email: target.email, displayName: target.display_name },
+    workspace: { id: membership.id, name: membership.name, slug: membership.slug, plan: membership.plan },
+    role: membership.role,
+    workspaces: [membership]
+  };
+}
+
 /** A session for the platform admin inside any workspace. Checked again on every request (middleware/auth.js). */
 async function platformAccessSession(user, workspace) {
   const token = createToken({ userId: user.id, email: user.email, workspaceId: workspace.id, role: 'Workspace Owner', platformAccess: true, sv: user.session_version });
@@ -313,6 +334,8 @@ async function signOutEverywhere(userId) {
 }
 
 module.exports = {
+  impersonationSession,
+  IMPERSONATION_TTL_SECONDS,
   signOut,
   signOutEverywhere,
   hashPassword,

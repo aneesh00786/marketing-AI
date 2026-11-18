@@ -31,13 +31,14 @@ async function audit(ctx, action, { resourceType = null, resourceId = null, meta
       [
         auth.workspaceId ?? null,
         auth.userId ?? null,
-        auth.actorType || (auth.isToolCall ? 'tool' : 'user'),
+        auth.actorType || (auth.isToolCall ? 'tool' : auth.impersonatedBy ? 'impersonation' : 'user'),
         action,
         resourceType,
         resourceId === null ? null : String(resourceId),
         ctx?.requestId || null,
         ctx?.ip || null,
-        metadata ? JSON.stringify(redact(metadata)) : null
+        auth.impersonatedBy ? JSON.stringify(redact({ ...(metadata || {}), impersonatedBy: auth.impersonatedBy.userId }))
+          : metadata ? JSON.stringify(redact(metadata)) : null
       ]
     );
   } catch (err) {
