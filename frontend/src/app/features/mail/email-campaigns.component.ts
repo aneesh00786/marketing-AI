@@ -190,10 +190,82 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
   /** People who can be emailed in the chosen lists (a person in two lists is counted in each). */
   get chosenPeople(): number {
     const ids = this.form?.mailListIds as Set<number> | undefined;
-    return ids ? this.mailListOptions.filter(l => ids.has(l.id)).reduce((n, l) => n + (l.reachable || 0), 0) : 0;
+    // A list with chosen contacts counts those (only people who can be emailed can be ticked).
+    return ids ? this.mailListOptions.filter(l => ids.has(l.id)).reduce((n, l) => n + (this.form.picks.has(l.id) ? this.form.picks.get(l.id).size : (l.reachable || 0)), 0) : 0;
   }
 
-  toggleMailList(id: number): void { this.form.mailListIds.has(id) ? this.form.mailListIds.delete(id) : this.form.mailListIds.add(id); }
+  toggleMailList(id: number): void {
+    if (this.form.mailListIds.has(id)) { this.form.mailListIds.delete(id); this.form.picks.delete(id); delete this.pickers[id]; }
+    else this.form.mailListIds.add(id);
+  }
+
+  // ---------- Recipients: everyone in a list, or chosen contacts ----------
+  /** Contacts shown in each list's picker (loaded on demand, searchable, 100 a page). */
+  pickers: Record<number, { q: string; page: number; rows: any[]; hasMore: boolean; total: number; reachable: number; loading: boolean; error: string; open: boolean }> = {};
+
+  listMode(id: number): 'all' | 'pick' { return this.form?.picks?.has(id) ? 'pick' : 'all'; }
+  picked(id: number): number { return this.form?.picks?.get(id)?.size || 0; }
+
+  setListMode(id: number, mode: 'all' | 'pick'): void {
+    if (mode === 'all') { this.form.picks.delete(id); if (this.pickers[id]) this.pickers[id].open = false; return; }
+    if (!this.form.picks.has(id)) this.form.picks.set(id, new Set<number>());
+    this.openPicker(id);
+  }
+
+  openPicker(id: number): void {
+    const p = this.pickers[id];
+    if (p) { p.open = !p.open || this.listMode(id) === 'pick'; if (!p.rows.length && !p.loading) this.loadPicker(id, 1); return; }
+    this.pickers[id] = { q: '', page: 1, rows: [], hasMore: false, total: 0, reachable: 0, loading: false, error: '', open: true };
+    this.loadPicker(id, 1);
+  }
+
+  togglePickerOpen(id: number): void { const p = this.pickers[id]; if (p) p.open = !p.open; else this.openPicker(id); }
+
+  loadPicker(id: number, page: number): void {
+    const p = this.pickers[id];
+    if (!p) return;
+    p.loading = true; p.error = '';
+    const params: any = { page: String(page) };
+    if (p.q.trim()) params.q = p.q.trim();
+    this.http.get<any>(`${this.base}/audiences/${id}/contacts`, { params }).subscribe({
+      next: r => {
+        p.loading = false; p.page = r.page; p.hasMore = !!r.hasMore; p.total = r.total || 0; p.reachable = r.reachable || 0;
+        p.rows = page === 1 ? (r.contacts || []) : [...p.rows, ...(r.contacts || [])];
+      },
+      error: e => { p.loading = false; p.error = this.err(e); }
+    });
+  }
+
+  searchPicker(id: number): void { this.loadPicker(id, 1); }
+
+  isPicked(id: number, contactId: number): boolean { return !!this.form?.picks?.get(id)?.has(contactId); }
+
+  togglePick(id: number, contactId: number): void {
+    const set = this.form.picks.get(id) || new Set<number>();
+    set.has(contactId) ? set.delete(contactId) : set.add(contactId);
+    this.form.picks.set(id, set);
+  }
+
+  /** Ticks everyone shown (who can be emailed); with a search, only the matches. */
+  pickShown(id: number): void {
+    const set = this.form.picks.get(id) || new Set<number>();
+    for (const c of this.pickers[id]?.rows || []) if (c.canEmail) set.add(c.id);
+    this.form.picks.set(id, set);
+  }
+
+  clearPicks(id: number): void { this.form.picks.set(id, new Set<number>()); }
+
+  /** Lists switched to "Choose contacts" with nobody ticked (they cannot be saved like that). */
+  get emptyPickLists(): string[] {
+    if (!this.form) return [];
+    return this.mailListOptions.filter(l => this.form.mailListIds.has(l.id) && this.form.picks.has(l.id) && !this.form.picks.get(l.id).size).map(l => l.name);
+  }
+
+  private picksBody(): Record<string, number[]> | null {
+    const out: Record<string, number[]> = {};
+    for (const [id, set] of this.form.picks as Map<number, Set<number>>) if (this.form.mailListIds.has(id) && set.size) out[String(id)] = [...set].sort((a, b) => a - b);
+    return Object.keys(out).length ? out : null;
+  }
   get fromText(): string {
     const f = this.form || {};
     if (!f.fromName && !f.fromEmail) return 'Not set';
@@ -452,8 +524,10 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
     this.linkCheck = null;
     this.form = {
       name: c.name, subject: c.subject || '', fromName: c.fromName || '', fromEmail: c.fromEmail || '', html: c.html || '',
-      mailListIds: new Set<number>(c.mailListIds || [])
+      mailListIds: new Set<number>(c.mailListIds || []),
+      picks: new Map<number, Set<number>>(Object.entries(c.mailListPicks || {}).map(([k, v]) => [Number(k), new Set<number>((v as number[]).map(Number))]))
     };
+    if (fresh) this.pickers = {};
     this.original = this.snapshot();
     if (fresh) this.step = this.editable ? 1 : 4;
     if (fresh && c.status === 'submitting') this.watchUpload(c.id);
@@ -499,7 +573,8 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
 
   private snapshot(): string {
     const f = this.form;
-    return f ? JSON.stringify([f.name, f.subject, f.fromName, f.fromEmail, f.html, [...f.mailListIds].sort()]) : '';
+    const picks = f ? [...(f.picks as Map<number, Set<number>>).entries()].map(([k, v]) => [k, [...v].sort((a, b) => a - b)]).sort((a: any, b: any) => a[0] - b[0]) : [];
+    return f ? JSON.stringify([f.name, f.subject, f.fromName, f.fromEmail, f.html, [...f.mailListIds].sort(), picks]) : '';
   }
 
   /** True when the open campaign has edits that are not saved yet. */
@@ -521,9 +596,11 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
   onBeforeUnload(e: BeforeUnloadEvent): void { if (this.dirty) { e.preventDefault(); e.returnValue = ''; } }
 
   save(then?: () => void): void {
+    const empty = this.emptyPickLists;
+    if (empty.length) { this.toast.emit(`Choose at least one contact in ${empty.map(n => `"${n}"`).join(', ')}, or send to everyone in it.`); this.step = 2; return; }
     const body = {
       name: this.form.name, subject: this.form.subject, fromName: this.form.fromName, fromEmail: this.form.fromEmail, html: this.form.html,
-      mailListIds: [...this.form.mailListIds]
+      mailListIds: [...this.form.mailListIds], mailListPicks: this.picksBody()
     };
     this.busy = 'save';
     this.http.patch<any>(`${this.base}/${this.selected.id}`, body).subscribe({

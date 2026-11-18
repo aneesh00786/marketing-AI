@@ -28,6 +28,8 @@ const ws = ctx => ctx.auth.workspaceId;
 const httpError = (status, message, code) => Object.assign(new Error(message), { status, code, expose: true });
 
 const MAX_HTML = 300000;
+/** Contacts that can be picked one by one from a list (more than this: send to the whole list or build a smaller list). */
+const MAX_PICKS = 5000;
 const EDITABLE = ['draft', 'approved', 'failed'];
 const PUBLIC_DOMAINS = /@(gmail|googlemail|yahoo|ymail|hotmail|outlook|live|msn|aol|icloud|me|mac|gmx|yandex|proton|protonmail|mail|zoho|rediffmail)\.[a-z.]+$/i;
 // Merge tags such as $[FNAME|there]$ and $[LI:UNSUBSCRIBE]$ are not placeholders.
@@ -41,7 +43,9 @@ const fields = {
   fromEmail: z.union([z.literal(''), z.string().trim().email('Enter a valid sender email.').max(255)]).nullable(),
   html: z.string().max(MAX_HTML, `Content is limited to ${MAX_HTML} characters.`).nullable(),
   // Contact lists kept in Marketech.ai.
-  mailListIds: z.array(z.number().int().positive()).max(20)
+  mailListIds: z.array(z.number().int().positive()).max(20),
+  // Contacts picked from a chosen list ({ listId: [contactId, …] }); a chosen list left out goes to everyone in it.
+  mailListPicks: z.record(z.string().regex(/^\d{1,10}$/), z.array(z.number().int().positive()).min(1, 'Choose at least one contact, or send to the whole list.').max(MAX_PICKS)).nullable()
 };
 // templateId: start from a saved template (its HTML is copied into the campaign).
 const createSchema = z.object({ ...fields, name: fields.name, templateId: z.union([z.number().int().positive(), z.string().regex(/^\d{1,10}$/)]).nullable() }).partial().required({ name: true }).strict();
@@ -50,6 +54,44 @@ const updateSchema = z.object(fields).partial().strict();
 const COLUMN = { name: 'name', subject: 'subject', fromName: 'from_name', fromEmail: 'from_email', html: 'html_content' };
 
 function parse(v, fallback) { try { return v ? JSON.parse(v) : fallback; } catch (e) { return fallback; } }
+
+/** The contacts picked per chosen list ({ "12": [5, 9] }); only lists still chosen count. */
+function picksOf(row) {
+  const ids = new Set(parse(row.mail_list_ids_json, []).map(String));
+  const raw = parse(row.mail_list_picks_json, null);
+  const out = {};
+  if (raw && typeof raw === 'object') for (const [k, v] of Object.entries(raw)) if (ids.has(k) && Array.isArray(v) && v.length) out[k] = v.map(Number);
+  return out;
+}
+
+/**
+ * Keeps the picks of chosen lists only, and only contacts that are in that list (this workspace).
+ * Returns the JSON to store (null when every chosen list goes to everyone in it).
+ */
+async function normalizePicks(ctx, listIds, picks) {
+  if (!picks) return null;
+  const chosen = new Set((listIds || []).map(String));
+  const out = {};
+  for (const [k, ids] of Object.entries(picks)) {
+    if (!chosen.has(k)) continue;
+    const unique = [...new Set(ids.map(Number))];
+    const found = await all(
+      `SELECT m.contact_id AS id FROM mail_list_members m JOIN mail_lists l ON l.id = m.list_id
+       WHERE l.workspace_id = ? AND m.list_id = ? AND m.contact_id IN (${unique.map(() => '?').join(',')})`, [ws(ctx), Number(k), ...unique]);
+    if (!found.length) throw httpError(400, 'The chosen contacts are no longer in that list. Choose them again.', 'VALIDATION_ERROR');
+    out[k] = found.map(r => Number(r.id)).sort((a, b) => a - b);
+  }
+  return Object.keys(out).length ? JSON.stringify(out) : null;
+}
+
+/** Adds the picks column to an INSERT/UPDATE when the lists or the picks change. */
+async function withPicks(ctx, v, row, sets, params) {
+  if (v.mailListIds === undefined && v.mailListPicks === undefined) return;
+  const listIds = v.mailListIds !== undefined ? v.mailListIds : parse(row?.mail_list_ids_json, []);
+  const picks = v.mailListPicks !== undefined ? v.mailListPicks : (row ? picksOf(row) : null);
+  sets.push('mail_list_picks_json = ?');
+  params.push(await normalizePicks(ctx, listIds, picks));
+}
 
 function present(row, { full = false } = {}) {
   return {
@@ -60,6 +102,7 @@ function present(row, { full = false } = {}) {
     fromEmail: row.from_email,
     ...(full ? { html: row.html_content || '' } : {}),
     mailListIds: parse(row.mail_list_ids_json, []),
+    mailListPicks: picksOf(row),
     // While sending: how many of the recipients have been handled.
     upload: row.upload_total != null ? { total: row.upload_total, done: row.upload_done || 0 } : null,
     status: row.status,
@@ -121,7 +164,7 @@ async function list(ctx, { thumbs = false } = {}) {
 async function getOne(ctx, id) {
   const row = await withLiveReport(await requireRow(ctx, id));
   const { n } = await get('SELECT COUNT(*) AS n FROM mail_campaign_contacts WHERE workspace_id = ? AND campaign_id = ?', [ws(ctx), row.id]);
-  return { ...present(row, { full: true }), contactCount: Number(n), mailLists: await mailListsOf(ws(ctx), parse(row.mail_list_ids_json, [])) };
+  return { ...present(row, { full: true }), contactCount: Number(n), mailLists: await mailListsOf(ws(ctx), parse(row.mail_list_ids_json, []), picksOf(row)) };
 }
 
 /**
@@ -129,20 +172,68 @@ async function getOne(ctx, id) {
  * the stop-list, consent not withdrawn) and how many are left out because they withdrew consent.
  */
 const ELIGIBLE_SQL = require('../contacts/consent').eligibleSql('c');
-async function mailListsOf(workspaceId, ids) {
+async function mailListsOf(workspaceId, ids, picks = {}) {
   if (!ids.length) return [];
-  const rows = await all(
+  const counts = (extra = '', extraParams = []) => all(
     `SELECT l.id, l.name,
        COUNT(DISTINCT CASE WHEN m.status = 'subscribed' AND s.email IS NULL AND ${ELIGIBLE_SQL} THEN c.id END) AS reachable,
        COUNT(DISTINCT CASE WHEN m.status = 'subscribed' AND s.email IS NULL AND NOT ${ELIGIBLE_SQL} THEN c.id END) AS no_consent
      FROM mail_lists l
-     LEFT JOIN mail_list_members m ON m.list_id = l.id
+     LEFT JOIN mail_list_members m ON m.list_id = l.id${extra}
      LEFT JOIN mail_contacts c ON c.id = m.contact_id
      LEFT JOIN email_suppressions s ON s.workspace_id = l.workspace_id AND s.email = c.email
      WHERE l.workspace_id = ? AND l.id IN (${ids.map(() => '?').join(',')})
-     GROUP BY l.id, l.name`, [workspaceId, ...ids]);
-  const byId = new Map(rows.map(r => [r.id, r]));
-  return ids.map(id => byId.get(id)).filter(Boolean).map(r => ({ id: r.id, name: r.name, reachable: Number(r.reachable) || 0, noConsent: Number(r.no_consent) || 0 }));
+     GROUP BY l.id, l.name`, [...extraParams, workspaceId, ...ids]);
+  const byId = new Map((await counts()).map(r => [r.id, r]));
+  const out = ids.map(id => byId.get(id)).filter(Boolean).map(r => ({ id: r.id, name: r.name, reachable: Number(r.reachable) || 0, noConsent: Number(r.no_consent) || 0, picked: null }));
+  // A list with picked contacts counts only those (picked: how many were picked, reachable or not).
+  for (const l of out) {
+    const chosen = picks[String(l.id)];
+    if (!chosen || !chosen.length) continue;
+    const [r] = await all(
+      `SELECT COUNT(DISTINCT CASE WHEN m.status = 'subscribed' AND s.email IS NULL AND ${ELIGIBLE_SQL} THEN c.id END) AS reachable,
+              COUNT(DISTINCT CASE WHEN m.status = 'subscribed' AND s.email IS NULL AND NOT ${ELIGIBLE_SQL} THEN c.id END) AS no_consent
+       FROM mail_list_members m JOIN mail_contacts c ON c.id = m.contact_id
+       LEFT JOIN email_suppressions s ON s.workspace_id = c.workspace_id AND s.email = c.email
+       WHERE m.list_id = ? AND c.workspace_id = ? AND c.id IN (${chosen.map(() => '?').join(',')})`, [l.id, workspaceId, ...chosen]);
+    Object.assign(l, { reachable: Number(r?.reachable) || 0, noConsent: Number(r?.no_consent) || 0, picked: chosen.length });
+  }
+  return out;
+}
+
+/**
+ * Contacts of one list to pick from (Recipients → Choose contacts): subscribed people, with whether each can
+ * be emailed (not unsubscribed, bounced or opted out). Searchable, 100 a page.
+ */
+const PICK_PAGE = 100;
+async function listPickOptions(ctx, rawListId, { q = '', page = 1 } = {}) {
+  const listId = Number(rawListId);
+  if (!Number.isInteger(listId) || listId <= 0) throw httpError(400, 'Invalid id.', 'VALIDATION_ERROR');
+  const list = await get('SELECT id, name FROM mail_lists WHERE id = ? AND workspace_id = ?', [listId, ws(ctx)]);
+  if (!list) throw httpError(404, 'Contact list not found.', 'NOT_FOUND');
+  const p = Math.max(1, Math.min(1000, parseInt(page, 10) || 1));
+  const params = [listId, ws(ctx)];
+  let search = '';
+  const term = String(q || '').trim().slice(0, 100);
+  if (term) {
+    const like = `%${term.replace(/[%_\\]/g, '\\$&')}%`;
+    search = 'AND (c.email LIKE ? OR c.first_name LIKE ? OR c.last_name LIKE ? OR c.company LIKE ?)';
+    params.push(like, like, like, like);
+  }
+  const base = `FROM mail_list_members m JOIN mail_contacts c ON c.id = m.contact_id
+     LEFT JOIN email_suppressions s ON s.workspace_id = c.workspace_id AND s.email = c.email
+     WHERE m.list_id = ? AND c.workspace_id = ? AND m.status = 'subscribed' ${search}`;
+  const rows = await all(
+    `SELECT DISTINCT c.id, c.email, c.first_name, c.last_name, c.company, (s.email IS NULL AND ${ELIGIBLE_SQL}) AS ok ${base}
+     ORDER BY c.email, c.id LIMIT ${PICK_PAGE + 1} OFFSET ${(p - 1) * PICK_PAGE}`, params);
+  const total = await get(`SELECT COUNT(DISTINCT c.id) AS n, COUNT(DISTINCT CASE WHEN s.email IS NULL AND ${ELIGIBLE_SQL} THEN c.id END) AS ok ${base}`, params);
+  return {
+    list: { id: list.id, name: list.name },
+    page: p, hasMore: rows.length > PICK_PAGE, total: Number(total?.n) || 0, reachable: Number(total?.ok) || 0, maxPicks: MAX_PICKS,
+    contacts: rows.slice(0, PICK_PAGE).map(r => ({
+      id: r.id, email: r.email, name: [r.first_name, r.last_name].filter(Boolean).join(' ') || null, company: r.company || null, canEmail: !!Number(r.ok)
+    }))
+  };
 }
 
 /** Refuses list ids from another workspace (or deleted lists). */
@@ -178,6 +269,7 @@ async function create(ctx, input) {
   delete v.templateId;
   await checkMailLists(ctx, v.mailListIds);
   const { sets, params } = columnsFrom(v);
+  await withPicks(ctx, v, null, sets, params);
   const cols = sets.map(s => s.split(' = ')[0]);
   const ins = await run(
     `INSERT INTO mail_campaigns (workspace_id, ${cols.join(', ')}, status, version, created_by, updated_by, created_at, updated_at)
@@ -214,6 +306,7 @@ async function update(ctx, id, input) {
   const v = updateSchema.parse(input || {});
   await checkMailLists(ctx, v.mailListIds);
   const { sets, params } = columnsFrom(v);
+  await withPicks(ctx, v, row, sets, params);
   if (!sets.length) throw httpError(400, 'Nothing to update.', 'VALIDATION_ERROR');
   await resetToDraft(ctx, row, sets, params);
   await audit(ctx, 'mail.campaign_updated', { resourceType: 'mail_campaign', resourceId: row.id, metadata: { fields: Object.keys(v) } });
@@ -227,9 +320,9 @@ async function update(ctx, id, input) {
 async function duplicate(ctx, id) {
   const row = await requireRow(ctx, id);
   const ins = await run(
-    `INSERT INTO mail_campaigns (workspace_id, name, subject, from_name, from_email, html_content, mail_list_ids_json, status, version, created_by, updated_by, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', 1, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
-    [ws(ctx), `${String(row.name).slice(0, 143)} (copy)`, row.subject, row.from_name, row.from_email, row.html_content, row.mail_list_ids_json, ctx.auth.userId, ctx.auth.userId]
+    `INSERT INTO mail_campaigns (workspace_id, name, subject, from_name, from_email, html_content, mail_list_ids_json, mail_list_picks_json, status, version, created_by, updated_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', 1, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+    [ws(ctx), `${String(row.name).slice(0, 143)} (copy)`, row.subject, row.from_name, row.from_email, row.html_content, row.mail_list_ids_json, row.mail_list_picks_json || null, ctx.auth.userId, ctx.auth.userId]
   );
   const contacts = await contactsSvc.copySelection(ws(ctx), row.id, ins.lastID);
   await audit(ctx, 'mail.campaign_duplicated', { resourceType: 'mail_campaign', resourceId: ins.lastID, metadata: { from: row.id, ...contacts } });
@@ -305,7 +398,7 @@ async function validateRow(ctx, row, { checkSes = true } = {}) {
   const contacts = await contactsSvc.assess(ws(ctx), row.id);
   const eligible = contacts.filter(c => c.eligible).length;
   const listIds = parse(row.mail_list_ids_json, []);
-  const mailLists = await mailListsOf(ws(ctx), listIds);
+  const mailLists = await mailListsOf(ws(ctx), listIds, picksOf(row));
   const listPeople = mailLists.reduce((n, l) => n + l.reachable, 0);
   if (listIds.length && mailLists.length !== listIds.length) problems.push('Some chosen lists were deleted. Choose the lists again (Recipients).');
   const noConsent = mailLists.reduce((n, l) => n + l.noConsent, 0);
@@ -315,7 +408,7 @@ async function validateRow(ctx, row, { checkSes = true } = {}) {
       : 'Nobody in the chosen lists can be emailed (all unsubscribed or bounced). Choose other lists.') : contacts.length ? 'None of the selected contacts can be emailed. Choose others or a list.' : 'Choose at least one contact list.');
   }
   if (noConsent && (listPeople || eligible)) warnings.push(`${noConsent.toLocaleString('en-US')} contact(s) in the chosen lists withdrew marketing consent and are left out of this campaign.`);
-  if (listPeople) warnings.push(`${listPeople.toLocaleString('en-US')} contact(s) from ${mailLists.map(l => `"${l.name}"`).join(', ')} will be emailed one by one with Amazon SES.`);
+  if (listPeople) warnings.push(`${listPeople.toLocaleString('en-US')} contact(s) from ${mailLists.map(l => `"${l.name}"${l.picked ? ` (${l.picked.toLocaleString('en-US')} chosen)` : ''}`).join(', ')} will be emailed one by one with Amazon SES.`);
   if (eligible) warnings.push(`${eligible} selected contact(s) will be emailed with Amazon SES.`);
   if (usesNames(row.subject, html)) warnings.push('Personalized with merge tags: each person sees their own name, and leads without a contact person see their business name (e.g. "Big Red Packaging team"). Anyone without a name sees the tag\'s default value.');
   if (contacts.length > eligible) warnings.push(`${contacts.length - eligible} selected contact(s) cannot be emailed and will be skipped.`);
@@ -574,5 +667,6 @@ async function withLeadDetails(workspaceId, contacts) {
 module.exports = {
   personHistory, checkLinks,
   unsubscribeTokenOf: row => unsubToken(row), recipientHistory, unsubscribeFromCampaign, list, getOne, create, update, duplicate, remove,
-  getContacts, setContactLeads, removeContacts, leadOptions, audiences, validate, approve, send, refresh, recipientActivity
+  getContacts, setContactLeads, removeContacts, leadOptions, audiences, listPickOptions, validate, approve, send, refresh, recipientActivity,
+  picksOf, MAX_PICKS
 };

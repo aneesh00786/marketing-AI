@@ -110,8 +110,11 @@ async function prepare(ctx, row) {
     const n = contactsSvc.greetingName({ name: p.name || [p.first_name, p.last_name].filter(Boolean).join(' '), company: p.company }) || {};
     people.set(email, { email, first_name: (n.first || '').slice(0, 100) || null, last_name: (n.last || '').slice(0, 100) || null, contact_id: p.contact_id || null, lead_id: p.lead_id || null });
   };
+  // A list with picked contacts goes only to those of them who can be emailed; any other list to everyone in it.
+  const picks = require('../campaigns/campaignService').picksOf(row);
   for (const listId of parse(row.mail_list_ids_json, [])) {
-    for (const c of await upload.reachable(workspaceId, listId)) add({ ...c, contact_id: c.id });
+    const only = picks[String(listId)] ? new Set(picks[String(listId)]) : null;
+    for (const c of await upload.reachable(workspaceId, listId)) if (!only || only.has(Number(c.id))) add({ ...c, contact_id: c.id });
   }
   for (const c of (await contactsSvc.assess(workspaceId, row.id)).filter(c => c.eligible)) add({ email: c.email, name: c.name, company: c.company, lead_id: c.leadId });
   const list = [...people.values()];

@@ -222,11 +222,63 @@
           <fieldset class="lists ec-rcard">
             <legend><app-icon name="leads" [size]="15"></app-icon>Contact lists</legend>
             <p class="muted small" *ngIf="audiences && !mailListOptions.length">No contact lists yet. Create one in Contact lists.</p>
-            <div class="ec-list-row" *ngFor="let l of mailListOptions">
-              <label class="check">
-                <input type="checkbox" [checked]="form.mailListIds.has(l.id)" (change)="toggleMailList(l.id)" [disabled]="!editable || (!l.reachable && !form.mailListIds.has(l.id))" />
-                {{ l.name }} <span class="muted small">({{ l.reachable | number }} can be emailed{{ l.total !== l.reachable ? ' of ' + (l.total | number) : '' }}{{ l.noConsent ? ' · ' + (l.noConsent | number) + ' opted out' : '' }})</span>
-              </label>
+            <div class="ec-list-item" *ngFor="let l of mailListOptions">
+              <div class="ec-list-row">
+                <label class="check">
+                  <input type="checkbox" [checked]="form.mailListIds.has(l.id)" (change)="toggleMailList(l.id)" [disabled]="!editable || (!l.reachable && !form.mailListIds.has(l.id))" />
+                  {{ l.name }} <span class="muted small">({{ l.reachable | number }} can be emailed{{ l.total !== l.reachable ? ' of ' + (l.total | number) : '' }}{{ l.noConsent ? ' · ' + (l.noConsent | number) + ' opted out' : '' }})</span>
+                </label>
+              </div>
+
+              <!-- Who in this list: everyone, or chosen contacts -->
+              <div class="ec-pick" *ngIf="form.mailListIds.has(l.id)">
+                <div class="ec-pick-modes" role="radiogroup" [attr.aria-label]="'Who in ' + l.name + ' gets it'">
+                  <label class="ec-pick-mode" [class.on]="listMode(l.id) === 'all'">
+                    <input type="radio" [name]="'pick-' + l.id" [checked]="listMode(l.id) === 'all'" (change)="setListMode(l.id, 'all')" [disabled]="!editable" />
+                    Everyone in the list <span class="muted small">({{ l.reachable | number }})</span>
+                  </label>
+                  <label class="ec-pick-mode" [class.on]="listMode(l.id) === 'pick'">
+                    <input type="radio" [name]="'pick-' + l.id" [checked]="listMode(l.id) === 'pick'" (change)="setListMode(l.id, 'pick')" [disabled]="!editable" />
+                    Choose contacts <span class="muted small" *ngIf="listMode(l.id) === 'pick'">({{ picked(l.id) | number }} chosen)</span>
+                  </label>
+                  <button *ngIf="listMode(l.id) === 'pick'" type="button" class="btn btn-secondary btn-sm" (click)="togglePickerOpen(l.id)" [attr.aria-expanded]="!!pickers[l.id]?.open">
+                    {{ pickers[l.id]?.open ? 'Hide contacts' : (editable ? 'Edit chosen contacts' : 'Show contacts') }}
+                  </button>
+                </div>
+
+                <div class="ec-pick-box" *ngIf="listMode(l.id) === 'pick' && pickers[l.id]?.open">
+                  <form class="ec-pick-bar" (ngSubmit)="searchPicker(l.id)" role="search" [attr.aria-label]="'Search ' + l.name">
+                    <input type="search" class="ec-pick-search" [(ngModel)]="pickers[l.id].q" [name]="'pick-q-' + l.id" placeholder="Search name, email or company…" />
+                    <button type="submit" class="btn btn-secondary btn-sm">Search</button>
+                    <span class="ec-pick-spacer"></span>
+                    <ng-container *ngIf="editable">
+                      <button type="button" class="btn btn-secondary btn-sm" (click)="pickShown(l.id)" [disabled]="!pickers[l.id].rows.length">{{ pickers[l.id].q.trim() ? 'Select all matches shown' : 'Select all shown' }}</button>
+                      <button type="button" class="btn btn-secondary btn-sm" (click)="clearPicks(l.id)" [disabled]="!picked(l.id)">Clear</button>
+                    </ng-container>
+                  </form>
+                  <p class="muted small ec-pick-count">{{ picked(l.id) | number }} of {{ pickers[l.id].reachable | number }} who can be emailed chosen.
+                    <span *ngIf="pickers[l.id].hasMore"> Showing {{ pickers[l.id].rows.length | number }}; load more or search to find others.</span></p>
+                  <p class="mx-callout warn small" *ngIf="!picked(l.id)" role="status">Tick at least one contact, or choose “Everyone in the list”.</p>
+                  <p class="muted small" *ngIf="pickers[l.id].loading && !pickers[l.id].rows.length">Loading contacts…</p>
+                  <p class="mx-callout warn small" *ngIf="pickers[l.id].error" role="alert">{{ pickers[l.id].error }}</p>
+                  <p class="muted small" *ngIf="!pickers[l.id].loading && !pickers[l.id].error && !pickers[l.id].rows.length">No contacts match.</p>
+                  <ul class="ec-pick-list" *ngIf="pickers[l.id].rows.length">
+                    <li *ngFor="let c of pickers[l.id].rows" [class.off]="!c.canEmail">
+                      <label class="check">
+                        <input type="checkbox" [checked]="isPicked(l.id, c.id)" (change)="togglePick(l.id, c.id)" [disabled]="!editable || (!c.canEmail && !isPicked(l.id, c.id))" />
+                        <span class="ec-pick-who">
+                          <span class="ec-pick-name">{{ c.name || c.email }}</span>
+                          <span class="muted small">{{ c.name ? c.email : '' }}{{ c.company ? (c.name ? ' · ' : '') + c.company : '' }}</span>
+                        </span>
+                        <span class="badge badge-off small" *ngIf="!c.canEmail">Can't be emailed</span>
+                      </label>
+                    </li>
+                  </ul>
+                  <button *ngIf="pickers[l.id].hasMore" type="button" class="btn btn-secondary btn-sm" (click)="loadPicker(l.id, pickers[l.id].page + 1)" [disabled]="pickers[l.id].loading">
+                    {{ pickers[l.id].loading ? 'Loading…' : 'Load more' }}
+                  </button>
+                </div>
+              </div>
             </div>
             <p class="muted small ec-consent-note" *ngIf="listsWithoutConsent">People who unsubscribed or opted out are never emailed.</p>
           </fieldset>

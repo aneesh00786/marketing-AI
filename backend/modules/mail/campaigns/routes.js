@@ -27,6 +27,8 @@ router.use((req, res, next) => {
 
 router.get('/', requireCapability('mail.view'), wrap(async (req, res) => res.json({ success: true, campaigns: await svc.list(req, { thumbs: String(req.query.thumbs || '') === '1' }) })));
 router.get('/audiences', requireCapability('mail.compose'), wrap(async (req, res) => res.json({ success: true, ...(await svc.audiences(req)) })));
+// The people of one contact list, to pick some of them for a campaign (Recipients → Choose contacts).
+router.get('/audiences/:listId(\\d+)/contacts', requireCapability('mail.compose'), wrap(async (req, res) => res.json({ success: true, ...(await svc.listPickOptions(req, req.params.listId, req.query)) })));
 // Leads and selected contacts are addresses from Leads CRM: leads.view as well.
 router.get('/lead-options', requireCapability('mail.compose', 'leads.view'), wrap(async (req, res) => res.json({ success: true, ...(await svc.leadOptions(req, req.query)) })));
 router.post('/', requireCapability('mail.compose'), wrap(async (req, res) => res.json({ success: true, campaign: await svc.create(req, req.body) })));

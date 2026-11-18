@@ -245,3 +245,25 @@
 .ec-ready .good dd { color: var(--success-text, inherit); }
 .ec-ready .bad dd { color: var(--danger-text, inherit); }
 .ec-ready-line { margin: 6px 0; }
+
+/* Recipients: everyone in a list, or chosen contacts */
+.ec-list-item { display: flex; flex-direction: column; gap: 6px; padding: 4px 0; }
+.ec-list-item + .ec-list-item { border-top: 1px solid var(--border); padding-top: 8px; }
+.ec-pick { margin-left: 26px; display: flex; flex-direction: column; gap: 8px; }
+.ec-pick-modes { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.ec-pick-mode { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text); cursor: pointer; }
+.ec-pick-mode.on { font-weight: 600; }
+.ec-pick-box { border: 1px solid var(--border); border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 8px; background: var(--surface-2, transparent); }
+.ec-pick-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ec-pick-search { flex: 1 1 220px; min-width: 0; }
+.ec-pick-spacer { flex: 1 1 auto; }
+.ec-pick-count { margin: 0; }
+.ec-pick-list { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
+.ec-pick-list li { padding: 6px 10px; }
+.ec-pick-list li + li { border-top: 1px solid var(--border); }
+.ec-pick-list li.off { opacity: .65; }
+.ec-pick-list label.check { display: flex; align-items: center; gap: 10px; width: 100%; cursor: pointer; }
+.ec-pick-who { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
+.ec-pick-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ec-pick-who .muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 600px) { .ec-pick { margin-left: 0; } }

@@ -496,6 +496,55 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     expect(comp.sendRecipients()).toContain('Lists Trade show (24)');
   });
 
+  it('Recipients: a chosen list goes to everyone, or only to the contacts ticked in it', () => {
+    comp.audiences = { mailLists: [{ id: 3, name: 'Trade show', reachable: 24, total: 25 }] };
+    comp.delivery = { canCompose: true, canSend: true, ses: { configured: true } };
+    comp.step = 2;
+    fixture.detectChanges();
+    (el().querySelector('.ec-list-row input') as HTMLInputElement).click();
+    fixture.detectChanges();
+    expect(comp.listMode(3)).toBe('all');
+    expect(el().querySelector('.ec-pick')!.textContent).toContain('Everyone in the list');
+
+    // Choose contacts: the list's people load; those who cannot be emailed cannot be ticked.
+    comp.setListMode(3, 'pick');
+    const load = http.expectOne(r => r.url.endsWith('/audiences/3/contacts'));
+    load.flush({ page: 1, hasMore: false, total: 3, reachable: 2, contacts: [
+      { id: 11, email: 'a@x.io', name: 'Asha', canEmail: true }, { id: 12, email: 'b@x.io', name: null, canEmail: true }, { id: 13, email: 'c@x.io', name: 'Cy', canEmail: false }] });
+    fixture.detectChanges();
+    const boxes = Array.from(el().querySelectorAll('.ec-pick-list input')) as HTMLInputElement[];
+    expect(boxes.length).toBe(3);
+    expect(boxes[2].disabled).toBeTrue();
+    // Nobody ticked yet: saving is refused with a hint, nothing is sent to the server.
+    comp.save();
+    http.expectNone(r => r.method === 'PATCH');
+    boxes[0].click();
+    fixture.detectChanges();
+    expect(comp.picked(3)).toBe(1);
+    expect(comp.chosenPeople).toBe(1);
+    comp.pickShown(3);
+    expect(comp.picked(3)).toBe(2, 'select all shown ticks only people who can be emailed');
+    comp.clearPicks(3);
+    expect(comp.picked(3)).toBe(0);
+    comp.togglePick(3, 12);
+    comp.save();
+    const req = http.expectOne(r => r.method === 'PATCH' && r.url.endsWith('/campaigns/5'));
+    expect(req.request.body.mailListIds).toEqual([3]);
+    expect(req.request.body.mailListPicks).toEqual({ '3': [12] });
+    req.flush({ campaign: { id: 5, name: 'Autumn', status: 'draft', version: 2, html: ORIGINAL, mailListIds: [3], mailListPicks: { '3': [12] }, mailLists: [{ id: 3, name: 'Trade show', reachable: 1, picked: 1 }] } });
+    http.expectOne(r => /\/mail\/campaigns$/.test(r.url)).flush({ campaigns: [] });
+    expect(comp.listMode(3)).toBe('pick');
+    expect(comp.dirty).toBeFalse();
+
+    // Back to everyone: the picks are dropped.
+    comp.setListMode(3, 'all');
+    comp.save();
+    const all = http.expectOne(r => r.method === 'PATCH');
+    expect(all.request.body.mailListPicks).toBeNull();
+    all.flush({ campaign: { id: 5, name: 'Autumn', status: 'draft', version: 3, html: ORIGINAL, mailListIds: [3], mailListPicks: {}, mailLists: [] } });
+    http.expectOne(r => /\/mail\/campaigns$/.test(r.url)).flush({ campaigns: [] });
+  });
+
   it('sent campaigns can be deleted by those who send, after a confirmation that the stop-list is kept', () => {
     const sent = { id: 7, name: 'Spring', status: 'submitted' };
     comp.delivery = { canCompose: true, canSend: false, ses: { configured: true } };

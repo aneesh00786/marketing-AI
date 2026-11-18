@@ -250,7 +250,7 @@ async function activatorContext(workflow) {
   if (!workflow.activated_by) return null;
   const m = await get("SELECT m.role, m.status, u.status AS user_status FROM workspace_members m JOIN users u ON u.id = m.user_id WHERE m.workspace_id = ? AND m.user_id = ?", [workflow.workspace_id, workflow.activated_by]);
   if (!m || m.status !== 'Active' || (m.user_status && m.user_status !== 'Active')) return null;
-  return { auth: { workspaceId: workflow.workspace_id, userId: workflow.activated_by, role: m.role, capabilities: capabilitiesForRole(m.role), actorType: 'automation' } };
+  return { auth: { workspaceId: workflow.workspace_id, userId: workflow.activated_by, role: m.role, capabilities: await require('../../lib/capabilityGrants').effectiveCapabilities(workflow.workspace_id, workflow.activated_by, m.role), actorType: 'automation' } };
 }
 
 module.exports = {
