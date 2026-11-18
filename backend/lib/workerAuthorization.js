@@ -1,5 +1,4 @@
 const { get } = require('../db/database');
-const { capabilitiesForRole } = require('./permissions');
 
 /**
  * Re-checks, immediately before a background job acts, that the work is still authorized:
@@ -26,7 +25,8 @@ async function workerAuthorizationProblem(workspaceId, userId, capability) {
   if (!m || m.status !== 'Active' || (m.user_status && m.user_status !== 'Active')) {
     return { code: 'SCHEDULER_NOT_MEMBER', message: 'The person who scheduled this is no longer an active member of the workspace; a current member must schedule or approve it again.' };
   }
-  if (capability && !capabilitiesForRole(m.role).has(capability)) {
+  // Role capabilities plus per-member grants (Members → Permissions), as for requests made in the app.
+  if (capability && !(await require('./capabilityGrants').effectiveCapabilities(workspaceId, userId, m.role)).has(capability)) {
     return { code: 'SCHEDULER_NOT_AUTHORIZED', message: `The person who scheduled this no longer has permission (${capability}); someone who does must schedule or approve it again.` };
   }
   return null;

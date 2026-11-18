@@ -206,3 +206,14 @@ test('mail settings are read and changed only by Owners/Admins or people given "
   assert.equal((await revoke(ANA, 'mail.configure')).status, 200);
   assert.equal((await get(ANA, '/api/v1/mail/tracking/settings')).status, 403, 'closed again once removed');
 });
+
+test('sending re-checks the approver with their granted permissions, not only their role', async () => {
+  const { workerAuthorizationProblem } = require('../lib/workerAuthorization');
+  const sender = await h.addMember(W, 'Member'); // a Member's role cannot send
+  assert.equal((await workerAuthorizationProblem(W, sender.userId, 'mail.send')).code, 'SCHEDULER_NOT_AUTHORIZED');
+  assert.equal((await grant(sender, 'mail.send')).status, 200);
+  assert.equal(await workerAuthorizationProblem(W, sender.userId, 'mail.send'), null, 'a granted "Send email" counts');
+  assert.equal((await revoke(sender, 'mail.send')).status, 200);
+  assert.equal((await workerAuthorizationProblem(W, sender.userId, 'mail.send')).code, 'SCHEDULER_NOT_AUTHORIZED', 'and stops counting once removed');
+  assert.equal(await workerAuthorizationProblem(W, APPROVER.userId, 'mail.send'), null, 'an Approver sends by role');
+});
