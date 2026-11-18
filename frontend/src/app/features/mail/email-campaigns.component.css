@@ -246,24 +246,33 @@
 .ec-ready .bad dd { color: var(--danger-text, inherit); }
 .ec-ready-line { margin: 6px 0; }
 
-/* Recipients: everyone in a list, or chosen contacts */
-.ec-list-item { display: flex; flex-direction: column; gap: 6px; padding: 4px 0; }
-.ec-list-item + .ec-list-item { border-top: 1px solid var(--border); padding-top: 8px; }
-.ec-pick { margin-left: 26px; display: flex; flex-direction: column; gap: 8px; }
-.ec-pick-modes { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
-.ec-pick-mode { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text); cursor: pointer; }
-.ec-pick-mode.on { font-weight: 600; }
-.ec-pick-box { border: 1px solid var(--border); border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 8px; background: var(--surface-2, transparent); }
-.ec-pick-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.ec-pick-search { flex: 1 1 220px; min-width: 0; }
-.ec-pick-spacer { flex: 1 1 auto; }
-.ec-pick-count { margin: 0; }
-.ec-pick-list { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
-.ec-pick-list li { padding: 6px 10px; }
-.ec-pick-list li + li { border-top: 1px solid var(--border); }
-.ec-pick-list li.off { opacity: .65; }
-.ec-pick-list label.check { display: flex; align-items: center; gap: 10px; width: 100%; cursor: pointer; }
-.ec-pick-who { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
-.ec-pick-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ec-pick-who .muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-@media (max-width: 600px) { .ec-pick { margin-left: 0; } }
+/* Recipients: list name opens its contacts (popup) */
+.ec-list-row { justify-content: flex-start; flex-wrap: nowrap; align-items: flex-start; gap: 8px; }
+.ec-list-row label.ec-list-check { flex: 0 0 auto; min-width: 0; padding-top: 2px; }
+.ec-list-label { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; min-width: 0; }
+.ec-list-link { color: var(--primary, #5b5bd6); text-decoration: underline; text-underline-offset: 3px; font-weight: 500; cursor: pointer; }
+.ec-list-link:hover, .ec-list-link:focus-visible { text-decoration-thickness: 2px; }
+.ec-list-chosen { font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 999px; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); }
+
+.ec-contacts-card { width: min(900px, 100%); }
+.ec-contacts-search { display: flex; align-items: center; gap: 8px; border: 1px solid var(--border); border-radius: 10px; padding: 0 10px; color: var(--text-muted); }
+.ec-contacts-search input { flex: 1 1 auto; min-width: 0; border: none; outline: none; background: transparent; color: var(--text); padding: 9px 0; font: inherit; }
+.ec-contacts-search:focus-within { border-color: var(--primary, #5b5bd6); }
+.ec-contacts-bar { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ec-contacts-all { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; }
+.ec-contacts-count { font-size: 13px; color: var(--text-muted); }
+.ec-contacts-table { border: 1px solid var(--border); border-radius: 10px; max-height: min(52vh, 480px); overflow: auto; }
+.ec-contacts-table table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ec-contacts-table th { position: sticky; top: 0; z-index: 1; background: var(--surface-2, var(--surface)); text-align: left; font-weight: 600; padding: 8px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.ec-contacts-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.ec-contacts-table tbody tr { cursor: pointer; }
+.ec-contacts-table tbody tr:hover { background: var(--surface-2); }
+.ec-contacts-table tbody tr.on { background: color-mix(in srgb, var(--primary, #5b5bd6) 8%, transparent); }
+.ec-contacts-table tbody tr.off { opacity: .6; cursor: default; }
+.ec-ct-check { width: 36px; }
+.ec-ct-email { word-break: break-all; }
+.ec-contacts-empty { padding: 12px; margin: 0; }
+.ec-contacts-more { display: flex; align-items: center; gap: 10px; padding: 10px; }
+@media (max-width: 600px) {
+  .ec-contacts-table th:nth-child(4), .ec-contacts-table td:nth-child(4) { display: none; }
+}

@@ -53,6 +53,8 @@ test('the people of a list to pick from: subscribed only, searchable, with who c
   assert.equal(r.data.total, 3, 'unsubscribed people are not offered');
   assert.equal(r.data.reachable, 3);
   assert.ok(r.data.contacts.every(c => c.canEmail));
+  assert.deepEqual(r.data.reachableIds, [people.asha, people.ben, people.cy].sort((x, y) => x - y), 'Select all covers the whole list');
+  assert.equal((await api(W, 'GET', `/audiences/${LIST}/contacts?page=2`)).data.reachableIds, undefined, 'only on the first page');
   const q = await api(W, 'GET', `/audiences/${LIST}/contacts?q=asha`);
   assert.deepEqual(q.data.contacts.map(c => c.name), ['Asha']);
   assert.equal((await api(W, 'GET', `/audiences/${OTHER_LIST}/contacts`)).status, 404);

@@ -496,54 +496,85 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     expect(comp.sendRecipients()).toContain('Lists Trade show (24)');
   });
 
-  it('Recipients: a chosen list goes to everyone, or only to the contacts ticked in it', () => {
-    comp.audiences = { mailLists: [{ id: 3, name: 'Trade show', reachable: 24, total: 25 }] };
+  it('Recipients: the list name opens its contacts; Select all, single ticks and search decide who gets it', fakeAsync(() => {
+    comp.audiences = { mailLists: [{ id: 3, name: 'Trade show', reachable: 2, total: 3 }] };
     comp.delivery = { canCompose: true, canSend: true, ses: { configured: true } };
     comp.step = 2;
     fixture.detectChanges();
-    (el().querySelector('.ec-list-row input') as HTMLInputElement).click();
-    fixture.detectChanges();
-    expect(comp.listMode(3)).toBe('all');
-    expect(el().querySelector('.ec-pick')!.textContent).toContain('Everyone in the list');
+    const people = [{ id: 11, email: 'a@x.io', name: 'Asha', canEmail: true }, { id: 12, email: 'b@x.io', name: null, canEmail: true }, { id: 13, email: 'c@x.io', name: 'Cy', canEmail: false }];
+    const open = () => {
+      (el().querySelector('.ec-list-link') as HTMLAnchorElement).click();
+      http.expectOne(r => r.url.endsWith('/audiences/3/contacts') && !r.params.get('q'))
+        .flush({ page: 1, hasMore: false, total: 3, reachable: 2, reachableIds: [11, 12], contacts: people });
+      fixture.detectChanges();
+    };
+    const pop = () => el().querySelector('.ec-contacts-card') as HTMLElement;
+    const boxes = () => Array.from(pop().querySelectorAll('tbody input')) as HTMLInputElement[];
+    const all = () => pop().querySelector('.ec-contacts-all input') as HTMLInputElement;
 
-    // Choose contacts: the list's people load; those who cannot be emailed cannot be ticked.
-    comp.setListMode(3, 'pick');
-    const load = http.expectOne(r => r.url.endsWith('/audiences/3/contacts'));
-    load.flush({ page: 1, hasMore: false, total: 3, reachable: 2, contacts: [
-      { id: 11, email: 'a@x.io', name: 'Asha', canEmail: true }, { id: 12, email: 'b@x.io', name: null, canEmail: true }, { id: 13, email: 'c@x.io', name: 'Cy', canEmail: false }] });
+    // The list is not chosen yet: nobody ticked; people who cannot be emailed cannot be ticked.
+    open();
+    expect(pop().querySelector('h3')!.textContent).toContain('Trade show');
+    expect(boxes().length).toBe(3);
+    expect(boxes().map(b => b.checked)).toEqual([false, false, false]);
+    expect(boxes()[2].disabled).toBeTrue();
+
+    // Select all = everyone in the list (also people added later).
+    all().click();
     fixture.detectChanges();
-    const boxes = Array.from(el().querySelectorAll('.ec-pick-list input')) as HTMLInputElement[];
-    expect(boxes.length).toBe(3);
-    expect(boxes[2].disabled).toBeTrue();
-    // Nobody ticked yet: saving is refused with a hint, nothing is sent to the server.
-    comp.save();
-    http.expectNone(r => r.method === 'PATCH');
-    boxes[0].click();
+    expect(boxes().map(b => b.checked)).toEqual([true, true, false]);
+    expect(pop().querySelector('.ec-contacts-count')!.textContent).toContain('2 of 2 selected');
+    // Untick one: the others stay ticked, one by one from now on.
+    boxes()[0].click();
     fixture.detectChanges();
-    expect(comp.picked(3)).toBe(1);
-    expect(comp.chosenPeople).toBe(1);
-    comp.pickShown(3);
-    expect(comp.picked(3)).toBe(2, 'select all shown ticks only people who can be emailed');
-    comp.clearPicks(3);
-    expect(comp.picked(3)).toBe(0);
-    comp.togglePick(3, 12);
+    expect(all().indeterminate).toBeTrue();
+    expect(comp.popCount).toBe(1);
+
+    // Search narrows the people shown; the choice is kept.
+    comp.contactsPop!.q = 'asha';
+    comp.popSearchChanged();
+    tick(300);
+    http.expectOne(r => r.url.endsWith('/audiences/3/contacts') && r.params.get('q') === 'asha')
+      .flush({ page: 1, hasMore: false, total: 1, reachable: 1, contacts: [people[0]] });
+    fixture.detectChanges();
+    expect(boxes().length).toBe(1);
+    expect(comp.popCount).toBe(1);
+
+    (Array.from(pop().querySelectorAll('button')).find(b => b.textContent!.includes('Done')) as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect(comp.contactsPop).toBeNull();
+    expect(comp.form.mailListIds.has(3)).toBeTrue();
+    expect([...comp.form.picks.get(3)]).toEqual([12]);
+    expect(el().querySelector('.ec-list-chosen')!.textContent).toContain('1 chosen');
     comp.save();
     const req = http.expectOne(r => r.method === 'PATCH' && r.url.endsWith('/campaigns/5'));
-    expect(req.request.body.mailListIds).toEqual([3]);
     expect(req.request.body.mailListPicks).toEqual({ '3': [12] });
-    req.flush({ campaign: { id: 5, name: 'Autumn', status: 'draft', version: 2, html: ORIGINAL, mailListIds: [3], mailListPicks: { '3': [12] }, mailLists: [{ id: 3, name: 'Trade show', reachable: 1, picked: 1 }] } });
+    req.flush({ campaign: { id: 5, name: 'Autumn', status: 'draft', version: 2, html: ORIGINAL, mailListIds: [3], mailListPicks: { '3': [12] }, mailLists: [] } });
     http.expectOne(r => /\/mail\/campaigns$/.test(r.url)).flush({ campaigns: [] });
-    expect(comp.listMode(3)).toBe('pick');
-    expect(comp.dirty).toBeFalse();
+    fixture.detectChanges();
 
-    // Back to everyone: the picks are dropped.
-    comp.setListMode(3, 'all');
-    comp.save();
-    const all = http.expectOne(r => r.method === 'PATCH');
-    expect(all.request.body.mailListPicks).toBeNull();
-    all.flush({ campaign: { id: 5, name: 'Autumn', status: 'draft', version: 3, html: ORIGINAL, mailListIds: [3], mailListPicks: {}, mailLists: [] } });
-    http.expectOne(r => /\/mail\/campaigns$/.test(r.url)).flush({ campaigns: [] });
-  });
+    // Reopened: ticked as saved. Ticking everyone again sends to the whole list (no picks).
+    open();
+    expect(boxes().map(b => b.checked)).toEqual([false, true, false]);
+    boxes()[0].click();
+    fixture.detectChanges();
+    expect(all().checked).toBeTrue();
+    comp.applyContacts();
+    expect(comp.form.picks.has(3)).toBeFalse();
+    expect(comp.form.mailListIds.has(3)).toBeTrue();
+
+    // Nobody ticked: the list is not used. Cancel keeps things as they were.
+    open();
+    all().click();
+    fixture.detectChanges();
+    expect(comp.popCount).toBe(0);
+    comp.closeContacts();
+    expect(comp.form.mailListIds.has(3)).toBeTrue();
+    open();
+    all().click();
+    comp.applyContacts();
+    expect(comp.form.mailListIds.has(3)).toBeFalse();
+  }));
 
   it('sent campaigns can be deleted by those who send, after a confirmation that the stop-list is kept', () => {
     const sent = { id: 7, name: 'Spring', status: 'submitted' };

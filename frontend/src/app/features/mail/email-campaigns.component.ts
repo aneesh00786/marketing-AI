@@ -165,7 +165,7 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
   toggleMenu(id: number, ev: Event): void { ev.stopPropagation(); this.menuFor = this.menuFor === id ? null : id; }
 
   @HostListener('document:click') closeMenu(): void { this.menuFor = null; this.showCreateMenu = false; this.moreOpen = false; }
-  @HostListener('document:keydown.escape') escMenu(): void { this.menuFor = null; this.showCreateMenu = false; this.moreOpen = false; this.sendConfirm = null; }
+  @HostListener('document:keydown.escape') escMenu(): void { this.menuFor = null; this.showCreateMenu = false; this.moreOpen = false; this.sendConfirm = null; this.contactsPop = null; }
 
   toggleMore(ev: Event): void { ev.stopPropagation(); this.moreOpen = !this.moreOpen; this.menuFor = null; this.showCreateMenu = false; }
 
@@ -195,65 +195,123 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
   }
 
   toggleMailList(id: number): void {
-    if (this.form.mailListIds.has(id)) { this.form.mailListIds.delete(id); this.form.picks.delete(id); delete this.pickers[id]; }
+    if (this.form.mailListIds.has(id)) { this.form.mailListIds.delete(id); this.form.picks.delete(id); }
     else this.form.mailListIds.add(id);
   }
 
-  // ---------- Recipients: everyone in a list, or chosen contacts ----------
-  /** Contacts shown in each list's picker (loaded on demand, searchable, 100 a page). */
-  pickers: Record<number, { q: string; page: number; rows: any[]; hasMore: boolean; total: number; reachable: number; loading: boolean; error: string; open: boolean }> = {};
+  // ---------- Recipients: a list's contacts popup (everyone, or chosen contacts) ----------
+  /** The open "contacts of a list" popup: search, Select all, or tick people one by one; applied on Done. */
+  contactsPop: {
+    list: any; q: string; page: number; rows: any[]; hasMore: boolean; total: number; reachable: number;
+    /** Everyone in the whole list who can be emailed (unaffected by the search). */
+    listReachable: number;
+    /** Everyone in the list who can be emailed (null: too many to pick one by one). */
+    reachableIds: number[] | null;
+    /** Everyone in the list (also people added to it later). */
+    all: boolean; selected: Set<number>; loading: boolean; error: string;
+  } | null = null;
+  private popSearch: any;
 
   listMode(id: number): 'all' | 'pick' { return this.form?.picks?.has(id) ? 'pick' : 'all'; }
   picked(id: number): number { return this.form?.picks?.get(id)?.size || 0; }
 
-  setListMode(id: number, mode: 'all' | 'pick'): void {
-    if (mode === 'all') { this.form.picks.delete(id); if (this.pickers[id]) this.pickers[id].open = false; return; }
-    if (!this.form.picks.has(id)) this.form.picks.set(id, new Set<number>());
-    this.openPicker(id);
+  /** Opens the list's contacts, ticked as the campaign has them now (the whole list when it is chosen without picks). */
+  openContacts(l: any, ev?: Event): void {
+    ev?.preventDefault();
+    const chosen = this.form.mailListIds.has(l.id);
+    const picks = this.form.picks.get(l.id);
+    this.contactsPop = {
+      list: l, q: '', page: 1, rows: [], hasMore: false, total: 0, reachable: 0, listReachable: l.reachable || 0, reachableIds: null,
+      all: chosen && !picks, selected: new Set<number>(picks || []), loading: false, error: ''
+    };
+    this.loadPop(1);
   }
 
-  openPicker(id: number): void {
-    const p = this.pickers[id];
-    if (p) { p.open = !p.open || this.listMode(id) === 'pick'; if (!p.rows.length && !p.loading) this.loadPicker(id, 1); return; }
-    this.pickers[id] = { q: '', page: 1, rows: [], hasMore: false, total: 0, reachable: 0, loading: false, error: '', open: true };
-    this.loadPicker(id, 1);
-  }
-
-  togglePickerOpen(id: number): void { const p = this.pickers[id]; if (p) p.open = !p.open; else this.openPicker(id); }
-
-  loadPicker(id: number, page: number): void {
-    const p = this.pickers[id];
+  loadPop(page: number): void {
+    const p = this.contactsPop;
     if (!p) return;
     p.loading = true; p.error = '';
     const params: any = { page: String(page) };
     if (p.q.trim()) params.q = p.q.trim();
-    this.http.get<any>(`${this.base}/audiences/${id}/contacts`, { params }).subscribe({
+    const listId = p.list.id;
+    this.http.get<any>(`${this.base}/audiences/${listId}/contacts`, { params }).subscribe({
       next: r => {
+        if (this.contactsPop !== p) return;
         p.loading = false; p.page = r.page; p.hasMore = !!r.hasMore; p.total = r.total || 0; p.reachable = r.reachable || 0;
+        if (!p.q.trim()) { p.listReachable = r.reachable || 0; if (r.reachableIds !== undefined) p.reachableIds = r.reachableIds; }
+        if (p.all && p.reachableIds) p.selected = new Set(p.reachableIds);
         p.rows = page === 1 ? (r.contacts || []) : [...p.rows, ...(r.contacts || [])];
       },
-      error: e => { p.loading = false; p.error = this.err(e); }
+      error: e => { if (this.contactsPop === p) { p.loading = false; p.error = this.err(e); } }
     });
   }
 
-  searchPicker(id: number): void { this.loadPicker(id, 1); }
-
-  isPicked(id: number, contactId: number): boolean { return !!this.form?.picks?.get(id)?.has(contactId); }
-
-  togglePick(id: number, contactId: number): void {
-    const set = this.form.picks.get(id) || new Set<number>();
-    set.has(contactId) ? set.delete(contactId) : set.add(contactId);
-    this.form.picks.set(id, set);
+  /** Search as the user types (short pause first). */
+  popSearchChanged(): void {
+    clearTimeout(this.popSearch);
+    this.popSearch = setTimeout(() => this.loadPop(1), 300);
   }
 
-  /** Ticks everyone shown (who can be emailed); with a search, only the matches. */
-  pickShown(id: number): void {
-    const set = this.form.picks.get(id) || new Set<number>();
-    for (const c of this.pickers[id]?.rows || []) if (c.canEmail) set.add(c.id);
-    this.form.picks.set(id, set);
+  /** How many are chosen in the popup. */
+  get popCount(): number {
+    const p = this.contactsPop;
+    if (!p) return 0;
+    return p.all ? p.listReachable : p.selected.size;
   }
 
-  clearPicks(id: number): void { this.form.picks.set(id, new Set<number>()); }
+  popChecked(c: any): boolean { const p = this.contactsPop!; return c.canEmail && (p.all || p.selected.has(c.id)); }
+
+  /** Select all: everyone in the list who can be emailed; with a search, the matches shown. */
+  get popAllChecked(): boolean {
+    const p = this.contactsPop;
+    if (!p) return false;
+    if (p.q.trim()) { const ok = p.rows.filter(c => c.canEmail); return !!ok.length && ok.every(c => this.popChecked(c)); }
+    return p.all || (!!p.reachableIds && p.reachableIds.length > 0 && p.reachableIds.every(id => p.selected.has(id)));
+  }
+  get popSomeChecked(): boolean { return !this.popAllChecked && this.popCount > 0; }
+
+  togglePopAll(): void {
+    const p = this.contactsPop!;
+    if (p.q.trim()) {
+      // With a search: tick or untick the matches shown.
+      const ok = p.rows.filter(c => c.canEmail);
+      const on = !this.popAllChecked;
+      this.popToIndividual();
+      for (const c of ok) on ? p.selected.add(c.id) : p.selected.delete(c.id);
+      return;
+    }
+    if (this.popAllChecked) { p.all = false; p.selected = new Set<number>(); }
+    else { p.all = true; p.selected = new Set<number>(p.reachableIds || []); }
+  }
+
+  togglePopContact(c: any): void {
+    const p = this.contactsPop!;
+    if (!c.canEmail) return;
+    this.popToIndividual();
+    p.selected.has(c.id) ? p.selected.delete(c.id) : p.selected.add(c.id);
+  }
+
+  /** From "everyone" to one by one: everyone who can be emailed starts ticked. */
+  private popToIndividual(): void {
+    const p = this.contactsPop!;
+    if (!p.all) return;
+    p.all = false;
+    p.selected = new Set<number>(p.reachableIds || p.rows.filter(c => c.canEmail).map(c => c.id));
+  }
+
+  /** Done: the whole list, the ticked contacts, or (nobody ticked) the list is not chosen. */
+  applyContacts(): void {
+    const p = this.contactsPop;
+    if (!p) return;
+    const id = p.list.id;
+    const everyone = p.all || (!!p.reachableIds && p.reachableIds.length > 0 && p.selected.size === p.reachableIds.length && p.reachableIds.every(x => p.selected.has(x)));
+    if (everyone) { this.form.mailListIds.add(id); this.form.picks.delete(id); }
+    else if (p.selected.size) { this.form.mailListIds.add(id); this.form.picks.set(id, new Set(p.selected)); }
+    else { this.form.mailListIds.delete(id); this.form.picks.delete(id); }
+    this.contactsPop = null;
+  }
+
+  closeContacts(): void { clearTimeout(this.popSearch); this.contactsPop = null; }
 
   /** Lists switched to "Choose contacts" with nobody ticked (they cannot be saved like that). */
   get emptyPickLists(): string[] {
@@ -527,7 +585,7 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
       mailListIds: new Set<number>(c.mailListIds || []),
       picks: new Map<number, Set<number>>(Object.entries(c.mailListPicks || {}).map(([k, v]) => [Number(k), new Set<number>((v as number[]).map(Number))]))
     };
-    if (fresh) this.pickers = {};
+    if (fresh) this.contactsPop = null;
     this.original = this.snapshot();
     if (fresh) this.step = this.editable ? 1 : 4;
     if (fresh && c.status === 'submitting') this.watchUpload(c.id);

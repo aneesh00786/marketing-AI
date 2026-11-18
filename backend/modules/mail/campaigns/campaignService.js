@@ -227,8 +227,20 @@ async function listPickOptions(ctx, rawListId, { q = '', page = 1 } = {}) {
     `SELECT DISTINCT c.id, c.email, c.first_name, c.last_name, c.company, (s.email IS NULL AND ${ELIGIBLE_SQL}) AS ok ${base}
      ORDER BY c.email, c.id LIMIT ${PICK_PAGE + 1} OFFSET ${(p - 1) * PICK_PAGE}`, params);
   const total = await get(`SELECT COUNT(DISTINCT c.id) AS n, COUNT(DISTINCT CASE WHEN s.email IS NULL AND ${ELIGIBLE_SQL} THEN c.id END) AS ok ${base}`, params);
+  // Everyone in the whole list who can be emailed (first page only), so "Select all" covers the list, not just a page.
+  // null when there are more than can be picked one by one (then "Select all" means the whole list).
+  let reachableIds;
+  if (p === 1) {
+    const ids = await all(
+      `SELECT DISTINCT c.id FROM mail_list_members m JOIN mail_contacts c ON c.id = m.contact_id
+       LEFT JOIN email_suppressions s ON s.workspace_id = c.workspace_id AND s.email = c.email
+       WHERE m.list_id = ? AND c.workspace_id = ? AND m.status = 'subscribed' AND s.email IS NULL AND ${ELIGIBLE_SQL}
+       ORDER BY c.id LIMIT ${MAX_PICKS + 1}`, [listId, ws(ctx)]);
+    reachableIds = ids.length > MAX_PICKS ? null : ids.map(r => Number(r.id));
+  }
   return {
     list: { id: list.id, name: list.name },
+    ...(reachableIds !== undefined ? { reachableIds } : {}),
     page: p, hasMore: rows.length > PICK_PAGE, total: Number(total?.n) || 0, reachable: Number(total?.ok) || 0, maxPicks: MAX_PICKS,
     contacts: rows.slice(0, PICK_PAGE).map(r => ({
       id: r.id, email: r.email, name: [r.first_name, r.last_name].filter(Boolean).join(' ') || null, company: r.company || null, canEmail: !!Number(r.ok)
