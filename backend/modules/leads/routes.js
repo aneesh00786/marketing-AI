@@ -247,4 +247,29 @@ router.post('/:id/email-draft', requireCapability('leads.view'), wrap(async (req
   res.json({ success: true, draft: await leadService.emailDraft(req, req.params.id) });
 }));
 
+/**
+ * Email a lead from the Leads page: to the lead's own address only, for people with "Email leads" (or who
+ * can send email anyway). The same checks as Compose: purpose, transactional permission, opt-outs and
+ * unsubscribe, idempotency and confirmation; recorded in Sent Mail as sent by this person.
+ */
+router.post('/:id/send-email', requireCapability('leads.view'), (req, res, next) => {
+  const caps = req.auth.capabilities;
+  if (!caps.has('mail.send') && !caps.has('leads.email')) {
+    return res.status(403).json({ success: false, code: 'FORBIDDEN', error: 'You cannot email leads. Ask a workspace Owner or Admin for "Email leads".' });
+  }
+  next();
+}, body(require('../mail/routes').sendSchema), wrap(async (req, res) => {
+  const lead = await leadService.requireLeadFor(req, req.params.id, 'view');
+  const to = String(lead.email || '').trim().toLowerCase();
+  if (!to) return res.status(400).json({ success: false, code: 'NO_EMAIL', error: 'This lead has no email address.' });
+  if (String(req.valid.recipient_email).trim().toLowerCase() !== to) {
+    return res.status(400).json({ success: false, code: 'NOT_LEAD_EMAIL', error: `From Leads you can only email the lead's own address (${lead.email}).` });
+  }
+  try {
+    await require('../mail/routes').sendDirect(req, res, { requireHtml: false });
+  } catch (err) {
+    res.status(err.status || 500).json({ success: false, code: err.code || 'SEND_FAILED', error: err.status && err.status < 500 ? err.message : (err.message || 'The email could not be sent.') });
+  }
+}));
+
 module.exports = router;

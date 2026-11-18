@@ -918,4 +918,4 @@ settings.post('/sync', requireCapability('mail.compose'), wrap(async (req, res) 
 }));
 
 // Every route above starts with requireCapability, which also rejects unauthenticated calls (401).
-module.exports = { drafts, emails, settings, tools, sendDraftCore, presentDraft, draftParts, SUPPRESSION_POLICY };
+module.exports = { drafts, emails, settings, tools, sendDraftCore, presentDraft, draftParts, SUPPRESSION_POLICY, sendDirect, sendSchema };

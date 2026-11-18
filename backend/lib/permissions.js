@@ -18,6 +18,8 @@ const CAPABILITIES = [
   'inbox.reply',
   'leads.view',
   'leads.manage',
+  // Email a lead from the Leads page (their own address only), without Mail Center or "Send email".
+  'leads.email',
   'mail.view',
   'mail.compose',
   'mail.send',

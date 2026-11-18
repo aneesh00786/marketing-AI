@@ -2,7 +2,7 @@ import { Injectable } from '@angular/core';
 import { Subject } from 'rxjs';
 
 /** A request to open Compose with the recipient (and optionally subject and text) filled in. */
-export interface ComposeRequest { email: string; name?: string | null; subject?: string; body?: string; }
+export interface ComposeRequest { email: string; name?: string | null; subject?: string; body?: string; /** Emailing a lead: sent through Leads ("Email leads"). */ leadId?: number | null; }
 
 /**
  * Lets any screen open the app's Compose window prefilled (e.g. following up a campaign

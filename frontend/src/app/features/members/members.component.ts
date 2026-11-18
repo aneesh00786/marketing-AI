@@ -12,7 +12,7 @@ import { AuthStateService } from '../../core/auth-state.service';
  * see Owner-related controls, and nobody gets controls for their own membership.
  */
 /** One group of the permissions panel: a menu item (section) and the permissions that belong to it. */
-interface MenuGroup { key: string; title: string; icon: string; module?: string; caps: string[]; tabs?: boolean; crm?: boolean; note?: string }
+interface MenuGroup { key: string; title: string; icon: string; module?: string; caps: string[]; tabs?: boolean; crm?: boolean; calls?: boolean; note?: string }
 
 @Component({
   selector: 'app-members',
@@ -123,7 +123,6 @@ export class MembersComponent implements OnInit {
 
   editPermissions(m: any): void {
     if (this.perm?.userId === m.userId) { this.perm = null; return; }
-    this.crmAuto = false;
     this.perm = { userId: m.userId, modules: new Set(m.modules?.keys || []), mailTabs: new Set(m.mailTabs?.keys || (this.data?.mailTabs || []).map((t: any) => t.key)),
       calls: !!m.callGrant, crmRole: m.crmRole || null, grants: { ...(m.grants || {}) } };
   }
@@ -144,6 +143,7 @@ export class MembersComponent implements OnInit {
     const g = this.perm?.grants[cap];
     if (g === 'role') return `Included in the ${m.role} role.`;
     const perf: Record<string, string> = {
+      'leads.email': 'Email a lead from the Leads page (their own address), without Mail Center. Opt-outs and the unsubscribe link apply as usual.',
       'mail.configure': 'Open Mail Center → Settings and change the mailbox, marketing approval, tracking and Amazon SES settings. Also opens the Compose send report.',
       'mail.view_all': "See everyone's drafts, sent emails, replies and campaigns in Mail Center, and approve them. Without it, people see only their own mail.",
       'performance.view_team': 'See every member in Team Performance and their individual pages, not only their own.',
@@ -154,7 +154,10 @@ export class MembersComponent implements OnInit {
       'performance.configure_scoring': 'Change how the performance score is calculated.',
       'performance.schedule_reports': 'Set up weekly or monthly performance report emails (with team access).'
     };
-    if (perf[cap]) return g === 'not_eligible' ? `The ${m.role} role cannot see analytics.` : perf[cap];
+    if (perf[cap] && g === 'not_eligible') {
+      return cap.startsWith('performance.') ? `The ${m.role} role cannot see analytics.` : cap.startsWith('leads.') ? `The ${m.role} role cannot see leads.` : `Not available for the ${m.role} role.`;
+    }
+    if (perf[cap]) return perf[cap];
     if (g === 'not_eligible') return cap === 'mail.send' ? `The ${m.role} role cannot write email.` : `Needs a role that sends email (Marketing Manager, Approver).`;
     return cap === 'mail.send' ? 'Send email themselves, not only write drafts.' : 'Compose email that can reach people who opted out of marketing.';
   }
@@ -167,8 +170,8 @@ export class MembersComponent implements OnInit {
    */
   readonly menuGroups: MenuGroup[] = [
     { key: 'products', title: 'Digital Products', icon: '📦', module: 'products', caps: [] },
-    { key: 'crm', title: 'CRM', icon: '💼', caps: [], crm: true, note: 'Platform-wide contacts, companies and deals. Calls use the company phone line.' },
-    { key: 'leads', title: 'Leads', icon: '👥', module: 'leads', caps: [] },
+    { key: 'crm', title: 'CRM', icon: '💼', caps: [], crm: true, note: 'Platform-wide contacts, companies and deals. Sales, Support and Manager can also make calls.' },
+    { key: 'leads', title: 'Leads', icon: '👥', module: 'leads', caps: ['leads.email'], calls: true },
     { key: 'appointments', title: 'Demos', icon: '📅', module: 'appointments', caps: [] },
     { key: 'mail', title: 'Mail Center & email campaigns', icon: '✉', module: 'mail', tabs: true, caps: ['mail.send', 'mail.send_transactional', 'mail.view_all', 'mail.configure'] },
     { key: 'social', title: 'Social Media Marketing', icon: '📣', module: 'social', caps: [] },
@@ -204,24 +207,10 @@ export class MembersComponent implements OnInit {
     this.perm.modules.add(g.module);
   }
 
-  /** True while CRM access was turned on by ticking Make calls (not chosen by hand). */
-  private crmAuto = false;
-
-  /**
-   * Make calls: ticking it while CRM is off also gives CRM access (Viewer, the lowest level), like every other
-   * section; unticking it removes that access again only when it was given that way.
-   */
+  /** Make calls (Leads): the company phone line; only the platform admin changes it (the server checks). */
   toggleCalls(): void {
     if (!this.perm) return;
     this.perm.calls = !this.perm.calls;
-    if (this.perm.calls && !this.perm.crmRole) {
-      const levels: string[] = this.data?.crmRoles || [];
-      this.perm.crmRole = levels.includes('viewer') ? 'viewer' : levels[0] || null;
-      this.crmAuto = true;
-    } else if (!this.perm.calls && this.crmAuto) {
-      this.perm.crmRole = null;
-      this.crmAuto = false;
-    }
   }
 
   /**
@@ -231,21 +220,22 @@ export class MembersComponent implements OnInit {
   afterUntick(m: any, g: any): void {
     if (!this.perm || !g.module || m.modules?.fullAccessRole || !this.perm.modules.has(g.module)) return;
     const tabsOn = g.tabs ? this.perm.mailTabs.size > 0 : false;
-    const grantsOn = this.groupGrants(g).some((x: any) => this.grantOn(m, x.capability));
-    const hasSubs = (g.tabs && (this.data?.mailTabs || []).length) || this.groupGrants(g).length;
+    const grantsOn = this.groupGrants(g).some((x: any) => this.grantOn(m, x.capability))
+      || (g.calls && !!this.data?.crmRoles && (this.perm.calls || this.crmAllowsCalls(this.perm.crmRole)));
+    const hasSubs = (g.tabs && (this.data?.mailTabs || []).length) || this.groupGrants(g).length || (g.calls && this.data?.crmRoles);
     if (hasSubs && !tabsOn && !grantsOn) this.perm.modules.delete(g.module);
   }
 
   /** CRM header checkbox: on gives the lowest level (Viewer; the level is chosen below), off removes access. */
   toggleCrm(): void {
     if (!this.perm) return;
-    this.crmAuto = false; // chosen by hand from now on
     const levels: string[] = this.data?.crmRoles || [];
     this.perm.crmRole = this.perm.crmRole ? null : (levels.includes('viewer') ? 'viewer' : levels[0] || null);
   }
 
   /** Short titles (the server's labels are longer); falls back to the server label. */
   private readonly shortLabels: Record<string, string> = {
+    'leads.email': 'Email leads',
     'mail.send': 'Send email',
     'mail.send_transactional': 'Send transactional email',
     'mail.view_all': 'View all mail',

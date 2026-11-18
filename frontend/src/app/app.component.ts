@@ -1695,6 +1695,7 @@ export class AppComponent implements OnInit, OnDestroy {
         this.composeTemplate = null;
         this.composeTab = 'visual';
         this.showComposeModal = true;
+        this.composeLeadId = lead.id; this.composeLeadEmail = String(d.to || '').trim().toLowerCase();
       },
       error: (err) => this.showToast(err?.error?.error || 'Could not prepare the email draft.')
     });
@@ -1739,6 +1740,11 @@ export class AppComponent implements OnInit, OnDestroy {
    * unsubscribe link, marketing opt-outs respected); without a purpose the server uses marketing.
    */
   composePurpose: 'transactional' | 'marketing' | null = null;
+  /** Compose opened for a lead: sent through Leads ("Email leads") while it still goes to that lead's address. */
+  composeLeadId: number | null = null;
+  composeLeadEmail = '';
+  /** Whether this person may email leads ("Email leads" or "Send email"); the server checks it too. */
+  get canEmailLeads(): boolean { return !this.myCaps || this.myCaps.has('mail.send') || this.myCaps.has('leads.email'); }
   /** Template the email was loaded from (its category decides whether transactional is possible). */
   composeTemplate: { id: number; category: string } | null = null;
 
@@ -1812,6 +1818,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.composeTokenValues = defaultTokenValues(findTokens(t.html), this.composeEmail.recipient_name);
     this.composeSend = null;
     this.showComposeModal = true;
+    this.composeLeadId = null;
   }
 
   get composeTokens(): string[] {
@@ -1865,6 +1872,17 @@ export class AppComponent implements OnInit, OnDestroy {
       }
     };
     this.isSendingCompose = true;
+    // To a lead's own address (opened from Leads): through Leads, so "Email leads" is enough.
+    const toLead = this.composeLeadId && String(this.composeEmail.recipient_email || '').trim().toLowerCase() === this.composeLeadEmail;
+    if (toLead) {
+      const html = this.composeEmail.is_html && this.composeEmail.html_body;
+      this.apiService.sendLeadEmail(this.composeLeadId!, {
+        recipient_email: this.composeEmail.recipient_email, recipient_name: this.composeEmail.recipient_name, subject: this.composeEmail.subject,
+        ...(html ? { html_body: this.composeEmail.html_body, body_text: this.composeEmail.body } : { body: this.composeEmail.body }),
+        purpose: this.composePurpose, templateId: this.composeTemplate?.id ?? null
+      }, true, key).subscribe(done);
+      return;
+    }
     if (this.composeEmail.is_html && this.composeEmail.html_body) {
       this.apiService.sendHtmlEmail({
         recipient_email: this.composeEmail.recipient_email,
@@ -1897,6 +1915,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.composeTemplate = null;
     this.composeTab = 'write';
     this.showComposeModal = true;
+    this.composeLeadId = null;
   }
 
   replyToEmail(email: any): void {
@@ -1916,6 +1935,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.composeSend = null;
     this.composeTab = 'write';
     this.showComposeModal = true;
+    this.composeLeadId = null;
   }
 
   /** Forward: a new email with the original content; the sender chooses the recipient and purpose. */
@@ -1934,6 +1954,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.composeSend = null;
     this.composeTab = html ? 'visual' : 'write';
     this.showComposeModal = true;
+    this.composeLeadId = null;
   }
 
   /** A failed email opened in Compose as a new email: every check runs again and nothing is sent until confirmed. */
@@ -1952,12 +1973,13 @@ export class AppComponent implements OnInit, OnDestroy {
     this.composeSend = null;
     this.composeTab = html ? 'visual' : 'write';
     this.showComposeModal = true;
+    this.composeLeadId = null;
   }
 
   private composeRequestSub: any = null;
 
   /** Compose prefilled for one person (campaign follow-up). The sender still chooses the purpose and sends. */
-  openComposeFor(r: { email: string; name?: string | null; subject?: string; body?: string }): void {
+  openComposeFor(r: { email: string; name?: string | null; subject?: string; body?: string; leadId?: number | null }): void {
     if (this.showComposeModal && !confirm('Replace the email you are writing?')) return;
     this.composeEmail = { recipient_email: r.email || '', recipient_name: r.name || '', subject: r.subject || '', body: r.body || '', html_body: '', is_html: false };
     this.composePurpose = null;
@@ -1967,6 +1989,8 @@ export class AppComponent implements OnInit, OnDestroy {
     this.composeTouched = false;
     this.composeTab = 'write';
     this.showComposeModal = true;
+    this.composeLeadId = null;
+    if (r.leadId) { this.composeLeadId = r.leadId; this.composeLeadEmail = String(r.email || '').trim().toLowerCase(); }
   }
 
   /** Compose Email (Mail Center header): a blank email. */
@@ -1978,6 +2002,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.composeSend = null;
     this.composeTab = 'write';
     this.showComposeModal = true;
+    this.composeLeadId = null;
   }
 
   get composeRecipientValid(): boolean { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((this.composeEmail.recipient_email || '').trim()); }

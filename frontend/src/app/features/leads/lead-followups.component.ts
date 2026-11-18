@@ -24,6 +24,8 @@ type Tab = 'overview' | 'timeline' | 'notes';
 export class LeadFollowupsComponent implements OnInit {
   @Input({ required: true }) lead!: any;
   @Input() members: { userId: number; name: string; role: string }[] = [];
+  /** Whether this person may email leads ("Email leads" or "Send email"); the server checks it too. */
+  @Input() canEmail = true;
   @Output() close = new EventEmitter<void>();
   @Output() toast = new EventEmitter<string>();
 
@@ -93,7 +95,7 @@ export class LeadFollowupsComponent implements OnInit {
 
   emailLead(): void {
     const first = String(this.lead.name || '').trim().split(/\s+/)[0] || 'there';
-    this.compose.open({ email: this.lead.email, name: this.lead.name || null, subject: this.lead.productName ? `Following up: ${this.lead.productName}` : 'Following up', body: `Hi ${first},\n\n` });
+    this.compose.open({ email: this.lead.email, name: this.lead.name || null, subject: this.lead.productName ? `Following up: ${this.lead.productName}` : 'Following up', body: `Hi ${first},\n\n`, leadId: this.lead.id ?? null });
   }
 
   // ---------------------------------------------------------------- follow-ups

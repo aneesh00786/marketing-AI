@@ -451,7 +451,7 @@
                 <button class="btn btn-secondary btn-sm" (click)="followupLead = ld" title="Follow-ups, calls, emails and notes for this lead">📅 Follow-ups</button>
                 <button class="btn btn-secondary btn-sm" *ngIf="leadCanManageAccess" (click)="accessLeadId = ld.id" title="Assign this lead to a member">👤 Assign</button>
                 <button class="btn btn-secondary btn-sm" *ngIf="ld.googlePlace" (click)="viewPlaceDetails(ld)" title="Show this business's details live from Google Maps">📍 Live details</button>
-                <button class="btn btn-secondary btn-sm" (click)="quickEmailLead(ld)" [disabled]="!ld.hasValidEmail" [title]="ld.hasValidEmail ? 'Draft an email about ' + (ld.productName || 'their needs') : 'No valid email address'">✉️ Email</button>
+                <button *ngIf="canEmailLeads" class="btn btn-secondary btn-sm" (click)="quickEmailLead(ld)" [disabled]="!ld.hasValidEmail" [title]="ld.hasValidEmail ? 'Draft an email about ' + (ld.productName || 'their needs') : 'No valid email address'">✉️ Email</button>
                 <button class="btn btn-secondary btn-sm" *ngIf="ld.accessLevel !== 'view'" (click)="qualifySingleLead(ld)" title="Refresh the rule-based score and ask AI for advice">⚡ AI advice</button>
                 <button class="btn btn-danger btn-sm" *ngIf="ld.accessLevel === 'admin' || ld.accessLevel === 'owner'" (click)="deleteLead(ld)" type="button" aria-label="Delete lead">🗑</button>
               </div>
@@ -1375,4 +1375,4 @@
 <app-lead-access *ngIf="accessLeadId" [leadId]="accessLeadId" (close)="accessLeadId = null" (changed)="showToast($event); loadLeads()"></app-lead-access>
 
 <!-- Lead follow-ups: calls (📞), emails (Compose), scheduled follow-ups and notes -->
-<app-lead-followups *ngIf="followupLead" [lead]="followupLead" [members]="leadMembers" (close)="followupLead = null; loadNotifications()" (toast)="showToast($event)"></app-lead-followups>
+<app-lead-followups *ngIf="followupLead" [lead]="followupLead" [members]="leadMembers" [canEmail]="canEmailLeads" (close)="followupLead = null; loadNotifications()" (toast)="showToast($event)"></app-lead-followups>

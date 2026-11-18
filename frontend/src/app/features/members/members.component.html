@@ -132,7 +132,18 @@
                   </div>
 
                   <!-- Permissions of this section -->
-                  <ul class="pm-list" *ngIf="groupGrants(grp).length">
+                  <ul class="pm-list" *ngIf="groupGrants(grp).length || (grp.calls && data.crmRoles)">
+                    <ng-container *ngIf="grp.calls && data.crmRoles">
+                    <li [class.on]="perm!.calls || crmAllowsCalls(perm!.crmRole)">
+                      <label>
+                        <input type="checkbox" [checked]="perm!.calls || crmAllowsCalls(perm!.crmRole)" (change)="toggleSub(m, grp, !(perm!.calls || crmAllowsCalls(perm!.crmRole))); toggleCalls(); afterUntick(m, grp)" [disabled]="m.isYou || crmAllowsCalls(perm!.crmRole)" />
+                        <span class="pm-text">
+                          <span class="pm-title">Make calls <span class="pm-tag role" *ngIf="crmAllowsCalls(perm!.crmRole)">With CRM access</span></span>
+                          <small class="muted">The call button next to a lead's phone number (company phone line). Only the platform admin can change it.</small>
+                        </span>
+                      </label>
+                    </li>
+                    </ng-container>
                     <li *ngFor="let g of groupGrants(grp)" [class.on]="grantOn(m, g.capability)" [class.off]="!!grantTag(m, g.capability) && !grantOn(m, g.capability)">
                       <label>
                         <input type="checkbox" [checked]="grantOn(m, g.capability)" (change)="toggleSub(m, grp, !grantOn(m, g.capability)); toggleGrant(g.capability); afterUntick(m, grp)"
@@ -156,32 +167,13 @@
                         <option *ngFor="let r of data.crmRoles" [ngValue]="r">{{ r | titlecase }}</option>
                       </select>
                     </li>
-                    <li [class.on]="perm!.calls || crmAllowsCalls(perm!.crmRole)">
-                      <label>
-                        <input type="checkbox" [checked]="perm!.calls || crmAllowsCalls(perm!.crmRole)" (change)="toggleCalls()" [disabled]="m.isYou || crmAllowsCalls(perm!.crmRole)" />
-                        <span class="pm-text">
-                          <span class="pm-title">Make calls <span class="pm-tag role" *ngIf="crmAllowsCalls(perm!.crmRole)">With CRM access</span></span>
-                          <small class="muted">The call button next to phone numbers (Leads, campaigns).</small>
-                        </span>
-                      </label>
-                    </li>
+
 
                   </ul>
 
                   <p class="muted small pm-empty" *ngIf="groupOn(m, grp) && !grp.tabs && !grp.crm && !groupGrants(grp).length">No other permissions: their role decides what they can do here.</p>
                 </ng-container>
-                <!-- Make calls does not need CRM access: it stays here when CRM is off -->
-                <ul class="pm-list" *ngIf="grp.crm && !groupOn(m, grp)">
-                    <li [class.on]="perm!.calls || crmAllowsCalls(perm!.crmRole)">
-                      <label>
-                        <input type="checkbox" [checked]="perm!.calls || crmAllowsCalls(perm!.crmRole)" (change)="toggleCalls()" [disabled]="m.isYou || crmAllowsCalls(perm!.crmRole)" />
-                        <span class="pm-text">
-                          <span class="pm-title">Make calls <span class="pm-tag role" *ngIf="crmAllowsCalls(perm!.crmRole)">With CRM access</span></span>
-                          <small class="muted">The call button next to phone numbers (Leads, campaigns).</small>
-                        </span>
-                      </label>
-                    </li>
-                </ul>
+
                 <p class="muted small pm-empty" *ngIf="!groupOn(m, grp) && (grp.crm || (!grp.tabs && !groupGrants(grp).length))">{{ grp.crm ? 'No CRM access. Tick it to give access (Viewer to start), then choose the level.' : 'Turn it on to show this section to them.' }}</p>
                 <p class="muted small pm-empty pm-hint" *ngIf="!groupOn(m, grp) && !grp.crm && (grp.tabs || groupGrants(grp).length)">Section is off. Ticking any permission below turns it on.</p>
               </section>

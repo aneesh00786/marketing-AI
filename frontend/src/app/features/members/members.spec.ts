@@ -60,37 +60,30 @@ describe('MembersComponent: permissions panel', () => {
     const leads = Array.from(el().querySelectorAll('.pm-group')).find(g => g.querySelector('h4')!.textContent!.trim() === 'Leads') as HTMLElement;
     expect((leads.querySelector('.pm-switch input') as HTMLInputElement).checked).toBeTrue();
     expect(leads.querySelector('.pm-state')!.textContent).toContain('On');
-    // CRM: the header checkbox gives Viewer access (the level is chosen below) and removes it; calls stay visible.
-    const crm = () => Array.from(el().querySelectorAll('.pm-group')).find(g => g.querySelector('h4')!.textContent!.trim() === 'CRM') as HTMLElement;
+    // CRM: the header checkbox gives Viewer access (the level is chosen below) and removes it.
+    const group = (t: string) => Array.from(el().querySelectorAll('.pm-group')).find(g => g.querySelector('h4')!.textContent!.trim() === t) as HTMLElement;
+    const crm = () => group('CRM');
     expect((crm().querySelector('.pm-switch input') as HTMLInputElement).checked).toBeFalse();
-    expect(crm().textContent).toContain('Make calls');
+    expect(crm().textContent).not.toContain('Make calls');
     (crm().querySelector('.pm-switch input') as HTMLInputElement).click();
     fixture.detectChanges();
     expect(c().perm!.crmRole).toBe('viewer');
     expect(crm().querySelector('.pm-state')!.textContent).toContain('Viewer');
-    expect(crm().querySelector('select')).toBeTruthy();
     (crm().querySelector('.pm-switch input') as HTMLInputElement).click();
     fixture.detectChanges();
     expect(c().perm!.crmRole).toBeNull();
-    // Ticking Make calls while CRM is off turns CRM on too (Viewer).
-    const calls = Array.from(crm().querySelectorAll('.pm-list li')).find(li => li.textContent!.includes('Make calls'))!.querySelector('input') as HTMLInputElement;
-    calls.click();
+    // Make calls is under Leads (with Email leads when offered); it does not turn CRM on.
+    const calls = () => Array.from(group('Leads').querySelectorAll('.pm-list li')).find(li => li.textContent!.includes('Make calls'))!.querySelector('input') as HTMLInputElement;
+    calls().click();
     fixture.detectChanges();
     expect(c().perm!.calls).toBeTrue();
-    expect(c().perm!.crmRole).toBe('viewer');
-    expect((crm().querySelector('.pm-switch input') as HTMLInputElement).checked).toBeTrue();
-    // Unticking Make calls removes the CRM access it gave; a level chosen by hand stays.
-    (Array.from(crm().querySelectorAll('.pm-list li')).find(li => li.textContent!.includes('Make calls'))!.querySelector('input') as HTMLInputElement).click();
+    expect(c().perm!.crmRole).toBeNull();
+    calls().click();
     fixture.detectChanges();
     expect(c().perm!.calls).toBeFalse();
-    expect(c().perm!.crmRole).toBeNull();
-    (crm().querySelector('.pm-switch input') as HTMLInputElement).click(); fixture.detectChanges(); // CRM on by hand
-    const calls2 = () => Array.from(crm().querySelectorAll('.pm-list li')).find(li => li.textContent!.includes('Make calls'))!.querySelector('input') as HTMLInputElement;
-    calls2().click(); fixture.detectChanges();
-    calls2().click(); fixture.detectChanges();
-    expect(c().perm!.crmRole).withContext('chosen by hand: kept').toBe('viewer');
-    expect(el().textContent).toContain('Make calls');
-    c().perm!.crmRole = null; // back to no CRM access (the checks above turned it on)
+    expect(c().perm!.modules.has('leads')).withContext('nothing left ticked in Leads: the section turned off').toBeFalse();
+    c().perm!.modules.add('leads'); // back as it was, to test saving below
+    c().perm!.crmRole = null;
     c().perm!.calls = true;
     c().toggleGrant(SEND);
     const done = c().savePermissions(m);

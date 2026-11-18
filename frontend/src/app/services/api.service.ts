@@ -363,6 +363,11 @@ export class ApiService {
   }
 
   // 23. Visual HTML Email & Email AI Analysis
+  /** Email a lead from Leads ("Email leads"): only to that lead's own address. */
+  sendLeadEmail(leadId: number, data: any, confirm: boolean, idempotencyKey: string): Observable<any> {
+    return this.http.post(`${this.baseUrl}/leads/${leadId}/send-email`, { ...data, confirm }, { headers: { 'Idempotency-Key': idempotencyKey } });
+  }
+
   sendHtmlEmail(data: { recipient_email: string; recipient_name?: string; subject: string; html_body: string; body_text?: string; purpose?: 'transactional' | 'marketing' | null; templateId?: number | null }, confirm: boolean, idempotencyKey: string): Observable<any> {
     return this.http.post(`${this.root}/api/emails/send-html`, { ...data, confirm }, { headers: { 'Idempotency-Key': idempotencyKey } });
   }

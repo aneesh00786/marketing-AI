@@ -45,7 +45,7 @@
       <!-- Quick actions: ✉ and 📞 are the app's existing Compose and calling -->
       <div class="lf-actions" *ngIf="canAct">
         <button type="button" class="btn btn-primary btn-sm" (click)="callLead()" [disabled]="!canCall" [title]="calls.available ? (lead.phone ? 'Call through your phone line' : 'This lead has no phone number') : 'Calling is not available for your account'">📞 Call lead</button>
-        <button type="button" class="btn btn-secondary btn-sm" (click)="emailLead()" [disabled]="!lead.email" [title]="lead.email ? 'Opens Compose' : 'This lead has no email address'">✉ Send email</button>
+        <button *ngIf="canEmail" type="button" class="btn btn-secondary btn-sm" (click)="emailLead()" [disabled]="!lead.email" [title]="lead.email ? 'Opens Compose' : 'This lead has no email address'">✉ Send email</button>
         <button type="button" class="btn btn-secondary btn-sm" [class.on]="form === 'followup'" (click)="open('followup')">📅 Schedule follow-up</button>
         <button type="button" class="btn btn-secondary btn-sm" [class.on]="form === 'note'" (click)="open('note')">📝 Add note</button>
         <button type="button" class="btn btn-secondary btn-sm" [class.on]="form === 'activity'" (click)="open('activity')">➕ Log activity</button>
