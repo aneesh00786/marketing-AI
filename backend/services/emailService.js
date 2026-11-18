@@ -97,7 +97,7 @@ async function sendZeptoMail({ to, recipientName = '', subject, html, text = '',
         to: [{ email_address: { address: to, name: recipientName || to } }],
         reply_to: [{ address: replyTo || fromAddress, name: fromName || fromAddress }],
         subject: subject,
-        htmlbody: html || `<p>${text || ''}</p>`,
+        htmlbody: html || require('../lib/mailContent').textToHtml(text),
         // Plain-text part for clients that do not show HTML.
         textbody: text || undefined,
         // Tracked Mail Center emails: our opaque reference, and ZeptoMail's open/click tracking set
@@ -431,7 +431,8 @@ async function sendRealEmail(workspaceId, {
     throw err;
   }
   if (!String(subject || '').trim()) throw mailError('A subject is required.', 400, 'VALIDATION_ERROR');
-  html = html || `<p>${String(text || '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))}</p>`;
+  // Plain text keeps its paragraphs and line breaks in the HTML part.
+  html = html || require('../lib/mailContent').textToHtml(text);
 
   const config = await getRawMailConfig(workspaceId);
   const senderEmail = config.sender_email || (EMAIL_RE.test(config.smtp_user || '') ? config.smtp_user : null);

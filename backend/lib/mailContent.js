@@ -64,4 +64,15 @@ function fillPlaceholders({ subject = '', text = '', html = '' }, replacements) 
   return { subject: s, text: t, html: hBody };
 }
 
-module.exports = { PLACEHOLDER_RE, TOKEN_RE, MERGE_TAG_RE, TEMPLATE_TOKENS, isPlaceholderKey, unresolvedPlaceholders, assertNoPlaceholders, fillPlaceholders };
+/**
+ * Plain text as email HTML, keeping its layout: a blank line starts a new paragraph, a single line break
+ * stays a line break (email apps collapse raw newlines in HTML into spaces). Text is escaped.
+ */
+function textToHtml(text) {
+  const esc = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const paras = String(text || '').replace(/\r\n?/g, '\n').trim().split(/\n[ \t]*\n+/).filter(p => p.trim());
+  if (!paras.length) return '<p></p>';
+  return paras.map(p => `<p style="margin:0 0 1em">${esc(p.trim()).replace(/\n/g, '<br>')}</p>`).join('\n');
+}
+
+module.exports = { textToHtml, PLACEHOLDER_RE, TOKEN_RE, MERGE_TAG_RE, TEMPLATE_TOKENS, isPlaceholderKey, unresolvedPlaceholders, assertNoPlaceholders, fillPlaceholders };

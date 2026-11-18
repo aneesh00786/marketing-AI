@@ -638,8 +638,7 @@ const purposeExplanation = cls => cls.reasons.map(r => PURPOSE_REASON_TEXT[r] ||
  */
 async function sendComposeAsMarketing(req, v, html, text) {
   const workspaceId = ws(req);
-  const esc = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
-  const bodyHtml = html || `<p>${esc(text).replace(/\n/g, '<br>')}</p>`;
+  const bodyHtml = html || require('../../lib/mailContent').textToHtml(text);
   const now = nowSql();
   const ins = await run(
     `INSERT INTO email_drafts (workspace_id, recipient_email, recipient_name, subject, body_html, body_text, tone, status, created_by_user_id, created_at, updated_at)
