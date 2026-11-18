@@ -118,6 +118,7 @@ export class MembersComponent implements OnInit {
     const g = this.perm?.grants[cap];
     if (g === 'role') return `Included in the ${m.role} role.`;
     const perf: Record<string, string> = {
+      'mail.view_all': "See everyone's drafts, sent emails, replies and campaigns in Mail Center, and approve them. Without it, people see only their own mail.",
       'performance.view_team': 'See every member in Team Performance and their individual pages, not only their own.',
       'performance.manage_targets': 'Set and change staff targets (per person or role).',
       'performance.compare': 'Compare staff side by side (with team access).',

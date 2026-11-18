@@ -1,4 +1,5 @@
 const express = require('express');
+const mailAccess = require('../../../lib/mailAccess');
 const { z } = require('zod');
 const crypto = require('crypto');
 const { run, get } = require('../../../db/database');
@@ -182,13 +183,15 @@ router.put('/zeptomail-webhook', requireCapability('mail.configure'), wrap(async
 }));
 
 router.get('/emails/:id(\\d+)', requireCapability('mail.view'), wrap(async (req, res) => {
-  const email = await get('SELECT id FROM emails WHERE id = ? AND workspace_id = ?', [req.params.id, ws(req)]);
+  const scope = mailAccess.emailScope(req, 'e');
+  const email = await get(`SELECT e.id FROM emails e WHERE e.id = ? AND e.workspace_id = ? AND ${scope.sql}`, [req.params.id, ws(req), ...scope.params]);
   if (!email) throw httpError(404, 'Email not found.', 'NOT_FOUND');
   res.json({ success: true, tracking: await svc.forEmail(ws(req), email.id) });
 }));
 
 router.get('/drafts/:id(\\d+)', requireCapability('mail.view'), wrap(async (req, res) => {
-  const draft = await get('SELECT id, email_id FROM email_drafts WHERE id = ? AND workspace_id = ?', [req.params.id, ws(req)]);
+  const scope = mailAccess.draftScope(req, 'd');
+  const draft = await get(`SELECT d.id, d.email_id FROM email_drafts d WHERE d.id = ? AND d.workspace_id = ? AND ${scope.sql}`, [req.params.id, ws(req), ...scope.params]);
   if (!draft) throw httpError(404, 'Draft not found.', 'NOT_FOUND');
   const byDraft = await svc.forDraft(ws(req), draft.id);
   res.json({ success: true, tracking: byDraft.tracked || !draft.email_id ? byDraft : await svc.forEmail(ws(req), draft.email_id) });

@@ -156,9 +156,9 @@ async function performAction(ctx, runRow, workflow, step, subject) {
       const subj = fill(p.subject, vars).slice(0, 200);
       const text = fill(p.body, vars);
       const r = await run(
-        `INSERT INTO email_drafts (workspace_id, product_id, product_name, lead_id, recipient_email, recipient_name, subject, body_html, body_text, tone, status, created_at, updated_at)
-         VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, 'Professional', 'Draft', UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
-        [ws, lead.product_id || null, lead.id, String(lead.email).trim(), lead.name || '', subj, `<div style="font-family: sans-serif; padding: 20px; line-height: 1.6;">${esc(text).replace(/\n/g, '<br>')}</div>`, text]
+        `INSERT INTO email_drafts (workspace_id, product_id, product_name, lead_id, recipient_email, recipient_name, subject, body_html, body_text, tone, status, created_by_user_id, created_at, updated_at)
+         VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, 'Professional', 'Draft', ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+        [ws, lead.product_id || null, lead.id, String(lead.email).trim(), lead.name || '', subj, `<div style="font-family: sans-serif; padding: 20px; line-height: 1.6;">${esc(text).replace(/\n/g, '<br>')}</div>`, text, lead.owner_user_id || null]
       );
       return { draftId: r.lastID, status: 'Draft (needs approval in Mail Drafts)' };
     }

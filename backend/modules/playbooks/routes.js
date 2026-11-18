@@ -202,9 +202,9 @@ router.post(['/api/v1/marketing/dispatch-campaign', '/api/marketing/dispatch-cam
     const text = `${greeting}\n\n${v.body}\n\nBest regards,\n[Your name]`;
     const html = `<div style="font-family: sans-serif; padding: 20px; line-height: 1.6;">${esc(text).replace(/\n/g, '<br>')}</div>`;
     const r = await run(
-      `INSERT INTO email_drafts (workspace_id, product_id, product_name, lead_id, recipient_email, recipient_name, subject, body_html, body_text, tone, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Professional', 'Draft', ?, ?)`,
-      [ws(req), product ? product.id : null, product ? product.name : null, lead.id, email, lead.name || '', v.subject, html, text, now, now]
+      `INSERT INTO email_drafts (workspace_id, product_id, product_name, lead_id, recipient_email, recipient_name, subject, body_html, body_text, tone, status, created_by_user_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Professional', 'Draft', ?, ?, ?)`,
+      [ws(req), product ? product.id : null, product ? product.name : null, lead.id, email, lead.name || '', v.subject, html, text, Number(req.auth?.userId) || null, now, now]
     );
     created.push({ draftId: r.lastID, leadId: lead.id });
   }

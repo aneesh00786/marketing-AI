@@ -10,6 +10,8 @@ const passwordService = require('./services/passwordService');
 const leadAccess = require('./lib/leadAccess');
 /** Leads this person may see, for queries written as `FROM leads l WHERE l.workspace_id = ? AND ${vis.sql}`. */
 const leadVis = req => leadAccess.visibleSql(req, 'l');
+// Mail an assistant may mention: the person's own unless they see all mail (lib/mailAccess).
+const mailVis = req => require('./lib/mailAccess').emailScope(req, 'e');
 const { audit } = require('./lib/audit');
 const telnyxService = require('./services/telnyxService');
 const marketingService = require('./services/marketingService');
@@ -455,7 +457,8 @@ app.post(['/api/v1/assistant/chat', '/api/assistant/chat'], async (req, res) => 
     const replies = await all('SELECT * FROM client_replies ORDER BY id DESC LIMIT 5');
     const connectedBiz = await all('SELECT * FROM connected_businesses WHERE workspace_id = ? ORDER BY id ASC', [req.auth.workspaceId]);
     const traivoStats = await queryTraivoMySQL();
-    const urgentEmails = await all("SELECT * FROM emails WHERE workspace_id = ? AND is_urgent = 1 AND is_read = 0 ORDER BY id DESC LIMIT 5", [req.auth.workspaceId]);
+    const mv1 = mailVis(req);
+    const urgentEmails = await all(`SELECT e.* FROM emails e WHERE e.workspace_id = ? AND e.is_urgent = 1 AND e.is_read = 0 AND ${mv1.sql} ORDER BY e.id DESC LIMIT 5`, [req.auth.workspaceId, ...mv1.params]);
     const lv1 = leadVis(req);
     const allLeads = await all(`SELECT l.* FROM leads l WHERE l.workspace_id = ? AND ${lv1.sql} ORDER BY l.id DESC LIMIT 5`, [req.auth.workspaceId, ...lv1.params]);
     const digitalProductsList = await all('SELECT * FROM digital_products WHERE workspace_id = ? ORDER BY id ASC', [req.auth.workspaceId]);
@@ -555,8 +558,8 @@ ${connectedBiz.map(b => `  * ${b.business_type === 'owner' ? '[MY BUSINESS]' : '
       );
 
       await run(
-        `INSERT INTO email_drafts (workspace_id, product_id, product_name, recipient_email, recipient_name, subject, body_html, body_text, tone, status, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Professional', 'Draft', ?, ?)`,
+        `INSERT INTO email_drafts (workspace_id, product_id, product_name, recipient_email, recipient_name, subject, body_html, body_text, tone, status, created_by_user_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Professional', 'Draft', ?, ?, ?)`,
         [
           req.auth.workspaceId,
           targetProduct ? targetProduct.id : null,
@@ -566,6 +569,7 @@ ${connectedBiz.map(b => `  * ${b.business_type === 'owner' ? '[MY BUSINESS]' : '
           generatedDraft.subject,
           generatedDraft.body_html,
           generatedDraft.body_text,
+          Number(req.auth?.userId) || null,
           now, now
         ]
       );
@@ -624,10 +628,10 @@ ${connectedBiz.map(b => `  * ${b.business_type === 'owner' ? '[MY BUSINESS]' : '
         const subject = messageText.split(/[.!?\n]/)[0].slice(0, 80) || messageText.slice(0, 80);
         const safeHtml = messageText.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
         const draftRes = await run(
-          `INSERT INTO email_drafts (workspace_id, product_id, product_name, recipient_email, recipient_name, subject, body_html, body_text, tone, status, created_at, updated_at)
-           VALUES (?, NULL, NULL, ?, ?, ?, ?, ?, 'Professional', 'Draft', ?, ?)`,
+          `INSERT INTO email_drafts (workspace_id, product_id, product_name, recipient_email, recipient_name, subject, body_html, body_text, tone, status, created_by_user_id, created_at, updated_at)
+           VALUES (?, NULL, NULL, ?, ?, ?, ?, ?, 'Professional', 'Draft', ?, ?, ?)`,
           [req.auth.workspaceId, recipient, recipientName, subject,
-            `<div style="font-family: sans-serif; padding: 20px; line-height: 1.6;"><p>${safeHtml}</p></div>`, messageText, now, now]
+            `<div style="font-family: sans-serif; padding: 20px; line-height: 1.6;"><p>${safeHtml}</p></div>`, messageText, Number(req.auth?.userId) || null, now, now]
         );
 
         fastReply = `Sir, I have not sent it yet. I saved an email to ${recipientName ? `${recipientName} (${recipient})` : recipient} with the subject "${subject}" in Mail Drafts (draft #${draftRes.lastID}). Approve and confirm it there to send.`;
@@ -640,8 +644,8 @@ ${connectedBiz.map(b => `  * ${b.business_type === 'owner' ? '[MY BUSINESS]' : '
     }
     // 6. Email queries (inbox, unread, urgent, read latest)
     else if (lower.includes('urgent') || lower.includes('inbox') || (lower.includes('email') && !lower.includes('send') && !lower.includes('draft')) || (lower.includes('mail') && !lower.includes('send') && !lower.includes('draft'))) {
-      const allEmails = await all("SELECT * FROM emails WHERE workspace_id = ? ORDER BY id DESC LIMIT 5", [req.auth.workspaceId]);
-      const unreadCountRow = await get("SELECT count(*) as count FROM emails WHERE workspace_id = ? AND is_read = 0", [req.auth.workspaceId]);
+      const allEmails = await all(`SELECT e.* FROM emails e WHERE e.workspace_id = ? AND ${mv1.sql} ORDER BY e.id DESC LIMIT 5`, [req.auth.workspaceId, ...mv1.params]);
+      const unreadCountRow = await get(`SELECT count(*) as count FROM emails e WHERE e.workspace_id = ? AND e.is_read = 0 AND ${mv1.sql}`, [req.auth.workspaceId, ...mv1.params]);
       const unreadCount = unreadCountRow?.count || 0;
 
       if (urgentEmails.length > 0) {
@@ -976,7 +980,8 @@ app.get(['/api/v1/executive/briefing', '/api/executive/briefing'], async (req, r
     const clients = await all('SELECT * FROM b2b_clients ORDER BY id DESC LIMIT 5');
     const replies = await all('SELECT * FROM client_replies ORDER BY id DESC LIMIT 5');
     const traivoStats = await queryTraivoMySQL();
-    const urgentEmails = await get("SELECT count(*) as c FROM emails WHERE workspace_id = ? AND is_urgent = 1 AND is_read = 0", [req.auth.workspaceId]);
+    const mv2 = mailVis(req);
+    const urgentEmails = await get(`SELECT count(*) as c FROM emails e WHERE e.workspace_id = ? AND e.is_urgent = 1 AND e.is_read = 0 AND ${mv2.sql}`, [req.auth.workspaceId, ...mv2.params]);
 
     res.json({
       success: true,
@@ -1094,7 +1099,8 @@ app.all(['/api/tools/get_briefing'], async (req, res) => {
   try {
     const lv5 = leadVis(req);
     const totalLeads = await get(`SELECT count(*) as count FROM leads l WHERE l.workspace_id = ? AND ${lv5.sql}`, [req.auth.workspaceId, ...lv5.params]);
-    const urgentEmails = await get('SELECT count(*) as count FROM emails WHERE workspace_id = ? AND is_urgent = 1 AND is_read = 0', [req.auth.workspaceId]);
+    const mv3 = mailVis(req);
+    const urgentEmails = await get(`SELECT count(*) as count FROM emails e WHERE e.workspace_id = ? AND e.is_urgent = 1 AND e.is_read = 0 AND ${mv3.sql}`, [req.auth.workspaceId, ...mv3.params]);
     const appointments = await all("SELECT customer_name, service, date, time FROM appointments WHERE status = 'Confirmed' ORDER BY date, time LIMIT 5");
     const traivoStats = await queryTraivoMySQL();
 

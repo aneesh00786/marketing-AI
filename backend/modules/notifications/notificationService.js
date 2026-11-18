@@ -1,4 +1,5 @@
 const { all, get, run } = require('../../db/database');
+const mailAccess = require('../../lib/mailAccess');
 const leadAccess = require('../../lib/leadAccess');
 
 /**
@@ -76,17 +77,19 @@ const SOURCES = [
   // Unread urgent emails in the inbox (people who read mail).
   async ctx => {
     if (!has(ctx, 'mail.view') && !has(ctx, 'inbox.view')) return [];
-    const rows = await safe(all(`SELECT id, subject, sender, sender_email, received_at FROM emails
-      WHERE workspace_id = ? AND COALESCE(is_read, 0) = 0 AND (is_urgent = 1 OR ai_priority = 'Urgent') AND received_at >= UTC_TIMESTAMP() - INTERVAL 7 DAY
-      ORDER BY received_at DESC LIMIT 20`, [ws(ctx)]));
+    const scope = mailAccess.emailScope(ctx, 'e');
+    const rows = await safe(all(`SELECT e.id, e.subject, e.sender, e.sender_email, e.received_at FROM emails e
+      WHERE e.workspace_id = ? AND COALESCE(e.is_read, 0) = 0 AND (e.is_urgent = 1 OR e.ai_priority = 'Urgent') AND e.received_at >= UTC_TIMESTAMP() - INTERVAL 7 DAY AND ${scope.sql}
+      ORDER BY e.received_at DESC LIMIT 20`, [ws(ctx), ...scope.params]));
     return rows.map(e => ({ key: `email:${e.id}:urgent`, kind: 'email_urgent', title: `Urgent email: ${clip(e.subject || '(no subject)', 80)}`, detail: e.sender || e.sender_email,
       tone: 'danger', icon: 'mail', link: { route: 'emails', mailSection: 'inbox', emailId: e.id }, at: e.received_at }));
   },
   // Drafts waiting for approval (people who may approve and send).
   async ctx => {
     if (!has(ctx, 'mail.send')) return [];
-    const rows = await safe(all(`SELECT id, subject, recipient_name, recipient_email, updated_at FROM email_drafts
-      WHERE workspace_id = ? AND status = 'Pending Approval' ORDER BY updated_at DESC LIMIT 20`, [ws(ctx)]));
+    const scope = mailAccess.draftScope(ctx, 'd');
+    const rows = await safe(all(`SELECT d.id, d.subject, d.recipient_name, d.recipient_email, d.updated_at FROM email_drafts d
+      WHERE d.workspace_id = ? AND d.status = 'Pending Approval' AND ${scope.sql} ORDER BY d.updated_at DESC LIMIT 20`, [ws(ctx), ...scope.params]));
     return rows.map(d => ({ key: `draft:${d.id}:approval`, kind: 'draft_approval', title: `Draft awaiting approval: ${clip(d.subject || '(no subject)', 80)}`,
       detail: d.recipient_name || d.recipient_email, tone: 'warning', icon: 'drafts', link: { route: 'emails', mailSection: 'approvals' }, at: d.updated_at }));
   },

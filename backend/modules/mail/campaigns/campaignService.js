@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const mailAccess = require('../../../lib/mailAccess');
 const { z } = require('zod');
 const { run, get, all } = require('../../../db/database');
 const { audit } = require('../../../lib/audit');
@@ -82,7 +83,8 @@ async function requireRow(ctx, rawId) {
   const id = Number(rawId);
   if (!Number.isInteger(id) || id <= 0) throw httpError(400, 'Invalid id.', 'VALIDATION_ERROR');
   const row = await get('SELECT * FROM mail_campaigns WHERE id = ? AND workspace_id = ?', [id, ws(ctx)]);
-  if (!row) throw httpError(404, 'Campaign not found.', 'NOT_FOUND');
+  // Someone else's campaign looks the same as a missing one to a person who sees only their own mail.
+  if (!row || !mailAccess.ownsCampaign(ctx, row)) throw httpError(404, 'Campaign not found.', 'NOT_FOUND');
   return row;
 }
 
@@ -109,7 +111,8 @@ async function withLiveReport(row) {
 }
 
 async function list(ctx, { thumbs = false } = {}) {
-  const rows = await all('SELECT * FROM mail_campaigns WHERE workspace_id = ? ORDER BY id DESC LIMIT 200', [ws(ctx)]);
+  const scope = mailAccess.campaignScope(ctx, 'c');
+  const rows = await all(`SELECT c.* FROM mail_campaigns c WHERE c.workspace_id = ? AND ${scope.sql} ORDER BY c.id DESC LIMIT 200`, [ws(ctx), ...scope.params]);
   const live = [];
   for (const r of rows) live.push(await withLiveReport(r));
   return live.map(r => ({ ...present(r), ...(thumbs ? { thumbHtml: String(r.html_content || '').slice(0, THUMB_CHARS) } : {}) }));
@@ -438,7 +441,7 @@ async function recipientHistory(ctx, id, { email, phone } = {}) {
   await requireRow(ctx, id);
   const addr = String(email || '').trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr) || addr.length > 255) throw httpError(400, 'Give the recipient\'s email address.', 'VALIDATION_ERROR');
-  const h = await personHistory(ws(ctx), { email: addr, phone });
+  const h = await personHistory(ws(ctx), { email: addr, phone, emailScope: mailAccess.emailScope(ctx, 'e') });
   await audit(ctx, 'mail.campaign_recipient_history_viewed', { resourceType: 'mail_campaign', resourceId: Number(id), metadata: { emails: h.emails.length, calls: h.calls.length } });
   return h;
 }
@@ -448,15 +451,15 @@ async function recipientHistory(ctx, id, { email, phone } = {}) {
  * from this workspace's campaigns or from their lead. Shared by a campaign's Follow up → History
  * and a lead's Follow-ups tab. Callers check access first.
  */
-async function personHistory(workspaceId, { email, phone, leadId = null } = {}) {
+async function personHistory(workspaceId, { email, phone, leadId = null, emailScope = null } = {}) {
   const addr = String(email || '').trim().toLowerCase();
   const hasAddr = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr) && addr.length <= 255;
   const digits = String(phone || '').replace(/\D/g, '');
   const tail = digits.length >= 7 ? digits.slice(-9) : null;
   const emails = hasAddr ? await all(
     `SELECT id, sender, sender_email, recipient_email, recipient_name, subject, body, status, smtp_status, sent_at, received_at
-     FROM emails WHERE workspace_id = ? AND (LOWER(TRIM(recipient_email)) = ? OR LOWER(TRIM(sender_email)) = ?)
-     ORDER BY COALESCE(received_at, sent_at) DESC, id DESC LIMIT 50`, [workspaceId, addr, addr]) : [];
+     FROM emails e WHERE e.workspace_id = ? AND (LOWER(TRIM(e.recipient_email)) = ? OR LOWER(TRIM(e.sender_email)) = ?)${emailScope ? ` AND ${emailScope.sql}` : ''}
+     ORDER BY COALESCE(e.received_at, e.sent_at) DESC, e.id DESC LIMIT 50`, [workspaceId, addr, addr, ...(emailScope ? emailScope.params : [])]) : [];
   const logs = require('../../calling/callLogService');
   const match = [];
   const params = [];

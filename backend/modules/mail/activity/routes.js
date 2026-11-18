@@ -1,4 +1,5 @@
 const express = require('express');
+const mailAccess = require('../../../lib/mailAccess');
 const { z } = require('zod');
 const { all } = require('../../../db/database');
 const { requireCapability } = require('../../../middleware/auth');
@@ -84,25 +85,33 @@ router.get('/summary', requireCapability('mail.view'), wrap(async (req, res) => 
   const end = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() + 1));
   const from = new Date(end.getTime() - days * 86400000);
   const range = [ws(req), sqlDate(from), sqlDate(end)];
+  // Members who see only their own mail get figures for their own emails and AI Campaigns.
+  const es = mailAccess.emailScope(req, 'e');
+  const ac = mailAccess.aiCampaignScope(req, 'oc');
+  const own = mailAccess.seesAllMail(req);
+  const aiOwn = own ? '' : ` AND campaign_id IN (SELECT oc.id FROM outreach_campaigns oc WHERE oc.workspace_id = ? AND ${ac.sql})`;
+  const aiParams = own ? [] : [ws(req), ...ac.params];
+  const trackOwn = own ? '' : ` AND email_id IN (SELECT e.id FROM emails e WHERE e.workspace_id = ? AND ${es.sql})`;
+  const trackParams = own ? [] : [ws(req), ...es.params];
 
   // Mailbox sends (Compose, drafts, other) — AI campaign sends are counted from outreach_sends below,
   // so an AI campaign email recorded in both tables is counted once.
   const mailbox = await all(
     `SELECT DATE_FORMAT(e.sent_at, '%Y-%m-%d') AS day, COUNT(*) AS n FROM emails e
      WHERE e.workspace_id = ? AND e.status = 'Sent' AND e.sent_at >= ? AND e.sent_at < ?
-       AND NOT EXISTS (SELECT 1 FROM outreach_sends os WHERE os.workspace_id = e.workspace_id AND os.email_id = e.id)
-     GROUP BY day`, range);
+       AND NOT EXISTS (SELECT 1 FROM outreach_sends os WHERE os.workspace_id = e.workspace_id AND os.email_id = e.id) AND ${es.sql}
+     GROUP BY day`, [...range, ...es.params]);
   const campaign = await all(
     `SELECT DATE_FORMAT(sent_at, '%Y-%m-%d') AS day, COUNT(*) AS n FROM outreach_sends
-     WHERE workspace_id = ? AND status = 'sent' AND sent_at >= ? AND sent_at < ? GROUP BY day`, range);
+     WHERE workspace_id = ? AND status = 'sent' AND sent_at >= ? AND sent_at < ?${aiOwn} GROUP BY day`, [...range, ...aiParams]);
   const received = await all(
     `SELECT DATE_FORMAT(e.received_at, '%Y-%m-%d') AS day, COUNT(*) AS n FROM emails e
-     WHERE e.workspace_id = ? AND e.status NOT IN ('Sent', 'Not Sent') AND e.received_at >= ? AND e.received_at < ?
-     GROUP BY day`, range);
+     WHERE e.workspace_id = ? AND e.status NOT IN ('Sent', 'Not Sent') AND e.received_at >= ? AND e.received_at < ? AND ${es.sql}
+     GROUP BY day`, [...range, ...es.params]);
   const notSent = await all(
-    `SELECT COUNT(*) AS n FROM emails e WHERE e.workspace_id = ? AND e.status = 'Not Sent' AND COALESCE(e.sent_at, e.received_at) >= ? AND COALESCE(e.sent_at, e.received_at) < ?`, range);
+    `SELECT COUNT(*) AS n FROM emails e WHERE e.workspace_id = ? AND e.status = 'Not Sent' AND COALESCE(e.sent_at, e.received_at) >= ? AND COALESCE(e.sent_at, e.received_at) < ? AND ${es.sql}`, [...range, ...es.params]);
   const failedCampaign = await all(
-    `SELECT COUNT(*) AS n FROM outreach_sends WHERE workspace_id = ? AND status IN ('failed', 'needs_review') AND created_at >= ? AND created_at < ?`, range);
+    `SELECT COUNT(*) AS n FROM outreach_sends WHERE workspace_id = ? AND status IN ('failed', 'needs_review') AND created_at >= ? AND created_at < ?${aiOwn}`, [...range, ...aiParams]);
 
   const index = rows => new Map(rows.map(r => [String(r.day), num(r.n)]));
   const [m, c, rcv] = [index(mailbox), index(campaign), index(received)];
@@ -121,7 +130,7 @@ router.get('/summary', requireCapability('mail.view'), wrap(async (req, res) => 
             SUM(complained_at IS NOT NULL) AS complained,
             SUM(track_opens = 1) AS opensTracked,
             SUM(track_clicks = 1) AS clicksTracked
-     FROM mail_message_tracking WHERE workspace_id = ? AND created_at >= ? AND created_at < ?`, range);
+     FROM mail_message_tracking WHERE workspace_id = ? AND created_at >= ? AND created_at < ?${trackOwn}`, [...range, ...trackParams]);
 
   const sum = (rows) => rows.reduce((a, r) => a + num(r.n), 0);
   res.json({
@@ -165,6 +174,8 @@ router.get('/campaigns', requireCapability('mail.view'), wrap(async (req, res) =
   const q = parse(campaignLogQuery, req.query);
   const page = q.page || 1;
   const sr = dayRange('s.sent_at', q);
+  const ac = mailAccess.aiCampaignScope(req, 'c');
+  const mc = mailAccess.campaignScope(req, 'mc');
   const ai = q.type === 'email' ? [] : await all(
     `SELECT c.id, c.name, c.status, c.created_at, c.approved_at, c.completed_at, c.updated_at, c.last_error,
             (SELECT COUNT(*) FROM outreach_recipients r WHERE r.workspace_id = c.workspace_id AND r.campaign_id = c.id) AS recipients,
@@ -176,14 +187,14 @@ router.get('/campaigns', requireCapability('mail.view'), wrap(async (req, res) =
             (SELECT MIN(s.sent_at) FROM outreach_sends s WHERE s.workspace_id = c.workspace_id AND s.campaign_id = c.id AND s.status = 'sent'${sr.sql}) AS first_sent_at,
             (SELECT MAX(s.sent_at) FROM outreach_sends s WHERE s.workspace_id = c.workspace_id AND s.campaign_id = c.id AND s.status = 'sent'${sr.sql}) AS last_sent_at
      FROM outreach_campaigns c
-     WHERE c.workspace_id = ?
+     WHERE c.workspace_id = ? AND ${ac.sql}
        AND EXISTS (SELECT 1 FROM outreach_sends s WHERE s.workspace_id = c.workspace_id AND s.campaign_id = c.id AND s.status = 'sent'${sr.sql})`,
-    [...sr.params, ...sr.params, ...sr.params, ws(req), ...sr.params]);
+    [...sr.params, ...sr.params, ...sr.params, ws(req), ...ac.params, ...sr.params]);
   const er = dayRange('submitted_at', q);
   const email = q.type === 'ai' ? [] : await all(
     `SELECT id, name, status, zoho_status, report_json, provider_message, created_at, approved_at, submitted_at, updated_at
-     FROM mail_campaigns WHERE workspace_id = ? AND status = 'submitted' AND submitted_at IS NOT NULL${er.sql}`,
-    [ws(req), ...er.params]);
+     FROM mail_campaigns mc WHERE workspace_id = ? AND status = 'submitted' AND submitted_at IS NOT NULL AND ${mc.sql}${er.sql}`,
+    [ws(req), ...mc.params, ...er.params]);
 
   const items = [
     ...ai.map(c => ({

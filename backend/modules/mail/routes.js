@@ -1,4 +1,5 @@
 const express = require('express');
+const mailAccess = require('../../lib/mailAccess');
 const { z } = require('zod');
 const { run, get, all } = require('../../db/database');
 const { requireCapability } = require('../../middleware/auth');
@@ -50,8 +51,10 @@ function requireId(raw) {
 const DRAFT_SELECT = `SELECT d.*, l.id AS contact_id, l.name AS contact_name, l.email AS contact_email, l.company_name AS contact_company, l.product_id AS contact_product_id
   FROM email_drafts d LEFT JOIN leads l ON l.id = d.lead_id AND l.workspace_id = d.workspace_id`;
 
-async function requireDraft(workspaceId, rawId) {
-  const draft = await get(`${DRAFT_SELECT} WHERE d.id = ? AND d.workspace_id = ?`, [requireId(rawId), workspaceId]);
+/** One draft of the workspace; with ctx, only if the person may see it (their own, unless they see all mail). */
+async function requireDraft(workspaceId, rawId, ctx = null) {
+  const scope = ctx ? mailAccess.draftScope(ctx, 'd') : { sql: '1 = 1', params: [] };
+  const draft = await get(`${DRAFT_SELECT} WHERE d.id = ? AND d.workspace_id = ? AND ${scope.sql}`, [requireId(rawId), workspaceId, ...scope.params]);
   if (!draft) throw httpError('Draft not found', 404, 'NOT_FOUND');
   return draft;
 }
@@ -106,8 +109,9 @@ async function recipientProblem(workspaceId, draft, policy) {
 const auditBlocked = (ctx, path, resourceType, resourceId, why) =>
   audit(ctx, 'mail.send_blocked', { resourceType, resourceId, metadata: { path, reason: why.reason } });
 
-async function requireEmail(workspaceId, rawId) {
-  const email = await get('SELECT * FROM emails WHERE id = ? AND workspace_id = ?', [requireId(rawId), workspaceId]);
+async function requireEmail(workspaceId, rawId, ctx = null) {
+  const scope = ctx ? mailAccess.emailScope(ctx, 'e') : { sql: '1 = 1', params: [] };
+  const email = await get(`SELECT e.* FROM emails e WHERE e.id = ? AND e.workspace_id = ? AND ${scope.sql}`, [requireId(rawId), workspaceId, ...scope.params]);
   if (!email) throw httpError('Email not found', 404, 'NOT_FOUND');
   return email;
 }
@@ -130,7 +134,8 @@ function presentEmail(e) {
 const drafts = express.Router();
 
 drafts.get('/', requireCapability('mail.view'), wrap(async (req, res) => {
-  res.json({ success: true, drafts: (await all(`${DRAFT_SELECT} WHERE d.workspace_id = ? ORDER BY d.id DESC`, [ws(req)])).map(presentDraft) });
+  const scope = mailAccess.draftScope(req, 'd');
+  res.json({ success: true, drafts: (await all(`${DRAFT_SELECT} WHERE d.workspace_id = ? AND ${scope.sql} ORDER BY d.id DESC`, [ws(req), ...scope.params])).map(presentDraft) });
 }));
 
 drafts.post('/generate', requireCapability('mail.compose'), body(z.object({
@@ -169,16 +174,16 @@ drafts.post('/generate', requireCapability('mail.compose'), body(z.object({
   }
   const now = nowSql();
   const result = await run(
-    `INSERT INTO email_drafts (workspace_id, product_id, product_name, lead_id, recipient_email, recipient_name, subject, body_html, body_text, tone, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Draft', ?, ?)`,
+    `INSERT INTO email_drafts (workspace_id, product_id, product_name, lead_id, recipient_email, recipient_name, subject, body_html, body_text, tone, status, created_by_user_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Draft', ?, ?, ?)`,
     [ws(req), product ? product.id : null, product ? product.name : null, leadId, (v.recipientEmail || '').trim(), v.recipientName || '',
-      draftContent.subject, draftContent.body_html, draftContent.body_text, draftContent.tone, now, now]
+      draftContent.subject, draftContent.body_html, draftContent.body_text, draftContent.tone, Number(req.auth?.userId) || null, now, now]
   );
   const missing = draftContent.missing_context || [];
   if (!isEmail(v.recipientEmail)) missing.push('recipient email');
   res.json({
     success: true,
-    draft: presentDraft(await requireDraft(ws(req), result.lastID)),
+    draft: presentDraft(await requireDraft(ws(req), result.lastID, req)),
     missing_context: missing,
     message: missing.includes('product')
       ? 'Draft created without product context: no product was selected, so it contains no product details or links. Review before sending.'
@@ -187,7 +192,7 @@ drafts.post('/generate', requireCapability('mail.compose'), body(z.object({
 }));
 
 drafts.get('/:id', requireCapability('mail.view'), wrap(async (req, res) => {
-  res.json({ success: true, draft: presentDraft(await requireDraft(ws(req), req.params.id)) });
+  res.json({ success: true, draft: presentDraft(await requireDraft(ws(req), req.params.id, req)) });
 }));
 
 // Editing a draft sends it back to "Draft", so it must be approved again before sending.
@@ -205,7 +210,7 @@ drafts.patch('/:id', requireCapability('mail.compose'), body(z.object({
   body_html: z.string().trim().min(1).max(200000).optional(),
   replacements: z.record(placeholderKey, placeholderValue).refine(r => Object.keys(r).length <= 20, 'at most 20 placeholders at once').optional()
 })), wrap(async (req, res) => {
-  const draft = await requireDraft(ws(req), req.params.id);
+  const draft = await requireDraft(ws(req), req.params.id, req);
   if (LOCKED_DRAFT.includes(draft.status)) throw httpError(draft.status === 'Needs Review' ? 'Resolve this draft\'s unknown delivery first.' : 'A sent draft cannot be edited.', 409, 'DRAFT_SENT');
   const v = req.valid;
   // Product email drafts are addressed to their lead; the recipient comes from the lead record only.
@@ -240,11 +245,11 @@ drafts.patch('/:id', requireCapability('mail.compose'), body(z.object({
     [leadId, v.recipient_email !== undefined ? v.recipient_email : draft.recipient_email, v.recipient_name !== undefined ? v.recipient_name : draft.recipient_name,
       filled.subject.slice(0, 255), filled.text, filled.html, nowSql(), draft.id, ws(req)]
   );
-  res.json({ success: true, draft: presentDraft(await requireDraft(ws(req), draft.id)), message: 'Draft updated. Approve it again before sending.' });
+  res.json({ success: true, draft: presentDraft(await requireDraft(ws(req), draft.id, req)), message: 'Draft updated. Approve it again before sending.' });
 }));
 
 drafts.post('/:id/rewrite', requireCapability('mail.compose'), body(z.object({ instruction: z.string().max(200).optional() })), wrap(async (req, res) => {
-  const draft = await requireDraft(ws(req), req.params.id);
+  const draft = await requireDraft(ws(req), req.params.id, req);
   if (LOCKED_DRAFT.includes(draft.status)) throw httpError('A sent draft cannot be rewritten.', 409, 'DRAFT_SENT');
   const instruction = req.valid.instruction || 'More Professional';
   const rewritten = await aiEngine.rewriteMailDraft(draft, instruction, ws(req));
@@ -252,11 +257,11 @@ drafts.post('/:id/rewrite', requireCapability('mail.compose'), body(z.object({ i
     `UPDATE email_drafts SET subject = ?, body_html = ?, body_text = ?, tone = ?, status = 'Draft', updated_at = ? WHERE id = ? AND workspace_id = ?`,
     [rewritten.subject, rewritten.body_html, rewritten.body_text, rewritten.tone, nowSql(), draft.id, ws(req)]
   );
-  res.json({ success: true, draft: presentDraft(await requireDraft(ws(req), draft.id)), message: `Draft rewritten to be "${instruction}". Approve it again before sending.` });
+  res.json({ success: true, draft: presentDraft(await requireDraft(ws(req), draft.id, req)), message: `Draft rewritten to be "${instruction}". Approve it again before sending.` });
 }));
 
 drafts.put('/:id/approve', requireCapability('mail.send'), wrap(async (req, res) => {
-  const draft = await requireDraft(ws(req), req.params.id);
+  const draft = await requireDraft(ws(req), req.params.id, req);
   if (draft.status === 'Needs Review') throw httpError('The last send of this draft has an unknown outcome. Resolve it first.', 409, 'NEEDS_REVIEW');
   if (['Sent', 'Sending'].includes(draft.status)) throw httpError('This draft has already been sent.', 409, 'DRAFT_SENT');
   if (!isEmail(draft.recipient_email)) throw httpError('Choose a contact with a valid email address before approving.', 400, 'INVALID_RECIPIENT');
@@ -267,7 +272,7 @@ drafts.put('/:id/approve', requireCapability('mail.send'), wrap(async (req, res)
   }
   await run(`UPDATE email_drafts SET status = 'Approved', updated_at = ? WHERE id = ? AND workspace_id = ?`, [nowSql(), draft.id, ws(req)]);
   await audit(req, 'mail.draft_approved', { resourceType: 'email_draft', resourceId: draft.id });
-  res.json({ success: true, draft: presentDraft(await requireDraft(ws(req), draft.id)), message: 'Draft approved. Ready for dispatch.' });
+  res.json({ success: true, draft: presentDraft(await requireDraft(ws(req), draft.id, req)), message: 'Draft approved. Ready for dispatch.' });
 }));
 
 /**
@@ -355,7 +360,7 @@ async function sendDraftCore(ctx, draft) {
 }
 
 drafts.post('/:id/send', requireCapability('mail.send'), body(z.object({ confirm: confirmed })), wrap(async (req, res) => {
-  const draft = await requireDraft(ws(req), req.params.id);
+  const draft = await requireDraft(ws(req), req.params.id, req);
   const sendResult = await sendDraftCore(req, draft);
   res.json({ success: true, sendResult, message: `Email sent to ${draft.recipient_email} (${sendResult.smtpStatus}).` });
 }));
@@ -366,7 +371,7 @@ drafts.post('/:id/send', requireCapability('mail.send'), body(z.object({ confirm
  * can be sent again deliberately.
  */
 drafts.post('/:id/resolve', requireCapability('mail.send'), body(z.object({ outcome: z.enum(['sent', 'not_sent']), confirm: confirmed })), wrap(async (req, res) => {
-  const draft = await requireDraft(ws(req), req.params.id);
+  const draft = await requireDraft(ws(req), req.params.id, req);
   // DATETIME values are read as UTC Date objects (pool timezone 'Z').
   const stuck = draft.status === 'Sending' && Date.now() - new Date(draft.updated_at).getTime() > STALE_SENDING_MS;
   if (draft.status !== 'Needs Review' && !stuck) {
@@ -376,11 +381,11 @@ drafts.post('/:id/resolve', requireCapability('mail.send'), body(z.object({ outc
   const r = await run(`UPDATE email_drafts SET status = ?, updated_at = ? WHERE id = ? AND workspace_id = ? AND status = ?`, [next, nowSql(), draft.id, ws(req), draft.status]);
   if (!r.changes) throw httpError('This draft changed meanwhile. Reload and try again.', 409, 'CONFLICT');
   await audit(req, 'mail.draft_resolved', { resourceType: 'email_draft', resourceId: draft.id, metadata: { outcome: req.valid.outcome, from: draft.status } });
-  res.json({ success: true, draft: presentDraft(await requireDraft(ws(req), draft.id)), message: next === 'Sent' ? 'Marked as sent.' : 'Marked as not sent. You can send it again.' });
+  res.json({ success: true, draft: presentDraft(await requireDraft(ws(req), draft.id, req)), message: next === 'Sent' ? 'Marked as sent.' : 'Marked as not sent. You can send it again.' });
 }));
 
 drafts.delete('/:id', requireCapability('mail.compose'), wrap(async (req, res) => {
-  const draft = await requireDraft(ws(req), req.params.id);
+  const draft = await requireDraft(ws(req), req.params.id, req);
   if (draft.status === 'Sending') throw httpError('This draft is being sent.', 409, 'DRAFT_SENDING');
   await run('DELETE FROM email_drafts WHERE id = ? AND workspace_id = ?', [draft.id, ws(req)]);
   await audit(req, 'mail.draft_deleted', { resourceType: 'email_draft', resourceId: draft.id });
@@ -395,7 +400,8 @@ const emails = express.Router();
 emails.get('/', requireCapability('mail.view'), wrap(async (req, res) => {
   // Each sent email carries its delivery status (delivered / opened / clicked / bounced …) for the mailbox.
   const { deliveryOf, TRACKING_COLUMNS, TRACKING_JOIN } = mailActivity;
-  const rows = await all(`SELECT e.*, ${TRACKING_COLUMNS}, t.last_open_at AS t_last_open_at, t.open_events AS t_open_events FROM emails e ${TRACKING_JOIN} WHERE e.workspace_id = ? ORDER BY e.is_urgent DESC, e.id DESC LIMIT 50`, [ws(req)]);
+  const scope = mailAccess.emailScope(req, 'e');
+  const rows = await all(`SELECT e.*, ${TRACKING_COLUMNS}, t.last_open_at AS t_last_open_at, t.open_events AS t_open_events FROM emails e ${TRACKING_JOIN} WHERE e.workspace_id = ? AND ${scope.sql} ORDER BY e.is_urgent DESC, e.id DESC LIMIT 50`, [ws(req), ...scope.params]);
   res.json({
     success: true,
     emails: rows.map(r => {
@@ -443,8 +449,9 @@ const inboxQuery = z.object({
 emails.get('/inbox', requireCapability('mail.view'), wrap(async (req, res) => {
   const q = query(inboxQuery, req);
   const page = q.page || 1;
-  const where = ['e.workspace_id = ?', RECEIVED_SQL];
-  const params = [ws(req)];
+  const scope = mailAccess.emailScope(req, 'e');
+  const where = ['e.workspace_id = ?', RECEIVED_SQL, scope.sql];
+  const params = [ws(req), ...scope.params];
   if (q.read === 'unread') where.push(UNREAD_SQL);
   else if (q.read === 'read') where.push(`NOT ${UNREAD_SQL}`);
   if (q.q) {
@@ -458,7 +465,7 @@ emails.get('/inbox', requireCapability('mail.view'), wrap(async (req, res) => {
             e.received_at, e.is_read, e.status, e.is_urgent, e.ai_priority, e.ai_summary, (e.html_body IS NOT NULL AND e.html_body <> '') AS has_html
      FROM emails e WHERE ${where.join(' AND ')}
      ORDER BY e.received_at DESC, e.id DESC LIMIT ${MAILBOX_PAGE + 1} OFFSET ${(page - 1) * MAILBOX_PAGE}`, params);
-  const unread = await get(`SELECT COUNT(*) AS n FROM emails e WHERE e.workspace_id = ? AND ${RECEIVED_SQL} AND ${UNREAD_SQL}`, [ws(req)]);
+  const unread = await get(`SELECT COUNT(*) AS n FROM emails e WHERE e.workspace_id = ? AND ${RECEIVED_SQL} AND ${UNREAD_SQL} AND ${scope.sql}`, [ws(req), ...scope.params]);
   const p = listPage(rows, page);
   res.json({
     success: true, page, hasMore: p.hasMore, unread: Number(unread?.n) || 0,
@@ -487,8 +494,9 @@ emails.get('/sent', requireCapability('mail.view'), wrap(async (req, res) => {
   const q = query(sentQuery, req);
   const page = q.page || 1;
   const A = mailActivity;
-  const where = ['e.workspace_id = ?', q.sentOnly ? "e.status = 'Sent'" : "e.status IN ('Sent', 'Not Sent')"];
-  const params = [ws(req), ws(req), ws(req), ws(req)]; // three for LINKS_JOIN, one for the WHERE
+  const scope = mailAccess.emailScope(req, 'e');
+  const where = ['e.workspace_id = ?', q.sentOnly ? "e.status = 'Sent'" : "e.status IN ('Sent', 'Not Sent')", scope.sql];
+  const params = [ws(req), ws(req), ws(req), ws(req), ...scope.params]; // three for LINKS_JOIN, one for the WHERE, then the scope
   if (q.q) {
     const like = likeOf(q.q);
     where.push('(e.subject LIKE ? OR e.recipient_email LIKE ? OR e.recipient_name LIKE ? OR e.body LIKE ?)');
@@ -520,10 +528,11 @@ emails.get('/sent', requireCapability('mail.view'), wrap(async (req, res) => {
 
 /** One message of this workspace (received or sent) with its content; 404 for another workspace's. */
 emails.get('/:id(\\d+)', requireCapability('mail.view'), wrap(async (req, res) => {
+  const scope = mailAccess.emailScope(req, 'e');
   const e = await get(
     `SELECT e.*, ${mailActivity.DELIVERY_SQL} AS delivery, ${mailActivity.PURPOSE_SQL} AS purpose, ${mailActivity.SOURCE_SQL} AS source,
             t.provider AS t_provider, t.failure_reason AS t_failure_reason
-     FROM emails e ${mailActivity.TRACKING_JOIN} ${mailActivity.LINKS_JOIN} WHERE e.id = ? AND e.workspace_id = ?`, [ws(req), ws(req), ws(req), req.params.id, ws(req)]);
+     FROM emails e ${mailActivity.TRACKING_JOIN} ${mailActivity.LINKS_JOIN} WHERE e.id = ? AND e.workspace_id = ? AND ${scope.sql}`, [ws(req), ws(req), ws(req), req.params.id, ws(req), ...scope.params]);
   if (!e) throw httpError('Email not found.', 404, 'NOT_FOUND');
   const direction = e.status === 'Sent' ? 'sent' : e.status === 'Not Sent' ? 'not_sent' : 'received';
   const { t_provider, t_failure_reason, ai_replies_json, ...rest } = e;
@@ -544,7 +553,8 @@ emails.get('/:id(\\d+)', requireCapability('mail.view'), wrap(async (req, res) =
 
 /** Mark a received message read or unread (the workspace's shared mailbox state). Sent mail has no read state. */
 emails.put('/:id(\\d+)/read', requireCapability('mail.view'), body(z.object({ read: z.boolean() }).strict()), wrap(async (req, res) => {
-  const e = await get(`SELECT e.id, e.status FROM emails e WHERE e.id = ? AND e.workspace_id = ?`, [req.params.id, ws(req)]);
+  const scope = mailAccess.emailScope(req, 'e');
+  const e = await get(`SELECT e.id, e.status FROM emails e WHERE e.id = ? AND e.workspace_id = ? AND ${scope.sql}`, [req.params.id, ws(req), ...scope.params]);
   if (!e) throw httpError('Email not found.', 404, 'NOT_FOUND');
   if (['Sent', 'Not Sent'].includes(e.status)) throw httpError('Only received emails can be marked read or unread.', 409, 'NOT_RECEIVED');
   const read = req.valid.read;
@@ -632,9 +642,9 @@ async function sendComposeAsMarketing(req, v, html, text) {
   const bodyHtml = html || `<p>${esc(text).replace(/\n/g, '<br>')}</p>`;
   const now = nowSql();
   const ins = await run(
-    `INSERT INTO email_drafts (workspace_id, recipient_email, recipient_name, subject, body_html, body_text, tone, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, 'Direct (Compose)', 'Approved', ?, ?)`,
-    [workspaceId, v.recipient_email, v.recipient_name || '', v.subject, bodyHtml, text || htmlToText(bodyHtml), now, now]
+    `INSERT INTO email_drafts (workspace_id, recipient_email, recipient_name, subject, body_html, body_text, tone, status, created_by_user_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, 'Direct (Compose)', 'Approved', ?, ?, ?)`,
+    [workspaceId, v.recipient_email, v.recipient_name || '', v.subject, bodyHtml, text || htmlToText(bodyHtml), Number(req.auth?.userId) || null, now, now]
   );
   await audit(req, 'mail.draft_approved', { resourceType: 'email_draft', resourceId: ins.lastID, metadata: { source: 'compose' } });
   const draft = await requireDraft(workspaceId, ins.lastID);
@@ -726,7 +736,7 @@ emails.post('/send', requireCapability('mail.send'), body(sendSchema), wrap((req
 emails.post('/send-html', requireCapability('mail.send'), body(sendSchema), wrap((req, res) => sendDirect(req, res, { requireHtml: true })));
 
 emails.post('/:id/ai-analyze', requireCapability('mail.compose'), wrap(async (req, res) => {
-  const email = await requireEmail(ws(req), req.params.id);
+  const email = await requireEmail(ws(req), req.params.id, req);
   // No product is assumed for inbox replies; replies stay generic unless the email itself says more.
   const analysis = await aiEngine.analyzeEmail(email, null, { workspaceId: ws(req), referenceType: 'email', referenceId: email.id });
   await run('UPDATE emails SET ai_summary = ?, ai_priority = ?, ai_replies_json = ? WHERE id = ? AND workspace_id = ?',
@@ -750,10 +760,10 @@ tools.post(['/api/tools/send_email', '/api/send_email'], requireCapability('mail
   const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const now = nowSql();
   const result = await run(
-    `INSERT INTO email_drafts (workspace_id, product_id, product_name, recipient_email, recipient_name, subject, body_html, body_text, tone, status, created_at, updated_at)
-     VALUES (?, NULL, NULL, ?, ?, ?, ?, ?, 'Professional', 'Draft', ?, ?)`,
+    `INSERT INTO email_drafts (workspace_id, product_id, product_name, recipient_email, recipient_name, subject, body_html, body_text, tone, status, created_by_user_id, created_at, updated_at)
+     VALUES (?, NULL, NULL, ?, ?, ?, ?, ?, 'Professional', 'Draft', ?, ?, ?)`,
     [ws(req), v.recipient_email, v.recipient_name || '', v.subject,
-      `<div style="font-family: sans-serif; padding: 20px; line-height: 1.6;">${esc(v.body).replace(/\n/g, '<br>')}</div>`, v.body, now, now]
+      `<div style="font-family: sans-serif; padding: 20px; line-height: 1.6;">${esc(v.body).replace(/\n/g, '<br>')}</div>`, v.body, Number(req.auth?.userId) || null, now, now]
   );
   res.json({
     success: true,

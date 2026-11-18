@@ -13,6 +13,8 @@ const GRANTABLE = {
   // A Member writes email but does not send it; this lets one member send as well.
   'mail.send': { requires: 'mail.compose', label: 'Send email' },
   'mail.send_transactional': { requires: 'mail.send', label: 'Send transactional email (Compose)' },
+  // See every draft, email and campaign in Mail Center, not only one's own (Owners/Admins always do).
+  'mail.view_all': { requires: 'mail.view', label: 'View all mail (everyone\'s drafts, emails and campaigns)' },
   // Team Performance for everyone (Owners/Admins always have it): e.g. a Marketing Manager leading the team.
   'performance.view_team': { requires: 'analytics.view', label: 'View team performance' },
   // Set and change staff targets (Owners/Admins always can).

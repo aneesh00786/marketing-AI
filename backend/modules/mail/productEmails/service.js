@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const mailAccess = require('../../../lib/mailAccess');
 const { z } = require('zod');
 const { run, get, all } = require('../../../db/database');
 const { audit } = require('../../../lib/audit');
@@ -372,9 +373,9 @@ async function createBatch(ctx, input) {
     const token = crypto.randomBytes(20).toString('hex');
     const p = await personalize({ product, lead, template, goal: v.goal, tone: v.tone, subject: v.subject, senderName: v.senderName, senderEmail, token });
     await run(
-      `INSERT INTO email_drafts (workspace_id, product_id, product_name, lead_id, recipient_email, recipient_name, subject, body_html, body_text, tone, status, batch_id, unsubscribe_token, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Draft', ?, ?, ?, ?)`,
-      [ws(ctx), product.id, product.name, lead.id, l.email, lead.name || '', p.subject, p.html, p.text, v.tone || 'Professional', batch.lastID, token, now, now]
+      `INSERT INTO email_drafts (workspace_id, product_id, product_name, lead_id, recipient_email, recipient_name, subject, body_html, body_text, tone, status, batch_id, unsubscribe_token, created_by_user_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Draft', ?, ?, ?, ?, ?)`,
+      [ws(ctx), product.id, product.name, lead.id, l.email, lead.name || '', p.subject, p.html, p.text, v.tone || 'Professional', batch.lastID, token, Number(ctx.auth?.userId) || null, now, now]
     );
   }
   await audit(ctx, 'mail.batch_created', { resourceType: 'mail_draft_batch', resourceId: batch.lastID, metadata: { productId: product.id, recipients: eligible.length, skipped: skipped.length, templateId: v.templateId || null } });
@@ -384,7 +385,8 @@ async function createBatch(ctx, input) {
 async function requireBatch(ctx, rawId) {
   const bid = Number(rawId);
   if (!Number.isInteger(bid) || bid <= 0) throw httpError(400, 'Invalid id.', 'VALIDATION_ERROR');
-  const b = await get('SELECT * FROM mail_draft_batches WHERE id = ? AND workspace_id = ?', [bid, ws(ctx)]);
+  const scope = mailAccess.batchScope(ctx, 'b');
+  const b = await get(`SELECT b.* FROM mail_draft_batches b WHERE b.id = ? AND b.workspace_id = ? AND ${scope.sql}`, [bid, ws(ctx), ...scope.params]);
   if (!b) throw httpError(404, 'Batch not found.', 'NOT_FOUND');
   return b;
 }
@@ -422,7 +424,8 @@ async function getBatch(ctx, rawId) {
 }
 
 async function listBatches(ctx) {
-  const rows = await all('SELECT id, product_name, status, recipients, created_at, sent_at FROM mail_draft_batches WHERE workspace_id = ? ORDER BY id DESC LIMIT 50', [ws(ctx)]);
+  const scope = mailAccess.batchScope(ctx, 'b');
+  const rows = await all(`SELECT b.id, b.product_name, b.status, b.recipients, b.created_at, b.sent_at FROM mail_draft_batches b WHERE b.workspace_id = ? AND ${scope.sql} ORDER BY b.id DESC LIMIT 50`, [ws(ctx), ...scope.params]);
   return rows.map(r => ({ id: r.id, productName: r.product_name, status: r.status, recipients: r.recipients, createdAt: r.created_at, sentAt: r.sent_at }));
 }
 
