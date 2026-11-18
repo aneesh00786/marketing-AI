@@ -816,3 +816,9 @@ button.dropdown-item:disabled { opacity: 0.6; cursor: default; }
 .notif-item small { color: var(--text-muted); font-size: 0.76rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .notif-time { font-size: 0.7rem !important; }
 .notif-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex: none; margin-top: 6px; }
+
+/* Compose: preview of the unsubscribe footer added to marketing email */
+.compose-unsub { margin-top: 10px; padding: 10px 12px; border: 1px dashed var(--border); border-radius: 10px; background: var(--surface-2, transparent); }
+.compose-unsub-label { display: flex; align-items: center; gap: 6px; margin: 0 0 4px; font-size: 12px; font-weight: 600; color: var(--text-muted); }
+.compose-unsub-text { margin: 0; font-size: 12px; color: #64748b; }
+.compose-unsub-link { color: var(--primary, #5b5bd6); text-decoration: underline; }

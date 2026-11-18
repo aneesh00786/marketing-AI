@@ -1041,7 +1041,8 @@
   <!-- =================================================================== -->
   <!-- MODAL 2: COMPOSE & SEND VISUAL HTML EMAIL -->
   <!-- =================================================================== -->
-  <div *ngIf="showComposeModal" class="modal-backdrop" (click)="closeCompose()">
+  <!-- Compose closes only with its close button or Cancel (a click outside would lose what was written). -->
+  <div *ngIf="showComposeModal" class="modal-backdrop">
     <div class="modal-card wide-modal compose-card" (click)="$event.stopPropagation()" role="dialog" aria-modal="true" aria-labelledby="compose-title">
       <div class="modal-header">
         <div>
@@ -1122,6 +1123,12 @@
           <div *ngIf="!composeEmail.html_body" class="plain-text-preview">
             <p style="white-space: pre-wrap;">{{ composeEmail.body || 'No message yet. Use Write to add one.' }}</p>
           </div>
+        </div>
+
+        <!-- Marketing email: the unsubscribe footer the server adds when sending -->
+        <div class="compose-unsub" *ngIf="composePurpose === 'marketing'" role="note">
+          <p class="compose-unsub-label"><app-icon name="mail" [size]="13"></app-icon>Added automatically at the bottom of this email:</p>
+          <p class="compose-unsub-text">You are receiving this email from {{ mailConfig?.sender_email || 'your sender address' }}. To stop these emails, reply "unsubscribe" or <span class="compose-unsub-link">unsubscribe here</span>.</p>
         </div>
       </div>
       <div class="modal-footer compose-footer">

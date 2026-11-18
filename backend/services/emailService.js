@@ -183,7 +183,7 @@ function zeptoToken(workspaceId, config) {
  */
 function marketingDeliveryProblem(workspaceId, config) {
   if (usesZepto(workspaceId, config)) {
-    return { code: 'MARKETING_PROVIDER_BLOCKED', message: 'Marketing emails cannot be sent through ZeptoMail: Zoho limits ZeptoMail to transactional email. Configure your own SMTP mailbox for marketing in Mail Settings, or use Email Campaigns (Zoho Campaigns).' };
+    return { code: 'MARKETING_PROVIDER_BLOCKED', message: 'Marketing emails cannot be sent through ZeptoMail: Zoho limits ZeptoMail to transactional email. Set up Amazon SES (Mail Center → Settings → Campaigns), or an SMTP mailbox approved for marketing (Mail Settings).' };
   }
   if (!config.smtp_host || !config.smtp_user || !config.smtp_pass) {
     return { code: 'MARKETING_SMTP_REQUIRED', message: 'Marketing emails need an SMTP mailbox configured in Mail Settings.' };
@@ -197,13 +197,36 @@ function marketingDeliveryProblem(workspaceId, config) {
 async function marketingDeliveryStatus(workspaceId) {
   const config = await getRawMailConfig(workspaceId);
   const problem = marketingDeliveryProblem(workspaceId, config);
+  // Without an approved SMTP mailbox, marketing email goes through Amazon SES when it is set up.
+  const viaSes = problem ? !!(await sesForMarketing(workspaceId)) : false;
   return {
-    allowed: !problem,
-    code: problem ? problem.code : null,
-    reason: problem ? problem.message : null,
+    allowed: !problem || viaSes,
+    code: problem && !viaSes ? problem.code : null,
+    reason: problem && !viaSes ? problem.message : null,
     provider: config.provider || null,
+    marketingVia: !problem ? 'smtp' : viaSes ? 'ses' : null,
     approvedAt: config.marketing_approved_at || null
   };
+}
+
+/** Amazon SES settings when marketing email may go through SES (set up for this workspace or the server), else null. */
+async function sesForMarketing(workspaceId) {
+  try { return await require('../modules/mail/ses/sesSettings').sesConfig(workspaceId); } catch { return null; }
+}
+
+/** Sends one email through Amazon SES (raw MIME, so List-Unsubscribe headers and tracking are kept). */
+async function sendViaSes(cfg, { fromAddress, senderEmail, to, subject, html, text, replyTo, headers }) {
+  const ses = require('../modules/mail/ses/sesClient');
+  const v = await ses.identityVerified(cfg, senderEmail);
+  if (!v.verified) {
+    throw mailError(`Not sent: the sender ${senderEmail} is not verified in Amazon SES. Verify this address or its domain in the SES console (region ${cfg.region}), or change the sender address in Mail Settings.`, 409, 'SES_SENDER_NOT_VERIFIED');
+  }
+  const MailComposer = require('nodemailer/lib/mail-composer');
+  const raw = await new Promise((resolve, reject) => {
+    new MailComposer({ from: fromAddress, to, subject, html, text, replyTo, ...(headers ? { headers } : {}) })
+      .compile().build((err, buf) => (err ? reject(err) : resolve(buf)));
+  });
+  return ses.sendRaw(cfg, { from: senderEmail, to, raw, configurationSet: cfg.configurationSet || null, tags: { source: 'mail_center' } });
 }
 
 /** Owner/Admin confirmation that the SMTP mailbox may be used for marketing (or withdrawal of it). */
@@ -448,12 +471,17 @@ async function sendRealEmail(workspaceId, {
     ...(listUnsubscribe.url ? { 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' } : {})
   } : null;
 
+  // Marketing: an SMTP mailbox approved for marketing, otherwise Amazon SES when it is set up (never ZeptoMail).
+  let marketingSes = null;
   if (purpose === 'marketing') {
     const problem = marketingDeliveryProblem(workspaceId, config);
     if (problem) {
-      const err = mailError(problem.message, 409, problem.code);
-      err.marketingBlocked = true;
-      throw err;
+      marketingSes = await sesForMarketing(workspaceId);
+      if (!marketingSes) {
+        const err = mailError(problem.message, 409, problem.code);
+        err.marketingBlocked = true;
+        throw err;
+      }
     }
   }
 
@@ -489,6 +517,27 @@ async function sendRealEmail(workspaceId, {
       }
       lastError = zeptoErr;
       console.warn('ZeptoMail dispatch error:', zeptoErr.message);
+    }
+  }
+
+  // 1b. Marketing email without an approved SMTP mailbox: Amazon SES (no fallback to anything else).
+  if (marketingSes) {
+    try {
+      const sesHtml = tracker ? await tracker.instrumentSmtp(html) : html;
+      const r = await sendViaSes(marketingSes, { fromAddress, senderEmail, to: recipient, subject, html: sesHtml, text: plain, replyTo: replyTo || senderEmail, headers: unsubHeaders });
+      sent = true;
+      provider = 'ses';
+      messageId = r.messageId;
+      smtpStatus = 'Sent via Amazon SES';
+      deliveryDetails = { messageId: r.messageId };
+    } catch (err) {
+      if (err.outcomeUnknown) {
+        if (tracker) await tracker.unknown(err.code || 'SES_OUTCOME_UNKNOWN');
+        throw err;
+      }
+      if (tracker) await tracker.failed(err.code || 'SES_ERROR', 'The email was not sent.');
+      if (err.code === 'SES_SENDER_NOT_VERIFIED') throw err;
+      throw mailError(`Email was not sent: ${err.message}`, err.status === 400 ? 400 : 502, err.code || 'MAIL_SEND_FAILED');
     }
   }
 
