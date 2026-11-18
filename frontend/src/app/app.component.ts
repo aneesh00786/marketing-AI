@@ -392,22 +392,81 @@ export class AppComponent implements OnInit, OnDestroy {
     this.openMenu = this.openMenu === menu ? null : menu;
   }
 
-  /** Notifications derived from data the app has already loaded (no extra API calls). */
-  get notifications(): { icon: string; title: string; detail: string; route: AppComponent['currentRoute']; mailSection?: MailSection; tone: 'danger' | 'warning' | 'info' }[] {
-    const out: { icon: string; title: string; detail: string; route: AppComponent['currentRoute']; mailSection?: MailSection; tone: 'danger' | 'warning' | 'info' }[] = [];
-    const urgent = this.emails.filter(e => (e.is_urgent === 1 || e.ai_priority === 'Urgent') && !e.is_read);
-    if (urgent.length) out.push({ icon: 'mail', title: `${urgent.length} urgent email${urgent.length > 1 ? 's' : ''}`, detail: urgent[0].subject || 'Needs a reply', route: 'emails', mailSection: 'inbox', tone: 'danger' });
-    const pendingDrafts = this.drafts.filter(d => d.status === 'Draft' || d.status === 'Pending Approval');
-    if (pendingDrafts.length) out.push({ icon: 'drafts', title: `${pendingDrafts.length} draft${pendingDrafts.length > 1 ? 's' : ''} awaiting approval`, detail: pendingDrafts[0].subject || 'Review before sending', route: 'emails', mailSection: 'approvals', tone: 'warning' });
-    const hot = this.leads.filter(l => l.category === 'Hot');
-    if (hot.length) out.push({ icon: 'leads', title: `${hot.length} hot lead${hot.length > 1 ? 's' : ''}`, detail: hot[0].name || 'High purchase intent', route: 'leads', tone: 'info' });
-    const mf = this.myFollowups;
-    if (mf?.overdue.length) out.push({ icon: 'calendar', title: `${mf.overdue.length} overdue follow-up${mf.overdue.length > 1 ? 's' : ''}`, detail: `${mf.overdue[0].title} · ${mf.overdue[0].leadName}`, route: 'leads', tone: 'danger', leadId: mf.overdue[0].leadId } as any);
-    if (mf?.upcoming.length) out.push({ icon: 'calendar', title: `${mf.upcoming.length} follow-up${mf.upcoming.length > 1 ? 's' : ''} due today`, detail: `${mf.upcoming[0].title} · ${mf.upcoming[0].leadName}`, route: 'leads', tone: 'warning', leadId: mf.upcoming[0].leadId } as any);
-    if (mf?.newlyAssigned.length) out.push({ icon: 'leads', title: `${mf.newlyAssigned.length} follow-up${mf.newlyAssigned.length > 1 ? 's' : ''} assigned to you`, detail: `${mf.newlyAssigned[0].title} · ${mf.newlyAssigned[0].leadName}`, route: 'leads', tone: 'info', leadId: mf.newlyAssigned[0].leadId } as any);
-    if (mf?.failedTranscripts.length) out.push({ icon: 'phone', title: `${mf.failedTranscripts.length} call transcript${mf.failedTranscripts.length > 1 ? 's' : ''} failed`, detail: mf.failedTranscripts[0].leadName, route: 'leads', tone: 'warning', leadId: mf.failedTranscripts[0].leadId } as any);
-    if (this.appointments.length) out.push({ icon: 'calendar', title: `${this.appointments.length} scheduled demo${this.appointments.length > 1 ? 's' : ''}`, detail: this.appointments[0].customer_name || this.appointments[0].contact_name || 'Upcoming', route: 'appointments', tone: 'info' });
-    return out;
+  // ------------------------------------------------------------------ notifications (the bell)
+
+  /** My notifications from the server (each with read state); refreshed every minute and when the tab is shown again. */
+  notifications: { id: number; kind: string; title: string; detail: string | null; tone: 'danger' | 'warning' | 'info'; icon: string; link: any; at: string; read: boolean }[] = [];
+  notifUnread = 0;
+  notifLoading = false;
+  private notifTimer: any = null;
+  private readonly onVisible = () => { if (document.visibilityState === 'visible') this.loadNotifications(); };
+
+  loadNotifications(): void {
+    if (!this.auth.isLoggedIn) return;
+    this.notifLoading = true;
+    this.apiService.getNotifications().subscribe({
+      next: (r: any) => { this.notifLoading = false; this.notifications = r.notifications || []; this.notifUnread = r.unread || 0; },
+      error: () => { this.notifLoading = false; }
+    });
+  }
+  private startNotificationPolling(): void {
+    this.stopNotificationPolling();
+    this.loadNotifications();
+    this.notifTimer = setInterval(() => { if (document.visibilityState === 'visible') this.loadNotifications(); }, 60000);
+    document.addEventListener('visibilitychange', this.onVisible);
+  }
+  private stopNotificationPolling(): void {
+    if (this.notifTimer) clearInterval(this.notifTimer);
+    this.notifTimer = null;
+    document.removeEventListener('visibilitychange', this.onVisible);
+  }
+  get notifBadge(): string { return this.notifUnread > 99 ? '99+' : String(this.notifUnread); }
+
+  toggleNotifications(event: Event): void {
+    const opening = this.openMenu !== 'notifications';
+    this.toggleMenu('notifications', event);
+    if (opening) this.loadNotifications();
+  }
+
+  /** Open what a notification is about (and mark it read). */
+  openNotification(n: any): void {
+    if (!n.read) {
+      n.read = true;
+      this.notifUnread = Math.max(0, this.notifUnread - 1);
+      this.apiService.markNotificationRead(n.id).subscribe({ error: () => null });
+    }
+    this.openMenu = null;
+    const l = n.link || {};
+    if (l.route === 'social') { this.onDashboardNavigate({ route: 'social', section: l.section, campaignId: l.campaignId, status: l.status } as any); return; }
+    if (l.route === 'emails') { this.navigate('emails', l.mailSection || 'overview'); return; }
+    if (l.route === 'leads') {
+      this.navigate('leads');
+      if (l.leadView && this.leadFilters.view !== l.leadView) { this.leadFilters.view = l.leadView; this.applyLeadFilters(); }
+      if (l.leadId) this.openFollowupLead(l.leadId);
+      return;
+    }
+    if (l.route && this.canOpen(l.route)) this.navigate(l.route);
+  }
+
+  markAllNotificationsRead(): void {
+    if (!this.notifUnread) return;
+    this.notifications.forEach(n => n.read = true);
+    this.notifUnread = 0;
+    this.apiService.markAllNotificationsRead().subscribe({ error: () => this.loadNotifications() });
+  }
+
+  /** "5 min ago", "2 h ago", "in 3 h", "12 Nov". */
+  notifWhen(at: string): string {
+    const t = new Date(at).getTime();
+    if (!t) return '';
+    const diff = Date.now() - t;
+    const abs = Math.abs(diff);
+    const fmt = (n: number, u: string) => (diff >= 0 ? `${n} ${u} ago` : `in ${n} ${u}`);
+    if (abs < 60000) return diff >= 0 ? 'just now' : 'in a moment';
+    if (abs < 3600000) return fmt(Math.round(abs / 60000), 'min');
+    if (abs < 86400000) return fmt(Math.round(abs / 3600000), 'h');
+    if (abs < 7 * 86400000) return fmt(Math.round(abs / 86400000), abs < 1.5 * 86400000 ? 'day' : 'days');
+    return new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
   }
 
   /** Highest rule-based scores first; unscored leads go last. */
@@ -549,12 +608,6 @@ export class AppComponent implements OnInit, OnDestroy {
   accessLeadId: number | null = null;
   /** The lead whose Follow-ups panel is open. */
   followupLead: any = null;
-  /** My follow-ups for the notification bell (overdue, due within a day, newly assigned, failed transcripts). */
-  myFollowups: { overdue: any[]; upcoming: any[]; newlyAssigned: any[]; failedTranscripts: any[] } | null = null;
-  loadMyFollowups(): void {
-    if (!this.hasModule('leads')) return;
-    this.apiService.getMyFollowups().subscribe({ next: (r: any) => { this.myFollowups = r; }, error: () => { this.myFollowups = null; } });
-  }
   openFollowupLead(leadId: number): void {
     const found = this.leads.find(l => l.id === leadId);
     if (found) { this.followupLead = found; return; }
@@ -858,6 +911,7 @@ export class AppComponent implements OnInit, OnDestroy {
 
   private loadWorkspaceData(): void {
     this.loadStatus();
+    this.startNotificationPolling();
     this.myCaps = null;
     this.myModules = null;
     // Section data loads once the member's sections are known, so no request is made for a section they cannot open.
@@ -888,6 +942,7 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.stopNotificationPolling();
     this.voiceManualStop = true;
     this.clearVoiceRetry();
     this.removeVoiceGestureHandler();
@@ -1335,7 +1390,7 @@ export class AppComponent implements OnInit, OnDestroy {
         this.leads = res.leads || [];
         if (Array.isArray(res.views)) this.leadViews = res.views;
         this.leadCanManageAccess = !!res.canManageAccess;
-        this.loadMyFollowups();
+        this.loadNotifications();
         if (!this.leadMembers.length) {
           this.apiService.getMembers().subscribe({ next: (m: any) => { this.leadMembers = (m.members || []).filter((x: any) => x.status === 'Active').map((x: any) => ({ userId: x.userId, name: x.displayName || x.email, role: x.role })); }, error: () => null });
         }

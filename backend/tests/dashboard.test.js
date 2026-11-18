@@ -132,13 +132,18 @@ test('analytics permission is enforced server-side', async () => {
 });
 
 test('date filters: presets, custom range, and invalid input', async () => {
+  // "Last N days" = N calendar days in the workspace's time zone, today included; compared with the N full days before.
   for (const r of ['7', '30', '90']) {
     const res = await h.api('GET', `/api/v1/social/dashboard?range=${r}`, { token: A.token });
     assert.equal(res.status, 200, `range ${r}`);
-    const span = (new Date(res.data.dashboard.range.to) - new Date(res.data.dashboard.range.from)) / 86400000;
-    assert.ok(Math.abs(span - Number(r)) < 0.01, `range ${r} spans ${span} days`);
-    const prevSpan = (new Date(res.data.dashboard.range.previousTo) - new Date(res.data.dashboard.range.previousFrom)) / 86400000;
-    assert.ok(Math.abs(prevSpan - Number(r)) < 0.01, 'previous period has the same length');
+    const d = res.data.dashboard;
+    assert.equal(d.series.length, Number(r), `range ${r}: one chart point per day, exactly ${r}`);
+    const span = (new Date(d.range.to) - new Date(d.range.from)) / 86400000;
+    assert.ok(span > Number(r) - 1 && span <= Number(r), `range ${r} spans ${span} days (today so far + ${Number(r) - 1} full days)`);
+    assert.equal(d.range.previousTo, d.range.from, 'the previous period ends where this one starts');
+    const prevSpan = (new Date(d.range.previousTo) - new Date(d.range.previousFrom)) / 86400000;
+    assert.ok(Math.abs(prevSpan - Number(r)) < 0.05, 'previous period is N full days');
+    assert.equal(new Date(d.range.from).toISOString().slice(11, 19), '00:00:00', 'starts at midnight (UTC workspace)');
   }
   const from = new Date(Date.now() - 14 * 86400000).toISOString();
   const to = new Date().toISOString();
@@ -177,4 +182,19 @@ test('demo accounts never reach real providers', async () => {
   } finally { mock.restore(); }
   const { get } = h.db();
   assert.equal((await get('SELECT status FROM social_accounts WHERE id = ?', [acct.id])).status, 'connected');
+});
+
+test('"Last N days" follows the workspace time zone: midnight in India, N points on the chart', async () => {
+  const { resolveRange } = require('../modules/social/dashboardService');
+  const end = new Date('2026-11-12T08:58:00Z'); // 14:28 in India
+  const r = resolveRange({ range: '7' }, 'Asia/Kolkata');
+  assert.ok(r.end - r.start <= 7 * 86400000);
+  // With a fixed "now" of 12 Nov 14:28 IST, "last 7 days" starts 6 Nov 00:00 IST (5 Nov 18:30 UTC).
+  const { localMidnightForTest } = require('../modules/social/dashboardService');
+  assert.equal(localMidnightForTest(end, 'Asia/Kolkata', 6).toISOString(), '2026-11-05T18:30:00.000Z');
+  assert.equal(localMidnightForTest(end, 'UTC', 6).toISOString(), '2026-11-06T00:00:00.000Z');
+  assert.equal(localMidnightForTest(end, 'America/New_York', 0).toISOString(), '2026-11-12T05:00:00.000Z');
+  // Other callers (no time zone) keep the rolling N × 24 hours.
+  const rolling = resolveRange({ range: '7' });
+  assert.ok(Math.abs((rolling.end - rolling.start) / 86400000 - 7) < 0.001);
 });

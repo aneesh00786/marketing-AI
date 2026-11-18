@@ -120,17 +120,26 @@
         </button>
 
         <div class="menu-anchor">
-          <button class="icon-btn" (click)="toggleMenu('notifications', $event)" [attr.aria-expanded]="openMenu === 'notifications'" aria-label="Notifications">
+          <button class="icon-btn bell-btn" (click)="toggleNotifications($event)" [attr.aria-expanded]="openMenu === 'notifications'"
+                  [attr.aria-label]="notifUnread ? 'Notifications, ' + notifUnread + ' unread' : 'Notifications'" [class.has-unread]="notifUnread">
             <app-icon name="bell"></app-icon>
-            <span class="badge-dot" *ngIf="notifications.length">{{ notifications.length }}</span>
+            <span class="badge-dot" *ngIf="notifUnread" aria-hidden="true">{{ notifBadge }}</span>
           </button>
-          <div class="dropdown dropdown-wide" *ngIf="openMenu === 'notifications'" (click)="$event.stopPropagation()" role="menu">
-            <div class="dropdown-label">Notifications</div>
-            <button class="dropdown-item" *ngFor="let n of notifications" (click)="navigate(n.route, n.mailSection); $any(n).leadId && openFollowupLead($any(n).leadId)">
-              <span class="notif-icon" [ngClass]="'tone-' + n.tone"><app-icon [name]="n.icon" [size]="16"></app-icon></span>
-              <span class="grow"><strong>{{ n.title }}</strong><small>{{ n.detail }}</small></span>
-            </button>
-            <div class="dropdown-empty" *ngIf="!notifications.length">You're all caught up.</div>
+          <div class="dropdown dropdown-wide notif-panel" *ngIf="openMenu === 'notifications'" (click)="$event.stopPropagation()" role="menu" aria-label="Notifications">
+            <div class="notif-head">
+              <span class="dropdown-label">Notifications</span>
+              <span class="notif-count" *ngIf="notifUnread">{{ notifUnread }} new</span>
+              <button type="button" class="notif-markall" *ngIf="notifUnread" (click)="markAllNotificationsRead()">Mark all as read</button>
+            </div>
+            <div class="notif-list">
+              <button type="button" class="dropdown-item notif-item" role="menuitem" *ngFor="let n of notifications" [class.unread]="!n.read" (click)="openNotification(n)">
+                <span class="notif-icon" [ngClass]="'tone-' + n.tone"><app-icon [name]="n.icon" [size]="16"></app-icon></span>
+                <span class="grow"><strong>{{ n.title }}</strong><small *ngIf="n.detail">{{ n.detail }}</small><small class="notif-time">{{ notifWhen(n.at) }}</small></span>
+                <span class="notif-dot" *ngIf="!n.read" aria-label="Unread"></span>
+              </button>
+            </div>
+            <div class="dropdown-empty" *ngIf="!notifications.length && !notifLoading">✓ You're all caught up.</div>
+            <div class="dropdown-empty" *ngIf="!notifications.length && notifLoading">Loading…</div>
           </div>
         </div>
 
@@ -1354,4 +1363,4 @@
 <app-lead-access *ngIf="accessLeadId" [leadId]="accessLeadId" (close)="accessLeadId = null" (changed)="showToast($event); loadLeads()"></app-lead-access>
 
 <!-- Lead follow-ups: calls (📞), emails (Compose), scheduled follow-ups and notes -->
-<app-lead-followups *ngIf="followupLead" [lead]="followupLead" [members]="leadMembers" (close)="followupLead = null; loadMyFollowups()" (toast)="showToast($event)"></app-lead-followups>
+<app-lead-followups *ngIf="followupLead" [lead]="followupLead" [members]="leadMembers" (close)="followupLead = null; loadNotifications()" (toast)="showToast($event)"></app-lead-followups>

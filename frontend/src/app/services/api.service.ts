@@ -163,6 +163,11 @@ export class ApiService {
     return this.http.get(`${this.baseUrl}/leads`, { params });
   }
 
+  /** The bell: my notifications (newest first) and how many are unread. */
+  getNotifications(): Observable<any> { return this.http.get(`${this.baseUrl}/notifications`); }
+  markNotificationRead(id: number): Observable<any> { return this.http.post(`${this.baseUrl}/notifications/${id}/read`, {}); }
+  markAllNotificationsRead(): Observable<any> { return this.http.post(`${this.baseUrl}/notifications/read-all`, {}); }
+
   /** My follow-ups for the notification bell. */
   getMyFollowups(): Observable<any> { return this.http.get(`${this.baseUrl}/leads/followups/mine`); }
   getLead(id: number): Observable<any> { return this.http.get(`${this.baseUrl}/leads/${id}`); }

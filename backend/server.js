@@ -221,6 +221,8 @@ app.use('/api/v1/campaign-analytics', campaignAnalyticsRouter);
 app.use('/api/v1/budgets', budgetRouter);
 // Team performance: what each member did, from recorded activity (Owners/Admins: everyone; others: themselves).
 app.use('/api/v1/performance', require('./modules/performance/routes'));
+// Notifications (the bell): each person's own, with read state.
+app.use('/api/v1/notifications', require('./modules/notifications/routes'));
 // The signed-in user's workspaces: list, create, switch (every workspace; before the legacy gate).
 app.use(workspacesRouter);
 

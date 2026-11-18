@@ -16,11 +16,37 @@ const contentService = require('./contentService');
 const ENGAGEMENT_KEYS = ['likes', 'comments', 'shares', 'saves'];
 const SERIES_KEYS = ['reach', 'impressions', 'engagements', 'clicks'];
 
-function resolveRange({ range, from, to }) {
+/** Milliseconds the time zone is ahead of UTC at an instant (Asia/Kolkata: +5:30). */
+function tzOffsetMs(ts, timeZone) {
+  const p = {};
+  new Intl.DateTimeFormat('en-US', { timeZone, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    .formatToParts(new Date(ts)).forEach(x => { p[x.type] = x.value; });
+  return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour % 24, +p.minute, +p.second) - Math.floor(ts / 1000) * 1000;
+}
+
+/** Midnight (in the time zone) of the day that is `daysBack` days before the day containing `now`. */
+function localMidnight(now, timeZone, daysBack = 0) {
+  const [y, m, d] = dayKey(now, timeZone).split('-').map(Number);
+  const guess = Date.UTC(y, m - 1, d - daysBack);
+  return new Date(guess - tzOffsetMs(guess, timeZone));
+}
+
+/**
+ * The reporting window. "Last N days" with a time zone means N calendar days in that zone, today included
+ * (midnight N-1 days ago until now), compared with the N full days before. A custom from/to is used as given.
+ * Without a time zone (other callers), N days is the rolling N × 24 hours, as before.
+ */
+function resolveRange({ range, from, to }, timeZone = null) {
   const end = to ? new Date(to) : new Date();
   let start;
+  const n = parseInt(range, 10) || 30;
+  if (!from && !to && timeZone && n >= 1 && n <= 366) {
+    start = localMidnight(end, timeZone, n - 1);
+    const prevStart = localMidnight(end, timeZone, 2 * n - 1);
+    return { start, end, prevStart, prevEnd: start };
+  }
   if (from) start = new Date(from);
-  else start = new Date(end.getTime() - (parseInt(range, 10) || 30) * 86400000);
+  else start = new Date(end.getTime() - n * 86400000);
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start >= end) {
     const err = new Error('Invalid date range.');
     err.status = 400;
@@ -97,7 +123,7 @@ async function getDashboard(workspaceId, query = {}, ctx = null) {
   const vis = ctx ? leadAccess.visibleSql(ctx, 'l') : ALL_LEADS;
   const settings = await settingsService.getSettings(workspaceId);
   const tz = settings.timezone || 'UTC';
-  const { start, end, prevStart, prevEnd } = resolveRange(query);
+  const { start, end, prevStart, prevEnd } = resolveRange(query, tz);
 
   const [current, previous] = await Promise.all([periodKpis(workspaceId, start, end, vis), periodKpis(workspaceId, prevStart, prevEnd, vis)]);
   const posts = current.summary.posts;
@@ -326,4 +352,4 @@ function cap(s) {
   return PLATFORM_NAMES[key] || key.charAt(0).toUpperCase() + key.slice(1);
 }
 
-module.exports = { getDashboard, resolveRange, buildInsights, compare };
+module.exports = { getDashboard, resolveRange, buildInsights, compare, localMidnightForTest: localMidnight };
