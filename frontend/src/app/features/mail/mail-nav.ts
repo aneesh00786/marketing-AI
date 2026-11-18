@@ -24,9 +24,14 @@ export const MAIL_SECTIONS: { key: MailSection; label: string; hint: string; gro
 /** Draft statuses that need someone with mail.send: approve, send, or confirm an unknown delivery. */
 export const APPROVAL_STATUSES = ['Draft', 'Approved', 'Needs Review'];
 
-/** Sections shown to this workspace. Product Emails exists only while its feature flag is on. */
-export function visibleMailSections(opts: { productEmails: boolean }): MailSection[] {
-  return MAIL_SECTIONS.map(s => s.key).filter(k => k !== 'product-emails' || opts.productEmails);
+/**
+ * Sections shown to this person. Product Emails exists only while its feature flag is on; Settings only for
+ * people who may manage mail settings (opts.settings; left out = shown).
+ */
+export function visibleMailSections(opts: { productEmails: boolean; settings?: boolean }): MailSection[] {
+  return MAIL_SECTIONS.map(s => s.key)
+    .filter(k => k !== 'product-emails' || opts.productEmails)
+    .filter(k => k !== 'settings' || opts.settings !== false);
 }
 
 /**

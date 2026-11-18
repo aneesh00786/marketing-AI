@@ -25,4 +25,9 @@ describe('Mail Center navigation links', () => {
     expect(visibleMailSections({ productEmails: false })).toEqual(['overview', 'inbox', 'sent', 'drafts', 'approvals', 'campaigns', 'deliverability', 'templates', 'logs', 'settings']);
     expect(visibleMailSections({ productEmails: true })).toContain('product-emails');
   });
+
+  it('Settings is left out for people who may not manage mail settings', () => {
+    expect(visibleMailSections({ productEmails: false, settings: false })).not.toContain('settings');
+    expect(visibleMailSections({ productEmails: false, settings: true })).toContain('settings');
+  });
 });

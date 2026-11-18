@@ -97,9 +97,11 @@ export class MailCenterComponent implements OnInit {
   can(cap: string): boolean { return this.caps === null || this.caps.has(cap); }
   get canView(): boolean { return this.can('mail.view'); }
   get canCompose(): boolean { return this.can('mail.compose'); }
+  /** Mail Center → Settings: Owners/Admins, or members given "Manage mail settings" (the server enforces it too). */
+  get canConfigure(): boolean { return !!this.caps?.has('mail.configure'); }
 
   get sections() {
-    const keys = visibleMailSections({ productEmails: this.productEmailsEnabled });
+    const keys = visibleMailSections({ productEmails: this.productEmailsEnabled, settings: this.canConfigure });
     return MAIL_SECTIONS.filter(s => keys.includes(s.key));
   }
 
@@ -114,6 +116,7 @@ export class MailCenterComponent implements OnInit {
   }
 
   go(section: MailSection, opts: { status?: string | null; draftId?: number | null } = {}): void {
+    if (section === 'settings' && !this.canConfigure) return;
     if (section !== 'templates') this.templateStartNew = false;
     if (section === 'sent') this.sentStatus = opts.status ?? null;
     if (section !== 'settings') this.settingsTab = null;

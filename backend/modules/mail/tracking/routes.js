@@ -18,6 +18,7 @@ const zepto = require('./zeptoWebhook');
  *   POST /webhooks/zeptomail/:endpoint   ZeptoMail events (signature-verified; off unless enabled)
  * Authenticated (mounted at /api/v1/mail/tracking):
  *   GET  /settings                       mail.view
+ *   GET  /settings                       mail.configure  (Mail Center → Settings; includes the webhook URL)
  *   PUT  /settings                       mail.configure  (open/click tracking on or off)
  *   PUT  /zeptomail-webhook              mail.configure  (key, enable/disable, rotate URL)
  *   GET  /emails/:id, /drafts/:id        mail.view       (tracking for one email)
@@ -140,7 +141,7 @@ async function settingsView(workspaceId) {
   };
 }
 
-router.get('/settings', requireCapability('mail.view'), wrap(async (req, res) => {
+router.get('/settings', requireCapability('mail.configure'), wrap(async (req, res) => {
   res.json({ success: true, settings: await settingsView(ws(req)) });
 }));
 

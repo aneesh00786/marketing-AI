@@ -65,6 +65,13 @@ const mask = id => (id ? `${String(id).slice(0, 4)}…${String(id).slice(-4)}` :
 const topicRegion = arn => (/^arn:aws[a-z-]*:sns:([a-z0-9-]+):/.exec(String(arn || '')) || [])[1] || null;
 
 async function getSettings(ctx) {
+  const canConfigure = ctx.auth.capabilities.has('mail.configure');
+  // Without "Manage mail settings", only whether campaigns can be sent and what this person may do:
+  // no keys, region, SNS topic or errors (those belong to Mail Center → Settings).
+  if (!canConfigure) {
+    const cfg = await sesConfig(ws(ctx)).catch(() => null);
+    return { provider: 'ses', canConfigure: false, canCompose: ctx.auth.capabilities.has('mail.compose'), canSend: ctx.auth.capabilities.has('mail.send'), ses: { configured: !!cfg } };
+  }
   const r = await row(ws(ctx));
   const last = await get('SELECT MAX(received_at) AS at, COUNT(*) AS n FROM mail_ses_notifications WHERE workspace_id = ?', [ws(ctx)]).catch(() => null);
   const cfg = await sesConfig(ws(ctx)).catch(() => null);

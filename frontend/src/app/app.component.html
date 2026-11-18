@@ -497,7 +497,7 @@
             </span>
           </div>
           <div class="status-right">
-            <button class="btn btn-sm" [class.btn-primary]="!mailConfig.has_smtp_auth" [class.btn-secondary]="mailConfig.has_smtp_auth" type="button" (click)="mailSection = 'settings'">
+            <button *ngIf="myCaps?.has('mail.configure')" class="btn btn-sm" [class.btn-primary]="!mailConfig.has_smtp_auth" [class.btn-secondary]="mailConfig.has_smtp_auth" type="button" (click)="mailSection = 'settings'">
               {{ mailConfig.has_smtp_auth ? '⚙️ Mail settings' : 'Set up sending →' }}
             </button>
           </div>

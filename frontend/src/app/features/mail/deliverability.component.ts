@@ -1,4 +1,4 @@
-import { Component, EventEmitter, OnInit, Output } from '@angular/core';
+import { Component, EventEmitter, Input, OnInit, Output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 
@@ -27,7 +27,7 @@ type Level = 'good' | 'warning' | 'critical' | 'none';
         <button type="button" *ngFor="let r of ranges" [class.on]="days === r" [attr.aria-pressed]="days === r" (click)="setRange(r)">{{ r }} days</button>
       </div>
       <button type="button" class="dv-link" (click)="showTable = !showTable" [attr.aria-pressed]="showTable">{{ showTable ? 'Show chart' : 'Show as table' }}</button>
-      <button type="button" class="dv-link" (click)="openSettings.emit()">Settings →</button>
+      <button *ngIf="canConfigure" type="button" class="dv-link" (click)="openSettings.emit()">Settings →</button>
     </div>
   </header>
 
@@ -141,6 +141,8 @@ type Level = 'good' | 'warning' | 'critical' | 'none';
 })
 export class DeliverabilityComponent implements OnInit {
   @Output() openSettings = new EventEmitter<void>();
+  /** Shows the Settings link only to people who may manage mail settings. */
+  @Input() canConfigure = false;
   readonly ranges = [7, 30, 90];
   days = 30;
   d: any = null;

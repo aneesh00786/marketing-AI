@@ -181,3 +181,28 @@ test('notifications: urgent replies and drafts awaiting approval reach only thos
   const admin = titles(await n(ADMIN));
   assert.ok(admin.includes('Re: Ben to Lee') && admin.includes('Ben draft'));
 });
+
+// ------------------------------------------------------------------ Mail Center → Settings
+
+test('mail settings are read and changed only by Owners/Admins or people given "Manage mail settings"', async () => {
+  const reads = ['/api/v1/mail/config', '/api/v1/mail/tracking/settings'];
+  for (const who of [ANA, APPROVER]) {
+    for (const p of reads) assert.equal((await get(who, p)).status, 403, `${p} is closed`);
+    assert.equal((await h.api('POST', '/api/v1/mail/config', { token: who.token, body: { provider: 'smtp', smtp_host: 'smtp.x.io', smtp_user: 'u', smtp_pass: 'p', sender_email: 'a@x.io' } })).status, 403);
+    assert.equal((await h.api('PUT', '/api/v1/mail/ses/settings', { token: who.token, body: { region: 'us-east-1' } })).status, 403);
+    assert.equal((await h.api('POST', '/api/v1/mail/marketing', { token: who.token, body: { approved: true, confirm: true } })).status, 403);
+    // The Campaigns screen still learns whether SES is set up, but no keys, region or SNS details.
+    const ses = await get(who, '/api/v1/mail/ses/settings');
+    assert.equal(ses.status, 200);
+    assert.equal(ses.data.canConfigure, false);
+    assert.deepEqual(Object.keys(ses.data.ses), ['configured']);
+  }
+  for (const p of reads) assert.equal((await get(ADMIN, p)).status, 200, `${p} opens for the owner`);
+  assert.equal((await get(ADMIN, '/api/v1/mail/ses/settings')).data.canConfigure, true);
+
+  assert.equal((await grant(ANA, 'mail.configure')).status, 200);
+  for (const p of reads) assert.equal((await get(ANA, p)).status, 200, `${p} opens with the grant`);
+  assert.equal((await get(ANA, '/api/v1/mail/ses/settings')).data.canConfigure, true);
+  assert.equal((await revoke(ANA, 'mail.configure')).status, 200);
+  assert.equal((await get(ANA, '/api/v1/mail/tracking/settings')).status, 403, 'closed again once removed');
+});

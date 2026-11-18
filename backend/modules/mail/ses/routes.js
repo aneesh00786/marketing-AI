@@ -6,7 +6,7 @@ const sns = require('./snsWebhook');
 
 /**
  * The Amazon SES connection that sends campaigns.
- * Read: mail.view (the campaign editor needs to know the service). Change and test: mail.configure.
+ * Read: mail.view (the campaign editor needs to know whether SES is set up; full details need mail.configure). Change and test: mail.configure.
  */
 const router = express.Router();
 const wrap = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(err => {

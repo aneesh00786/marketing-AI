@@ -108,7 +108,8 @@ test('only roles with mail.configure can change tracking; a workspace without ma
     assert.equal((await h.api('PUT', '/api/v1/mail/tracking/settings', { token: m.token, body: { trackOpens: true, trackClicks: true } })).status, 403);
     assert.equal((await h.api('PUT', '/api/v1/mail/tracking/zeptomail-webhook', { token: m.token, body: { authKey: KEY_A } })).status, 403);
   }
-  assert.equal((await h.api('GET', '/api/v1/mail/tracking/settings', { token: member.token })).status, 200, 'members can see the settings');
+  // The settings (with the webhook URL) belong to Mail Center → Settings: Owners/Admins or "Manage mail settings".
+  assert.equal((await h.api('GET', '/api/v1/mail/tracking/settings', { token: member.token })).status, 403, 'members cannot read the settings');
   const empty = await h.createWorkspace({ name: 'No mail' });
   assert.equal((await h.api('PUT', '/api/v1/mail/tracking/settings', { token: empty.token, body: { trackOpens: true, trackClicks: false } })).data.code, 'MAIL_NOT_CONFIGURED');
   const bad = await h.api('PUT', '/api/v1/mail/tracking/settings', { token: A.token, body: { trackOpens: 'yes' } });

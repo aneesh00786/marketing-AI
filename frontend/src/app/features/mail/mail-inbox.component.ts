@@ -22,6 +22,8 @@ import { textToPreviewHtml } from './email-preview';
 export class MailInboxComponent implements OnInit, OnChanges {
   /** Whether a reply mailbox (IMAP) is set up; null while unknown. Without one nothing new arrives. */
   @Input() imapReady: boolean | null = null;
+  /** Shows the "Set up replies" link (Mail Center → Settings) only to people who may manage mail settings. */
+  @Input() canConfigure = false;
   /** Bumped by the shell after a sync elsewhere: reload the list. */
   @Input() refreshKey = 0;
   @Output() reply = new EventEmitter<any>();

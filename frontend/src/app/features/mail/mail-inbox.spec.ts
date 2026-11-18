@@ -22,6 +22,7 @@ describe('MailInboxComponent', () => {
     fixture = TestBed.createComponent(MailInboxComponent);
     comp = fixture.componentInstance;
     comp.imapReady = imapReady;
+    comp.canConfigure = true;
     fixture.detectChanges();
     inbox().flush(JSON.parse(JSON.stringify(list)));
     fixture.detectChanges();

@@ -95,7 +95,7 @@
       </div>
 
       <!-- ===== Inbox: received mail only ===== -->
-      <app-mail-inbox *ngSwitchCase="'inbox'" [imapReady]="imapReady" [refreshKey]="mailboxVersion"
+      <app-mail-inbox *ngSwitchCase="'inbox'" [imapReady]="imapReady" [canConfigure]="canConfigure" [refreshKey]="mailboxVersion"
         (reply)="reply.emit($event)" (forward)="forward.emit($event)" (smartReply)="smartReply.emit($event)"
         (changed)="inboxUnread = $event" (toast)="toast.emit($event)" (openSettings)="go('settings')"></app-mail-inbox>
 
@@ -125,7 +125,7 @@
 
       <app-email-campaigns *ngSwitchCase="'campaigns'" (openSettings)="settingsTab = 'campaigns'; go('settings')" (createTemplate)="templateStartNew = true; go('templates')" [startTemplate]="campaignStartTemplate" (toast)="toast.emit($event)"></app-email-campaigns>
 
-      <app-deliverability *ngSwitchCase="'deliverability'" (openSettings)="settingsTab = 'campaigns'; go('settings')"></app-deliverability>
+      <app-deliverability *ngSwitchCase="'deliverability'" [canConfigure]="canConfigure" (openSettings)="settingsTab = 'campaigns'; go('settings')"></app-deliverability>
 
       <app-email-templates *ngSwitchCase="'templates'" [startNew]="templateStartNew" (toast)="toast.emit($event)" (use)="templateUse.emit($event)"></app-email-templates>
 

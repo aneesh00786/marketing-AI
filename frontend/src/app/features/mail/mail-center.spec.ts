@@ -37,7 +37,7 @@ class LogsStub { static last: LogsStub | null = null; @Input() canViewAudit = fa
 @Component({ selector: 'app-mail-inbox', standalone: true, template: '<p class="stub-inbox">inbox</p>' })
 class InboxStub {
   static last: InboxStub | null = null;
-  @Input() imapReady: boolean | null = null; @Input() refreshKey = 0;
+  @Input() imapReady: boolean | null = null; @Input() refreshKey = 0; @Input() canConfigure = false;
   @Output() reply = new EventEmitter<any>(); @Output() forward = new EventEmitter<any>(); @Output() smartReply = new EventEmitter<any>();
   @Output() changed = new EventEmitter<number>(); @Output() toast = new EventEmitter<string>(); @Output() openSettings = new EventEmitter<void>();
   constructor() { InboxStub.last = this; }
@@ -80,7 +80,7 @@ describe('MailCenterComponent', () => {
     comp.sectionChange.subscribe(s => sections.push(s));
     fixture.detectChanges();
     const me = http.expectOne(r => r.url.endsWith('/auth/me'));
-    const caps = opts.caps === undefined ? ['mail.view', 'mail.compose', 'mail.send'] : opts.caps;
+    const caps = opts.caps === undefined ? ['mail.view', 'mail.compose', 'mail.send', 'mail.configure'] : opts.caps;
     if (caps) me.flush({ capabilities: caps }); else me.flush({}, { status: 500, statusText: 'x' });
     // The unread count for the Inbox tab badge and the Overview tile.
     http.expectOne(r => r.url.endsWith('/emails/inbox') && r.params.get('read') === 'unread').flush({ unread: opts.unread ?? 3, emails: [] });
@@ -302,7 +302,7 @@ describe('MailCenterComponent', () => {
   });
 
   it('Logs offers the Compose audit to Owners/Admins (mail.configure) only, and can open Campaigns', () => {
-    init({ section: 'logs' });
+    init({ section: 'logs', caps: ['mail.view', 'mail.compose', 'mail.send'] });
     expect(LogsStub.last!.canViewAudit).toBeFalse();
     LogsStub.last!.openSection.emit('campaigns');
     fixture.detectChanges();
@@ -318,6 +318,17 @@ describe('MailCenterComponent', () => {
     fixture.destroy();
     init({ drafts: [d(2, 'Needs Review')] });
     expect(el().querySelector('.mc-attention')!.textContent).toContain('Delivery unknown');
+  });
+
+  it('Settings is only for people who may manage mail settings; others cannot open it, even by link', () => {
+    init({ caps: ['mail.view', 'mail.compose', 'mail.send'], section: 'settings' });
+    expect(tab('Settings')).toBeFalsy();
+    expect(comp.active).toBe('overview');
+    expect(el().querySelector('.stub-settings')).toBeNull();
+    comp.go('settings');
+    fixture.detectChanges();
+    expect(sections).toEqual([]);
+    expect(el().querySelector('.stub-settings')).toBeNull();
   });
 
   it('all mail settings are in the Settings tab; it can send the user to Campaigns and reports saved changes', () => {
