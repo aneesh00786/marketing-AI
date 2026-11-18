@@ -44,7 +44,9 @@
   <div class="mc-panel" id="mc-panel" role="tabpanel" [attr.aria-labelledby]="'mc-tab-' + active">
     <div class="callout warn" *ngIf="!canView" role="alert">Your role cannot view mail in this workspace. Ask a workspace admin for access.</div>
 
-    <ng-container *ngIf="canView" [ngSwitch]="active">
+    <p class="muted small" *ngIf="!meLoaded">Loading…</p>
+    <!-- A section opens once the person's tabs are known (a tab they may not open is never loaded). -->
+    <ng-container *ngIf="canView && meLoaded" [ngSwitch]="active">
       <!-- ===== Overview ===== -->
       <div *ngSwitchCase="'overview'" class="mc-overview">
         <!-- 1. Is mail set up? (status bar provided by the app shell) -->

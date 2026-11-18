@@ -152,6 +152,9 @@ test('permissions: members draft, approvers send, only owners/admins configure',
     assert.equal((await h.api(m, p, { token: approver.token, body })).status, 403, `approver ${m} ${p}`);
   }
   assert.equal((await h.api('POST', '/api/v1/drafts/generate', { token: approver.token, body: {} })).status, 403);
+  // Approvers see only their own mail: a member's draft needs "View all mail" (or an Owner/Admin) to approve.
+  assert.equal((await h.api('PUT', `/api/v1/drafts/${id}/approve`, { token: approver.token })).status, 404);
+  assert.equal((await h.api('PUT', `/api/v1/workspace/members/${approver.userId}/grants/mail.view_all`, { token: A.token })).status, 200);
   assert.equal((await h.api('PUT', `/api/v1/drafts/${id}/approve`, { token: approver.token })).status, 200);
   assert.equal((await h.api('GET', '/api/v1/drafts')).status, 401);
   assert.equal((await h.api('POST', '/api/v1/emails/send', { body: { recipient_email: 'lee@acme.io', subject: 's', confirm: true } })).status, 401);

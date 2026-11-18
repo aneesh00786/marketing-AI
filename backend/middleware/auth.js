@@ -94,7 +94,10 @@ async function resolveAuth(token) {
     // Role capabilities plus per-member grants the role currently qualifies for (fails closed).
     capabilities: await require('../lib/capabilityGrants').effectiveCapabilities(member.workspace_id, member.user_id, member.role),
     // Sections this member may open (Owners/Admins: all). Read on every request, so changes apply at once.
-    modules: require('../lib/moduleAccess').modulesFor(member.role, member.module_access_json)
+    modules: require('../lib/moduleAccess').modulesFor(member.role, member.module_access_json),
+    // Mail Center tabs (Owners/Admins: all). Read separately so a server without migration 066 keeps working (all tabs).
+    mailTabs: require('../lib/mailTabs').tabsFor(member.role,
+      (await get('SELECT mail_tabs_json FROM workspace_members WHERE workspace_id = ? AND user_id = ?', [member.workspace_id, member.user_id]).catch(() => null))?.mail_tabs_json ?? null)
   };
 }
 

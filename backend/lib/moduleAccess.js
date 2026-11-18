@@ -62,8 +62,14 @@ function moduleGate() {
   return function moduleGateMiddleware(req, res, next) {
     const mods = req.auth?.modules;
     if (!mods) return next(); // public routes and tool calls carry no member modules
-    const m = moduleForRequest(req.method, req.originalUrl.split('?')[0]);
-    if (!m || mods.has(m.key)) return next();
+    const path = req.originalUrl.split('?')[0];
+    const m = moduleForRequest(req.method, path);
+    if (!m || mods.has(m.key)) {
+      // Mail Center tabs a member may not open (Inbox, Campaigns, Deliverability, Templates, Logs).
+      const tab = m?.key === 'mail' ? require('./mailTabs').missingTab(req.auth, req.method, path) : null;
+      if (!tab) return next();
+      return res.status(403).json({ success: false, error: `You do not have access to ${tab.label} in Mail Center. Ask a workspace Owner or Admin.`, code: 'MAIL_TAB_REQUIRED', tab: tab.key });
+    }
     return res.status(403).json({ success: false, error: `You do not have access to ${m.label}. Ask a workspace Owner or Admin.`, code: 'MODULE_ACCESS_REQUIRED', module: m.key });
   };
 }

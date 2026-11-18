@@ -53,7 +53,13 @@ describe('MembersComponent: permissions panel', () => {
     const m = c().data.members[1];
     c().editPermissions(m);
     fixture.detectChanges();
-    expect(el().textContent).toContain('📞 Make calls');
+    // Grouped: Sections, Email, (Team Performance when offered), Calls & CRM; each group with its count.
+    const groups = Array.from(el().querySelectorAll('.pm-group h4')).map(h => h.textContent!.trim());
+    expect(groups[0]).toBe('Sections they can open');
+    expect(groups).toContain('Email');
+    expect(groups[groups.length - 1]).toBe('Calls & CRM');
+    expect(el().querySelector('.pm-group')!.textContent).toContain('1 of 1 on');
+    expect(el().textContent).toContain('Make calls');
     c().perm!.calls = true;
     c().toggleGrant(SEND);
     const done = c().savePermissions(m);
@@ -66,6 +72,61 @@ describe('MembersComponent: permissions panel', () => {
     call.flush({});
     await done;
     http.expectOne(r => r.url.endsWith('/workspace/members')).flush(permData());
+  });
+});
+
+describe('MembersComponent: Mail Center tabs', () => {
+  let fixture: ComponentFixture<MembersComponent>;
+  let http: HttpTestingController;
+  const el = () => fixture.nativeElement as HTMLElement;
+  const c = () => fixture.componentInstance;
+  const TABS = ['inbox', 'campaigns', 'deliverability', 'templates', 'logs'];
+  const d = (memberTabs: string[]) => ({
+    canManage: true, canManageOwners: true, roles: ['Workspace Owner', 'Member'], invitations: [], grantable: [], crmRoles: null,
+    modules: [{ key: 'leads', label: 'Leads', description: '' }, { key: 'mail', label: 'Mail Center & email campaigns', description: '' }],
+    mailTabs: [{ key: 'inbox', label: 'Inbox' }, { key: 'campaigns', label: 'Campaigns' }, { key: 'deliverability', label: 'Deliverability' }, { key: 'templates', label: 'Email Templates' }, { key: 'logs', label: 'Logs' }],
+    fullAccessRoles: ['Workspace Owner', 'Workspace Admin'],
+    members: [
+      { userId: 1, email: 'own@x.io', role: 'Workspace Owner', status: 'Active', isYou: true, modules: { all: true, fullAccessRole: true, keys: ['leads', 'mail'] }, mailTabs: { all: true, fullAccessRole: true, keys: TABS }, grants: {} },
+      { userId: 4, email: 'mem@x.io', role: 'Member', status: 'Active', modules: { all: true, fullAccessRole: false, keys: ['leads', 'mail'] }, mailTabs: { all: memberTabs.length === 5, fullAccessRole: false, keys: memberTabs }, grants: {} }
+    ]
+  });
+  beforeEach(() => {
+    TestBed.configureTestingModule({ imports: [MembersComponent], providers: [provideHttpClient(), provideHttpClientTesting()] });
+    http = TestBed.inject(HttpTestingController);
+    fixture = TestBed.createComponent(MembersComponent);
+    fixture.detectChanges();
+    http.expectOne(r => r.url.endsWith('/workspace/members')).flush(d(['inbox', 'campaigns']));
+    fixture.detectChanges();
+  });
+  afterEach(() => http.verify());
+
+  it('limited tabs show in the list; the panel ticks them under Mail Center and saves only the tabs that changed', async () => {
+    const row = Array.from(el().querySelectorAll('tbody tr')).find(r => r.textContent!.includes('mem@x.io'))!;
+    expect(row.textContent).toContain('Mail: Inbox, Campaigns');
+    const m = c().data.members[1];
+    c().editPermissions(m);
+    fixture.detectChanges();
+    const sub = el().querySelector('.pm-sub') as HTMLElement;
+    expect(sub.textContent).toContain('Mail Center tabs');
+    expect(sub.textContent).toContain('2 of 5 on');
+    const boxes = Array.from(sub.querySelectorAll('.pm-chip input')) as HTMLInputElement[];
+    expect(boxes.map(b => b.checked)).toEqual([true, true, false, false, false]);
+    boxes[4].click(); // Logs
+    fixture.detectChanges();
+    const done = c().savePermissions(m);
+    const req = http.expectOne(r => r.method === 'PUT' && r.url.endsWith('/members/4/modules'));
+    expect(req.request.body).toEqual({ modules: ['leads', 'mail'], mailTabs: ['inbox', 'campaigns', 'logs'] });
+    req.flush({});
+    await done;
+    http.expectOne(r => r.url.endsWith('/workspace/members')).flush(d(['inbox', 'campaigns', 'logs']));
+  });
+
+  it('the tabs are hidden while Mail Center is not ticked', () => {
+    c().editPermissions(c().data.members[1]);
+    c().perm!.modules.delete('mail');
+    fixture.detectChanges();
+    expect(el().querySelector('.pm-sub')).toBeNull();
   });
 });
 

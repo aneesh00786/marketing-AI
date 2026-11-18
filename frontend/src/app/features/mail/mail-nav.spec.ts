@@ -26,6 +26,12 @@ describe('Mail Center navigation links', () => {
     expect(visibleMailSections({ productEmails: true })).toContain('product-emails');
   });
 
+  it('Inbox, Campaigns, Deliverability, Email Templates and Logs only when the member has that tab', () => {
+    const keys = visibleMailSections({ productEmails: false, tabs: new Set(['campaigns', 'logs']) });
+    expect(keys).toEqual(['overview', 'sent', 'drafts', 'approvals', 'campaigns', 'logs', 'settings']);
+    expect(visibleMailSections({ productEmails: false, tabs: null })).toContain('inbox');
+  });
+
   it('Settings is left out for people who may not manage mail settings', () => {
     expect(visibleMailSections({ productEmails: false, settings: false })).not.toContain('settings');
     expect(visibleMailSections({ productEmails: false, settings: true })).toContain('settings');

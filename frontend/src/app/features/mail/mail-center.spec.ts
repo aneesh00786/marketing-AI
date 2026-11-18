@@ -320,6 +320,19 @@ describe('MailCenterComponent', () => {
     expect(el().querySelector('.mc-attention')!.textContent).toContain('Delivery unknown');
   });
 
+  it('only the Mail Center tabs the member may open are shown; a link to another opens the overview', () => {
+    fixture = TestBed.createComponent(MailCenterComponent);
+    comp = fixture.componentInstance;
+    comp.drafts = []; comp.draftsState = 'ready'; comp.section = 'deliverability';
+    fixture.detectChanges();
+    http.expectOne(r => r.url.endsWith('/auth/me')).flush({ capabilities: ['mail.view', 'mail.compose'], mailTabs: ['campaigns'] });
+    http.expectOne(r => r.url.endsWith('/emails/inbox')).flush({ unread: 2, emails: [] });
+    fixture.detectChanges();
+    expect(tabs().map(t => t.textContent!.trim().replace(/\s*\d+$/, ''))).toEqual(['Overview', 'Sent Mail', 'Drafts', 'Approvals', 'Campaigns']);
+    expect(comp.active).toBe('overview');
+    expect(comp.inboxUnread).withContext('no Inbox: no unread badge').toBeNull();
+  });
+
   it('Settings is only for people who may manage mail settings; others cannot open it, even by link', () => {
     init({ caps: ['mail.view', 'mail.compose', 'mail.send'], section: 'settings' });
     expect(tab('Settings')).toBeFalsy();

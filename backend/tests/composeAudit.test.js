@@ -185,7 +185,7 @@ test('grants: Owners/Admins grant mail.send_transactional to eligible members on
   assert.equal((await grant(mm, appr)).status, 403, 'a Marketing Manager cannot grant');
   assert.equal((await grant(Z, member)).data.code, 'NOT_ELIGIBLE', 'Members cannot send mail at all');
   assert.equal((await grant(Z, admin)).data.code, 'ALREADY_IN_ROLE');
-  assert.equal((await grant(Z, mm, 'mail.configure')).data.code, 'NOT_GRANTABLE');
+  assert.equal((await grant(Z, mm, 'members.manage')).data.code, 'NOT_GRANTABLE');
   assert.equal((await grant(Z, mm, 'billing.manage')).data.code, 'NOT_GRANTABLE');
   const outsider = await h.addMember(OTHER.workspaceId, 'Marketing Manager');
   assert.equal((await grant(Z, outsider)).status, 404, 'not a member of this workspace');
@@ -229,8 +229,8 @@ test('grants fail closed: a role change removes an ineligible grant (not restore
   assert.equal((await effectiveCapabilities(Z.workspaceId, member.userId, 'Member')).has(CAP), false);
   // So is a grant of a capability that is not grantable.
   const appr = await h.addMember(Z.workspaceId, 'Approver');
-  await db().run('INSERT INTO workspace_member_capability_grants (workspace_id, user_id, capability, granted_by) VALUES (?, ?, ?, NULL)', [Z.workspaceId, appr.userId, 'mail.configure']);
-  assert.equal((await effectiveCapabilities(Z.workspaceId, appr.userId, 'Approver')).has('mail.configure'), false);
+  await db().run('INSERT INTO workspace_member_capability_grants (workspace_id, user_id, capability, granted_by) VALUES (?, ?, ?, NULL)', [Z.workspaceId, appr.userId, 'members.manage']);
+  assert.equal((await effectiveCapabilities(Z.workspaceId, appr.userId, 'Approver')).has('members.manage'), false);
   // A grant in another workspace does not apply here.
   await db().run('INSERT INTO workspace_member_capability_grants (workspace_id, user_id, capability, granted_by) VALUES (?, ?, ?, NULL)', [OTHER.workspaceId, appr.userId, CAP]);
   assert.equal((await effectiveCapabilities(Z.workspaceId, appr.userId, 'Approver')).has(CAP), false);

@@ -65,6 +65,10 @@ export class MailCenterComponent implements OnInit {
 
   // Capabilities of the signed-in member (null = unknown: the server still decides).
   caps: Set<string> | null = null;
+  /** Mail Center tabs this person may open (null until known: all shown; the server enforces them anyway). */
+  mailTabs: Set<string> | null = null;
+  /** True once /auth/me answered (or failed): sections open only then. */
+  meLoaded = false;
   createMenuOpen = false;
   /** What the drafts view does when it opens: start the generator, filter, or open a draft. */
   draftAction: 'ai' | 'template' | null = null;
@@ -81,15 +85,24 @@ export class MailCenterComponent implements OnInit {
 
   ngOnInit(): void {
     this.api.getMe().subscribe({
-      next: (me: any) => { if (Array.isArray(me?.capabilities)) this.caps = new Set(me.capabilities); },
-      error: () => { this.caps = null; }
+      next: (me: any) => {
+        if (Array.isArray(me?.capabilities)) this.caps = new Set(me.capabilities);
+        if (Array.isArray(me?.mailTabs)) {
+          this.mailTabs = new Set(me.mailTabs);
+          // No Inbox tab: no unread badge (the server would refuse the inbox).
+          if (!this.mailTabs.has('inbox')) this.inboxUnread = null;
+        }
+        this.meLoaded = true;
+      },
+      error: () => { this.caps = null; this.meLoaded = true; }
     });
     this.loadUnread();
   }
 
   loadUnread(): void {
+    if (this.mailTabs && !this.mailTabs.has('inbox')) return;
     this.api.getInbox({ read: 'unread' }).subscribe({
-      next: (r: any) => { this.inboxUnread = typeof r?.unread === 'number' ? r.unread : null; },
+      next: (r: any) => { this.inboxUnread = typeof r?.unread === 'number' && (!this.mailTabs || this.mailTabs.has('inbox')) ? r.unread : null; },
       error: () => { this.inboxUnread = null; }
     });
   }
@@ -101,7 +114,7 @@ export class MailCenterComponent implements OnInit {
   get canConfigure(): boolean { return !!this.caps?.has('mail.configure'); }
 
   get sections() {
-    const keys = visibleMailSections({ productEmails: this.productEmailsEnabled, settings: this.canConfigure });
+    const keys = visibleMailSections({ productEmails: this.productEmailsEnabled, settings: this.canConfigure, tabs: this.mailTabs });
     return MAIL_SECTIONS.filter(s => keys.includes(s.key));
   }
 

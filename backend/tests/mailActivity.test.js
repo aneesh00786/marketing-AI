@@ -117,7 +117,10 @@ test('message detail and read/unread: workspace-scoped, received mail only, noth
   assert.equal((await h.api('GET', `/api/v1/emails/${id}`, { token: B.token })).status, 404, 'another workspace');
   assert.equal((await h.api('PUT', `/api/v1/emails/${id}/read`, { token: B.token, body: { read: true } })).status, 404);
 
+  // Approvers see only their own mail; with "View all mail" they share the inbox state.
   const approver = await h.addMember(A.workspaceId, 'Approver');
+  assert.equal((await h.api('PUT', `/api/v1/emails/${id}/read`, { token: approver.token, body: { read: true } })).status, 404);
+  assert.equal((await h.api('PUT', `/api/v1/workspace/members/${approver.userId}/grants/mail.view_all`, { token: A.token })).status, 200);
   assert.equal((await h.api('PUT', `/api/v1/emails/${id}/read`, { token: approver.token, body: { read: true } })).status, 200);
   assert.equal((await h.api('GET', '/api/v1/emails/inbox?read=unread', { token: A.token })).data.unread, 0);
   assert.equal((await h.api('PUT', `/api/v1/emails/${id}/read`, { token: A.token, body: { read: false } })).status, 200);

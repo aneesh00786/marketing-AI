@@ -95,11 +95,12 @@ export class MembersComponent implements OnInit {
   // ---------------------------------------------------------------- Permissions (one panel per member)
 
   /** The member whose permissions are being edited: sections, calls, email grants and CRM access. */
-  perm: { userId: number; modules: Set<string>; calls: boolean; crmRole: string | null; grants: Record<string, string> } | null = null;
+  perm: { userId: number; modules: Set<string>; mailTabs: Set<string>; calls: boolean; crmRole: string | null; grants: Record<string, string> } | null = null;
 
   editPermissions(m: any): void {
     if (this.perm?.userId === m.userId) { this.perm = null; return; }
-    this.perm = { userId: m.userId, modules: new Set(m.modules?.keys || []), calls: !!m.callGrant, crmRole: m.crmRole || null, grants: { ...(m.grants || {}) } };
+    this.perm = { userId: m.userId, modules: new Set(m.modules?.keys || []), mailTabs: new Set(m.mailTabs?.keys || (this.data?.mailTabs || []).map((t: any) => t.key)),
+      calls: !!m.callGrant, crmRole: m.crmRole || null, grants: { ...(m.grants || {}) } };
   }
 
   crmAllowsCalls(role: string | null): boolean { return ['sales', 'support', 'manager'].includes(role || ''); }
@@ -135,6 +136,77 @@ export class MembersComponent implements OnInit {
 
   grantIcon(cap: string): string { return cap.startsWith('performance.') ? '📊' : '✉'; }
 
+  /** Permission groups in the panel, in a sensible order; anything the server adds later lands in "Other". */
+  readonly grantGroups: { key: string; title: string; icon: string; desc: string; caps: string[] }[] = [
+    { key: 'mail', title: 'Email', icon: '✉', desc: 'Sending email and what they see in Mail Center.', caps: ['mail.send', 'mail.send_transactional', 'mail.view_all', 'mail.configure'] },
+    { key: 'perf', title: 'Team Performance', icon: '📊', desc: 'Most of these need “View team performance” first.', caps: ['performance.view_team', 'performance.compare', 'performance.export', 'performance.view_transcripts', 'performance.manage_targets', 'performance.configure_scoring', 'performance.schedule_reports'] }
+  ];
+
+  /** Short titles (the server's labels are longer); falls back to the server label. */
+  private readonly shortLabels: Record<string, string> = {
+    'mail.send': 'Send email',
+    'mail.send_transactional': 'Send transactional email',
+    'mail.view_all': 'View all mail',
+    'mail.configure': 'Manage mail settings',
+    'performance.view_team': 'View team performance',
+    'performance.compare': 'Compare staff',
+    'performance.export': 'Export team reports',
+    'performance.view_transcripts': 'View others’ call transcripts',
+    'performance.manage_targets': 'Manage staff targets',
+    'performance.configure_scoring': 'Configure scoring',
+    'performance.schedule_reports': 'Schedule report emails'
+  };
+  grantTitle(g: any): string { return this.shortLabels[g.capability] || g.label; }
+
+  /** The grantable permissions of one group, in the group's order. */
+  groupGrants(group: { key: string; caps: string[] }): any[] {
+    const all = this.data?.grantable || [];
+    if (group.key === 'other') {
+      const known = new Set(this.grantGroups.flatMap(x => x.caps));
+      return all.filter((g: any) => !known.has(g.capability));
+    }
+    return group.caps.map(c => all.find((g: any) => g.capability === c)).filter(Boolean);
+  }
+
+  /** Groups to show: the fixed ones plus "Other" when the server offers anything else. */
+  get shownGrantGroups() {
+    const other = { key: 'other', title: 'Other', icon: '⚙', desc: '', caps: [] as string[] };
+    return [...this.grantGroups, other].filter(g => this.groupGrants(g).length);
+  }
+
+  /** "2 of 4 on" for a group header. */
+  groupCount(m: any, group: any): string {
+    const gs = this.groupGrants(group);
+    return `${gs.filter(g => this.grantOn(m, g.capability)).length} of ${gs.length} on`;
+  }
+
+  /** A tag next to a permission: why it cannot be changed here. */
+  grantTag(m: any, cap: string): string | null {
+    const g = this.perm?.grants[cap];
+    if (g === 'role') return 'In role';
+    if (g === 'not_eligible' || !this.grantPossible(cap)) return 'Not for this role';
+    return null;
+  }
+
+  /** Mail Center tabs: shown under Sections while Mail Center is ticked. */
+  setAllMailTabs(on: boolean): void {
+    if (!this.perm) return;
+    this.perm.mailTabs = new Set(on ? (this.data?.mailTabs || []).map((x: any) => x.key) : []);
+  }
+
+  /** Chip text for the members list when some Mail Center tabs are off. */
+  mailTabsSummary(m: any): string | null {
+    const all = this.data?.mailTabs || [];
+    if (!m.mailTabs || m.mailTabs.all || m.mailTabs.fullAccessRole || !m.modules?.keys?.includes('mail')) return null;
+    const on = all.filter((t: any) => m.mailTabs.keys.includes(t.key)).map((t: any) => t.label);
+    return on.length ? `Mail: ${on.join(', ')}` : 'Mail: no limited tabs';
+  }
+
+  setAllModules(on: boolean): void {
+    if (!this.perm) return;
+    this.perm.modules = new Set(on ? (this.data?.modules || []).map((x: any) => x.key) : []);
+  }
+
   toggleGrant(cap: string): void {
     if (!this.perm) return;
     const g = this.perm.grants[cap];
@@ -155,7 +227,13 @@ export class MembersComponent implements OnInit {
       if (!m.modules?.fullAccessRole) {
         const keys = (this.data.modules || []).map((x: any) => x.key).filter((k: string) => p.modules.has(k));
         const before = (m.modules?.keys || []).join(',');
-        if (keys.join(',') !== before) await firstValueFrom(this.http.put<any>(`${base}/modules`, { modules: keys }));
+        // Mail Center tabs (only sent when they changed; all ticked = all tabs).
+        const tabKeys = (this.data.mailTabs || []).map((x: any) => x.key).filter((k: string) => p.mailTabs.has(k));
+        const tabsBefore = (m.mailTabs?.keys || (this.data.mailTabs || []).map((x: any) => x.key)).join(',');
+        const tabsChanged = !!this.data.mailTabs && tabKeys.join(',') !== tabsBefore;
+        if (keys.join(',') !== before || tabsChanged) {
+          await firstValueFrom(this.http.put<any>(`${base}/modules`, { modules: keys, ...(tabsChanged ? { mailTabs: tabKeys } : {}) }));
+        }
       }
       for (const cap of Object.keys(p.grants)) {
         const was = m.grants?.[cap];

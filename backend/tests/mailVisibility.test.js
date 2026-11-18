@@ -164,8 +164,8 @@ test('the Mail Center summary and campaign log count only the member\'s own mail
 test('drafts made in Mail Center record who made them', async () => {
   const r = await h.api('POST', '/api/tools/send_email', { token: ANA.token, body: { recipient_email: `x-${uid()}@client.io`, subject: 'Tool draft', body: 'Hi there' } });
   assert.equal(r.status, 200);
-  const row = await db().get("SELECT created_by_user_id AS by FROM email_drafts WHERE workspace_id = ? AND subject = 'Tool draft'", [W]);
-  assert.equal(Number(row.by), ANA.userId);
+  const row = await db().get("SELECT created_by_user_id AS author FROM email_drafts WHERE workspace_id = ? AND subject = 'Tool draft'", [W]);
+  assert.equal(Number(row.author), ANA.userId);
   assert.ok(subjects((await get(ANA, '/api/v1/drafts')).data.drafts).includes('Tool draft'));
   assert.ok(!subjects((await get(BEN, '/api/v1/drafts')).data.drafts).includes('Tool draft'));
 });

@@ -32,6 +32,8 @@ test.before(async () => {
   for (const id of [leadA, hot, leadA]) await run("INSERT INTO audit_logs (workspace_id, actor_user_id, action, resource_type, resource_id, metadata_json, created_at) VALUES (?, ?, 'leads.owner_changed', 'lead', ?, ?, UTC_TIMESTAMP())",
     [W, Owner.userId, String(id), JSON.stringify({ previous: null, owner: A.userId, bulk: true })]);
   await run("INSERT INTO crm_call_logs (user_id, phone, transcribe, transcript_status, answered, duration_seconds, lead_id, lead_workspace_id, started_at, ended_at) VALUES (?, '+61400000001', 1, 'failed', 1, 30, ?, ?, ?, ?)", [A.userId, leadA, W, at(-30), at(-29)]);
+  // A emailed Kim, so Kim's urgent reply is A's mail (members see only their own; the owner sees all).
+  await run("INSERT INTO emails (workspace_id, sender, sender_email, recipient_email, subject, body, status, is_read, sent_by_user_id, sent_at) VALUES (?, 'A', 'team@bell.io', 'kim@client.io', 'Contract', 'x', 'Sent', 1, ?, UTC_TIMESTAMP())", [W, A.userId]);
   await run("INSERT INTO emails (workspace_id, sender, sender_email, recipient_email, subject, body, status, is_read, is_urgent, received_at) VALUES (?, 'Kim', 'kim@client.io', 'team@bell.io', 'Contract question', 'x', 'Unread', 0, 1, UTC_TIMESTAMP())", [W]);
   await run("INSERT INTO email_drafts (workspace_id, recipient_name, recipient_email, subject, body, status, created_at, updated_at) VALUES (?, 'Kim', 'kim@client.io', 'Proposal', 'x', 'Pending Approval', UTC_TIMESTAMP(), UTC_TIMESTAMP())", [W]);
   const acc = await h.createAccount(W);
@@ -60,9 +62,10 @@ test('a member sees their own follow-ups, leads, calls, posts and generations, a
 
 test('others see only what is theirs; the owner is asked to approve the draft; another workspace sees nothing', async () => {
   const b = await bell(B);
-  assert.deepEqual(kinds(b), ['email_urgent'], "B shares the inbox, nothing of A's");
+  assert.deepEqual(kinds(b), [], "nothing of A's: not A's follow-ups, nor the reply to A's email");
   const o = await bell(Owner);
   assert.ok(kinds(o).includes('draft_approval'));
+  assert.ok(kinds(o).includes('email_urgent'), 'the owner sees all mail');
   assert.ok(!kinds(o).some(k => k.startsWith('followup') || k === 'publish_failed'), "A's follow-ups and posts are A's");
   assert.equal((await bell(Other)).notifications.length, 0);
 });

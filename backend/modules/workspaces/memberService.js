@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const mailTabs = require('../../lib/mailTabs');
 const { z } = require('zod');
 const { run, get, all, withTransaction } = require('../../db/database');
 const { audit } = require('../../lib/audit');
@@ -55,6 +56,12 @@ function presentInvitation(r) {
 }
 
 /** { all, keys }: the sections a member (or invitee) can open. */
+/** A member's Mail Center tabs: { all, keys } (Owners/Admins and no list: all). */
+function mailTabsView(role, json) {
+  const keys = [...mailTabs.tabsFor(role, json)];
+  return { all: keys.length === mailTabs.KEYS.length, fullAccessRole: moduleAccess.FULL_ACCESS_ROLES.includes(role), keys };
+}
+
 function modulesView(role, json) {
   const keys = [...moduleAccess.modulesFor(role, json)];
   return { all: moduleAccess.FULL_ACCESS_ROLES.includes(role) || json === null || json === undefined, fullAccessRole: moduleAccess.FULL_ACCESS_ROLES.includes(role), keys };
@@ -81,6 +88,9 @@ async function listMembers(ctx) {
   }
   // Per-member grants (Owners/Admins only): state per grantable capability for each active member.
   const grantRows = manage ? await all('SELECT user_id, capability FROM workspace_member_capability_grants WHERE workspace_id = ?', [ws(ctx)]).catch(() => []) : [];
+  // Mail Center tabs per member (no column before migration 066: everyone has all tabs).
+  const tabRows = await all('SELECT user_id, mail_tabs_json FROM workspace_members WHERE workspace_id = ?', [ws(ctx)]).catch(() => []);
+  const tabsOf = m => mailTabsView(m.role, tabRows.find(r => r.user_id === m.user_id)?.mail_tabs_json ?? null);
   const grantsOf = userId => {
     const out = {};
     for (const cap of Object.keys(grants.GRANTABLE)) {
@@ -102,6 +112,7 @@ async function listMembers(ctx) {
   return {
     members: members.map(m => ({ userId: m.user_id, email: m.email, displayName: m.display_name, role: m.role, status: m.status, joinedAt: m.created_at, isYou: m.user_id === ctx.auth.userId,
       modules: modulesView(m.role, m.module_access_json),
+      mailTabs: tabsOf(m),
       ...(manage ? { grants: grantsOf(m.user_id) } : {}),
       ...(platformAdmin ? {
         crmRole: m.user_id === ctx.auth.userId ? 'manager' : (crmRows.find(r => r.user_id === m.user_id)?.role || null),
@@ -110,6 +121,7 @@ async function listMembers(ctx) {
         callGrant: callRows.some(r => r.user_id === m.user_id)
       } : {}) })),
     modules: moduleAccess.registry(),
+    mailTabs: mailTabs.registry(),
     fullAccessRoles: moduleAccess.FULL_ACCESS_ROLES,
     crmRoles: platformAdmin ? Object.keys(crmAccess.CRM_ROLES) : null,
     grantable: manage ? Object.entries(grants.GRANTABLE).map(([capability, g]) => ({ capability, label: g.label, requires: g.requires })) : [],
@@ -342,14 +354,26 @@ async function signUpWithInvitation(input, meta = {}) {
 
 /** Sets which sections a member can open. Owners and Admins always have all of them. */
 async function setModules(ctx, rawUserId, input) {
-  const v = z.object({ modules: z.array(z.string().max(40)).max(20).nullable() }).strict().parse(input || {});
+  // mailTabs (optional): the Mail Center tabs they may open; null = all; left out = unchanged.
+  const v = z.object({ modules: z.array(z.string().max(40)).max(20).nullable(), mailTabs: z.array(z.string().max(40)).max(20).nullable().optional() }).strict().parse(input || {});
   const m = await requireOtherMember(ctx, rawUserId);
   if (moduleAccess.FULL_ACCESS_ROLES.includes(m.role)) throw httpError(409, `${m.role}s always have access to every section. Change their role first.`, 'FULL_ACCESS_ROLE');
   const list = v.modules === null ? null : moduleAccess.cleanList(v.modules);
   await run("UPDATE workspace_members SET module_access_json = ? WHERE workspace_id = ? AND user_id = ? AND status = 'Active'",
     [list === null ? null : JSON.stringify(list), ws(ctx), m.user_id]);
-  await audit(ctx, 'workspace.member_modules_changed', { resourceType: 'workspace_member', resourceId: m.user_id, metadata: { modules: list === null ? 'all' : list } });
-  return { userId: m.user_id, modules: modulesView(m.role, list === null ? null : JSON.stringify(list)) };
+  let tabs;
+  if (v.mailTabs !== undefined) {
+    const t = mailTabs.cleanList(v.mailTabs);
+    // Every tab chosen is stored as "all" (also covers tabs added later).
+    tabs = t === null || t.length === mailTabs.KEYS.length ? null : t;
+    await run("UPDATE workspace_members SET mail_tabs_json = ? WHERE workspace_id = ? AND user_id = ? AND status = 'Active'",
+      [tabs === null ? null : JSON.stringify(tabs), ws(ctx), m.user_id]);
+  }
+  await audit(ctx, 'workspace.member_modules_changed', { resourceType: 'workspace_member', resourceId: m.user_id,
+    metadata: { modules: list === null ? 'all' : list, ...(v.mailTabs !== undefined ? { mailTabs: tabs === null ? 'all' : tabs } : {}) } });
+  const stored = v.mailTabs !== undefined ? tabs : (await get('SELECT mail_tabs_json FROM workspace_members WHERE workspace_id = ? AND user_id = ?', [ws(ctx), m.user_id]).catch(() => null))?.mail_tabs_json ?? null;
+  return { userId: m.user_id, modules: modulesView(m.role, list === null ? null : JSON.stringify(list)),
+    mailTabs: mailTabsView(m.role, stored === null ? null : (typeof stored === 'string' ? stored : JSON.stringify(stored))) };
 }
 
 /** "Make calls" (charged to the company's Telnyx account): only the platform admin turns it on or off. */

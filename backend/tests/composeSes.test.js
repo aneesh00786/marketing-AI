@@ -7,6 +7,7 @@ const h = require('./helpers');
 // through Amazon SES when SES is set up, with the unsubscribe link and header; never through ZeptoMail.
 // SES is a local fake behind the fetch mock: nothing is sent.
 const db = () => h.db();
+process.env.APP_BASE_URL = 'https://app.marketech.test'; // one-click unsubscribe links need the public https address
 const uid = () => crypto.randomBytes(4).toString('hex');
 const key = () => ({ 'Idempotency-Key': crypto.randomBytes(16).toString('hex') });
 const KEYS = { region: 'us-east-1', accessKeyId: 'AKIATESTKEY0000001', secretAccessKey: 'testSecretKey/abcdefghijklmnop1234', maxPerSecond: 5 };
@@ -68,7 +69,8 @@ test('with SES set up, marketing goes through SES (unsubscribe link and header, 
   assert.equal(r.status, 200, JSON.stringify(r.data));
   assert.equal(s.zepto.length, 0, 'never ZeptoMail');
   assert.equal(s.sent.length, 1);
-  const raw = s.sent[0].raw.replace(/=\r?\n/g, '');
+  // Quoted-printable soft breaks and folded headers undone.
+  const raw = s.sent[0].raw.replace(/=\r?\n/g, '').replace(/\r?\n[ \t]+/g, ' ');
   assert.equal(s.sent[0].from, 'sales@thrive-co.io');
   assert.match(raw, /^List-Unsubscribe: <https?:\/\/[^>]+>, <mailto:sales@thrive-co\.io\?subject=unsubscribe>/m);
   assert.match(raw, /List-Unsubscribe-Post: List-Unsubscribe=One-Click/);

@@ -26,13 +26,18 @@ export const APPROVAL_STATUSES = ['Draft', 'Approved', 'Needs Review'];
 
 /**
  * Sections shown to this person. Product Emails exists only while its feature flag is on; Settings only for
- * people who may manage mail settings (opts.settings; left out = shown).
+ * people who may manage mail settings (opts.settings; left out = shown); Inbox, Campaigns, Deliverability,
+ * Email Templates and Logs only when the member has that tab (opts.tabs; null = all).
  */
-export function visibleMailSections(opts: { productEmails: boolean; settings?: boolean }): MailSection[] {
+export function visibleMailSections(opts: { productEmails: boolean; settings?: boolean; tabs?: Set<string> | null }): MailSection[] {
   return MAIL_SECTIONS.map(s => s.key)
     .filter(k => k !== 'product-emails' || opts.productEmails)
-    .filter(k => k !== 'settings' || opts.settings !== false);
+    .filter(k => k !== 'settings' || opts.settings !== false)
+    .filter(k => { const tab = TAB_KEYS[k]; return !opts.tabs || !tab || opts.tabs.has(tab); });
 }
+
+/** Mail Center tabs that can be limited per member (Members → Permissions), by their access key. */
+export const TAB_KEYS: Partial<Record<MailSection, string>> = { inbox: 'inbox', campaigns: 'campaigns', deliverability: 'deliverability', templates: 'templates', logs: 'logs' };
 
 /**
  * Resolves a deep link (?view=…&section=…) to a Mail Center section, or null when it is not a mail link.

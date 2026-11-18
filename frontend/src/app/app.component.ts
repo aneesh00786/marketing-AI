@@ -128,7 +128,9 @@ export class AppComponent implements OnInit, OnDestroy {
    */
   /** Mail Center sections for the sidebar sub-menu (Product Emails only while its feature is on). */
   get mailSubnav() {
-    const keys = visibleMailSections({ productEmails: !!this.serverStatus?.features?.productEmails });
+    // Same as Mail Center's own tabs: Settings only with mail.configure, limited tabs only when allowed.
+    const keys = visibleMailSections({ productEmails: !!this.serverStatus?.features?.productEmails,
+      settings: this.myCaps ? this.myCaps.has('mail.configure') : undefined, tabs: this.myMailTabs });
     return MAIL_SECTIONS.filter(s => keys.includes(s.key));
   }
   get pendingApprovalCount(): number { return this.drafts.filter(d => ['Draft', 'Approved', 'Needs Review'].includes(d.status)).length; }
@@ -928,6 +930,7 @@ export class AppComponent implements OnInit, OnDestroy {
       next: (me: any) => {
         this.myCaps = Array.isArray(me?.capabilities) ? new Set(me.capabilities) : null;
         this.myModules = Array.isArray(me?.modules) ? new Set(me.modules) : null;
+        this.myMailTabs = Array.isArray(me?.mailTabs) ? new Set(me.mailTabs) : null;
         loadSections();
       },
       error: () => { this.myCaps = null; loadSections(); }
@@ -1739,6 +1742,8 @@ export class AppComponent implements OnInit, OnDestroy {
   composeTemplate: { id: number; category: string } | null = null;
 
   /** Capabilities of the signed-in member (null = unknown; the server still decides). */
+  /** Mail Center tabs this person may open (from /auth/me; null = all). */
+  myMailTabs: Set<string> | null = null;
   myCaps: Set<string> | null = null;
   /** Sending Compose email as transactional needs mail.send_transactional (Owners/Admins by default). */
   get canSendTransactional(): boolean { return this.myCaps === null || this.myCaps.has('mail.send_transactional'); }
