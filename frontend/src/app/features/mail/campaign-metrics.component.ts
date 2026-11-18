@@ -199,9 +199,34 @@ export class CampaignMetricsComponent implements OnChanges {
     this.loadRecipients(1);
   }
 
-  closeRecipients(): void { this.showRecipients = false; this.history = null; this.seq++; }
+  closeRecipients(): void { this.showRecipients = false; this.history = null; this.seq++; this.search = ''; clearTimeout(this.searchTimer); }
+
+  /** Search in the open group (email, name, business or phone), as the user types. */
+  search = '';
+  private searchTimer: any;
+  searchChanged(): void {
+    clearTimeout(this.searchTimer);
+    this.searchTimer = setTimeout(() => this.loadRecipients(1), 300);
+  }
+  clearSearch(): void { this.search = ''; clearTimeout(this.searchTimer); this.loadRecipients(1); }
 
   @HostListener('document:keydown.escape') onEscape(): void { if (this.showRecipients) this.closeRecipients(); }
+
+  /** "5 min ago", "3 h ago", "2 days ago" (shown under the date). */
+  ago(at: any): string {
+    const t = new Date(at).getTime();
+    if (!Number.isFinite(t)) return '';
+    const s = Math.max(0, Math.round((Date.now() - t) / 1000));
+    if (s < 60) return 'just now';
+    const m = Math.round(s / 60);
+    if (m < 60) return `${m} min ago`;
+    const h = Math.round(m / 60);
+    if (h < 24) return `${h} h ago`;
+    const d = Math.round(h / 24);
+    if (d < 30) return `${d} day${d === 1 ? '' : 's'} ago`;
+    const mo = Math.round(d / 30);
+    return mo < 12 ? `${mo} month${mo === 1 ? '' : 's'} ago` : `${Math.round(mo / 12)} year${mo < 18 ? '' : 's'} ago`;
+  }
 
   private def(key: string) { return ACTIVITIES.find(a => a.key === key); }
   activityLabel(key: string): string { return this.def(key)?.label || key; }
@@ -227,7 +252,7 @@ export class CampaignMetricsComponent implements OnChanges {
     this.page = page;
     this.loading = true;
     this.error = null;
-    this.api.getCampaignRecipients(this.campaignId, api, page).subscribe({
+    this.api.getCampaignRecipients(this.campaignId, api, page, this.search).subscribe({
       next: (r: any) => {
         if (mine !== this.seq) return;
         this.loading = false;
@@ -294,7 +319,7 @@ export class CampaignMetricsComponent implements OnChanges {
       if (/^[=+\-@\t\r]/.test(t)) t = `'${t}`; // keep spreadsheet formulas from running
       return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
     };
-    const rows = this.recipients.map(r => [r.name || r.contactName, r.company, r.email, r.phone, r.location, r.opens, r.lastOpenedAt, r.clicks, r.leadStatus].map(cell).join(','));
+    const rows = this.recipients.map(r => [r.name || r.contactName, r.company, r.email, r.phone, r.location, r.opens, r.lastOpenedAt ? new Date(r.lastOpenedAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '', r.clicks, r.leadStatus].map(cell).join(','));
     const blob = new Blob([[head.join(','), ...rows].join('\r\n')], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);

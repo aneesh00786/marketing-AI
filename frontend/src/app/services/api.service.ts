@@ -468,8 +468,8 @@ export class ApiService {
     return this.http.get(`${this.baseUrl}/mail/campaigns/${campaignId}/recipient-history`, { params: { email, ...(phone ? { phone } : {}) } });
   }
 
-  getCampaignRecipients(campaignId: number, activity: string, page = 1): Observable<any> {
-    return this.http.get(`${this.baseUrl}/mail/campaigns/${campaignId}/recipients`, { params: { activity, page: String(page) } });
+  getCampaignRecipients(campaignId: number, activity: string, page = 1, q = ''): Observable<any> {
+    return this.http.get(`${this.baseUrl}/mail/campaigns/${campaignId}/recipients`, { params: { activity, page: String(page), ...(q.trim() ? { q: q.trim() } : {}) } });
   }
 
   rewriteMailDraft(id: number, instruction: string): Observable<any> {

@@ -1,4 +1,4 @@
-import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { CampaignMetricsComponent, num, rate } from './campaign-metrics.component';
@@ -68,12 +68,22 @@ describe('CampaignMetricsComponent', () => {
     (Array.from(el().querySelectorAll('button')).find(b => b.textContent!.includes('View recipients')) as HTMLButtonElement).click();
     let req = http.expectOne(r => r.url.endsWith('/mail/campaigns/7/recipients'));
     expect(req.request.params.get('activity')).toBe('sent');
-    req.flush({ available: true, recipients: [{ email: 'ann@acme.io', name: 'Ann Lee', company: 'Acme', phone: '0400', location: 'Sydney', opens: 2, lastOpenedAt: 'Nov 05, 2026 09:10 AM', leadStatus: 'Contacted' }], hasMore: true });
+    req.flush({ available: true, recipients: [{ email: 'ann@acme.io', name: 'Ann Lee', company: 'Acme', phone: '0400', location: 'Sydney', opens: 2, lastOpenedAt: new Date(2026, 10, 5, 9, 10).toISOString(), leadStatus: 'Contacted' }], hasMore: true });
     fixture.detectChanges();
     const pop = () => el().querySelector('.cm-pop') as HTMLElement;
     expect(pop().querySelector('h3')!.textContent).toContain('Sent');
     const cells = Array.from(pop().querySelectorAll('tbody tr:first-child td')).map(td => td.textContent!.trim());
-    expect(cells.slice(0, 10)).toEqual(['1', 'Ann Lee', 'Acme', 'ann@acme.io', '0400', 'Sydney', '2', 'Nov 05, 2026 09:10 AM', '—', 'Contacted']);
+    expect(cells.slice(0, 7)).toEqual(['1', 'Ann Lee', 'Acme', 'ann@acme.io', '0400', 'Sydney', '2']);
+    expect(cells[7]).withContext('a readable local time, with how long ago').toMatch(/^5 Nov 2026, 9:10\sAM\s*\S.* ago$/);
+    expect(cells.slice(8, 10)).toEqual(['—', 'Contacted']);
+    // Long text stays on one line; the full text shows on hover.
+    const clip = pop().querySelector('tbody tr:first-child td.cm-clip span') as HTMLElement;
+    expect(clip.title).toBe('Ann Lee');
+    expect(getComputedStyle(clip).textOverflow).toBe('ellipsis');
+    // A click outside does not close the popup.
+    (el().querySelector('.cm-backdrop') as HTMLElement).click();
+    fixture.detectChanges();
+    expect(pop()).withContext('still open').toBeTruthy();
     const heads = Array.from(pop().querySelectorAll('thead th')).map(th => th.textContent!.trim());
     expect(heads[heads.length - 1]).withContext('the last column').toBe('Follow up');
     // Follow up by email: Compose opens with the person and a follow-up subject (nothing is sent).
@@ -124,6 +134,25 @@ describe('CampaignMetricsComponent', () => {
     fixture.detectChanges();
     expect(el().querySelector('.cm-pop')).toBeNull();
   });
+
+  it('recipients popup: a search box finds people by name, business, email or phone, from page 1', fakeAsync(() => {
+    init({ report: { emails_sent_count: '2' }, canViewRecipients: true });
+    (Array.from(el().querySelectorAll('button')).find(b => b.textContent!.includes('View recipients')) as HTMLButtonElement).click();
+    http.expectOne(r => r.url.endsWith('/recipients') && !r.params.get('q')).flush({ available: true, recipients: [{ email: 'ann@acme.io', name: 'Ann' }, { email: 'bo@b.io', name: 'Bo' }], hasMore: false });
+    fixture.detectChanges();
+    const input = el().querySelector('.cm-search input') as HTMLInputElement;
+    expect(input).toBeTruthy();
+    input.value = 'acme';
+    input.dispatchEvent(new Event('input'));
+    tick(300);
+    const req = http.expectOne(r => r.url.endsWith('/recipients') && r.params.get('q') === 'acme');
+    expect(req.request.params.get('page')).toBe('1');
+    req.flush({ available: true, recipients: [], hasMore: false });
+    fixture.detectChanges();
+    expect(el().querySelector('.cm-pop')!.textContent).toContain('No one in this group matches "acme".');
+    (el().querySelector('.cm-search-clear') as HTMLButtonElement).click();
+    http.expectOne(r => r.url.endsWith('/recipients') && !r.params.get('q')).flush({ available: true, recipients: [], hasMore: false });
+  }));
 
   it('insights: devices, email apps, browsers, locations and lists, when reported; zero entries are left out', () => {
     init({ report: { emails_sent_count: '2', insights: { sentAt: '04 Nov 2026, 11:33 AM', sentTimeZone: 'IST', topic: 'Marketing',

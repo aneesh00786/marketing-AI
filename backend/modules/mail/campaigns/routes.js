@@ -58,6 +58,6 @@ router.post('/:id/approve', requireCapability('mail.send'), wrap(async (req, res
 router.post('/:id/send', requireCapability('mail.send'), wrap(async (req, res) => res.json({ success: true, campaign: await svc.send(req, req.params.id, req.body || {}) })));
 router.post('/:id/refresh', requireCapability('mail.view'), wrap(async (req, res) => res.json({ success: true, campaign: await svc.refresh(req, req.params.id) })));
 // Per-recipient activity (addresses): Owner, Admin, Marketing Manager and Approver only.
-router.get('/:id/recipients', requireCapability('mail.send'), wrap(async (req, res) => res.json({ success: true, ...(await svc.recipientActivity(req, req.params.id, { activity: String(req.query.activity || ''), page: req.query.page })) })));
+router.get('/:id/recipients', requireCapability('mail.send'), wrap(async (req, res) => res.json({ success: true, ...(await svc.recipientActivity(req, req.params.id, { activity: String(req.query.activity || ''), page: req.query.page, q: String(req.query.q || '') })) })));
 
 module.exports = router;

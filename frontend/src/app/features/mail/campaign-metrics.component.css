@@ -58,7 +58,7 @@ button.cm-bar:focus-visible, .cm-link:focus-visible { outline: 2px solid var(--a
 .cm-listrow small { color: var(--text-muted); white-space: nowrap; }
 /* Recipients popup */
 .cm-backdrop { position: fixed; inset: 0; z-index: 1000; background: rgba(15, 18, 30, 0.5); display: grid; place-items: center; padding: 16px; }
-.cm-pop { width: min(1200px, 100%); max-height: calc(100vh - 32px); display: flex; flex-direction: column; gap: 10px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 14px; padding: 18px; box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25); box-sizing: border-box; min-width: 0; }
+.cm-pop { width: min(1640px, 100%); max-height: calc(100vh - 32px); display: flex; flex-direction: column; gap: 10px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 14px; padding: 18px; box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25); box-sizing: border-box; min-width: 0; }
 .cm-pop-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
 .cm-pop-head h3 { margin: 0 0 2px; font-size: 1.1rem; }
 .cm-pop-count { display: inline-block; margin-left: 6px; padding: 1px 10px; border-radius: 999px; background: var(--surface-2); font-size: 0.85rem; font-variant-numeric: tabular-nums; }
@@ -113,3 +113,17 @@ button.cm-bar:focus-visible, .cm-link:focus-visible { outline: 2px solid var(--a
 .cm-convo p { margin: 0; padding: 6px 10px; border-radius: 8px; background: var(--surface-2); max-width: 92%; }
 .cm-convo p.them { align-self: flex-end; background: rgba(79, 70, 229, 0.08); }
 @media (max-width: 760px) { .cm-hist-cols { grid-template-columns: 1fr; } }
+
+/* Recipients table: long names, businesses, emails and places stay on one line (full text on hover) */
+.cm-table td.cm-clip { max-width: 200px; min-width: 0; overflow-wrap: normal; }
+.cm-table td.cm-clip > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cm-table td.cm-clip-name { max-width: 220px; }
+.cm-table td.cm-email { max-width: 260px; min-width: 160px; }
+.cm-table td.cm-nw { white-space: nowrap; }
+.cm-ago { display: block; color: var(--text-muted); font-size: 0.72rem; }
+
+.cm-search { display: flex; align-items: center; gap: 8px; border: 1px solid var(--border); border-radius: 10px; padding: 0 10px; color: var(--text-muted); max-width: 520px; }
+.cm-search:focus-within { border-color: var(--accent); }
+.cm-search input { flex: 1 1 auto; min-width: 0; border: 0; outline: none; background: transparent; color: var(--text); font: inherit; font-size: 0.85rem; padding: 8px 0; }
+.cm-search-clear { border: 0; background: none; color: var(--text-muted); cursor: pointer; padding: 2px 4px; border-radius: 6px; }
+.cm-search-clear:hover { color: var(--text); background: var(--surface-2); }

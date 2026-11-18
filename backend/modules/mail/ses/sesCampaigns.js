@@ -391,13 +391,18 @@ const ACTIVITY_SQL = {
   delivered: 't.delivered_at IS NOT NULL',
   failed: "r.status IN ('failed', 'unknown', 'skipped')"
 };
-async function activity(row, activityName, page, pageSize) {
+async function activity(row, activityName, page, pageSize, q = '') {
   const where = ACTIVITY_SQL[activityName];
   if (!where) return null;
+  // Search: the recipient's email or name, or the matching lead's name, business or phone.
+  const term = String(q || '').trim().slice(0, 100);
+  const like = term ? `%${term.replace(/[%_\\]/g, '\\$&')}%` : null;
+  const search = like ? `AND (r.email LIKE ? OR r.first_name LIKE ? OR r.last_name LIKE ? OR CONCAT_WS(' ', r.first_name, r.last_name) LIKE ?
+      OR EXISTS (SELECT 1 FROM leads l WHERE l.workspace_id = r.workspace_id AND LOWER(TRIM(l.email)) = LOWER(r.email) AND (l.name LIKE ? OR l.company_name LIKE ? OR l.phone LIKE ?)))` : '';
   const rows = await all(`SELECT r.email, r.first_name, r.last_name, r.status, r.error, r.sent_at, t.delivery_status, t.delivered_at, t.open_events, t.click_events,
       t.last_open_at, t.last_click_at, t.failure_reason
     FROM mail_campaign_recipients r LEFT JOIN mail_message_tracking t ON t.id = r.tracking_id
-    WHERE r.campaign_id = ? AND r.version = ? AND ${where} ORDER BY r.id LIMIT ${pageSize + 1} OFFSET ${(page - 1) * pageSize}`, [row.id, row.version]);
+    WHERE r.campaign_id = ? AND r.version = ? AND ${where} ${search} ORDER BY r.id LIMIT ${pageSize + 1} OFFSET ${(page - 1) * pageSize}`, [row.id, row.version, ...(like ? Array(7).fill(like) : [])]);
   const iso = v => (v ? new Date(v).toISOString() : null);
   return {
     recipients: rows.slice(0, pageSize).map(x => ({

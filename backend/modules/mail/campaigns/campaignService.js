@@ -639,14 +639,14 @@ async function unsubscribeFromCampaign(token, email, { apply }) {
 const PAGE_SIZE = 50;
 
 /** Per-recipient activity (sent, opened, clicked, bounced, …) from Marketech.ai's records. */
-async function recipientActivity(ctx, id, { activity, page = 1 } = {}) {
+async function recipientActivity(ctx, id, { activity, page = 1, q = '' } = {}) {
   if (!sesCampaigns().ACTIVITY_SQL[activity]) throw httpError(400, `Unknown activity. Use one of: ${Object.keys(sesCampaigns().ACTIVITY_SQL).join(', ')}.`, 'VALIDATION_ERROR');
   const row = await requireRow(ctx, id);
   const p = Math.max(1, Math.min(1000, parseInt(page, 10) || 1));
   if (row.provider !== 'ses' || !['submitted', 'submitting', 'failed'].includes(row.status)) return { available: false, reason: 'not_sent', recipients: [], page: 1, pageSize: PAGE_SIZE };
-  const r = await sesCampaigns().activity(row, activity, p, PAGE_SIZE);
+  const r = await sesCampaigns().activity(row, activity, p, PAGE_SIZE, q);
   const recipients = (await withLeadDetails(ws(ctx), r.recipients)).map(x => ({ ...x, name: x.name || x.contactName || null }));
-  await audit(ctx, 'mail.campaign_recipients_viewed', { resourceType: 'mail_campaign', resourceId: row.id, metadata: { activity, page: p, count: recipients.length } });
+  await audit(ctx, 'mail.campaign_recipients_viewed', { resourceType: 'mail_campaign', resourceId: row.id, metadata: { activity, page: p, count: recipients.length, searched: !!String(q || '').trim() } });
   return { available: true, recipients, page: p, pageSize: PAGE_SIZE, hasMore: r.hasMore };
 }
 

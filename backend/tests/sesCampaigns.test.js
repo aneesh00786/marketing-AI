@@ -218,6 +218,11 @@ test('SES events through SNS: the subscription is confirmed; delivered, opens, c
   assert.deepEqual(opened.data.recipients.map(x => x.email), ['a@shop.io']);
   const bounced = (await capi(ws, 'GET', `/${c.id}/recipients?activity=hard_bounced`)).data.recipients;
   assert.deepEqual(bounced.map(x => [x.email, x.reason]), [['c@shop.io', '550 5.1.1 user unknown']]);
+  // Search within a group: by email (case-insensitive part), nothing for no match; LIKE wildcards are literal.
+  const found = (await capi(ws, 'GET', `/${c.id}/recipients?activity=sent&q=${encodeURIComponent('B@SHOP')}`)).data.recipients;
+  assert.deepEqual(found.map(x => x.email), ['b@shop.io']);
+  assert.deepEqual((await capi(ws, 'GET', `/${c.id}/recipients?activity=sent&q=nobody`)).data.recipients, []);
+  assert.deepEqual((await capi(ws, 'GET', `/${c.id}/recipients?activity=sent&q=%25`)).data.recipients, [], '% is searched as text');
 });
 
 test('SES stops on a hard refusal with SES\'s reason; Send again continues with the people not yet emailed', async () => {
