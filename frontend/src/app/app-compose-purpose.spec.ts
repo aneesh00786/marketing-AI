@@ -9,6 +9,7 @@ describe('App shell: Compose email purpose', () => {
     api = {
       sendEmail: jasmine.createSpy('sendEmail').and.returnValue(of({ message: 'sent' })),
       sendHtmlEmail: jasmine.createSpy('sendHtmlEmail').and.returnValue(of({ message: 'sent' })),
+      sendLeadEmail: jasmine.createSpy('sendLeadEmail').and.returnValue(of({ message: 'sent' })),
       getEmails: () => of({ emails: [] })
     };
     app = new AppComponent(api, {} as any, {} as any, {} as any);
@@ -112,6 +113,28 @@ describe('App shell: Compose email purpose', () => {
     app.trySendCompose();
     expect(api.sendEmail).toHaveBeenCalledTimes(1);
     expect(api.sendEmail.calls.mostRecent().args[0].body).toBe('Plain text written in the Write tab');
+  });
+
+  it('✉ next to a lead\'s email opens Compose to that lead and sends through Leads; another address goes the normal way', () => {
+    app.emailLeadDirect({ id: 42, name: 'Kim Lee', email: 'kim@kimco.io', productName: 'Spring offer' });
+    expect(app.showComposeModal).toBeTrue();
+    expect(app.composeEmail.recipient_email).toBe('kim@kimco.io');
+    expect(app.composeEmail.subject).toBe('Following up: Spring offer');
+    expect(app.composeEmail.body).toBe('Hi Kim,\n\n');
+    app.composeEmail.body = 'Hi Kim,\n\nNews.';
+    app.composePurpose = 'marketing';
+    app.trySendCompose();
+    expect(api.sendLeadEmail).toHaveBeenCalledTimes(1);
+    expect(api.sendLeadEmail.calls.mostRecent().args[0]).toBe(42);
+    expect(api.sendEmail).not.toHaveBeenCalled();
+    // The address changed in Compose: not the lead's any more, so the normal Compose send.
+    app.emailLeadDirect({ id: 42, name: 'Kim Lee', email: 'kim@kimco.io' });
+    app.composeEmail.recipient_email = 'other@kimco.io';
+    app.composeEmail.body = 'Hi';
+    app.composePurpose = 'marketing';
+    app.trySendCompose();
+    expect(api.sendEmail).toHaveBeenCalledTimes(1);
+    expect(api.sendLeadEmail).toHaveBeenCalledTimes(1);
   });
 
   it('closing Compose with content asks first and keeps it when the user cancels', () => {

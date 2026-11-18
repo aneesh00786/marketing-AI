@@ -1682,6 +1682,12 @@ export class AppComponent implements OnInit, OnDestroy {
 
 
   /** Opens the compose window with a draft built from the lead's real product (never a placeholder address). */
+  /** ✉ next to a lead's email: Compose to that lead (sent through Leads, so "Email leads" is enough). */
+  emailLeadDirect(lead: any): void {
+    const first = String(lead.name || '').trim().split(/\s+/)[0] || 'there';
+    this.openComposeFor({ email: lead.email, name: lead.name || null, subject: lead.productName ? `Following up: ${lead.productName}` : 'Following up', body: `Hi ${first},\n\n`, leadId: lead.id });
+  }
+
   quickEmailLead(lead: any): void {
     if (!lead.hasValidEmail) {
       this.showToast('This lead has no valid email address. Edit the lead to add one.');

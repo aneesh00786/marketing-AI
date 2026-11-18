@@ -822,3 +822,8 @@ button.dropdown-item:disabled { opacity: 0.6; cursor: default; }
 .compose-unsub-label { display: flex; align-items: center; gap: 6px; margin: 0 0 4px; font-size: 12px; font-weight: 600; color: var(--text-muted); }
 .compose-unsub-text { margin: 0; font-size: 12px; color: #64748b; }
 .compose-unsub-link { color: var(--primary, #5b5bd6); text-decoration: underline; }
+
+/* ✉ next to a lead's email: same look as the 📞 call button next to the phone number */
+.leads-table .mail-btn { display: inline-flex; margin-left: 6px; padding: 4px; border: 1px solid var(--border); border-radius: 50%; background: var(--surface); color: var(--accent); cursor: pointer; line-height: 0; flex: 0 0 auto; }
+.leads-table .mail-btn:hover { background: var(--accent-soft); border-color: var(--accent); }
+.leads-table .mail-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
