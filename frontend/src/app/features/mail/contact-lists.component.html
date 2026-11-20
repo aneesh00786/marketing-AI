@@ -114,7 +114,21 @@
     </div>
     <label class="zl-search zl-pick-filter"><app-icon name="search" [size]="15"></app-icon>
       <input class="hud-input" type="search" [(ngModel)]="picker.query" placeholder="Filter by name, email, company or address" aria-label="Filter leads" /></label>
-    <app-country-filter class="zl-pick-country" *ngIf="leadCountries.length" [countries]="leadCountries" [(value)]="picker.country"></app-country-filter>
+    <div class="zl-pick-filters">
+      <app-country-filter class="zl-pick-country" *ngIf="leadCountries.length" [countries]="leadCountries" [(value)]="picker.country" (valueChange)="picker.state = ''"></app-country-filter>
+      <!-- State: read from each lead's address (leads have no separate state field) -->
+      <select class="hud-input zl-pick-sel" *ngIf="stateOptions.length" [(ngModel)]="picker.state" aria-label="Filter by state">
+        <option value="">All states</option>
+        <option *ngFor="let s of stateOptions" [value]="s.key">{{ s.label }} ({{ s.count }})</option>
+      </select>
+      <select class="hud-input zl-pick-sel" [(ngModel)]="picker.added" aria-label="Filter by when the lead was added">
+        <option value="">Added: any time</option>
+        <option value="today">Added today</option>
+        <option value="7">Added in the last 7 days</option>
+        <option value="30">Added in the last 30 days</option>
+      </select>
+      <button type="button" class="link-btn" *ngIf="picker.state || picker.added || picker.country || picker.query" (click)="picker.query = ''; picker.country = ''; picker.state = ''; picker.added = ''">Clear filters</button>
+    </div>
     <div class="zl-pick-list">
       <label class="zl-pick-row zl-pick-all" *ngIf="pickerShownAddable.length">
         <input type="checkbox" [checked]="pickerAllShownChecked" (change)="toggleAllShown()" />
@@ -126,7 +140,7 @@
           <small class="zl-pick-addr" *ngIf="l.address" [title]="l.address">📍 {{ l.address }}</small>
           <small class="zl-pick-why" *ngIf="l.eligible === false">{{ (l.reasons || []).join('; ') || 'Cannot be added' }}</small></span>
       </label>
-      <p class="muted small zl-pick-none" *ngIf="!pickerLeads.length">No leads match{{ picker.query.trim() ? ' “' + picker.query + '”' : '' }}{{ picker.country ? (picker.country === 'none' ? ' without a country' : ' in ' + picker.country) : '' }}.</p>
+      <p class="muted small zl-pick-none" *ngIf="!pickerLeads.length">No leads match{{ picker.query.trim() ? ' “' + picker.query + '”' : '' }}{{ picker.country ? (picker.country === 'none' ? ' without a country' : ' in ' + picker.country) : '' }}{{ picker.state ? (picker.state === 'none' ? ' with no state in the address' : ' in ' + picker.state) : '' }}{{ picker.added ? ' added ' + (picker.added === 'today' ? 'today' : 'in the last ' + picker.added + ' days') : '' }}.</p>
     </div>
     <div class="zl-form-foot">
       <span class="muted small">{{ picker.sel.size }} selected</span>

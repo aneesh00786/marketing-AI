@@ -83,6 +83,31 @@ describe('ContactListsComponent (lists kept in Marketech.ai)', () => {
     expect(el().querySelector('.zl-pick-addr')!.textContent).toContain('12 MG Road, Ernakulam 682016');
   });
 
+  it('Choose leads: filter by state (read from the address) and by when the lead was added', () => {
+    start();
+    button('New list').click(); fixture.detectChanges();
+    const now = new Date();
+    const daysAgo = (d: number) => new Date(now.getTime() - d * 86400000).toISOString();
+    http.expectOne(r => r.url.endsWith('/lead-options')).flush({
+      leads: [
+        { id: 1, name: 'Sarv Wires', email: 'a@sw.io', country: 'India', address: 'Budhwar Peth, Pune, Maharashtra 411002', createdAt: daysAgo(0.01), eligible: true },
+        { id: 2, name: 'Prince Pipes', email: 'b@pp.io', country: 'India', address: 'Bhawani Peth, Pune, Maharashtra 411042', createdAt: daysAgo(20), eligible: true },
+        { id: 3, name: 'Kochi Traders', email: 'c@kt.io', country: 'India', address: 'MG Road, Kochi, Kerala 682016', createdAt: daysAgo(0.01), eligible: true },
+        { id: 4, name: 'No address', email: 'd@na.io', country: 'India', address: null, createdAt: daysAgo(90), eligible: true }],
+      countries: [{ country: 'India', count: 4 }] });
+    fixture.detectChanges();
+    comp.openPicker(); fixture.detectChanges();
+    expect(comp.stateOptions.map(s => `${s.label} (${s.count})`)).toEqual(['Maharashtra (2)', 'Kerala (1)', 'No state in address (1)']);
+    comp.picker!.state = 'Maharashtra';
+    expect(comp.pickerLeads.map(l => l.id)).toEqual([1, 2]);
+    comp.picker!.added = 'today';
+    expect(comp.pickerLeads.map(l => l.id)).toEqual([1]);
+    comp.picker!.state = ''; comp.picker!.added = '30';
+    expect(comp.pickerLeads.map(l => l.id)).toEqual([1, 2, 3]);
+    comp.picker!.added = ''; comp.picker!.state = 'none';
+    expect(comp.pickerLeads.map(l => l.id)).toEqual([4]);
+  });
+
   it('View contacts: status tabs, search, details and lead status; remove one', () => {
     start();
     button('View contacts').click(); fixture.detectChanges();

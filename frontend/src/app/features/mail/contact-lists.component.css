@@ -3,3 +3,7 @@
 .cl-view-search { flex: 1 1 240px; max-width: none; }
 .zl-status.cl-bad { color: var(--danger-text, #b91c1c); border-color: currentColor; }
 @media (max-width: 700px) { .cl-row { grid-template-columns: minmax(0, 1fr) auto; } .cl-row > :nth-child(3) { display: none; } }
+
+/* Choose leads: country, state (from the address) and when added */
+.zl-pick-filters { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+.zl-pick-sel { width: auto; min-width: 0; max-width: 260px; font-size: 0.85rem; padding: 6px 10px; }

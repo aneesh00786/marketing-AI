@@ -6,11 +6,12 @@ import { HttpClient } from '@angular/common/http';
 import { apiRoot } from '../../core/api-base';
 import { IconComponent } from '../../shared/icon.component';
 import { CountryFilterComponent, LeadCountry } from '../../shared/leads/country-filter.component';
+import { stateOfAddress } from '../../shared/leads/state-of-address';
 import { parseLeadSheet, LeadSheetRow } from '../leads/lead-sheet';
 
 export interface MList { id: number; name: string; source: string; total: number; reachable: number; noConsent?: number; updatedAt?: string; }
 interface ManualContact { name: string; company: string; email: string; phone: string; }
-interface LeadOpt { id: number; name: string; email: string; company?: string | null; country?: string | null; address?: string | null; eligible?: boolean; reasons?: string[]; }
+interface LeadOpt { id: number; name: string; email: string; company?: string | null; country?: string | null; address?: string | null; createdAt?: string | null; eligible?: boolean; reasons?: string[]; }
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const emptyContact = (): ManualContact => ({ name: '', company: '', email: '', phone: '' });
 type Status = 'all' | 'subscribed' | 'unsubscribed' | 'bounced';
@@ -76,15 +77,39 @@ export class ContactListsComponent implements OnInit, OnDestroy {
 
   get addableLeads(): LeadOpt[] { return this.leadOptions.filter(l => l.eligible !== false); }
 
-  picker: { query: string; country: string; sel: Set<number> } | null = null;
-  openPicker(): void { this.picker = { query: '', country: '', sel: new Set(this.form?.picked.keys() || []) }; }
-  /** Filtered by the search and the country ('none' = leads without a country). */
-  get pickerFiltered(): boolean { return !!(this.picker?.query.trim() || this.picker?.country); }
+  /** state: from the lead's address ('none' = no state found); added: 'today' | '7' | '30' days. */
+  picker: { query: string; country: string; state: string; added: string; sel: Set<number> } | null = null;
+  openPicker(): void { this.picker = { query: '', country: '', state: '', added: '', sel: new Set(this.form?.picked.keys() || []) }; }
+  /** Filtered by the search, country, state or when the lead was added. */
+  get pickerFiltered(): boolean { return !!(this.picker?.query.trim() || this.picker?.country || this.picker?.state || this.picker?.added); }
+  stateOf(l: LeadOpt): string | null { return stateOfAddress(l.address); }
+  private inCountry(l: LeadOpt): boolean { const c = this.picker?.country || ''; return !c || (c === 'none' ? !l.country : l.country === c); }
+  private addedSince(): number | null {
+    const a = this.picker?.added || '';
+    if (!a) return null;
+    const now = new Date();
+    if (a === 'today') return new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    return now.getTime() - Number(a) * 86400000;
+  }
+  /** States found in the addresses of the leads in the chosen country, with how many leads each. */
+  get stateOptions(): { key: string; label: string; count: number }[] {
+    const counts = new Map<string, number>();
+    let none = 0;
+    for (const l of this.leadOptions) {
+      if (!this.inCountry(l)) continue;
+      const s = this.stateOf(l);
+      if (s) counts.set(s, (counts.get(s) || 0) + 1); else none++;
+    }
+    const out = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([k, n]) => ({ key: k, label: k, count: n }));
+    return out.length && none ? [...out, { key: 'none', label: 'No state in address', count: none }] : out;
+  }
   get pickerLeads(): LeadOpt[] {
     const q = (this.picker?.query || '').trim().toLowerCase();
-    const country = this.picker?.country || '';
-    const inCountry = (l: LeadOpt) => !country || (country === 'none' ? !l.country : l.country === country);
-    const hit = (l: LeadOpt) => inCountry(l) && (!q || [l.name, l.email, l.company, l.address].some(v => String(v || '').toLowerCase().includes(q)));
+    const state = this.picker?.state || '';
+    const since = this.addedSince();
+    const inState = (l: LeadOpt) => !state || (state === 'none' ? !this.stateOf(l) : this.stateOf(l) === state);
+    const inTime = (l: LeadOpt) => since === null || (!!l.createdAt && new Date(String(l.createdAt).replace(' ', 'T') + (/[zZ]|[+-]\d\d:?\d\d$/.test(String(l.createdAt)) ? '' : 'Z')).getTime() >= since);
+    const hit = (l: LeadOpt) => this.inCountry(l) && inState(l) && inTime(l) && (!q || [l.name, l.email, l.company, l.address].some(v => String(v || '').toLowerCase().includes(q)));
     return [...this.addableLeads.filter(hit), ...this.leadOptions.filter(l => l.eligible === false).filter(hit)];
   }
   get pickerShownAddable(): LeadOpt[] { return this.pickerLeads.filter(l => l.eligible !== false); }

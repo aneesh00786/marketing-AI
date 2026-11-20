@@ -88,6 +88,8 @@ async function withEligibility(workspaceId, leads, { requireConsent = false } = 
       company: l.company_name || null,
       country: l.country || null,
       address: l.address || null,
+      // When the lead was added (the contact-list picker filters on it: Today, last 7 / 30 days).
+      createdAt: l.created_at || null,
       status: l.status,
       productId: l.product_id || null,
       productInterest: l.product_interest || null,
@@ -102,7 +104,7 @@ async function withEligibility(workspaceId, leads, { requireConsent = false } = 
   });
 }
 
-const LEAD_COLUMNS = 'id, name, email, company_name, country, address, status, product_id, product_interest, marketing_consent, marketing_consent_source, marketing_consent_method, marketing_consent_obtained_at, marketing_consent_evidence';
+const LEAD_COLUMNS = 'id, name, email, company_name, country, address, created_at, status, product_id, product_interest, marketing_consent, marketing_consent_source, marketing_consent_method, marketing_consent_obtained_at, marketing_consent_evidence';
 
 /**
  * Leads of the workspace for the recipient picker: searchable and filterable, each with its
