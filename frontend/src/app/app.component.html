@@ -154,6 +154,7 @@
               <app-icon [name]="theme.isDark ? 'sun' : 'moon'" [size]="16"></app-icon>
               <span class="grow">{{ theme.isDark ? 'Light theme' : 'Dark theme' }}</span>
             </button>
+            <button class="dropdown-item" (click)="openSenders()"><app-icon name="mail" [size]="16"></app-icon><span class="grow">My sender email</span></button>
             <button class="dropdown-item" (click)="openMenu = null; openChangePassword()"><app-icon name="settings" [size]="16"></app-icon><span class="grow">Change password</span></button>
             <button class="dropdown-item" (click)="logout(true)" title="Ends every sign-in of your account, on every device"><app-icon name="logout" [size]="16"></app-icon><span class="grow">Sign out everywhere</span></button>
             <button class="dropdown-item danger" (click)="logout()"><app-icon name="logout" [size]="16"></app-icon><span class="grow">Sign out</span></button>
@@ -1058,6 +1059,22 @@
         <button class="close-btn" (click)="closeCompose()" aria-label="Close">✕</button>
       </div>
       <div class="modal-body">
+        <!-- From: the person's own verified address ("My sender email") -->
+        <div class="compose-from" *ngIf="sendersLoaded">
+          <ng-container *ngIf="mySenders.length; else noSender">
+            <label for="compose-from">From</label>
+            <select id="compose-from" class="hud-input" [(ngModel)]="composeFrom">
+              <option *ngFor="let s of mySenders" [ngValue]="s.email">{{ s.name ? s.name + ' <' + s.email + '>' : s.email }}</option>
+            </select>
+            <button type="button" class="link-btn" (click)="openSenders()">Manage</button>
+          </ng-container>
+          <ng-template #noSender>
+            <div class="compose-from-warn" [class.blocking]="sendersRequired" role="status">
+              <span>{{ sendersRequired ? 'Add and verify your own email address to send email. Your emails are sent from it.' : 'Sent from the workspace address. Add your own address to send from it instead.' }}</span>
+              <button type="button" class="btn btn-secondary btn-sm" (click)="openSenders()">My sender email</button>
+            </div>
+          </ng-template>
+        </div>
         <div class="form-row">
           <div class="form-group flex-1">
             <label for="compose-to">To (email) <span class="req" aria-hidden="true">*</span></label>
@@ -1376,4 +1393,5 @@
 <app-lead-access *ngIf="accessLeadId" [leadId]="accessLeadId" (close)="accessLeadId = null" (changed)="showToast($event); loadLeads()"></app-lead-access>
 
 <!-- Lead follow-ups: calls (📞), emails (Compose), scheduled follow-ups and notes -->
+<app-my-senders *ngIf="showSenders" (close)="showSenders = false; loadMySenders()"></app-my-senders>
 <app-lead-followups *ngIf="followupLead" [lead]="followupLead" [members]="leadMembers" [canEmail]="canEmailLeads" (close)="followupLead = null; loadNotifications()" (toast)="showToast($event)"></app-lead-followups>

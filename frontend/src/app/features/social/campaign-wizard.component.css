@@ -237,3 +237,7 @@
 .cw-ver-media { display: flex; gap: 6px; }
 .cw-ver-media img { height: 90px; border-radius: 8px; }
 .cw-ver-prompt { margin: 0; font-size: .8rem; color: var(--text-muted); line-height: 1.4; }
+
+/* Review: where the planned posts come from, and the ones still needing content */
+.cw-plan-note { margin: 0 0 10px; }
+.cw-needs { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin: 4px 0; padding: 6px 8px; border-radius: 8px; border: 1px dashed var(--border); font-size: 0.78rem; color: var(--text-muted); }

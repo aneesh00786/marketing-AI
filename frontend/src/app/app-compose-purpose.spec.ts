@@ -137,6 +137,20 @@ describe('App shell: Compose email purpose', () => {
     expect(api.sendLeadEmail).toHaveBeenCalledTimes(1);
   });
 
+  it('staff without a verified sender address cannot send; with one, Compose sends from it', () => {
+    app.sendersLoaded = true; app.sendersRequired = true; app.mySenders = [];
+    app.composeEmail = { recipient_email: 'kim@client.io', recipient_name: 'Kim', subject: 'Hello', body: 'Hi', html_body: '', is_html: false };
+    app.composePurpose = 'marketing';
+    app.trySendCompose();
+    expect(app.composeProblems).toContain('your own verified sender address (My sender email)');
+    expect(api.sendEmail).not.toHaveBeenCalled();
+    app.mySenders = [{ email: 'anita@thrive-co.io', name: 'Anita' }];
+    app.composeFrom = 'anita@thrive-co.io';
+    app.trySendCompose();
+    expect(api.sendEmail).toHaveBeenCalledTimes(1);
+    expect(api.sendEmail.calls.mostRecent().args[0].from_email).toBe('anita@thrive-co.io');
+  });
+
   it('closing Compose with content asks first and keeps it when the user cancels', () => {
     (window.confirm as jasmine.Spy).and.returnValue(false);
     app.showComposeModal = true;

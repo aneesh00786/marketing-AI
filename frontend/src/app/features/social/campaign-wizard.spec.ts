@@ -109,6 +109,39 @@ describe('CampaignWizardComponent (product campaigns)', () => {
     http.expectNone(r => r.url.includes('/ai/'));
   });
 
+  it('review says which planned posts still need content, and Create content opens that post in Generate Content', () => {
+    init();
+    comp.campaignId = 9; comp.form = { ...comp.blankForm(), name: 'X', productId: 5, platforms: ['facebook'] };
+    comp.ov = OVERVIEW({ strategy: { status: 'accepted', ideas: [] }, items: [
+      { id: 1, format: 'poster', title: 'Meet', planDay: 1, status: 'draft', media: [{ id: 3, type: 'image', thumbnailUrl: '/t.png' }] },
+      { id: 2, format: 'video', title: 'Billing', planDay: 2, status: 'draft', media: [] },
+      { id: 3, format: 'post', title: 'Text only', planDay: 7, status: 'draft', media: [] }] });
+    comp.step = 'review';
+    fixture.detectChanges();
+    expect(el().querySelector('.cw-plan-note')!.textContent).toContain('2 of 3');
+    expect(el().querySelector('.cw-plan-note')!.textContent).toContain('planned by Mark');
+    expect(el().querySelectorAll('.cw-needs').length).toBe(1);
+    comp.createContentFor(comp.ov.items[1]);
+    expect(comp.step).toBe('content');
+    expect(comp.tab).toBe('video');
+    expect(comp.workingItem.id).toBe(2);
+    http.match(() => true).forEach(r => r.flush({}));
+  });
+
+  it('generate content: a tab opens on the next planned post that needs content, so what is made is attached to it', () => {
+    init();
+    comp.campaignId = 9;
+    comp.ov = OVERVIEW({ strategy: { status: 'accepted', ideas: [] }, items: [
+      { id: 1, format: 'poster', title: 'Done', planDay: 1, media: [{ id: 3 }] },
+      { id: 2, format: 'poster', title: 'Needs one', planDay: 5, media: [] }] });
+    comp.step = 'content';
+    comp.setTab('poster');
+    expect(comp.workingItem?.id).toBe(2);
+    comp.work(null, 'poster', true); // "Create something new"
+    expect(comp.workingItem).toBeNull();
+    expect(comp.freeCreate).toBeTrue();
+  });
+
   it('review: cards show preview, type, platform and statuses; Approve submits then approves; analytics show unavailable metrics and no leads', () => {
     init();
     comp.campaignId = 9; comp.form = { ...comp.blankForm(), name: 'ShelfSync launch', productId: 5, platforms: ['instagram'] };

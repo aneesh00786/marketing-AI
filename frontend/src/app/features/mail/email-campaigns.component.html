@@ -195,7 +195,7 @@
                 <optgroup *ngFor="let g of senderGroups" [label]="g.domain">
                   <option *ngFor="let s of g.items" [value]="s.email" [selected]="s.email === (form.fromEmail || '').toLowerCase()">{{ s.email }}{{ s.sentBefore ? ' ✓' : '' }}</option>
                 </optgroup>
-                <option *ngIf="editable" value="__add">+ Add sender address…</option>
+                <option *ngIf="editable" value="__add">{{ sendersRequired ? '+ Add my sender email…' : '+ Add sender address…' }}</option>
               </select>
               <div class="ec-sender-add" *ngIf="senderAdding" role="group" aria-label="Add sender address">
                 <input id="ec-sender-select" class="hud-input" type="email" [(ngModel)]="newSender" maxlength="255" placeholder="news@yourdomain.com" aria-label="New sender address"

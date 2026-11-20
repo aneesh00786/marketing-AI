@@ -202,6 +202,19 @@ const POLL_MS = 4000;
           <button type="button" class="btn btn-secondary btn-sm" (click)="editing = a">✏️ Edit</button>
           <a class="btn btn-secondary btn-sm" [href]="a.url" download>⬇ Download</a>
           <button type="button" class="btn btn-secondary btn-sm" *ngIf="current.kind === 'image'" (click)="regenerateOne()">↻ New design</button>
+          <!-- Made for a post: which design is on it; another can be used instead -->
+          <ng-container *ngIf="current.kind === 'image' && current.contentItemId && postOf(current) as post">
+            <span class="st-on-post" *ngIf="onPost(post, a.id)">✓ On this post</span>
+            <button type="button" class="btn btn-primary btn-sm" *ngIf="!onPost(post, a.id)" [disabled]="busy" (click)="useDesign(post, a)">Use this design</button>
+          </ng-container>
+          <!-- Made without a post: put it on one of the campaign's posts -->
+          <span class="st-attach" *ngIf="current.kind === 'image' && !current.contentItemId && attachTargets.length">
+            <select [name]="'attach-' + a.id" [(ngModel)]="attachTo[a.id]" [attr.aria-label]="'Add design ' + a.id + ' to a post'">
+              <option [ngValue]="undefined" disabled>Add to post…</option>
+              <option *ngFor="let it of attachTargets" [ngValue]="it.id">Day {{ it.planDay || '—' }} · {{ it.title }}{{ it.media?.length ? ' (has media)' : '' }}</option>
+            </select>
+            <button type="button" class="btn btn-primary btn-sm" [disabled]="!attachTo[a.id] || busy" (click)="attachToPost(a)">Add</button>
+          </span>
         </figcaption>
       </figure>
     </div>
@@ -301,6 +314,9 @@ export class StudioGeneratorComponent implements OnInit, OnDestroy {
   /** In the campaign wizard: the campaign (its product is used on the server) and the planned post being made. */
   @Input() campaignId: number | null = null;
   @Input() contentItemId: number | null = null;
+  /** The campaign's posts, to put a design made without a post on one of them ("Add to post"). */
+  @Input() attachTargets: any[] = [];
+  attachTo: Record<number, number | undefined> = {};
   /** Hides the page header and mode cards when the wizard shows its own tabs. */
   @Input() embedded = false;
   /** Fills the form from a planned idea (title, media prompt, platform); nothing starts until Generate. */
@@ -604,6 +620,34 @@ export class StudioGeneratorComponent implements OnInit, OnDestroy {
   onEdited(asset: any): void { this.editing = null; this.toast.emit('Edited copy saved to the Content Library (the original is kept).'); this.images = [asset, ...this.images]; }
 
   loadUsage(): void { this.studio.usage().subscribe({ next: r => this.usage = r.usage, error: () => {} }); }
+  /** The campaign post a generation was made for (from the wizard's list). */
+  postOf(g: Generation): any { return this.attachTargets.find(i => i.id === g.contentItemId) || null; }
+  onPost(post: any, assetId: number): boolean {
+    const ids: number[] = post.mediaAssetIds || (post.media || []).map((m: any) => m.id);
+    return ids.map(Number).includes(Number(assetId));
+  }
+  /** Swaps the post's design for another one of the same generation. */
+  useDesign(post: any, a: any): void {
+    this.busy = true;
+    this.social.updateContent(post.id, { mediaAssetIds: [a.id], changeNote: 'Another design chosen in Generate Content' }).subscribe({
+      next: () => { this.busy = false; this.toast.emit(`This design is now on Day ${post.planDay || '—'} · ${post.title}.`); },
+      error: err => { this.busy = false; this.error = this.err(err); }
+    });
+  }
+
+  /** Puts a generated design on a campaign post (its media is replaced; an approved post goes back for approval). */
+  attachToPost(a: any): void {
+    const itemId = this.attachTo[a.id];
+    const item = this.attachTargets.find(i => i.id === itemId);
+    if (!item) return;
+    if (item.media?.length && !confirm(`"${item.title}" already has media. Replace it with this design?`)) return;
+    this.busy = true;
+    this.social.updateContent(item.id, { mediaAssetIds: [a.id], changeNote: 'Design added from the AI Content Generator' }).subscribe({
+      next: () => { this.busy = false; this.attachTo[a.id] = undefined; this.toast.emit(`Design added to Day ${item.planDay || '—'} · ${item.title}.`); },
+      error: err => { this.busy = false; this.error = this.err(err); }
+    });
+  }
+
   loadRecent(): void { this.studio.generations({}).subscribe({ next: r => this.recent = (r.generations || []).slice(0, 10), error: () => {} }); }
   private err(e: any): string { return e?.error?.error || e?.message || 'Something went wrong.'; }
 }

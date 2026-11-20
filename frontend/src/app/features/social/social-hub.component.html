@@ -2,7 +2,7 @@
   <div class="panel-header">
     <div>
       <h2>Social Media Content Studio</h2>
-      <p class="subtitle">Create posters, videos, posts and carousels with AI, plan whole campaigns, approve, schedule and track real results.</p>
+      <p class="subtitle">Plan a campaign for a product; Mark creates its posters, videos, posts and carousels. Approve, schedule and track real results.</p>
     </div>
     <div class="header-actions">
       <span class="chip">TZ: {{ settings?.timezone || 'UTC' }}</span>
@@ -21,13 +21,6 @@
   </div>
   <div *ngIf="error" class="banner bad">{{ error }} <button class="link-btn" (click)="error = null">Dismiss</button></div>
 
-  <!-- ===================== AI CONTENT GENERATOR ===================== -->
-  <div *ngIf="section === 'generator'" class="section">
-    <!-- AI content always starts by selecting a product (then the campaign, strategy and content steps). -->
-    <app-campaign-wizard [campaigns]="campaigns || []" [startNew]="true" [preferredTab]="generatorMode" (toast)="notify($event)" (openContent)="openContentById($event)"
-      (openCalendar)="openCampaignCalendar($event)" (changed)="loadCampaigns()"></app-campaign-wizard>
-  </div>
-
   <!-- ===================== BRAND KIT ===================== -->
   <div *ngIf="section === 'brand'" class="section">
     <app-brand-kit (toast)="notify($event)"></app-brand-kit>
@@ -35,12 +28,16 @@
 
   <!-- ===================== OVERVIEW ===================== -->
   <div *ngIf="section === 'overview'" class="section">
-    <div class="studio-start" aria-label="Create with AI">
-      <button type="button" class="studio-start-card" (click)="startGenerator('poster')"><span aria-hidden="true">🖼️</span><b>Create a poster</b><small>Offers, launches, festivals</small></button>
-      <button type="button" class="studio-start-card" (click)="startGenerator('video')"><span aria-hidden="true">🎬</span><b>Create a video</b><small>Reels, Shorts, promos</small></button>
-      <button type="button" class="studio-start-card" (click)="startGenerator('post')"><span aria-hidden="true">✍️</span><b>Write posts</b><small>Captions for every platform</small></button>
-      <button type="button" class="studio-start-card" (click)="startGenerator('carousel')"><span aria-hidden="true">🎠</span><b>Build a carousel</b><small>Multi-slide posts</small></button>
-      <button type="button" class="studio-start-card" (click)="go('campaigns')"><span aria-hidden="true">📦</span><b>Create a campaign</b><small>Pick a product, Mark plans it</small></button>
+    <!-- One way to create: a campaign for a product. Its posters, videos, posts and carousels are made inside it. -->
+    <div class="studio-begin">
+      <div class="studio-begin-text">
+        <b>Create AI content with a campaign</b>
+        <small>Pick a product → set the campaign details → Mark plans the strategy → generate posters, videos, posts and carousels → review, approve and schedule.</small>
+      </div>
+      <div class="studio-begin-actions">
+        <button type="button" class="btn btn-primary" (click)="newCampaign()">＋ Create a campaign</button>
+        <button type="button" class="btn btn-secondary" (click)="go('campaigns')">Open campaigns</button>
+      </div>
     </div>
     <div *ngIf="loading && !overview" class="muted">Loading…</div>
     <ng-container *ngIf="overview">
@@ -273,7 +270,7 @@
   <!-- ===================== CAMPAIGNS ===================== -->
   <div *ngIf="section === 'campaigns'" class="section">
     <!-- Every campaign starts by selecting a product (Social Media Campaigns wizard). -->
-    <app-campaign-wizard [campaigns]="campaigns || []" [initialCampaignId]="initialCampaignId" (toast)="notify($event)" (openContent)="openContentById($event)"
+    <app-campaign-wizard [campaigns]="campaigns || []" [initialCampaignId]="initialCampaignId" [startNew]="campaignsStartNew" (toast)="notify($event)" (openContent)="openContentById($event)"
       (openCalendar)="openCampaignCalendar($event)" (changed)="loadCampaigns()"></app-campaign-wizard>
   </div>
 

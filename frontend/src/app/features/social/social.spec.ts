@@ -204,6 +204,19 @@ describe('SocialHubComponent', () => {
   });
   afterEach(() => http.verify());
 
+  it('AI content is created inside a campaign: no separate generator tab; old generator links open a new campaign', () => {
+    expect(comp.sections.map(x => x.key)).not.toContain('generator' as any);
+    comp.go('generator' as any);
+    expect(comp.section).toBe('campaigns');
+    expect(comp.campaignsStartNew).toBeTrue();
+    http.match(r => r.url === `${BASE}/campaigns`).forEach(r => r.flush({ campaigns: [] }));
+    http.match(r => r.url === `${BASE}/products`).forEach(r => r.flush({ products: [] }));
+    comp.go('campaigns');
+    expect(comp.campaignsStartNew).withContext('the Campaigns tab itself opens the list').toBeFalse();
+    http.match(r => r.url === `${BASE}/campaigns`).forEach(r => r.flush({ campaigns: [] }));
+    http.match(r => r.url === `${BASE}/products`).forEach(r => r.flush({ products: [] }));
+  });
+
   it('opening a post by id fills the edit form from the server (no blank save)', () => {
     comp.openContentById(42);
     http.expectOne(r => r.url === `${BASE}/content`).flush({ items: [] });

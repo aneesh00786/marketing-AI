@@ -345,11 +345,12 @@
             <span class="cw-plan-text"><b>Day {{ it.planDay || '—' }} · {{ it.title }}</b><small>{{ platformIcon(it.platformKey) }} {{ it.platformKey }} · {{ it.media?.length ? '✓ media ready' : 'needs content' }}</small></span>
           </button>
           <p class="st-muted" *ngIf="!itemsFor(tab).length">No planned {{ tab }} items. Create one freely on the right.</p>
-          <button type="button" class="st-link" (click)="work(null)">＋ Create something new</button>
+          <button type="button" class="st-link" (click)="work(null, tab, true)">＋ Create something new</button>
         </aside>
         <div class="cw-gen">
+          <p class="st-note warn" *ngIf="!workingItem">Not attached to a post: choose a planned post on the left first, or use “Add to post” on the result.</p>
           <p class="st-note" *ngIf="workingItem">Creating for <b>Day {{ workingItem.planDay }} · {{ workingItem.title }}</b> — the result is attached to this post (as a new version). Uses {{ product?.name }}'s details{{ product?.images?.length ? ' and images' : '' }}.</p>
-          <app-studio-generator [embedded]="true" [campaignId]="campaignId" [contentItemId]="workingItem?.id || null" [startMode]="tab === 'story' ? 'poster' : $any(tab)" [prefill]="prefill"
+          <app-studio-generator [embedded]="true" [campaignId]="campaignId" [contentItemId]="workingItem?.id || null" [attachTargets]="ov?.items || []" [startMode]="tab === 'story' ? 'poster' : $any(tab)" [prefill]="prefill"
             (toast)="toast.emit($event); loadOverview()" (openContent)="openContent.emit($event)"></app-studio-generator>
         </div>
       </div>
@@ -366,6 +367,11 @@
         <button type="button" class="btn btn-secondary btn-sm cw-push" (click)="approveAllReady()">✓ Approve all with media</button>
         <button type="button" class="btn btn-primary btn-sm" [disabled]="!selectedIds.length" (click)="approveSelected()">✓ Approve selected ({{ selectedIds.length }})</button>
       </div>
+      <!-- Where these posts come from: Mark's plan (step 4) makes them; content is made per post (step 5). -->
+      <p class="st-note cw-plan-note" *ngIf="ov?.items?.length">
+        <b>{{ withContent }} of {{ ov.items.length }}</b> posts have their content.
+        <ng-container *ngIf="plannedEmpty">The other {{ plannedEmpty }} were planned by Mark in step 4 (AI Strategy) and still need content: use <b>Create content</b> on them, or delete the ones you don't want.</ng-container>
+      </p>
       <div class="cw-filters" role="tablist" aria-label="Filter content">
         <button type="button" *ngFor="let f of reviewFilters" [class.on]="reviewFilter === f.key" (click)="reviewFilter = f.key" [attr.aria-pressed]="reviewFilter === f.key">{{ f.label }} <em>{{ countFor(f.key) }}</em></button>
       </div>
@@ -381,6 +387,8 @@
             <div class="cw-card-tags"><span class="st-format">{{ formatIcon(it.format) }} {{ it.format || 'post' }}</span><span class="st-format">{{ platformIcon(it.platformKey) }} {{ it.platformKey }}</span><span class="st-format" *ngIf="it.planDay">Day {{ it.planDay }}</span></div>
             <b>{{ it.title || 'Untitled' }}</b>
             <small class="st-muted">{{ product?.name }} · {{ form.name }}</small>
+            <span class="cw-needs" *ngIf="needsContent(it)">🧭 Planned by Mark · needs content
+              <button type="button" class="btn btn-secondary btn-sm" (click)="createContentFor(it)">✨ Create content</button></span>
             <p class="cw-card-caption">{{ it.caption | slice:0:140 }}{{ it.caption?.length > 140 ? '…' : '' }}</p>
             <small class="cw-card-tagsline" *ngIf="it.hashtags?.length">{{ tagsOf(it) }}</small>
             <small class="st-muted" *ngIf="it.suggestedPublishAt || it.scheduledAt">🗓 {{ (it.scheduledAt || it.suggestedPublishAt) | date:'EEE, MMM d, h:mm a' }}{{ it.scheduledAt ? '' : ' (planned)' }}</small>

@@ -3,6 +3,7 @@ import { DeliverabilityComponent } from './deliverability.component';
 import { CommonModule } from '@angular/common';
 import { IconComponent } from '../../shared/icon.component';
 import { ApiService } from '../../services/api.service';
+import { SendersUiService } from '../../core/senders-ui.service';
 import { MailDraftsComponent } from './mail-drafts.component';
 import { ProductEmailsComponent } from './product-emails.component';
 import { EmailCampaignsComponent } from './email-campaigns.component';
@@ -81,7 +82,7 @@ export class MailCenterComponent implements OnInit {
   /** Unread received emails (null until known). */
   inboxUnread: number | null = null;
 
-  constructor(private api: ApiService) {}
+  constructor(private api: ApiService, public senders: SendersUiService) {}
 
   ngOnInit(): void {
     this.api.getMe().subscribe({

@@ -10,6 +10,8 @@
       </ng-container>
     </nav>
     <div class="mc-create">
+      <button type="button" class="btn btn-secondary" (click)="senders.open()" title="The address your campaigns and emails are sent from">
+        <app-icon name="mail" [size]="16"></app-icon>My sender email</button>
       <button type="button" class="btn btn-primary" (click)="compose.emit()" title="Write one email and send it after you confirm">
         <app-icon name="send" [size]="16"></app-icon>Compose Email</button>
       <button #createBtn type="button" class="btn btn-secondary" (click)="toggleCreateMenu($event)" [disabled]="!canCompose"

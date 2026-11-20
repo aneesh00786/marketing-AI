@@ -16,6 +16,8 @@ import { SpeechService } from './services/speech.service';
 import { AuthStateService, SessionChangeKind } from './core/auth-state.service';
 import { ThemeService } from './core/theme.service';
 import { ComposeRequestService } from './core/compose-request.service';
+import { SendersUiService } from './core/senders-ui.service';
+import { MySendersComponent } from './features/mail/my-senders.component';
 import { LoginComponent } from './core/login.component';
 import { SocialHubComponent } from './features/social/social-hub.component';
 import { CommandCenterComponent } from './features/command/command-center.component';
@@ -39,7 +41,7 @@ import { findTokens, fillTokens, defaultTokenValues } from './features/mail/temp
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [CommonModule, FormsModule, LoginComponent, LeadImportMapperComponent, LeadAccessComponent, LeadFollowupsComponent, TeamPerformanceComponent, CrmPhoneInputComponent, SocialHubComponent, CommandCenterComponent, IconComponent, DashboardComponent, LeadDiscoveryComponent, CrmComponent, PlatformAdminComponent, CallButtonComponent, SoftphoneComponent, MembersComponent, TemplatePickerComponent, MailCenterComponent, EmailPreviewComponent, ImportSyncOptionsComponent, LeadsToListComponent, CountryFilterComponent],
+  imports: [CommonModule, FormsModule, LoginComponent, LeadImportMapperComponent, LeadAccessComponent, LeadFollowupsComponent, TeamPerformanceComponent, CrmPhoneInputComponent, SocialHubComponent, CommandCenterComponent, IconComponent, DashboardComponent, LeadDiscoveryComponent, CrmComponent, PlatformAdminComponent, CallButtonComponent, SoftphoneComponent, MembersComponent, TemplatePickerComponent, MailCenterComponent, EmailPreviewComponent, ImportSyncOptionsComponent, LeadsToListComponent, CountryFilterComponent, MySendersComponent],
   templateUrl: './app.component.html',
   styleUrls: ['./app.component.css']
 })
@@ -777,8 +779,33 @@ export class AppComponent implements OnInit, OnDestroy {
     public speechService: SpeechService,
     public auth: AuthStateService,
     public theme: ThemeService,
-    private composeRequests: ComposeRequestService = new ComposeRequestService()
+    private composeRequests: ComposeRequestService = new ComposeRequestService(),
+    private sendersUi: SendersUiService = new SendersUiService()
   ) {}
+
+  // ---------- "My sender email" ----------
+  showSenders = false;
+  /** The person's verified addresses (Compose sends from one of them). */
+  mySenders: { email: string; name: string | null }[] = [];
+  /** Staff must have one to send; Owners/Admins fall back to the workspace address. */
+  sendersRequired = false;
+  sendersLoaded = false;
+  composeFrom: string | null = null;
+  private sendersSubs: any[] = [];
+
+  loadMySenders(): void {
+    if (!this.auth.isLoggedIn || !this.apiService.getMySenders) return;
+    this.apiService.getMySenders().subscribe({
+      next: (r: any) => {
+        this.mySenders = (r.senders || []).filter((x: any) => x.status === 'verified').map((x: any) => ({ email: x.email, name: x.name || null }));
+        this.sendersRequired = !!r.required;
+        this.sendersLoaded = true;
+        if (!this.composeFrom || !this.mySenders.some(x => x.email === this.composeFrom)) this.composeFrom = this.mySenders[0]?.email || null;
+      },
+      error: () => { this.sendersLoaded = false; }
+    });
+  }
+  openSenders(): void { this.openMenu = null; this.showSenders = true; }
 
   ngOnInit(): void {
     try { this.sidebarCollapsed = localStorage.getItem('tradesage_sidebar_collapsed') === '1'; } catch { this.sidebarCollapsed = false; }
@@ -787,6 +814,8 @@ export class AppComponent implements OnInit, OnDestroy {
     this.sessionChangeSub = this.auth.sessionChanged$.subscribe(kind => this.onSessionChanged(kind));
     // Other screens (e.g. campaign results) open Compose prefilled.
     this.composeRequestSub = this.composeRequests.requests$.subscribe(r => this.openComposeFor(r));
+    this.sendersSubs = [this.sendersUi.open$.subscribe(() => this.openSenders()), this.sendersUi.changed$.subscribe(() => this.loadMySenders())];
+    this.loadMySenders();
     this.auth.checkSession();
     if (this.auth.isLoggedIn) {
       this.checkInvitations();
@@ -1885,7 +1914,7 @@ export class AppComponent implements OnInit, OnDestroy {
       this.apiService.sendLeadEmail(this.composeLeadId!, {
         recipient_email: this.composeEmail.recipient_email, recipient_name: this.composeEmail.recipient_name, subject: this.composeEmail.subject,
         ...(html ? { html_body: this.composeEmail.html_body, body_text: this.composeEmail.body } : { body: this.composeEmail.body }),
-        purpose: this.composePurpose, templateId: this.composeTemplate?.id ?? null
+        purpose: this.composePurpose, templateId: this.composeTemplate?.id ?? null, from_email: this.composeFrom
       }, true, key).subscribe(done);
       return;
     }
@@ -1897,10 +1926,11 @@ export class AppComponent implements OnInit, OnDestroy {
         html_body: this.composeEmail.html_body,
         body_text: this.composeEmail.body,
         purpose: this.composePurpose,
-        templateId: this.composeTemplate?.id ?? null
-      }, true, key).subscribe(done);
+        templateId: this.composeTemplate?.id ?? null,
+        from_email: this.composeFrom
+      } as any, true, key).subscribe(done);
     } else {
-      this.apiService.sendEmail({ ...this.composeEmail, purpose: this.composePurpose, templateId: this.composeTemplate?.id ?? null }, true, key).subscribe(done);
+      this.apiService.sendEmail({ ...this.composeEmail, purpose: this.composePurpose, templateId: this.composeTemplate?.id ?? null, from_email: this.composeFrom } as any, true, key).subscribe(done);
     }
   }
 
@@ -2001,6 +2031,7 @@ export class AppComponent implements OnInit, OnDestroy {
 
   /** Compose Email (Mail Center header): a blank email. */
   openCompose(): void {
+    this.loadMySenders();
     this.composeEmail = { recipient_email: '', recipient_name: '', subject: '', body: '', html_body: '', is_html: true };
     this.composePurpose = null;
     this.composeTemplate = null;
@@ -2020,6 +2051,7 @@ export class AppComponent implements OnInit, OnDestroy {
     if (!this.composeEmail.subject?.trim()) out.push('a subject');
     if (!this.composePurpose) out.push('the email purpose');
     if (!this.composeEmail.body?.trim() && !this.composeEmail.html_body?.trim()) out.push('a message');
+    if (this.sendersLoaded && this.sendersRequired && !this.mySenders.length) out.push('your own verified sender address (My sender email)');
     return out;
   }
 

@@ -246,3 +246,9 @@
   .st *, .ie, .ie-backdrop { animation: none !important; transition: none !important; }
   .st-progress i { width: 100%; opacity: .5; }
 }
+
+/* "Add to post" under a design made without a post (campaign generator) */
+.st-attach { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.st-attach select { max-width: 220px; min-width: 0; font: inherit; font-size: 0.8rem; padding: 4px 6px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); }
+
+.st-on-post { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 999px; font-size: 0.78rem; font-weight: 600; background: var(--success-soft, #e7f7ee); color: var(--success-text, #157a3c); }

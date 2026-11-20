@@ -40,6 +40,42 @@ describe('AI Content Studio', () => {
       http.match(r => r.url.includes('/studio/generations') && !/generations\/\d/.test(r.url)).forEach(r => r.flush({ generations: [] }));
     };
 
+    it('a design made without a post can be added to one of the campaign\'s posts', () => {
+      init();
+      comp.campaignId = 9;
+      comp.attachTargets = [{ id: 21, title: 'The Manual Workload', planDay: 1, media: [] }, { id: 22, title: 'Live Order Status', planDay: 4, media: [{ id: 1 }] }];
+      comp.current = { id: 7, kind: 'image', status: 'completed', contentItemId: null, campaignId: 9, assets: [{ id: 2, url: '/p.png', type: 'image' }] } as any;
+      fixture.detectChanges();
+      const sel = el().querySelector('.st-attach select') as HTMLSelectElement;
+      expect(sel).toBeTruthy();
+      expect(Array.from(sel.options).map(o => o.textContent!.trim())).toEqual(['Add to post…', 'Day 1 · The Manual Workload', 'Day 4 · Live Order Status (has media)']);
+      comp.attachTo[2] = 21;
+      comp.attachToPost({ id: 2 });
+      const req = http.expectOne(r => r.method === 'PATCH' && r.url.endsWith('/content/21'));
+      expect(req.request.body.mediaAssetIds).toEqual([2]);
+      req.flush({});
+      // Made for a post already: no picker.
+      comp.current = { ...comp.current!, contentItemId: 21 } as any;
+      fixture.detectChanges();
+      expect(el().querySelector('.st-attach')).toBeNull();
+    });
+
+    it('designs made for a post: the one on the post is marked, another can be used instead', () => {
+      init();
+      comp.campaignId = 9; comp.contentItemId = 49;
+      comp.attachTargets = [{ id: 49, title: 'Meet ThriveWoo', planDay: 1, media: [{ id: 3 }] }];
+      comp.current = { id: 10, kind: 'image', status: 'completed', contentItemId: 49, campaignId: 9, assets: [{ id: 3, url: '/a.png', type: 'image' }, { id: 4, url: '/b.png', type: 'image' }] } as any;
+      fixture.detectChanges();
+      const shots = Array.from(el().querySelectorAll('.st-shot')) as HTMLElement[];
+      expect(shots[0].textContent).toContain('On this post');
+      expect(shots[1].textContent).toContain('Use this design');
+      expect(el().querySelector('.st-attach')).toBeNull();
+      (Array.from(shots[1].querySelectorAll('button')).find(b => b.textContent!.includes('Use this design')) as HTMLButtonElement).click();
+      const req = http.expectOne(r => r.method === 'PATCH' && r.url.endsWith('/content/49'));
+      expect(req.request.body.mediaAssetIds).toEqual([4]);
+      req.flush({});
+    });
+
     it('shows the four options and usage; an option without a provider says how to set it up', () => {
       init(CAPS({ image: { available: false, reason: 'Add OPENAI_API_KEY or FAL_KEY on the server to generate images.' } }));
       expect(Array.from(el().querySelectorAll('.st-mode b')).map(b => b.textContent)).toEqual(['Poster', 'Video', 'Social post', 'Carousel']);

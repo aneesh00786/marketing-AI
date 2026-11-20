@@ -311,3 +311,10 @@ h3 { font-size: 0.72rem; letter-spacing: .08em; }
 .page-avatar { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; }
 .page-name { display: flex; flex-direction: column; gap: 2px; }
 .page-picker .muted { color: var(--text-muted); }
+
+/* Overview: the one way to create AI content (a campaign) */
+.studio-begin { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding: 16px 18px; margin-bottom: 16px; border-radius: 14px; border: 1px solid var(--border); background: linear-gradient(135deg, var(--accent-soft, rgba(79,70,229,.08)), var(--surface)); }
+.studio-begin-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1 1 360px; }
+.studio-begin-text b { font-size: 1rem; }
+.studio-begin-text small { color: var(--text-muted); line-height: 1.45; }
+.studio-begin-actions { display: flex; gap: 8px; flex-wrap: wrap; }

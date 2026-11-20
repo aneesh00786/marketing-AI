@@ -133,7 +133,12 @@ export class CampaignWizardComponent implements OnInit, OnDestroy {
       error: e => { this.busy = ''; this.error = this.err(e); }
     });
   }
-  private applyOverview(r: any): void { this.ov = r; this.strategy = r.strategy ? JSON.parse(JSON.stringify(r.strategy)) : null; this.strategyDirty = false; }
+  private applyOverview(r: any): void {
+    this.ov = r; this.strategy = r.strategy ? JSON.parse(JSON.stringify(r.strategy)) : null; this.strategyDirty = false;
+    // Keep working on the same planned post (fresh copy); otherwise pick the next one that needs content.
+    if (this.workingItem) this.workingItem = (r.items || []).find((i: any) => i.id === this.workingItem.id) || null;
+    if (this.step === 'content' && !this.workingItem && !this.freeCreate) this.pickNext(this.tab);
+  }
   loadOverview(): void { if (this.campaignId) this.studio.campaignOverview(this.campaignId).subscribe({ next: r => this.applyOverview(r), error: e => this.error = this.err(e) }); }
 
   // ------------------------------------------------------------ step 1: product
@@ -274,13 +279,36 @@ export class CampaignWizardComponent implements OnInit, OnDestroy {
 
   // ------------------------------------------------------------ step 4: generate content
   itemsFor(tab: Tab): any[] { const f = this.tabs.find(t => t.key === tab)!.formats; return (this.ov?.items || []).filter((i: any) => f.includes(i.format)); }
-  work(item: any | null, tab: Tab = this.tab): void {
+  /** "Create something new" was chosen: nothing is picked automatically until a planned post is chosen. */
+  freeCreate = false;
+  /** Selects the first planned post of this tab that still needs content, so what is generated is attached to it. */
+  pickNext(tab: Tab): void {
+    const items = this.itemsFor(tab);
+    const next = items.find((i: any) => !i.media?.length) || null;
+    if (next) this.work(next, tab);
+  }
+  work(item: any | null, tab: Tab = this.tab, free = false): void {
     this.tab = tab;
     this.workingItem = item;
+    this.freeCreate = free;
     const mode = tab === 'story' ? 'poster' : tab;
     this.prefill = { mode, title: item?.title || this.ov?.product?.name || '', prompt: item?.mediaPrompt || item?.caption || '', platform: item?.platformKey, purpose: tab === 'story' ? 'story' : 'product_ad' };
   }
-  setTab(t: Tab): void { this.tab = t; this.work(null, t); }
+  /** A planned post with no media yet (text posts need none). */
+  needsContent(it: any): boolean { return it.format !== 'post' && !(it.media?.length); }
+  get withContent(): number { return (this.ov?.items || []).filter((i: any) => !this.needsContent(i)).length; }
+  get plannedEmpty(): number { return (this.ov?.items || []).filter((i: any) => this.needsContent(i)).length; }
+  /** From Review: open Generate Content on this post, so what is made is attached to it. */
+  createContentFor(it: any): void {
+    const tab = (this.tabs.find(t => t.formats.includes(it.format))?.key || 'poster') as Tab;
+    this.work(it, tab);
+    this.go('content');
+  }
+  setTab(t: Tab): void {
+    this.tab = t;
+    this.work(null, t);
+    this.pickNext(t);
+  }
 
   // ------------------------------------------------------------ step 5: review
   approve(item: any): void {

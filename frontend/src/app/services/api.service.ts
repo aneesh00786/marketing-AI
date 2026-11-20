@@ -363,6 +363,9 @@ export class ApiService {
   }
 
   // 23. Visual HTML Email & Email AI Analysis
+  /** "My sender email": the person's own addresses (verified ones are used to send). */
+  getMySenders(): Observable<any> { return this.http.get(`${this.baseUrl}/mail/senders`); }
+
   /** Email a lead from Leads ("Email leads"): only to that lead's own address. */
   sendLeadEmail(leadId: number, data: any, confirm: boolean, idempotencyKey: string): Observable<any> {
     return this.http.post(`${this.baseUrl}/leads/${leadId}/send-email`, { ...data, confirm }, { headers: { 'Idempotency-Key': idempotencyKey } });

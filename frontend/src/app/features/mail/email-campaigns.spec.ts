@@ -26,6 +26,8 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     http.expectOne(r => /\/mail\/campaigns$/.test(r.url)).flush({ campaigns: [] });
     // The Amazon SES connection and this person's permissions (Mail Settings → Campaigns).
     http.expectOne(r => r.url.endsWith('/mail/ses/settings')).flush({ canCompose: false, canSend: false, canConfigure: false, ses: { configured: false } });
+    // This person's own sender addresses ("My sender email"): an Owner/Admin here, so not required.
+    http.expectOne(r => r.url.endsWith('/mail/senders')).flush({ senders: [], required: false });
     comp.delivery = { canCompose: true, canSend: false, ses: { configured: false } };
     (comp as any).setSelected({ id: 5, name: 'Autumn', status: 'draft', version: 1, html: ORIGINAL, lists: [] });
     fixture.detectChanges();
@@ -575,6 +577,21 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     comp.applyContacts();
     expect(comp.form.mailListIds.has(3)).toBeFalse();
   }));
+
+  it('staff choose only from their own verified sender addresses; adding one opens "My sender email"', () => {
+    comp.campaigns = [{ id: 1, fromEmail: 'sales@thrive-co.io', status: 'submitted' }];
+    comp.mySenders = [{ email: 'anita@thrive-co.io', name: 'Anita' }];
+    comp.sendersRequired = true;
+    expect(comp.senderGroups.flatMap(g => g.items.map(i => i.email))).toEqual(['anita@thrive-co.io']);
+    let opened = 0;
+    (comp as any).sendersUi.open$.subscribe(() => opened++);
+    comp.pickSender('__add');
+    expect(opened).toBe(1);
+    expect(comp.senderAdding).toBeFalse();
+    // Owners/Admins: addresses used before as well.
+    comp.sendersRequired = false;
+    expect(comp.senderGroups.flatMap(g => g.items.map(i => i.email)).sort()).toEqual(['anita@thrive-co.io', 'sales@thrive-co.io']);
+  });
 
   it('sent campaigns can be deleted by those who send, after a confirmation that the stop-list is kept', () => {
     const sent = { id: 7, name: 'Spring', status: 'submitted' };

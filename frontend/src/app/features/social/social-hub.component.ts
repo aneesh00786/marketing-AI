@@ -42,7 +42,6 @@ export class SocialHubComponent implements OnInit, OnDestroy {
   /** The Content Studio's nine sections, then the other social tools (after a divider). */
   readonly sections: { key: Section; label: string; icon: string; more?: boolean }[] = [
     { key: 'overview', label: 'Overview', icon: '🧭' },
-    { key: 'generator', label: 'AI Content Generator', icon: '✨' },
     { key: 'campaigns', label: 'Campaigns', icon: '🎯' },
     { key: 'calendar', label: 'Content Calendar', icon: '🗓️' },
     { key: 'media', label: 'Content Library', icon: '🗂️' },
@@ -55,9 +54,11 @@ export class SocialHubComponent implements OnInit, OnDestroy {
     { key: 'strategist', label: 'Mark AI Strategist', icon: '🧠', more: true },
     { key: 'settings', label: 'Social Settings', icon: '⚙️', more: true }
   ];
-  generatorMode: 'poster' | 'video' | 'post' | 'carousel' | null = null;
+  /** Campaigns opens on a new campaign (Overview's "Create a campaign", and old links to the AI Content Generator). */
+  campaignsStartNew = false;
 
-  startGenerator(mode: 'poster' | 'video' | 'post' | 'carousel'): void { this.generatorMode = mode; this.go('generator'); }
+  /** AI content (posters, videos, posts, carousels) is made inside a campaign: start one for a product. */
+  newCampaign(): void { this.go('campaigns', true); }
   /** The calendar filtered to one campaign (from the campaign wizard). */
   openCampaignCalendar(campaignId: number): void { this.calendarFilters = { ...this.calendarFilters, campaignId }; this.go('calendar'); }
   readonly platforms = PLATFORMS;
@@ -306,14 +307,16 @@ export class SocialHubComponent implements OnInit, OnDestroy {
     return `st-${status}`;
   }
 
-  go(section: Section): void {
+  go(section: Section, startNew = false): void {
+    // The AI Content Generator is part of creating a campaign now: old links open a new campaign.
+    if (section === 'generator') { section = 'campaigns'; startNew = true; }
+    this.campaignsStartNew = section === 'campaigns' && startNew;
     this.section = section;
     this.error = null;
     switch (section) {
       case 'overview': this.loadOverview(); break;
       case 'accounts': this.loadAccounts(); break;
       case 'campaigns': this.loadCampaigns(); break;
-      case 'generator': if (!this.campaigns?.length) this.loadCampaigns(); break;
       case 'calendar': this.loadCalendar(); break;
       case 'library': this.loadLibrary(); break;
       case 'media': break;

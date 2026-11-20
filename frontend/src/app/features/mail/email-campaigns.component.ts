@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { IconComponent } from '../../shared/icon.component';
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
+import { SendersUiService } from '../../core/senders-ui.service';
 import { apiRoot } from '../../core/api-base';
 import { TemplatePickerComponent } from './template-picker.component';
 import { EmailPreviewComponent } from './email-preview.component';
@@ -73,9 +74,20 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
   /** The saved values of the open campaign, to tell when the form has unsaved changes. */
   private original = '';
 
-  constructor(private http: HttpClient) {}
+  constructor(private http: HttpClient, private sendersUi: SendersUiService = new SendersUiService()) {}
 
-  ngOnInit(): void { this.load(); this.loadDelivery(); }
+  /** The person's verified sender addresses ("My sender email"); staff send campaigns only from these. */
+  mySenders: { email: string; name: string | null }[] = [];
+  sendersRequired = false;
+  private sendersSub: any = null;
+  loadMySenders(): void {
+    this.http.get<any>(`${apiRoot()}/api/v1/mail/senders`).subscribe({
+      next: r => { this.mySenders = (r.senders || []).filter((x: any) => x.status === 'verified').map((x: any) => ({ email: x.email, name: x.name || null })); this.sendersRequired = !!r.required; },
+      error: () => {}
+    });
+  }
+
+  ngOnInit(): void { this.load(); this.loadDelivery(); this.loadMySenders(); this.sendersSub = this.sendersUi.changed$.subscribe(() => this.loadMySenders()); }
 
   /** The Amazon SES connection and what this person may do (Mail Settings → Campaigns). */
   delivery: any = null;
@@ -376,7 +388,9 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
    */
   get senderGroups(): { domain: string; items: { email: string; name: string; sentBefore: boolean }[] }[] {
     const seen = new Map<string, { email: string; name: string; sentBefore: boolean }>();
-    for (const c of this.campaigns || []) {
+    // Staff: only their own verified addresses.
+    for (const m of this.mySenders) seen.set(m.email, { email: m.email, name: m.name || '', sentBefore: false });
+    for (const c of this.sendersRequired ? [] : (this.campaigns || [])) {
       const email = String(c?.fromEmail || '').trim().toLowerCase();
       if (!SENDER_RE.test(email) || PUBLIC_MAIL_RE.test(email)) continue;
       const s = seen.get(email) || { email, name: '', sentBefore: false };
@@ -407,6 +421,8 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
   pickSender(value: string, sel?: HTMLSelectElement): void {
     if (!this.editable || !this.form) return;
     if (value === '__add') {
+      // Staff add (and confirm) their own address in "My sender email".
+      if (this.sendersRequired) { if (sel) sel.value = this.form.fromEmail || ''; this.sendersUi.open(); return; }
       this.senderAdding = true; this.newSender = ''; this.senderError = '';
       if (sel) sel.value = this.form.fromEmail || '';
       return;
@@ -572,7 +588,7 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
 
   get uploadPct(): number { const u = this.selected?.upload; return u?.total ? Math.min(100, Math.round((u.done / u.total) * 100)) : 0; }
 
-  ngOnDestroy(): void { clearTimeout(this.reportPoll); clearTimeout(this.uploadPoll); }
+  ngOnDestroy(): void { clearTimeout(this.reportPoll); clearTimeout(this.uploadPoll); this.sendersSub?.unsubscribe(); }
 
   private setSelected(c: any): void {
     const fresh = this.selected?.id !== c.id;
