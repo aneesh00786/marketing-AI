@@ -16,6 +16,7 @@ const lead = (ws, email, consent, method = null, evidence = null) => db().run(`I
 
 test('contact lists: create, add people, view with status and consent, remove, delete; another workspace sees none', async () => {
   const ws = await h.createWorkspace({ name: `Lists ${Date.now()}` });
+  await h.verifiedSender(ws, ws.workspaceId, 'news@acme-co.io'); // campaigns are sent from a confirmed address
   await db().run("INSERT INTO email_suppressions (workspace_id, email, reason, source) VALUES (?, 'stop@x.io', 'unsubscribed', 'test')", [ws.workspaceId]);
   const made = await capi(ws, 'POST', '/contact-lists', { name: 'Sydney buyers', emails: ['Stop@X.io', 'not-an-email'], contacts: [{ name: 'Kim Lee', company: 'Shop', email: 'KIM@shop.com.au', phone: '+61 400 123 456' }] });
   assert.equal(made.status, 200, JSON.stringify(made.data));
@@ -44,6 +45,7 @@ test('contact lists: create, add people, view with status and consent, remove, d
 
 test('consent: campaigns do not require recorded consent; only withdrawn consent (and the stop-list) leaves people out', async () => {
   const ws = await h.createWorkspace({ name: `Consent ${Date.now()}` });
+  await h.verifiedSender(ws, ws.workspaceId, 'news@acme-co.io'); // campaigns are sent from a confirmed address
   for (const [email, consent, method, evidence] of [['granted@shop.io', 'granted', 'web_form', 'Form #1'], ['noevidence@shop.io', 'granted', null, null], ['unknown@shop.io', 'unknown'], ['withdrawn@shop.io', 'withdrawn', 'web_form', 'Form #2']]) {
     await lead(ws, email, consent, method, evidence);
   }
@@ -64,6 +66,7 @@ test('consent: campaigns do not require recorded consent; only withdrawn consent
 
 test('campaign unsubscribe link: asks first, then stops the address in every list; a forged link is refused', async () => {
   const ws = await h.createWorkspace({ name: `Unsub ${Date.now()}` });
+  await h.verifiedSender(ws, ws.workspaceId, 'news@acme-co.io'); // campaigns are sent from a confirmed address
   await lead(ws, 'ann@shop.io', 'granted', 'web_form', 'Form #3');
   const a = (await capi(ws, 'POST', '/contact-lists', { name: 'A', emails: ['ann@shop.io'] })).data.list.id;
   const b = (await capi(ws, 'POST', '/contact-lists', { name: 'B', emails: ['ann@shop.io'] })).data.list.id;

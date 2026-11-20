@@ -120,4 +120,18 @@ async function sendRaw(cfg, { from, to, raw, configurationSet = null, tags = {} 
   return { messageId: String(d.MessageId) };
 }
 
-module.exports = { sign, getAccount, identityVerified, sendRaw, sesError, REGION_RE };
+/**
+ * Asks Amazon SES to verify one email address (POST /v2/email/identities): AWS emails it a confirmation link.
+ * Needs the ses:CreateEmailIdentity permission. An identity that already exists is not an error.
+ */
+async function createEmailIdentity(cfg, email) {
+  try {
+    await request(cfg, 'POST', '/v2/email/identities', { EmailIdentity: email }, { write: true });
+    return { requested: true, existed: false };
+  } catch (err) {
+    if (err.providerCode === 'AlreadyExistsException') return { requested: false, existed: true };
+    throw err;
+  }
+}
+
+module.exports = { sign, getAccount, identityVerified, createEmailIdentity, sendRaw, sesError, REGION_RE };

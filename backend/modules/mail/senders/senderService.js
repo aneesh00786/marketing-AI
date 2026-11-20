@@ -3,9 +3,12 @@
  *
  * A member adds their own address; Marketech.ai emails it a single-use link (24 hours). Clicking it proves they
  * own the mailbox, and the address becomes theirs to send from:
- * - Campaigns: the From address must be one of the person's verified addresses (Owners/Admins: any address).
- * - Compose and Mail Drafts: sent from the person's verified address. Members who are not Owners/Admins cannot
- *   send email until they have one; Owners/Admins without one keep the workspace address (Mail Settings).
+ * - Campaigns: the From address must be one of the person's verified addresses (or, when an Owner/Admin sends a
+ *   member's campaign, one of that member's).
+ * - Compose and Mail Drafts: sent from the person's verified address. Nobody, Owners/Admins included, sends email
+ *   without one (product email batches and system emails keep the workspace address).
+ * Confirming the mailbox is Marketech.ai's own check; Amazon SES (and ZeptoMail) must also allow the address or
+ * its domain, which is shown per address (sesReady) and can be requested from AWS (requestAws).
  * One address belongs to one member of the workspace. Public mailbox domains (Gmail, Yahoo...) are refused:
  * they fail email authentication when sent through Amazon SES or ZeptoMail.
  */
@@ -24,8 +27,22 @@ const isAdmin = ctx => !!ctx?.auth?.capabilities?.has?.('members.manage');
 
 function httpError(status, message, code) { return Object.assign(new Error(message), { status, code }); }
 
-function present(r) {
-  return { id: r.id, email: r.email, name: r.display_name || null, status: r.status, verifiedAt: r.verified_at || null, lastSentAt: r.last_sent_at || null, createdAt: r.created_at };
+function present(r, ses = undefined) {
+  return { id: r.id, email: r.email, name: r.display_name || null, status: r.status, verifiedAt: r.verified_at || null, lastSentAt: r.last_sent_at || null, createdAt: r.created_at,
+    ...(ses !== undefined ? { ses } : {}) };
+}
+
+/**
+ * Whether Amazon SES may send from this address (it, or its domain, verified in the AWS account):
+ * { ready: true|false, identity } or null when SES is not set up or could not be asked.
+ */
+async function sesStatus(workspaceId, email) {
+  const cfg = await require('../ses/sesSettings').sesConfig(workspaceId).catch(() => null);
+  if (!cfg) return null;
+  try {
+    const v = await require('../ses/sesClient').identityVerified(cfg, email);
+    return { ready: !!v.verified, identity: v.identity || null };
+  } catch { return null; }
 }
 
 function publicBase() { return (process.env.APP_BASE_URL || '').replace(/\/$/, ''); }
@@ -33,7 +50,10 @@ function publicBase() { return (process.env.APP_BASE_URL || '').replace(/\/$/, '
 /** The person's addresses (verified first). */
 async function mine(ctx) {
   const rows = await all("SELECT * FROM member_sender_addresses WHERE workspace_id = ? AND user_id = ? ORDER BY status = 'verified' DESC, id", [ws(ctx), me(ctx)]).catch(() => []);
-  return { senders: rows.map(present), required: !isAdmin(ctx) };
+  const out = [];
+  for (const r of rows) out.push(present(r, await sesStatus(ws(ctx), r.email)));
+  // Everyone needs their own confirmed address to send Compose emails and campaigns.
+  return { senders: out, required: true };
 }
 
 /** Emails the single-use link that proves the person owns the address. */
@@ -74,7 +94,8 @@ async function add(ctx, input) {
   const row = await get('SELECT * FROM member_sender_addresses WHERE id = ?', [id]);
   if (row.status !== 'verified') await sendLink(ctx, row);
   await audit(ctx, 'mail.sender_added', { resourceType: 'sender_address', resourceId: id, metadata: { email: v.email, linkSent: row.status !== 'verified' } });
-  return { sender: present(await get('SELECT * FROM member_sender_addresses WHERE id = ?', [id])) };
+  const fresh = await get('SELECT * FROM member_sender_addresses WHERE id = ?', [id]);
+  return { sender: present(fresh, await sesStatus(ws(ctx), fresh.email)) };
 }
 
 async function requireMine(ctx, rawId) {
@@ -91,6 +112,29 @@ async function resend(ctx, rawId) {
   if (Number(recent?.r)) throw httpError(429, 'A link was just sent. Wait a minute before sending another.', 'TOO_SOON');
   await sendLink(ctx, row);
   return { sender: present(await get('SELECT * FROM member_sender_addresses WHERE id = ?', [row.id])) };
+}
+
+/**
+ * Asks Amazon SES to verify this address (AWS emails it its own link). Only for an address confirmed here first,
+ * and only when SES cannot already send from it (its domain is not verified).
+ */
+async function requestAws(ctx, rawId) {
+  const row = await requireMine(ctx, rawId);
+  if (row.status !== 'verified') throw httpError(409, 'Confirm the address in Marketech.ai first (open the link we emailed).', 'NOT_VERIFIED');
+  const cfg = await require('../ses/sesSettings').sesConfig(ws(ctx)).catch(() => null);
+  if (!cfg) throw httpError(409, 'Amazon SES is not set up for this workspace.', 'SES_NOT_CONFIGURED');
+  const ses = require('../ses/sesClient');
+  if ((await ses.identityVerified(cfg, row.email)).verified) return { sender: present(row, { ready: true }), message: 'Amazon SES can already send from this address.' };
+  try {
+    const r = await ses.createEmailIdentity(cfg, row.email);
+    await audit(ctx, 'mail.sender_aws_requested', { resourceType: 'sender_address', resourceId: row.id, metadata: { email: row.email, existed: r.existed } });
+    return { sender: present(row, { ready: false }), message: r.existed
+      ? `Amazon SES is already waiting for ${row.email} to be confirmed: open the email from Amazon Web Services in that mailbox.`
+      : `Amazon Web Services emailed a confirmation link to ${row.email}. Open it (within 24 hours); then campaigns can be sent from this address.` };
+  } catch (err) {
+    if (err.providerCode === 'AccessDeniedException') throw httpError(403, 'The AWS key in use may not create identities (needs ses:CreateEmailIdentity). Ask your AWS admin to verify the address or its domain in the SES console.', 'AWS_ACCESS_DENIED');
+    throw httpError(err.status && err.status < 500 ? err.status : 502, err.message || 'Amazon SES could not be asked.', err.code || 'SES_ERROR');
+  }
 }
 
 async function remove(ctx, rawId) {
@@ -111,11 +155,12 @@ async function verify(token) {
   return { ok: true, email: row.email };
 }
 
-/** Whether this address is one of the person's verified addresses. */
-async function ownsVerified(ctx, email) {
+/** Whether this address is a verified sender address of one of these members (default: the person). */
+async function ownsVerified(ctx, email, userIds = null) {
   const e = String(email || '').trim().toLowerCase();
-  if (!e) return false;
-  return !!(await get("SELECT 1 AS x FROM member_sender_addresses WHERE workspace_id = ? AND user_id = ? AND email = ? AND status = 'verified'", [ws(ctx), me(ctx), e]).catch(() => null));
+  const ids = (userIds || [me(ctx)]).map(Number).filter(Boolean);
+  if (!e || !ids.length) return false;
+  return !!(await get(`SELECT 1 AS x FROM member_sender_addresses WHERE workspace_id = ? AND user_id IN (${ids.map(() => '?').join(',')}) AND email = ? AND status = 'verified'`, [ws(ctx), ...ids, e]).catch(() => null));
 }
 
 /**
@@ -128,11 +173,10 @@ async function senderFor(ctx, preferred = null) {
   if (want) {
     const r = rows.find(x => x.email === want);
     if (r) return { email: r.email, name: r.display_name || ctx.auth.displayName || null };
-    if (!isAdmin(ctx)) throw httpError(403, `You can only send from your own verified address. ${want} is not one of them.`, 'SENDER_NOT_YOURS');
+    throw httpError(403, `You can only send from your own verified address. ${want} is not one of them.`, 'SENDER_NOT_YOURS');
   }
   if (rows.length) return { email: rows[0].email, name: rows[0].display_name || ctx.auth.displayName || null };
-  if (isAdmin(ctx)) return null;
-  throw httpError(403, 'Add and verify your own email address before sending (Mail Center → My sender email).', 'SENDER_REQUIRED');
+  throw httpError(403, 'Add and confirm your own email address before sending (Mail Center → My sender email).', 'SENDER_REQUIRED');
 }
 
-module.exports = { mine, add, resend, remove, verify, senderFor, ownsVerified, isAdmin, PUBLIC_DOMAINS };
+module.exports = { mine, add, resend, remove, requestAws, verify, senderFor, ownsVerified, isAdmin, sesStatus, PUBLIC_DOMAINS };

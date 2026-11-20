@@ -250,14 +250,15 @@ async function listPickOptions(ctx, rawListId, { q = '', page = 1 } = {}) {
 }
 
 /**
- * The From address: members who are not Owners/Admins send only from their own verified sender addresses
- * (Mail Center → My sender email). Owners/Admins may use any address on a verified domain.
+ * The From address must be a confirmed sender address (Mail Center → My sender email) of the person, or of the
+ * campaign's creator (an Owner/Admin working on a member's campaign keeps the member's address). Everyone.
  */
-async function checkSender(ctx, fromEmail) {
+async function checkSender(ctx, fromEmail, row = null) {
   if (!fromEmail) return;
   const senders = require('../senders/senderService');
-  if (senders.isAdmin(ctx) || await senders.ownsVerified(ctx, fromEmail)) return;
-  throw httpError(403, `You can only send from your own verified address. Add and verify ${fromEmail} in Mail Center → My sender email, or choose one of yours.`, 'SENDER_NOT_YOURS');
+  const owners = [ctx.auth.userId, ...(row && senders.isAdmin(ctx) ? [row.created_by] : [])];
+  if (await senders.ownsVerified(ctx, fromEmail, owners)) return;
+  throw httpError(403, `You can only send from your own confirmed address. Add and confirm ${fromEmail} in Mail Center → My sender email, or choose one of yours.`, 'SENDER_NOT_YOURS');
 }
 
 /** Refuses list ids from another workspace, deleted lists, and other people's lists (unless they see all mail). */
@@ -331,7 +332,8 @@ async function update(ctx, id, input) {
   const row = await editableRow(ctx, id);
   const v = updateSchema.parse(input || {});
   await checkMailLists(ctx, v.mailListIds);
-  await checkSender(ctx, v.fromEmail);
+  // Saving keeps an unchanged From as it is (checked again when sending).
+  if (v.fromEmail !== undefined && String(v.fromEmail || '').toLowerCase() !== String(row.from_email || '').toLowerCase()) await checkSender(ctx, v.fromEmail, row);
   const { sets, params } = columnsFrom(v);
   await withPicks(ctx, v, row, sets, params);
   if (!sets.length) throw httpError(400, 'Nothing to update.', 'VALIDATION_ERROR');
@@ -354,7 +356,7 @@ async function duplicate(ctx, id) {
   const picks = Object.fromEntries(Object.entries(picksOf(row)).filter(([k]) => listIds.includes(Number(k))));
   // A staff member's copy keeps the From address only if it is one of their own verified addresses.
   const senders = require('../senders/senderService');
-  const fromEmail = row.from_email && (senders.isAdmin(ctx) || await senders.ownsVerified(ctx, row.from_email)) ? row.from_email : null;
+  const fromEmail = row.from_email && await senders.ownsVerified(ctx, row.from_email) ? row.from_email : null;
   const ins = await run(
     `INSERT INTO mail_campaigns (workspace_id, name, subject, from_name, from_email, html_content, mail_list_ids_json, mail_list_picks_json, status, version, created_by, updated_by, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', 1, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
@@ -515,7 +517,7 @@ async function approve(ctx, id) {
 async function send(ctx, id, { confirm } = {}) {
   if (confirm !== true) throw httpError(400, 'Explicit confirmation (confirm: true) is required to send a campaign.', 'CONFIRMATION_REQUIRED');
   const row = await requireRow(ctx, id);
-  await checkSender(ctx, row.from_email);
+  await checkSender(ctx, row.from_email, row);
   if (!['approved', 'failed'].includes(row.status) || row.approved_version !== row.version) {
     const msg = { submitting: 'This campaign is being sent right now.', submitted: 'This campaign was already sent.' }[row.status] || 'Approve the campaign before sending it.';
     throw httpError(409, msg, row.status === 'submitted' ? 'ALREADY_SUBMITTED' : row.status === 'submitting' ? 'SUBMIT_IN_PROGRESS' : 'NOT_APPROVED');

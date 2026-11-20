@@ -37,7 +37,7 @@ test('migration 067 adds the table', async () => {
   assert.ok(await db().get("SELECT 1 AS x FROM schema_migrations WHERE id = '067_member_senders'"));
 });
 
-test('staff cannot send until they have a verified address; Owners/Admins keep the workspace address', async () => {
+test('nobody sends until they have a confirmed address (the Owner here confirmed the workspace address)', async () => {
   const { r } = await withZepto(() => compose(STAFF));
   assert.equal(r.status, 403);
   assert.equal(r.data.code, 'SENDER_REQUIRED');
@@ -94,13 +94,48 @@ test('an expired link is refused; resend gives a new one', async () => {
   assert.equal((await h.api('DELETE', `/api/v1/mail/senders/${r.data.sender.id}`, { token: STAFF.token })).status, 404, "nobody removes another person's");
 });
 
-test('campaigns: staff use only their own verified address as From; Owners/Admins any', async () => {
+test('campaigns: everyone (Owners too) uses only their own confirmed address; an Owner may send a member\'s campaign from the member\'s', async () => {
   const mine = (await h.api('GET', '/api/v1/mail/senders', { token: STAFF.token })).data.senders.find(s => s.status === 'verified').email;
   const bad = await h.api('POST', '/api/v1/mail/campaigns', { token: STAFF.token, body: { name: `c-${uid()}`, fromEmail: 'sales@thrive-co.io' } });
   assert.equal(bad.status, 403);
   assert.equal(bad.data.code, 'SENDER_NOT_YOURS');
   const ok = await h.api('POST', '/api/v1/mail/campaigns', { token: STAFF.token, body: { name: `c-${uid()}`, fromEmail: mine } });
   assert.equal(ok.status, 200, JSON.stringify(ok.data));
-  const owner = await h.api('POST', '/api/v1/mail/campaigns', { token: W.token, body: { name: `c-${uid()}`, fromEmail: 'news@thrive-co.io' } });
-  assert.equal(owner.status, 200);
+  // The Owner: only addresses they confirmed (here the workspace address they set up), not any address.
+  assert.equal((await h.api('POST', '/api/v1/mail/campaigns', { token: W.token, body: { name: `c-${uid()}`, fromEmail: 'news@thrive-co.io' } })).data.code, 'SENDER_NOT_YOURS');
+  assert.equal((await h.api('POST', '/api/v1/mail/campaigns', { token: W.token, body: { name: `c-${uid()}`, fromEmail: 'sales@thrive-co.io' } })).status, 200);
+  // Editing the member's campaign keeps the member's address (it is theirs).
+  assert.equal((await h.api('PATCH', `/api/v1/mail/campaigns/${ok.data.campaign.id}`, { token: W.token, body: { name: 'Renamed', fromEmail: mine } })).status, 200);
+  // Senders list says everyone needs one.
+  assert.equal((await h.api('GET', '/api/v1/mail/senders', { token: W.token })).data.required, true);
+});
+
+test('each address says whether Amazon SES can send from it; "Ask AWS" requests verification of one address', async () => {
+  const KEYS = { region: 'us-east-1', accessKeyId: 'AKIATESTKEY0000001', secretAccessKey: 'testSecretKey/abcdefghijklmnop1234', maxPerSecond: 5 };
+  assert.equal((await h.api('PUT', '/api/v1/mail/ses/settings', { token: W.token, body: KEYS })).status, 200);
+  const created = [];
+  const ses = { match: u => /^https:\/\/email\.us-east-1\.amazonaws\.com\/v2\/email\/identities/.test(u), respond: (url, init) => {
+    const id = decodeURIComponent(new URL(url).pathname.split('/').pop());
+    if (init.method === 'POST') { created.push(JSON.parse(init.body).EmailIdentity); return h.json(200, { IdentityType: 'EMAIL_ADDRESS', VerifiedForSendingStatus: false }); }
+    return id === 'thrive-co.io' ? h.json(200, { VerifiedForSendingStatus: true }) : h.json(404, { message: 'Not found' }, { 'x-amzn-ErrorType': 'NotFoundException' });
+  } };
+  // A confirmed address on a domain SES does not know.
+  const other = `aneesh-${uid()}@jrboon-co.io`;
+  const zcalls = [];
+  let mock = h.mockFetch([ses, zepto(zcalls)]);
+  let added;
+  try { added = await h.api('POST', '/api/v1/mail/senders', { token: STAFF.token, body: { email: other } }); } finally { mock.restore(); }
+  assert.equal(added.data.sender.ses.ready, false);
+  await h.api('GET', `/api/v1/mail/senders/verify/${tokenFrom(zcalls[0])}`);
+  mock = h.mockFetch([ses]);
+  try {
+    const list = (await h.api('GET', '/api/v1/mail/senders', { token: STAFF.token })).data.senders;
+    assert.equal(list.find(s => s.email === other).ses.ready, false, 'SES cannot send from it yet');
+    assert.equal(list.find(s => /thrive-co\.io$/.test(s.email)).ses.ready, true, 'the verified domain can');
+    const id = list.find(s => s.email === other).id;
+    const r = await h.api('POST', `/api/v1/mail/senders/${id}/aws`, { token: STAFF.token });
+    assert.equal(r.status, 200, JSON.stringify(r.data));
+    assert.match(r.data.message, /Amazon Web Services emailed a confirmation link/);
+    assert.deepEqual(created, [other]);
+  } finally { mock.restore(); }
 });

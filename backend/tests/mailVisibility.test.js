@@ -256,7 +256,8 @@ test('duplicating a campaign keeps only the lists (and sender) the person may us
   for (const m of [ANA]) await grant(m, 'mail.send');
   const adminList = (await h.api('POST', '/api/v1/mail/campaigns/contact-lists', { token: ADMIN.token, body: { name: `Admin only ${uid()}`, emails: [`q-${uid()}@client.io`] } })).data.list;
   const anaList = (await h.api('POST', '/api/v1/mail/campaigns/contact-lists', { token: ANA.token, body: { name: `Ana own ${uid()}`, emails: [`r-${uid()}@client.io`] } })).data.list;
-  // An admin campaign using both lists, with the admin's sender, that Ana can see with "View all mail".
+  await h.verifiedSender(ADMIN, W, 'news@acme.io'); // the admin's own confirmed address
+  // An admin campaign using both lists, with the admin's sender.
   const c = await h.api('POST', '/api/v1/mail/campaigns', { token: ADMIN.token, body: { name: `Both ${uid()}`, fromEmail: 'news@acme.io', mailListIds: [adminList.id, anaList.id] } });
   assert.equal(c.status, 200, JSON.stringify(c.data));
   assert.equal((await grant(ANA)).status, 200);

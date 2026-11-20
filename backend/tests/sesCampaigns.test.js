@@ -79,6 +79,8 @@ async function sesWorkspace(name) {
   const ws = await h.createWorkspace({ name: `${name} ${Date.now()}` });
   const r = await sapi(ws, 'PUT', '/settings', KEYS);
   assert.equal(r.status, 200, JSON.stringify(r.data));
+  // Everyone sends from their own confirmed addresses ("My sender email").
+  for (const e of ['news@acme-co.io', 'support@thrivewoo.com', 'news@not-verified.io']) await h.verifiedSender(ws, ws.workspaceId, e);
   return ws;
 }
 

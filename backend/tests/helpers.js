@@ -241,6 +241,13 @@ async function api(method, pathName, { token, body: reqBody, rawBody, headers = 
   const text = await res.text();
   let data = null;
   try { data = JSON.parse(text); } catch (e) { data = text; }
+  // Everyone sends from their own confirmed address: whoever saves the workspace's mail settings with a
+  // sender address gets that address as their own confirmed sender (as an Owner would confirm it).
+  if (method === 'POST' && pathName === '/api/v1/mail/config' && res.status === 200 && token && reqBody?.sender_email) {
+    const p = require('../services/authService').verifyToken(token);
+    if (p?.userId) await db().run("INSERT IGNORE INTO member_sender_addresses (workspace_id, user_id, email, status, verified_at, created_at, updated_at) VALUES (?, ?, ?, 'verified', UTC_TIMESTAMP(), UTC_TIMESTAMP(), UTC_TIMESTAMP())",
+      [p.workspaceId, p.userId, String(reqBody.sender_email).trim().toLowerCase()]).catch(() => null);
+  }
   return { status: res.status, data, headers: res.headers };
 }
 
@@ -253,7 +260,7 @@ async function shutdown() {
 /** Gives a member a verified personal sender address ("My sender email"), as if they clicked the link. */
 async function verifiedSender(member, workspaceId, email = null) {
   const addr = email || `staff-${member.userId}-${crypto.randomBytes(3).toString('hex')}@company-mail.io`;
-  await db().run("INSERT INTO member_sender_addresses (workspace_id, user_id, email, display_name, status, verified_at, created_at, updated_at) VALUES (?, ?, ?, NULL, 'verified', UTC_TIMESTAMP(), UTC_TIMESTAMP(), UTC_TIMESTAMP())",
+  await db().run("INSERT IGNORE INTO member_sender_addresses (workspace_id, user_id, email, display_name, status, verified_at, created_at, updated_at) VALUES (?, ?, ?, NULL, 'verified', UTC_TIMESTAMP(), UTC_TIMESTAMP(), UTC_TIMESTAMP())",
     [workspaceId, member.userId, addr]);
   return addr;
 }

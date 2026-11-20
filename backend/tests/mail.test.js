@@ -241,7 +241,9 @@ test('failures are reported and nothing is recorded as sent', async () => {
   assert.equal((await get('SELECT status FROM email_drafts WHERE id = ?', [d.id])).status, 'Approved', 'back to Approved, not Sent');
   assert.equal(Number((await get("SELECT COUNT(*) AS c FROM emails WHERE recipient_email = 'fail@acme.io'")).c), 0);
 
-  // An unconfigured workspace never falls back to the server mailbox, even when .env has a token.
+  // An unconfigured workspace never falls back to the server mailbox, even when .env has a token
+  // (the sender has their own confirmed address, so the mail settings are what is checked).
+  await h.verifiedSender(C, C.workspaceId, 'owner@c-co.io');
   const saved = process.env.ZEPTOMAIL_TOKEN;
   process.env.ZEPTOMAIL_TOKEN = 'server-env-token';
   const leaked = [];

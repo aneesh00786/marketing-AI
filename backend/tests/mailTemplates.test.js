@@ -21,6 +21,7 @@ let B;
 test.before(async () => {
   await h.prepareDatabase();
   A = await h.createWorkspace({ name: 'Templates A' });
+  await h.verifiedSender(A, A.workspaceId, 'news@acme-co.io');
   B = await h.createWorkspace({ name: 'Templates B' });
 });
 test.after(async () => { await h.shutdown(); fs.rmSync(STORAGE, { recursive: true, force: true }); });

@@ -16,6 +16,7 @@ const wrap = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch
 router.get('/', requireCapability('mail.view'), wrap(async (req, res) => res.json({ success: true, ...(await svc.mine(req)) })));
 router.post('/', requireCapability('mail.compose'), wrap(async (req, res) => res.json({ success: true, ...(await svc.add(req, req.body)) })));
 router.post('/:id(\\d+)/resend', requireCapability('mail.compose'), wrap(async (req, res) => res.json({ success: true, ...(await svc.resend(req, req.params.id)) })));
+router.post('/:id(\\d+)/aws', requireCapability('mail.compose'), wrap(async (req, res) => res.json({ success: true, ...(await svc.requestAws(req, req.params.id)) })));
 router.delete('/:id(\\d+)', requireCapability('mail.view'), wrap(async (req, res) => res.json({ success: true, ...(await svc.remove(req, req.params.id)) })));
 
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
