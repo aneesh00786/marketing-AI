@@ -467,8 +467,14 @@ async function sendRealEmail(workspaceId, {
   if (!senderEmail || !mailboxEmail) throw mailError('Mail is not configured for this workspace. Add a sender address in Mail Settings.', 503, 'MAIL_NOT_CONFIGURED');
   const senderName = own ? (own.name || config.sender_name || null) : (config.sender_name || null);
   const fromAddress = senderName ? `"${String(senderName).replace(/"/g, '')}" <${senderEmail}>` : senderEmail;
-  // SMTP mailboxes send only as themselves: the member's name on the mailbox address, replies to the member.
-  const smtpFrom = own ? `"${String(senderName || own.email).replace(/"/g, '')}" <${mailboxEmail}>` : fromAddress;
+  // SMTP mailboxes send only as themselves. A member's own address must be the From address, so an SMTP mailbox
+  // with a different address never sends it (ZeptoMail or Amazon SES do, or the email is refused).
+  const smtpCanSendOwn = !own || own.email === String(mailboxEmail).trim().toLowerCase();
+  const ownNotSendable = why => {
+    const err = mailError(`Not sent: your emails are sent only from your sender address ${own.email}, and ${why} Nothing was sent from another address.`, 409, 'SENDER_NOT_SENDABLE');
+    err.marketingBlocked = purpose === 'marketing';
+    return err;
+  };
   if (own && !replyTo) replyTo = own.email;
   const plain = text || html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
   const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
@@ -482,7 +488,11 @@ async function sendRealEmail(workspaceId, {
 
   // Marketing: an SMTP mailbox approved for marketing, otherwise Amazon SES when it is set up (never ZeptoMail).
   let marketingSes = null;
-  if (purpose === 'marketing') {
+  if (purpose === 'marketing' && !smtpCanSendOwn) {
+    // The SMTP mailbox cannot send as the member: only Amazon SES can.
+    marketingSes = await sesForMarketing(workspaceId);
+    if (!marketingSes) throw ownNotSendable('marketing email from it needs Amazon SES, which is not set up for this workspace (Mail Settings → Amazon SES).');
+  } else if (purpose === 'marketing') {
     const problem = marketingDeliveryProblem(workspaceId, config);
     if (problem) {
       marketingSes = await sesForMarketing(workspaceId);
@@ -550,15 +560,44 @@ async function sendRealEmail(workspaceId, {
     }
   }
 
-  // 2. The workspace's SMTP server, only when nothing was sent above.
-  if (!sent) {
+  // 1c. Transactional email from a member's own address that ZeptoMail did not send: Amazon SES when set up,
+  // never the SMTP mailbox (it would send from the workspace address instead).
+  if (!sent && !smtpCanSendOwn && purpose !== 'marketing') {
+    const sesCfg = await sesForMarketing(workspaceId);
+    if (!sesCfg) {
+      if (tracker) await tracker.failed('SENDER_NOT_SENDABLE', 'The email was not sent.');
+      throw ownNotSendable(lastError
+        ? `ZeptoMail could not send from it (${lastError.message}). Check that the address or its domain is added in ZeptoMail.`
+        : 'this workspace has no ZeptoMail or Amazon SES set up to send from it (Mail Settings).');
+    }
+    try {
+      const sesHtml = tracker ? await tracker.instrumentSmtp(html) : html;
+      const r = await sendViaSes(sesCfg, { fromAddress, senderEmail, to: recipient, subject, html: sesHtml, text: plain, replyTo: replyTo || senderEmail, headers: unsubHeaders });
+      sent = true;
+      provider = 'ses';
+      messageId = r.messageId;
+      smtpStatus = 'Sent via Amazon SES';
+      deliveryDetails = { messageId: r.messageId };
+    } catch (err) {
+      if (err.outcomeUnknown) {
+        if (tracker) await tracker.unknown(err.code || 'SES_OUTCOME_UNKNOWN');
+        throw err;
+      }
+      if (tracker) await tracker.failed(err.code || 'SES_ERROR', 'The email was not sent.');
+      if (err.code === 'SES_SENDER_NOT_VERIFIED') throw err;
+      throw mailError(`Email was not sent: ${err.message}`, err.status === 400 ? 400 : 502, err.code || 'MAIL_SEND_FAILED');
+    }
+  }
+
+  // 2. The workspace's SMTP server, only when nothing was sent above (and it can send as the From address).
+  if (!sent && smtpCanSendOwn) {
     const transporter = config.smtp_host ? createSmtpTransporter(config) : null;
     if (transporter) {
       try {
         await assertSafeMailHost(config.smtp_host);
         const smtpHtml = tracker ? await tracker.instrumentSmtp(html) : html;
         const info = await transporter.sendMail({
-          from: smtpFrom, to: recipient, subject, text: plain, html: smtpHtml, replyTo: replyTo || senderEmail,
+          from: fromAddress, to: recipient, subject, text: plain, html: smtpHtml, replyTo: replyTo || senderEmail,
           ...(unsubHeaders ? { headers: unsubHeaders } : {})
         });
         sent = true;

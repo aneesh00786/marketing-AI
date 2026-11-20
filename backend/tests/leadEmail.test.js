@@ -2,8 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('crypto');
 const h = require('./helpers');
-// Staff send only from their own verified address: every member here has one (see senders.test.js for the rule).
-const addMember = async (workspaceId, role) => { const m = await h.addMember(workspaceId, role); await h.verifiedSender(m, workspaceId); return m; };
+// Staff send only from their own verified address (see senders.test.js for the rule).
 
 // "Email leads" (Leads → ✉): a member emails a lead's own address from the Leads page, without Mail Center
 // or "Send email". Same rules as Compose (purpose, opt-outs, unsubscribe). SMTP is a stub: nothing is sent.
@@ -22,7 +21,10 @@ test.before(async () => {
   await h.prepareDatabase();
   W = await h.createWorkspace({ name: 'Lead email' });
   await h.useMarketingSmtp(W, 'sales@lead-co.io');
-  MEM = await addMember(W.workspaceId, 'Member');
+  // The member's own sender address is the SMTP mailbox (it sends only as itself), moved from the owner.
+  MEM = await h.addMember(W.workspaceId, 'Member');
+  await db().run('DELETE FROM member_sender_addresses WHERE workspace_id = ? AND email = ?', [W.workspaceId, 'sales@lead-co.io']);
+  await h.verifiedSender(MEM, W.workspaceId, 'sales@lead-co.io');
   // Members see leads they own: one of theirs, one of the owner's.
   LEAD = (await db().run("INSERT INTO leads (workspace_id, name, email, status, owner_user_id, created_by_user_id, lead_source, created_at) VALUES (?, 'Kim Co', 'kim@kimco.io', 'New', ?, ?, 'manual', UTC_TIMESTAMP())", [W.workspaceId, MEM.userId, MEM.userId])).lastID;
   OTHER_LEAD = (await db().run("INSERT INTO leads (workspace_id, name, email, status, owner_user_id, created_by_user_id, lead_source, created_at) VALUES (?, 'Lee Co', 'lee@leeco.io', 'New', ?, ?, 'manual', UTC_TIMESTAMP())", [W.workspaceId, W.userId, W.userId])).lastID;

@@ -200,18 +200,53 @@ test('without mail.send_transactional a transactional Compose send is refused (s
     assert.equal((await db().get('SELECT COUNT(*) AS n FROM mail_send_requests WHERE workspace_id = ?', [S.workspaceId])).n, before, 'no idempotency claim');
     const a = await db().get("SELECT metadata_json FROM audit_logs WHERE workspace_id = ? AND action = 'mail.send_blocked' AND actor_user_id = ? ORDER BY id DESC LIMIT 1", [S.workspaceId, m.userId]);
     assert.equal(JSON.parse(a.metadata_json).reason, 'transactional_not_permitted');
-    // The same person can send it as marketing (marketing safeguards apply)...
+    // As marketing it passes the permission check; here it stops only because the SMTP mailbox
+    // (news@s-co.io) cannot send from the member's own address and no Amazon SES is set up.
     const mk = await send(m, { ...RECEIPT, purpose: 'marketing' }, { smtp });
-    assert.equal(mk.status, 200, JSON.stringify(mk.data));
-    assert.equal(mk.data.purpose, 'marketing');
-    // ...and promotional content they declare transactional is treated as marketing, not refused.
+    assert.equal(mk.status, 409, JSON.stringify(mk.data));
+    assert.equal(mk.data.code, 'SENDER_NOT_SENDABLE');
+    // ...and promotional content they declare transactional is treated as marketing, not refused for permission.
     const promo = await send(m, { ...PROMO, purpose: 'transactional' }, { smtp });
-    assert.equal(promo.status, 200);
-    assert.equal(promo.data.purpose, 'marketing');
+    assert.equal(promo.status, 409);
+    assert.equal(promo.data.code, 'SENDER_NOT_SENDABLE');
+    assert.equal(smtp.length, 0, 'never sent from the workspace mailbox instead');
   }
-  const ok = await send(admin, { ...RECEIPT, purpose: 'transactional' });
+  const zAdmin = await addMember(Z.workspaceId, 'Workspace Admin');
+  const ok = await send(zAdmin, { ...RECEIPT, purpose: 'transactional' });
   assert.equal(ok.status, 200, JSON.stringify(ok.data));
   assert.equal(ok.data.purpose, 'transactional');
+  assert.ok(admin.userId);
+});
+
+test('a member with their own sender address sends only from it, transactional included: ZeptoMail uses it; never the workspace address instead', async () => {
+  const m = await h.addMember(Z.workspaceId, 'Workspace Admin');
+  const own = await h.verifiedSender(m, Z.workspaceId);
+  const zepto = [];
+  const r = await send(m, { ...RECEIPT, purpose: 'transactional' }, { zepto });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(zepto.length, 1);
+  assert.equal(zepto[0].from.address, own);
+  assert.equal(zepto[0].reply_to[0].address, own);
+
+  // ZeptoMail refuses the address (e.g. its domain is not added there): refused, nothing sent from hello@z-co.io.
+  const calls = [];
+  const mock = h.mockFetch([{ match: u => u.startsWith('https://api.zeptomail.com/'), respond: (u, init) => { calls.push(JSON.parse(init.body)); return h.json(400, { error: { code: 'TM_3201', message: 'Sender address not verified' } }); } }]);
+  let bad;
+  try { bad = await h.api('POST', '/api/v1/emails/send', { token: m.token, headers: key(), body: { recipient_email: `kim-${uid()}@client.io`, confirm: true, ...RECEIPT, purpose: 'transactional' } }); } finally { mock.restore(); }
+  assert.equal(bad.status, 409, JSON.stringify(bad.data));
+  assert.equal(bad.data.code, 'SENDER_NOT_SENDABLE');
+  assert.ok(calls.every(c => c.from.address === own), 'only ever tried from the member address');
+
+  // An SMTP mailbox with another address cannot send as the member: refused (transactional and marketing).
+  const sm = await h.addMember(S.workspaceId, 'Workspace Admin');
+  await h.verifiedSender(sm, S.workspaceId);
+  for (const p of ['transactional', 'marketing']) {
+    const smtp = [];
+    const x = await send(sm, { ...RECEIPT, purpose: p }, { smtp });
+    assert.equal(x.status, 409, `${p}: ${JSON.stringify(x.data)}`);
+    assert.equal(x.data.code, 'SENDER_NOT_SENDABLE');
+    assert.equal(smtp.length, 0);
+  }
 });
 
 test('the capability is reported to the signed-in member (for the Compose screen)', async () => {
