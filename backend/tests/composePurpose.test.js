@@ -2,6 +2,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('crypto');
 const h = require('./helpers');
+// Staff send only from their own verified address: every member here has one (see senders.test.js for the rule).
+const addMember = async (workspaceId, role) => { const m = await h.addMember(workspaceId, role); await h.verifiedSender(m, workspaceId); return m; };
 
 // Compose & Send purpose: declared by the sender, validated by the server (lib/mailPurpose.js).
 // ZeptoMail is mocked and SMTP stubbed; nothing is sent.
@@ -161,7 +163,7 @@ test('a marketing send that fails leaves no draft behind; an unknown outcome is 
 
 test('the API refuses an invalid purpose and another workspace cannot use the endpoint on this workspace\'s data', async () => {
   assert.equal((await send(S, { ...RECEIPT, purpose: 'newsletter' })).status, 400);
-  const member = await h.addMember(S.workspaceId, 'Member');
+  const member = await addMember(S.workspaceId, 'Member');
   assert.equal((await send(member, { ...RECEIPT, purpose: 'transactional' })).status, 403, 'mail.send is still required');
 });
 
@@ -186,9 +188,9 @@ test('roles: only Owners and Admins hold mail.send_transactional (least privileg
 });
 
 test('without mail.send_transactional a transactional Compose send is refused (server-side), audited, nothing claimed or sent; marketing still works', async () => {
-  const admin = await h.addMember(S.workspaceId, 'Workspace Admin');
+  const admin = await addMember(S.workspaceId, 'Workspace Admin');
   for (const role of ['Marketing Manager', 'Approver']) {
-    const m = await h.addMember(S.workspaceId, role);
+    const m = await addMember(S.workspaceId, role);
     const before = (await db().get('SELECT COUNT(*) AS n FROM mail_send_requests WHERE workspace_id = ?', [S.workspaceId])).n;
     const smtp = [];
     const r = await send(m, { ...RECEIPT, purpose: 'transactional' }, { smtp });
@@ -213,7 +215,7 @@ test('without mail.send_transactional a transactional Compose send is refused (s
 });
 
 test('the capability is reported to the signed-in member (for the Compose screen)', async () => {
-  const appr = await h.addMember(S.workspaceId, 'Approver');
+  const appr = await addMember(S.workspaceId, 'Approver');
   const meOwner = await h.api('GET', '/api/v1/auth/me', { token: S.token });
   const meAppr = await h.api('GET', '/api/v1/auth/me', { token: appr.token });
   assert.ok(meOwner.data.capabilities.includes('mail.send_transactional'));

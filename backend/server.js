@@ -139,6 +139,8 @@ app.use('/api', apiGate({
     /^\/api\/v1\/social\/oauth\/[a-z_]+\/callback$/,
     // Template images/fonts, loaded by recipients' mail clients (opaque, unguessable ids).
     /^\/api\/v1\/mail\/assets\/[A-Za-z0-9_-]{43}$/,
+    // Confirming a member's own sender address (single-use emailed token).
+    /^\/api\/v1\/mail\/senders\/verify\/[a-f0-9]{64}$/,
     // Unsubscribe links in product emails carry a random per-recipient token.
     /^\/api\/v1\/mail\/unsubscribe\/[a-f0-9]{40}$/,
     // Campaign unsubscribe links (signed per campaign; the address is checked against the campaign).
@@ -202,6 +204,10 @@ app.use('/api/v1/mail/t/webhooks/ses', sesRoutes.webhook);
 app.use('/api/v1/mail/ses', sesRoutes.router);
 app.use('/api/v1/mail/view', sesRoutes.view);
 app.use('/api/v1/mail/t', mailTrackingRoutes.publicRouter);
+// Personal sender addresses ("My sender email"): the public confirmation link, then the member's own list.
+const senderRoutes = require('./modules/mail/senders/routes');
+app.use('/api/v1/mail/senders', senderRoutes.publicRouter);
+app.use('/api/v1/mail/senders', senderRoutes.router);
 app.use('/api/v1/mail/tracking', mailTrackingRoutes.router);
 // Mail Center charts, email log and campaign log (read-only).
 app.use('/api/v1/mail/activity', require('./modules/mail/activity/routes').router);

@@ -4,6 +4,8 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const h = require('./helpers');
+// Staff send only from their own verified address: every member here has one (see senders.test.js for the rule).
+const addMember = async (workspaceId, role) => { const m = await h.addMember(workspaceId, role); await h.verifiedSender(m, workspaceId); return m; };
 
 // Migration 025: Compose purpose audit records, the Owners/Admins report, and per-member grants of
 // mail.send_transactional. ZeptoMail is mocked and SMTP stubbed; nothing is sent.
@@ -47,7 +49,7 @@ test('migration 025: three nullable purpose columns, the report index and the gr
   assert.deepEqual(fks.map(f => [f.n, f.d]), [['fk_member_capability_grantor', 'SET NULL'], ['fk_member_capability_user', 'CASCADE'], ['fk_member_capability_ws', 'CASCADE']]);
   assert.ok(await db().get("SELECT 1 AS x FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'workspace_member_capability_grants' AND INDEX_NAME = 'uq_member_capability' AND NON_UNIQUE = 0"));
   // Existing Marketing Managers / Approvers were not copied into grants.
-  const mm = await h.addMember(Z.workspaceId, 'Marketing Manager');
+  const mm = await addMember(Z.workspaceId, 'Marketing Manager');
   assert.equal((await db().get('SELECT COUNT(*) AS n FROM workspace_member_capability_grants WHERE workspace_id = ?', [Z.workspaceId])).n, 0);
   assert.equal((await compose(mm, { ...RECEIPT, purpose: 'transactional' })).data.code, 'TRANSACTIONAL_NOT_PERMITTED');
 });
@@ -130,9 +132,9 @@ test('no application code path updates the purpose columns after the claim', () 
 // ------------------------------------------------------------------ report
 
 test('report: Owners/Admins only; this workspace only; masked recipients; no content; legacy rows "not recorded"', async () => {
-  const admin = await h.addMember(Z.workspaceId, 'Workspace Admin');
+  const admin = await addMember(Z.workspaceId, 'Workspace Admin');
   for (const role of ['Marketing Manager', 'Approver', 'Member']) {
-    const m = await h.addMember(Z.workspaceId, role);
+    const m = await addMember(Z.workspaceId, role);
     assert.equal((await report(m)).status, 403, role);
   }
   await db().run("INSERT INTO mail_send_requests (workspace_id, idempotency_key, request_hash, status, requested_by, created_at, updated_at) VALUES (?, ?, ?, 'sent', NULL, UTC_TIMESTAMP(), UTC_TIMESTAMP())", [Z.workspaceId, `legacy-${uid()}-aaaaaaaaaaaa`, 'x'.repeat(64)]);
@@ -177,17 +179,17 @@ test('report filters (purpose, dates), pagination and validation', async () => {
 // ------------------------------------------------------------------ grants
 
 test('grants: Owners/Admins grant mail.send_transactional to eligible members only; enforced on the server; audited; revocable', async () => {
-  const mm = await h.addMember(Z.workspaceId, 'Marketing Manager');
-  const appr = await h.addMember(Z.workspaceId, 'Approver');
-  const member = await h.addMember(Z.workspaceId, 'Member');
-  const admin = await h.addMember(Z.workspaceId, 'Workspace Admin');
+  const mm = await addMember(Z.workspaceId, 'Marketing Manager');
+  const appr = await addMember(Z.workspaceId, 'Approver');
+  const member = await addMember(Z.workspaceId, 'Member');
+  const admin = await addMember(Z.workspaceId, 'Workspace Admin');
 
   assert.equal((await grant(mm, appr)).status, 403, 'a Marketing Manager cannot grant');
   assert.equal((await grant(Z, member)).data.code, 'NOT_ELIGIBLE', 'Members cannot send mail at all');
   assert.equal((await grant(Z, admin)).data.code, 'ALREADY_IN_ROLE');
   assert.equal((await grant(Z, mm, 'members.manage')).data.code, 'NOT_GRANTABLE');
   assert.equal((await grant(Z, mm, 'billing.manage')).data.code, 'NOT_GRANTABLE');
-  const outsider = await h.addMember(OTHER.workspaceId, 'Marketing Manager');
+  const outsider = await addMember(OTHER.workspaceId, 'Marketing Manager');
   assert.equal((await grant(Z, outsider)).status, 404, 'not a member of this workspace');
 
   assert.equal((await grant(admin, mm)).status, 200, 'Admins can grant');
@@ -213,7 +215,7 @@ test('grants: Owners/Admins grant mail.send_transactional to eligible members on
 });
 
 test('grants fail closed: a role change removes an ineligible grant (not restored later); a stray grant on an ineligible role is ignored; removal deletes grants', async () => {
-  const mm = await h.addMember(Z.workspaceId, 'Marketing Manager');
+  const mm = await addMember(Z.workspaceId, 'Marketing Manager');
   assert.equal((await grant(Z, mm)).status, 200);
   assert.equal((await h.api('PATCH', `/api/v1/workspace/members/${mm.userId}`, { token: Z.token, body: { role: 'Member' } })).status, 200);
   assert.equal(await db().get('SELECT 1 AS x FROM workspace_member_capability_grants WHERE workspace_id = ? AND user_id = ?', [Z.workspaceId, mm.userId]) ?? null, null);
@@ -223,19 +225,19 @@ test('grants fail closed: a role change removes an ineligible grant (not restore
   assert.equal((await compose(mm, { ...RECEIPT, purpose: 'transactional' })).data.code, 'TRANSACTIONAL_NOT_PERMITTED', 'not restored by changing back');
 
   // A grant row for a role that does not qualify (e.g. written directly) is ignored.
-  const member = await h.addMember(Z.workspaceId, 'Member');
+  const member = await addMember(Z.workspaceId, 'Member');
   await db().run('INSERT INTO workspace_member_capability_grants (workspace_id, user_id, capability, granted_by) VALUES (?, ?, ?, NULL)', [Z.workspaceId, member.userId, CAP]);
   const { effectiveCapabilities } = require('../lib/capabilityGrants');
   assert.equal((await effectiveCapabilities(Z.workspaceId, member.userId, 'Member')).has(CAP), false);
   // So is a grant of a capability that is not grantable.
-  const appr = await h.addMember(Z.workspaceId, 'Approver');
+  const appr = await addMember(Z.workspaceId, 'Approver');
   await db().run('INSERT INTO workspace_member_capability_grants (workspace_id, user_id, capability, granted_by) VALUES (?, ?, ?, NULL)', [Z.workspaceId, appr.userId, 'members.manage']);
   assert.equal((await effectiveCapabilities(Z.workspaceId, appr.userId, 'Approver')).has('members.manage'), false);
   // A grant in another workspace does not apply here.
   await db().run('INSERT INTO workspace_member_capability_grants (workspace_id, user_id, capability, granted_by) VALUES (?, ?, ?, NULL)', [OTHER.workspaceId, appr.userId, CAP]);
   assert.equal((await effectiveCapabilities(Z.workspaceId, appr.userId, 'Approver')).has(CAP), false);
 
-  const mm2 = await h.addMember(Z.workspaceId, 'Marketing Manager');
+  const mm2 = await addMember(Z.workspaceId, 'Marketing Manager');
   await grant(Z, mm2);
   assert.equal((await h.api('DELETE', `/api/v1/workspace/members/${mm2.userId}`, { token: Z.token })).status, 200);
   assert.equal(await db().get('SELECT 1 AS x FROM workspace_member_capability_grants WHERE workspace_id = ? AND user_id = ?', [Z.workspaceId, mm2.userId]) ?? null, null);

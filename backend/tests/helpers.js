@@ -250,7 +250,16 @@ async function shutdown() {
   await db().closeDatabase();
 }
 
+/** Gives a member a verified personal sender address ("My sender email"), as if they clicked the link. */
+async function verifiedSender(member, workspaceId, email = null) {
+  const addr = email || `staff-${member.userId}-${crypto.randomBytes(3).toString('hex')}@company-mail.io`;
+  await db().run("INSERT INTO member_sender_addresses (workspace_id, user_id, email, display_name, status, verified_at, created_at, updated_at) VALUES (?, ?, ?, NULL, 'verified', UTC_TIMESTAMP(), UTC_TIMESTAMP(), UTC_TIMESTAMP())",
+    [workspaceId, member.userId, addr]);
+  return addr;
+}
+
 module.exports = {
+  verifiedSender,
   prepareDatabase,
   createWorkspace,
   addMember,

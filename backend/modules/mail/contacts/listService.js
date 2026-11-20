@@ -1,4 +1,5 @@
 const { z } = require('zod');
+const mailAccess = require('../../../lib/mailAccess');
 const { run, get, all } = require('../../../db/database');
 const { audit } = require('../../../lib/audit');
 const emailService = require('../../../services/emailService');
@@ -45,14 +46,17 @@ function splitName(name) {
   return { first: parts[0].slice(0, 100), last: parts.slice(1).join(' ').slice(0, 100) || null };
 }
 
+/** One list of the workspace that the person may see (their own, unless they see all mail); 404 otherwise. */
 async function requireList(ctx, id) {
-  const row = await get('SELECT * FROM mail_lists WHERE id = ? AND workspace_id = ?', [Number(id) || 0, ws(ctx)]);
+  const scope = mailAccess.listScope(ctx, 'l');
+  const row = await get(`SELECT l.* FROM mail_lists l WHERE l.id = ? AND l.workspace_id = ? AND ${scope.sql}`, [Number(id) || 0, ws(ctx), ...scope.params]);
   if (!row) throw httpError(404, 'List not found.', 'NOT_FOUND');
   return row;
 }
 
 /** Every list with its counts: all members, and those that can be emailed (subscribed, not on the stop-list). */
 async function lists(ctx) {
+  const scope = mailAccess.listScope(ctx, 'l');
   const rows = await all(
     `SELECT l.id, l.name, l.source, l.created_at, l.updated_at,
        COUNT(m.contact_id) AS total,
@@ -62,14 +66,17 @@ async function lists(ctx) {
      LEFT JOIN mail_list_members m ON m.list_id = l.id
      LEFT JOIN mail_contacts c ON c.id = m.contact_id
      LEFT JOIN email_suppressions s ON s.workspace_id = l.workspace_id AND s.email = c.email
-     WHERE l.workspace_id = ?
-     GROUP BY l.id ORDER BY l.name`, [ws(ctx)]);
+     WHERE l.workspace_id = ? AND ${scope.sql}
+     GROUP BY l.id ORDER BY l.name`, [ws(ctx), ...scope.params]);
   return {
     lists: rows.map(r => ({
       id: r.id, name: r.name, source: r.source,
       total: Number(r.total) || 0, reachable: Number(r.reachable) || 0, noConsent: Number(r.no_consent) || 0, createdAt: r.created_at, updatedAt: r.updated_at
     })),
-    contacts: Number((await get('SELECT COUNT(*) AS n FROM mail_contacts WHERE workspace_id = ?', [ws(ctx)])).n) || 0,
+    // Everyone: all contacts of the workspace; otherwise the people in their own lists.
+    contacts: mailAccess.seesAllMail(ctx)
+      ? Number((await get('SELECT COUNT(*) AS n FROM mail_contacts WHERE workspace_id = ?', [ws(ctx)])).n) || 0
+      : Number((await get(`SELECT COUNT(DISTINCT m.contact_id) AS n FROM mail_list_members m JOIN mail_lists l ON l.id = m.list_id WHERE l.workspace_id = ? AND ${scope.sql}`, [ws(ctx), ...scope.params])).n) || 0,
   };
 }
 

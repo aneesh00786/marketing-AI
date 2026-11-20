@@ -209,7 +209,8 @@ const PICK_PAGE = 100;
 async function listPickOptions(ctx, rawListId, { q = '', page = 1 } = {}) {
   const listId = Number(rawListId);
   if (!Number.isInteger(listId) || listId <= 0) throw httpError(400, 'Invalid id.', 'VALIDATION_ERROR');
-  const list = await get('SELECT id, name FROM mail_lists WHERE id = ? AND workspace_id = ?', [listId, ws(ctx)]);
+  const ls = mailAccess.listScope(ctx, 'l');
+  const list = await get(`SELECT l.id, l.name FROM mail_lists l WHERE l.id = ? AND l.workspace_id = ? AND ${ls.sql}`, [listId, ws(ctx), ...ls.params]);
   if (!list) throw httpError(404, 'Contact list not found.', 'NOT_FOUND');
   const p = Math.max(1, Math.min(1000, parseInt(page, 10) || 1));
   const params = [listId, ws(ctx)];
@@ -248,11 +249,23 @@ async function listPickOptions(ctx, rawListId, { q = '', page = 1 } = {}) {
   };
 }
 
-/** Refuses list ids from another workspace (or deleted lists). */
+/**
+ * The From address: members who are not Owners/Admins send only from their own verified sender addresses
+ * (Mail Center → My sender email). Owners/Admins may use any address on a verified domain.
+ */
+async function checkSender(ctx, fromEmail) {
+  if (!fromEmail) return;
+  const senders = require('../senders/senderService');
+  if (senders.isAdmin(ctx) || await senders.ownsVerified(ctx, fromEmail)) return;
+  throw httpError(403, `You can only send from your own verified address. Add and verify ${fromEmail} in Mail Center → My sender email, or choose one of yours.`, 'SENDER_NOT_YOURS');
+}
+
+/** Refuses list ids from another workspace, deleted lists, and other people's lists (unless they see all mail). */
 async function checkMailLists(ctx, ids) {
   if (!ids || !ids.length) return;
-  const found = await all(`SELECT id FROM mail_lists WHERE workspace_id = ? AND id IN (${ids.map(() => '?').join(',')})`, [ws(ctx), ...ids]);
-  if (found.length !== new Set(ids).size) throw httpError(400, 'Some chosen lists no longer exist. Choose them again.', 'VALIDATION_ERROR');
+  const ls = mailAccess.listScope(ctx, 'l');
+  const found = await all(`SELECT l.id FROM mail_lists l WHERE l.workspace_id = ? AND l.id IN (${ids.map(() => '?').join(',')}) AND ${ls.sql}`, [ws(ctx), ...ids, ...ls.params]);
+  if (found.length !== new Set(ids).size) throw httpError(400, 'Some chosen lists no longer exist or are not yours. Choose them again.', 'VALIDATION_ERROR');
 }
 
 function columnsFrom(v) {
@@ -280,6 +293,7 @@ async function create(ctx, input) {
   }
   delete v.templateId;
   await checkMailLists(ctx, v.mailListIds);
+  await checkSender(ctx, v.fromEmail);
   const { sets, params } = columnsFrom(v);
   await withPicks(ctx, v, null, sets, params);
   const cols = sets.map(s => s.split(' = ')[0]);
@@ -317,6 +331,7 @@ async function update(ctx, id, input) {
   const row = await editableRow(ctx, id);
   const v = updateSchema.parse(input || {});
   await checkMailLists(ctx, v.mailListIds);
+  await checkSender(ctx, v.fromEmail);
   const { sets, params } = columnsFrom(v);
   await withPicks(ctx, v, row, sets, params);
   if (!sets.length) throw httpError(400, 'Nothing to update.', 'VALIDATION_ERROR');
@@ -490,6 +505,7 @@ async function approve(ctx, id) {
 async function send(ctx, id, { confirm } = {}) {
   if (confirm !== true) throw httpError(400, 'Explicit confirmation (confirm: true) is required to send a campaign.', 'CONFIRMATION_REQUIRED');
   const row = await requireRow(ctx, id);
+  await checkSender(ctx, row.from_email);
   if (!['approved', 'failed'].includes(row.status) || row.approved_version !== row.version) {
     const msg = { submitting: 'This campaign is being sent right now.', submitted: 'This campaign was already sent.' }[row.status] || 'Approve the campaign before sending it.';
     throw httpError(409, msg, row.status === 'submitted' ? 'ALREADY_SUBMITTED' : row.status === 'submitting' ? 'SUBMIT_IN_PROGRESS' : 'NOT_APPROVED');

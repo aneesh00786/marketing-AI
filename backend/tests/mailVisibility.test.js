@@ -12,12 +12,14 @@ const uid = () => crypto.randomBytes(4).toString('hex');
 let W; let ADMIN; let ANA; let BEN; let APPROVER; let OTHER;
 const ids = {};
 
+// Relative dates: notifications only cover recent mail, so fixed dates would expire.
+const ago = days => new Date(Date.now() - days * 86400000).toISOString().slice(0, 19).replace('T', ' ');
 async function email(ws, row) {
   const r = await db().run(
     `INSERT INTO emails (workspace_id, sender, sender_email, recipient_email, recipient_name, subject, body, status, sent_by_user_id, sent_at, received_at, is_read, is_urgent)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
     [ws, row.sender || null, row.from || null, row.to, row.toName || '', row.subject, row.body || 'Hello', row.status,
-      row.by || null, row.status === 'Sent' ? '2026-11-10 10:00:00' : null, row.status === 'Sent' ? null : '2026-11-11 10:00:00', row.urgent ? 1 : 0]);
+      row.by || null, row.status === 'Sent' ? ago(2) : null, row.status === 'Sent' ? null : ago(1), row.urgent ? 1 : 0]);
   return r.lastID;
 }
 async function draft(ws, by, subject, status = 'Draft') {
@@ -31,7 +33,7 @@ async function campaign(ws, by, name, extra = {}) {
   const r = await db().run(
     `INSERT INTO mail_campaigns (workspace_id, name, subject, from_name, from_email, html_content, mail_list_ids_json, status, version, created_by, updated_by, submitted_by, submitted_at, created_at, updated_at)
      VALUES (?, ?, 'Subject', 'Acme', 'news@acme.io', '<p>Hi</p>', '[]', ?, 1, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
-    [ws, name, extra.status || 'draft', by, by, extra.submittedBy || null, extra.status === 'submitted' ? '2026-11-10 10:00:00' : null]);
+    [ws, name, extra.status || 'draft', by, by, extra.submittedBy || null, extra.status === 'submitted' ? ago(2) : null]);
   return r.lastID;
 }
 
@@ -216,4 +218,36 @@ test('sending re-checks the approver with their granted permissions, not only th
   assert.equal((await revoke(sender, 'mail.send')).status, 200);
   assert.equal((await workerAuthorizationProblem(W, sender.userId, 'mail.send')).code, 'SCHEDULER_NOT_AUTHORIZED', 'and stops counting once removed');
   assert.equal(await workerAuthorizationProblem(W, APPROVER.userId, 'mail.send'), null, 'an Approver sends by role');
+});
+
+// ------------------------------------------------------------------ contact lists
+
+test('contact lists: members see and use only the lists they created; Owners/Admins and "View all mail" see all', async () => {
+  const mk = (who, name) => h.api('POST', '/api/v1/mail/campaigns/contact-lists', { token: who.token, body: { name, emails: [`p-${uid()}@client.io`] } });
+  // Creating lists needs mail.send: give the members "Send email" for this test.
+  for (const m of [ANA, BEN]) assert.equal((await grant(m, 'mail.send')).status, 200);
+  const adminList = (await mk(ADMIN, `Admin list ${uid()}`)).data.list;
+  const anaList = (await mk(ANA, `Ana list ${uid()}`)).data.list;
+  const benList = (await mk(BEN, `Ben list ${uid()}`)).data.list;
+  assert.ok(adminList && anaList && benList, 'lists created');
+
+  const names = async who => (await get(who, '/api/v1/mail/campaigns/contact-lists')).data.lists.map(l => l.id).sort();
+  assert.deepEqual(await names(ANA), [anaList.id]);
+  assert.deepEqual(await names(BEN), [benList.id]);
+  const all = await names(ADMIN);
+  for (const l of [adminList, anaList, benList]) assert.ok(all.includes(l.id));
+  assert.equal((await get(ANA, '/api/v1/mail/campaigns/contact-lists')).data.contacts, 1, 'contacts counted from their own lists only');
+
+  // Someone else's list: not found, cannot be changed, picked from or used in a campaign.
+  assert.equal((await get(ANA, `/api/v1/mail/campaigns/contact-lists/${benList.id}/contacts`)).status, 404);
+  assert.equal((await h.api('POST', `/api/v1/mail/campaigns/contact-lists/${benList.id}/contacts`, { token: ANA.token, body: { emails: ['x@client.io'] } })).status, 404);
+  assert.equal((await h.api('DELETE', `/api/v1/mail/campaigns/contact-lists/${adminList.id}`, { token: ANA.token, body: { confirm: true } })).status, 404);
+  assert.equal((await get(ANA, `/api/v1/mail/campaigns/audiences/${benList.id}/contacts`)).status, 404);
+  assert.deepEqual((await get(ANA, '/api/v1/mail/campaigns/audiences')).data.mailLists.map(l => l.id), [anaList.id]);
+  const c = await h.api('POST', '/api/v1/mail/campaigns', { token: ANA.token, body: { name: `Ana c ${uid()}`, mailListIds: [benList.id] } });
+  assert.equal(c.status, 400);
+
+  assert.equal((await grant(BEN)).status, 200); // View all mail
+  assert.ok((await names(BEN)).includes(adminList.id));
+  assert.equal((await revoke(BEN)).status, 200);
 });

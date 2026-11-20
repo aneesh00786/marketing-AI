@@ -442,7 +442,10 @@ async function sendRealEmail(workspaceId, {
   // a caller may only make a transactional send stricter, never a marketing one looser.
   suppressionPolicy = null,
   // false: not saved in the workspace's Sent mail (e.g. password reset links, which only the recipient may see).
-  record = true
+  record = true,
+  // A member's own verified sender address ({ email, name }; modules/mail/senders). ZeptoMail and Amazon SES send
+  // from it; an SMTP mailbox can only send as itself, so it keeps its address with this name and Reply-To.
+  from = null
 }) {
   const recipient = String(to || '').trim();
   if (!isValidRecipient(recipient)) throw mailError('A valid recipient email address is required (placeholder domains such as example.com are not accepted).', 400, 'INVALID_RECIPIENT');
@@ -458,14 +461,20 @@ async function sendRealEmail(workspaceId, {
   html = html || require('../lib/mailContent').textToHtml(text);
 
   const config = await getRawMailConfig(workspaceId);
-  const senderEmail = config.sender_email || (EMAIL_RE.test(config.smtp_user || '') ? config.smtp_user : null);
-  if (!senderEmail) throw mailError('Mail is not configured for this workspace. Add a sender address in Mail Settings.', 503, 'MAIL_NOT_CONFIGURED');
-  const fromAddress = config.sender_name ? `"${String(config.sender_name).replace(/"/g, '')}" <${senderEmail}>` : senderEmail;
+  const mailboxEmail = config.sender_email || (EMAIL_RE.test(config.smtp_user || '') ? config.smtp_user : null);
+  const own = from && EMAIL_RE.test(String(from.email || '')) ? { email: String(from.email).trim().toLowerCase(), name: String(from.name || '').replace(/["\r\n]/g, '').trim() || null } : null;
+  const senderEmail = own ? own.email : mailboxEmail;
+  if (!senderEmail || !mailboxEmail) throw mailError('Mail is not configured for this workspace. Add a sender address in Mail Settings.', 503, 'MAIL_NOT_CONFIGURED');
+  const senderName = own ? (own.name || config.sender_name || null) : (config.sender_name || null);
+  const fromAddress = senderName ? `"${String(senderName).replace(/"/g, '')}" <${senderEmail}>` : senderEmail;
+  // SMTP mailboxes send only as themselves: the member's name on the mailbox address, replies to the member.
+  const smtpFrom = own ? `"${String(senderName || own.email).replace(/"/g, '')}" <${mailboxEmail}>` : fromAddress;
+  if (own && !replyTo) replyTo = own.email;
   const plain = text || html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
   const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
 
   // mailtoSelf: a mailto: to the sender address; such replies are detected by the inbox sync.
-  const unsubParts = listUnsubscribe ? [listUnsubscribe.url, listUnsubscribe.mailtoSelf ? `mailto:${senderEmail}?subject=unsubscribe` : listUnsubscribe.mailto].filter(Boolean) : [];
+  const unsubParts = listUnsubscribe ? [listUnsubscribe.url, listUnsubscribe.mailtoSelf ? `mailto:${mailboxEmail}?subject=unsubscribe` : listUnsubscribe.mailto].filter(Boolean) : [];
   const unsubHeaders = unsubParts.length ? {
     'List-Unsubscribe': unsubParts.map(u => `<${u}>`).join(', '),
     ...(listUnsubscribe.url ? { 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' } : {})
@@ -499,7 +508,7 @@ async function sendRealEmail(workspaceId, {
       const zeptoResult = await sendZeptoMail({
         to: recipient, recipientName, subject, html, text: plain,
         fromAddress: senderEmail,
-        fromName: config.sender_name || senderEmail,
+        fromName: senderName || senderEmail,
         replyTo: replyTo || senderEmail,
         token: zeptoToken(workspaceId, config),
         tracking: tracker ? tracker.zeptoOptions() : null
@@ -549,7 +558,7 @@ async function sendRealEmail(workspaceId, {
         await assertSafeMailHost(config.smtp_host);
         const smtpHtml = tracker ? await tracker.instrumentSmtp(html) : html;
         const info = await transporter.sendMail({
-          from: fromAddress, to: recipient, subject, text: plain, html: smtpHtml, replyTo: replyTo || senderEmail,
+          from: smtpFrom, to: recipient, subject, text: plain, html: smtpHtml, replyTo: replyTo || senderEmail,
           ...(unsubHeaders ? { headers: unsubHeaders } : {})
         });
         sent = true;

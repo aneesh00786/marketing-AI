@@ -1,4 +1,5 @@
 const express = require('express');
+const senders = () => require('./senders/senderService');
 const mailAccess = require('../../lib/mailAccess');
 const { z } = require('zod');
 const { run, get, all } = require('../../db/database');
@@ -288,6 +289,9 @@ async function sendDraftCore(ctx, draft) {
   }
   if (!isEmail(draft.recipient_email)) throw httpError('This draft has no valid recipient email address. Add one before sending.', 400, 'INVALID_RECIPIENT');
   assertNoPlaceholders(draftParts(draft));
+  // Sent from the sender's own verified address (Compose's choice, or their first); product email batches
+  // keep the workspace address. Members who are not Owners/Admins must have one.
+  const from = draft.batch_id ? null : await senders().senderFor(ctx, ctx.mailFrom || null);
   // Product email batch drafts are marketing email: the lead must still be eligible (consent, not unsubscribed).
   if (draft.batch_id) {
     const why = await require('./productEmails/service').recheckRecipient(workspaceId, draft);
@@ -339,6 +343,7 @@ async function sendDraftCore(ctx, draft) {
       listUnsubscribe: { url: require('./productEmails/service').unsubscribeLink(unsubscribeToken), mailtoSelf: true },
       purpose: 'marketing',
       suppressionPolicy: 'marketing',
+      from,
       track: { draftId: draft.id, consentOk }
     });
   } catch (err) {
@@ -572,6 +577,8 @@ const sendSchema = z.object({
   // Declared purpose (validated by the server; missing = marketing) and the template used, if any.
   purpose: z.enum(['transactional', 'marketing']).optional().nullable(),
   templateId: z.coerce.number().int().positive().optional().nullable(),
+  // Which of the sender's own verified addresses to send from (default: their first).
+  from_email: z.string().trim().toLowerCase().max(255).optional().nullable(),
   confirm: confirmed
 }).passthrough();
 
@@ -659,6 +666,9 @@ async function sendComposeAsMarketing(req, v, html, text) {
 async function sendDirect(req, res, { requireHtml }) {
   const v = req.valid;
   if (requireHtml && !v.html_body) throw httpError('html_body is required.', 400, 'VALIDATION_ERROR');
+  // The sender's own verified address (refused before anything is claimed or sent when they have none).
+  const own = await senders().senderFor(req, v.from_email || null);
+  req.mailFrom = own?.email || null;
   const text = v.body_text || v.body || '';
   const html = v.html_body || null;
   assertNoPlaceholders({ subject: v.subject, text, html: html || '' });
@@ -707,6 +717,7 @@ async function sendDirect(req, res, { requireHtml }) {
         text,
         purpose: 'transactional',
         suppressionPolicy: 'transactional',
+        from: own,
         track: {}
       });
   } catch (err) {

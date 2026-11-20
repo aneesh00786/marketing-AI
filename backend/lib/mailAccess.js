@@ -6,7 +6,8 @@
  *   - drafts they created;
  *   - emails they sent (Compose, drafts, product emails);
  *   - received emails from people they emailed (replies to their own mail or campaigns);
- *   - campaigns they created or sent.
+ *   - campaigns they created or sent;
+ *   - contact lists they created (Mail Center → Campaigns → Contact lists).
  * Mail with no recorded author (e.g. made before authors were recorded, or by an automation) is visible to the
  * first group only. Every list and every action on one item goes through these checks, on the server.
  */
@@ -54,9 +55,14 @@ function batchScope(ctx, a = 'b') {
   return seesAllMail(ctx) ? { sql: '1 = 1', params: [] } : { sql: `(${a}.created_by = ? OR ${a}.sent_by = ?)`, params: [me(ctx), me(ctx)] };
 }
 
+/** SQL limiting mail_lists rows (contact lists, alias a) to the lists the person created. */
+function listScope(ctx, a = 'l') {
+  return seesAllMail(ctx) ? { sql: '1 = 1', params: [] } : { sql: `${a}.created_by = ?`, params: [me(ctx)] };
+}
+
 /** Whether one campaign row is the person's to see. */
 function ownsCampaign(ctx, row) {
   return seesAllMail(ctx) || [row?.created_by, row?.submitted_by].map(Number).includes(me(ctx));
 }
 
-module.exports = { seesAllMail, draftScope, campaignScope, aiCampaignScope, batchScope, emailScope, ownsCampaign };
+module.exports = { seesAllMail, draftScope, campaignScope, aiCampaignScope, batchScope, emailScope, listScope, ownsCampaign };
