@@ -713,6 +713,8 @@ button.dropdown-item:disabled { opacity: 0.6; cursor: default; }
 .admin-access-banner { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; padding: 10px 14px; border-radius: 10px; border: 1px solid rgba(245, 158, 11, 0.35); background: var(--warning-soft); color: var(--warning-text); font-size: 0.86rem; }
 .admin-access-banner b { font-weight: 650; }
 .admin-access-banner .link-btn { margin-left: auto; }
+.sender-reminder-banner .btn { margin-left: auto; }
+.sender-reminder-banner .btn + .link-btn { margin-left: 0; }
 
 /* Leads table: emails, phones and status stay on one line; the table scrolls sideways when wide,
    and on phones each lead becomes a card with labelled rows. */

@@ -175,6 +175,13 @@
         <span>Admin access: you are inside <b>{{ auth.workspace?.name }}</b>. Changes here are real and logged under your name.</span>
         <button type="button" class="link-btn" (click)="leaveAdminAccess()" [disabled]="workspaceBusy">Back to my workspace</button>
       </div>
+      <div class="admin-access-banner sender-reminder-banner" *ngIf="showSenderReminder" role="status">
+        <app-icon name="mail" [size]="16"></app-icon>
+        <span *ngIf="!pendingSenders">Set up your sender email: your campaigns and emails are sent from it. Add your company address and confirm it.</span>
+        <span *ngIf="pendingSenders">Confirm your sender email: open the link we emailed to that address. Until then you cannot send campaigns or emails.</span>
+        <button type="button" class="btn btn-primary btn-sm" (click)="openSenders()">{{ pendingSenders ? 'Check status' : 'Set up sender email' }}</button>
+        <button type="button" class="link-btn" (click)="hideSenderReminder()">Later</button>
+      </div>
   <app-dashboard *ngIf="currentRoute === 'dashboard'" (navigate)="onDashboardNavigate($event)"
                  [voiceOn]="voiceAlwaysOn" [voiceLive]="isElevenLabsConnected" [voiceBusy]="voiceConnecting" [voiceStatus]="voiceStatusLabel"
                  (voiceToggle)="setVoiceAlwaysOn($event)"></app-dashboard>

@@ -790,7 +790,11 @@ export class AppComponent implements OnInit, OnDestroy {
   /** Staff must have one to send; Owners/Admins fall back to the workspace address. */
   sendersRequired = false;
   sendersLoaded = false;
+  /** Addresses added but not yet confirmed (the reminder then says to open the link). */
+  pendingSenders = 0;
   composeFrom: string | null = null;
+  /** "Later" on the reminder hides it for this browser session only. */
+  senderReminderHidden = false;
   private sendersSubs: any[] = [];
 
   loadMySenders(): void {
@@ -798,6 +802,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.apiService.getMySenders().subscribe({
       next: (r: any) => {
         this.mySenders = (r.senders || []).filter((x: any) => x.status === 'verified').map((x: any) => ({ email: x.email, name: x.name || null }));
+        this.pendingSenders = (r.senders || []).filter((x: any) => x.status !== 'verified').length;
         this.sendersRequired = !!r.required;
         this.sendersLoaded = true;
         if (!this.composeFrom || !this.mySenders.some(x => x.email === this.composeFrom)) this.composeFrom = this.mySenders[0]?.email || null;
@@ -806,6 +811,19 @@ export class AppComponent implements OnInit, OnDestroy {
     });
   }
   openSenders(): void { this.openMenu = null; this.showSenders = true; }
+
+  private senderReminderKey(): string { return `mt_sender_reminder_later_${this.auth.user?.id ?? ''}_${this.auth.workspace?.id ?? ''}`; }
+  /** Reminds anyone who can write email, and has no confirmed sender address, to add one. */
+  get showSenderReminder(): boolean {
+    if (!this.auth.isLoggedIn || !this.sendersLoaded || this.mySenders.length || this.senderReminderHidden || this.impersonatedBy) return false;
+    // Only people allowed to write or send email (permissions known, Mail module open to them).
+    if (!this.myCaps || !this.canOpen('emails')) return false;
+    return this.myCaps.has('mail.compose') || this.myCaps.has('mail.send');
+  }
+  hideSenderReminder(): void {
+    this.senderReminderHidden = true;
+    try { sessionStorage.setItem(this.senderReminderKey(), '1'); } catch { /* storage unavailable */ }
+  }
 
   ngOnInit(): void {
     try { this.sidebarCollapsed = localStorage.getItem('tradesage_sidebar_collapsed') === '1'; } catch { this.sidebarCollapsed = false; }
@@ -962,6 +980,9 @@ export class AppComponent implements OnInit, OnDestroy {
         this.myMailTabs = Array.isArray(me?.mailTabs) ? new Set(me.mailTabs) : null;
         this.impersonatedBy = me?.impersonatedBy || null;
         loadSections();
+        // Signed in (or switched workspace): reload the sender addresses so the reminder and Compose are current.
+        try { this.senderReminderHidden = sessionStorage.getItem(this.senderReminderKey()) === '1'; } catch { this.senderReminderHidden = false; }
+        this.loadMySenders();
       },
       error: () => { this.myCaps = null; loadSections(); }
     });
