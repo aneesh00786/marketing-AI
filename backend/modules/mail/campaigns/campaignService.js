@@ -346,14 +346,24 @@ async function update(ctx, id, input) {
  */
 async function duplicate(ctx, id) {
   const row = await requireRow(ctx, id);
+  // Only lists the person may use come with the copy (deleted lists and other people's are left out).
+  const wanted = parse(row.mail_list_ids_json, []);
+  const ls = mailAccess.listScope(ctx, 'l');
+  const usable = wanted.length ? (await all(`SELECT l.id FROM mail_lists l WHERE l.workspace_id = ? AND l.id IN (${wanted.map(() => '?').join(',')}) AND ${ls.sql}`, [ws(ctx), ...wanted, ...ls.params])).map(r => Number(r.id)) : [];
+  const listIds = wanted.filter(i => usable.includes(Number(i)));
+  const picks = Object.fromEntries(Object.entries(picksOf(row)).filter(([k]) => listIds.includes(Number(k))));
+  // A staff member's copy keeps the From address only if it is one of their own verified addresses.
+  const senders = require('../senders/senderService');
+  const fromEmail = row.from_email && (senders.isAdmin(ctx) || await senders.ownsVerified(ctx, row.from_email)) ? row.from_email : null;
   const ins = await run(
     `INSERT INTO mail_campaigns (workspace_id, name, subject, from_name, from_email, html_content, mail_list_ids_json, mail_list_picks_json, status, version, created_by, updated_by, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', 1, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
-    [ws(ctx), `${String(row.name).slice(0, 143)} (copy)`, row.subject, row.from_name, row.from_email, row.html_content, row.mail_list_ids_json, row.mail_list_picks_json || null, ctx.auth.userId, ctx.auth.userId]
+    [ws(ctx), `${String(row.name).slice(0, 143)} (copy)`, row.subject, fromEmail ? row.from_name : null, fromEmail, row.html_content, JSON.stringify(listIds),
+      Object.keys(picks).length ? JSON.stringify(picks) : null, ctx.auth.userId, ctx.auth.userId]
   );
   const contacts = await contactsSvc.copySelection(ws(ctx), row.id, ins.lastID);
   await audit(ctx, 'mail.campaign_duplicated', { resourceType: 'mail_campaign', resourceId: ins.lastID, metadata: { from: row.id, ...contacts } });
-  return { campaign: await getOne(ctx, ins.lastID), contactsDropped: contacts.dropped };
+  return { campaign: await getOne(ctx, ins.lastID), contactsDropped: contacts.dropped, listsDropped: wanted.length - listIds.length, senderDropped: !!row.from_email && !fromEmail };
 }
 
 /**

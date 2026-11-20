@@ -206,6 +206,16 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
     return ids ? this.mailListOptions.filter(l => ids.has(l.id)).reduce((n, l) => n + (this.form.picks.has(l.id) ? this.form.picks.get(l.id).size : (l.reachable || 0)), 0) : 0;
   }
 
+  /** Chosen lists this person cannot use (deleted, or someone else's): shown, and left out when saving. */
+  get unavailableLists(): number[] {
+    if (!this.form || !this.audiences) return [];
+    const ok = new Set(this.mailListOptions.map((l: any) => l.id));
+    return [...this.form.mailListIds as Set<number>].filter(id => !ok.has(id));
+  }
+  dropUnavailableLists(): void {
+    for (const id of this.unavailableLists) { this.form.mailListIds.delete(id); this.form.picks.delete(id); }
+  }
+
   toggleMailList(id: number): void {
     if (this.form.mailListIds.has(id)) { this.form.mailListIds.delete(id); this.form.picks.delete(id); }
     else this.form.mailListIds.add(id);
@@ -670,6 +680,8 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
   onBeforeUnload(e: BeforeUnloadEvent): void { if (this.dirty) { e.preventDefault(); e.returnValue = ''; } }
 
   save(then?: () => void): void {
+    // Lists this person cannot use are left out (the server refuses them otherwise).
+    if (this.unavailableLists.length) this.dropUnavailableLists();
     const empty = this.emptyPickLists;
     if (empty.length) { this.toast.emit(`Choose at least one contact in ${empty.map(n => `"${n}"`).join(', ')}, or send to everyone in it.`); this.step = 2; return; }
     const body = {
@@ -755,7 +767,9 @@ export class EmailCampaignsComponent implements OnInit, OnDestroy {
         this.setSelected(r.campaign);
         this.load();
         const dropped = r.contactsDropped ? ` ${r.contactsDropped} contact${r.contactsDropped === 1 ? ' was' : 's were'} left out because they can no longer be emailed.` : '';
-        this.toast.emit(`Copy created as a draft.${dropped}`);
+        const lists = r.listsDropped ? ` ${r.listsDropped} list${r.listsDropped === 1 ? ' was' : 's were'} left out (deleted, or not yours).` : '';
+        const sender = r.senderDropped ? ' Choose your own sender address (the original one is not yours).' : '';
+        this.toast.emit(`Copy created as a draft.${dropped}${lists}${sender}`);
       },
       error: e => { this.busy = ''; this.toast.emit(this.err(e)); }
     });

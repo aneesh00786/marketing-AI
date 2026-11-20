@@ -251,3 +251,27 @@ test('contact lists: members see and use only the lists they created; Owners/Adm
   assert.ok((await names(BEN)).includes(adminList.id));
   assert.equal((await revoke(BEN)).status, 200);
 });
+
+test('duplicating a campaign keeps only the lists (and sender) the person may use', async () => {
+  for (const m of [ANA]) await grant(m, 'mail.send');
+  const adminList = (await h.api('POST', '/api/v1/mail/campaigns/contact-lists', { token: ADMIN.token, body: { name: `Admin only ${uid()}`, emails: [`q-${uid()}@client.io`] } })).data.list;
+  const anaList = (await h.api('POST', '/api/v1/mail/campaigns/contact-lists', { token: ANA.token, body: { name: `Ana own ${uid()}`, emails: [`r-${uid()}@client.io`] } })).data.list;
+  // An admin campaign using both lists, with the admin's sender, that Ana can see with "View all mail".
+  const c = await h.api('POST', '/api/v1/mail/campaigns', { token: ADMIN.token, body: { name: `Both ${uid()}`, fromEmail: 'news@acme.io', mailListIds: [adminList.id, anaList.id] } });
+  assert.equal(c.status, 200, JSON.stringify(c.data));
+  assert.equal((await grant(ANA)).status, 200);
+  await revoke(ANA);
+  const dup = await h.api('POST', `/api/v1/mail/campaigns/${c.data.campaign.id}/duplicate`, { token: ADMIN.token });
+  assert.equal(dup.status, 200);
+  assert.deepEqual(dup.data.campaign.mailListIds.sort(), [adminList.id, anaList.id].sort(), 'an admin keeps every list');
+  // Ana's own campaign that refers to the admin's list (e.g. made before lists were per person): her copy drops it.
+  await h.db().run('UPDATE mail_campaigns SET created_by = ?, mail_list_ids_json = ? WHERE id = ?', [ANA.userId, JSON.stringify([adminList.id, anaList.id]), c.data.campaign.id]);
+  const mine = await h.api('POST', `/api/v1/mail/campaigns/${c.data.campaign.id}/duplicate`, { token: ANA.token });
+  assert.equal(mine.status, 200, JSON.stringify(mine.data));
+  assert.deepEqual(mine.data.campaign.mailListIds, [anaList.id]);
+  assert.equal(mine.data.listsDropped, 1);
+  assert.equal(mine.data.campaign.fromEmail, null, "not Ana's sender address");
+  assert.equal(mine.data.senderDropped, true);
+  // And her copy can be saved.
+  assert.equal((await h.api('PATCH', `/api/v1/mail/campaigns/${mine.data.campaign.id}`, { token: ANA.token, body: { mailListIds: mine.data.campaign.mailListIds } })).status, 200);
+});

@@ -233,6 +233,10 @@
                 <span class="ec-list-chosen" *ngIf="form.mailListIds.has(l.id)">{{ listMode(l.id) === 'pick' ? (picked(l.id) | number) + ' chosen' : 'Everyone' }}</span>
               </span>
             </div>
+            <div class="mx-callout warn ec-unavail" *ngIf="unavailableLists.length" role="status">
+              <span>{{ unavailableLists.length }} chosen list{{ unavailableLists.length === 1 ? ' is' : 's are' }} not available to you (deleted, or created by someone else). {{ unavailableLists.length === 1 ? 'It is' : 'They are' }} left out when you save.</span>
+              <button *ngIf="editable" type="button" class="btn btn-secondary btn-sm" (click)="dropUnavailableLists()">Remove now</button>
+            </div>
             <p class="muted small ec-consent-note" *ngIf="listsWithoutConsent">People who unsubscribed or opted out are never emailed.</p>
           </fieldset>
 

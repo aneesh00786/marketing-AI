@@ -593,6 +593,21 @@ describe('EmailCampaignsComponent: Choose Template', () => {
     expect(comp.senderGroups.flatMap(g => g.items.map(i => i.email)).sort()).toEqual(['anita@thrive-co.io', 'sales@thrive-co.io']);
   });
 
+  it('a chosen list that is not available (deleted or someone else\'s) is shown, and left out when saving', () => {
+    comp.audiences = { mailLists: [{ id: 3, name: 'Mumbai', reachable: 15, total: 15 }] };
+    comp.delivery = { canCompose: true, canSend: true, ses: { configured: true } };
+    comp.form.mailListIds = new Set([3, 99]);
+    comp.step = 2;
+    fixture.detectChanges();
+    expect(comp.unavailableLists).toEqual([99]);
+    expect(el().querySelector('.ec-unavail')!.textContent).toContain('1 chosen list is not available to you');
+    comp.save();
+    const req = http.expectOne(r => r.method === 'PATCH' && r.url.endsWith('/campaigns/5'));
+    expect(req.request.body.mailListIds).toEqual([3]);
+    req.flush({ campaign: { id: 5, name: 'Autumn', status: 'draft', version: 2, html: ORIGINAL, mailListIds: [3], mailListPicks: {}, mailLists: [] } });
+    http.expectOne(r => /\/mail\/campaigns$/.test(r.url)).flush({ campaigns: [] });
+  });
+
   it('sent campaigns can be deleted by those who send, after a confirmation that the stop-list is kept', () => {
     const sent = { id: 7, name: 'Spring', status: 'submitted' };
     comp.delivery = { canCompose: true, canSend: false, ses: { configured: true } };
