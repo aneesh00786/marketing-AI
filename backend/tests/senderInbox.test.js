@@ -94,6 +94,18 @@ test('a message that cannot be saved does not stop newer ones; a sent email with
   assert.ok(subjects.includes('Newest reply') && subjects.includes('Self test') && !subjects.includes('Broken one'), subjects.join(', '));
 });
 
+test('the Inbox badge counts unread received mail the person may see', async () => {
+  const unread = async who => (await h.api('GET', '/api/v1/emails/inbox/unread', { token: who.token })).data.unread;
+  const mine = await unread(MEM);
+  const n = await db().get("SELECT COUNT(*) AS n FROM emails WHERE workspace_id = ? AND mailbox_user_id = ? AND status = 'Unread'", [W.workspaceId, MEM.userId]);
+  assert.equal(mine, Number(n.n));
+  assert.ok(mine > 0);
+  assert.equal(await unread(OTHER), 0, 'another member does not see it');
+  const one = await db().get('SELECT id FROM emails WHERE workspace_id = ? AND mailbox_user_id = ? ORDER BY id LIMIT 1', [W.workspaceId, MEM.userId]);
+  assert.equal((await h.api('PUT', `/api/v1/emails/${one.id}/read`, { token: MEM.token, body: { read: true } })).status, 200);
+  assert.equal(await unread(MEM), mine - 1);
+});
+
 test('workspaces with a mailbox or a member inbox are listed for the automatic sync', async () => {
   assert.ok((await require('../services/emailService').inboxWorkspaces()).includes(W.workspaceId));
 });

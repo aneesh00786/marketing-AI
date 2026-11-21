@@ -30,7 +30,9 @@
                     (click)="navigate(item.route)" [attr.aria-current]="currentRoute === item.route ? 'page' : null" [title]="sidebarCollapsed ? item.label : ''">
               <app-icon [name]="item.icon" [size]="19"></app-icon>
               <span class="nav-label">{{ item.label }}</span>
-              <span class="nav-count" *ngIf="navCount(item.route) !== null && navCount(item.route)! > 0">{{ navCount(item.route) }}</span>
+              <span class="nav-count" *ngIf="item.route !== 'emails' && navCount(item.route) !== null && navCount(item.route)! > 0">{{ navCount(item.route) }}</span>
+              <!-- Mail: unread received emails, unless the Inbox sub-item below already shows them -->
+              <span class="nav-count nav-count-unread" *ngIf="item.route === 'emails' && inboxUnread && (currentRoute !== 'emails' || sidebarCollapsed)" [attr.aria-label]="inboxUnread + ' unread emails'">{{ inboxBadge }}</span>
             </button>
             <!-- CRM and Mail Center sections, listed under them while they are open -->
             <div class="nav-sub" *ngIf="item.route === 'crm' && currentRoute === 'crm' && !sidebarCollapsed" role="group" aria-label="CRM sections">
@@ -46,6 +48,7 @@
                 <app-icon [name]="s.icon" [size]="16"></app-icon>
                 <span class="nav-label">{{ s.label }}</span>
                 <span class="nav-count" *ngIf="s.key === 'approvals' && pendingApprovalCount">{{ pendingApprovalCount }}</span>
+                <span class="nav-count nav-count-unread" *ngIf="s.key === 'inbox' && inboxUnread" [attr.aria-label]="inboxUnread + ' unread'">{{ inboxBadge }}</span>
               </button>
             </div>
           </ng-container>
@@ -496,7 +499,7 @@
     @defer (on immediate) {
       <app-mail-center class="hud-panel full-width-panel" [(section)]="mailSection" [productEmailsEnabled]="!!serverStatus?.features?.productEmails"
         [products]="digitalProducts" [drafts]="drafts" [draftsState]="draftsState"
-        [imapReady]="mailConfigLoaded ? !!mailConfig.has_imap_auth : null" [mailboxVersion]="mailboxVersion"
+        [imapReady]="mailConfigLoaded ? !!mailConfig.has_imap_auth : null" [mailboxVersion]="mailboxVersion" [unread]="inboxUnread" (unreadChange)="inboxUnread = $event"
         (compose)="openCompose()" (reply)="replyToEmail($event)" (forward)="forwardEmail($event)" (smartReply)="applySmartReply($event.reply, $event.email)" (sendAgain)="sendEmailAgain($event)"
         [draftTemplate]="draftTemplate" (templateConsumed)="draftTemplate = null" [draftProduct]="draftProduct" (productConsumed)="draftProduct = null"
         [campaignStartTemplate]="campaignStartTemplate" (templateUse)="onTemplateUse($event)"

@@ -453,6 +453,13 @@ const inboxQuery = z.object({
   page: z.coerce.number().int().min(1).max(1000).optional()
 }).strict();
 
+/** Unread received emails the person may see: the Inbox badge (polled by the app, so kept to one count). */
+emails.get('/inbox/unread', requireCapability('mail.view'), wrap(async (req, res) => {
+  const scope = mailAccess.emailScope(req, 'e');
+  const r = await get(`SELECT COUNT(*) AS n FROM emails e WHERE e.workspace_id = ? AND ${RECEIVED_SQL} AND ${UNREAD_SQL} AND ${scope.sql}`, [ws(req), ...scope.params]);
+  res.json({ success: true, unread: Number(r?.n) || 0 });
+}));
+
 /** Inbox: messages received by the workspace mailbox (synced over IMAP), newest first. */
 emails.get('/inbox', requireCapability('mail.view'), wrap(async (req, res) => {
   const q = query(inboxQuery, req);

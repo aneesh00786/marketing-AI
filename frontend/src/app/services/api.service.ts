@@ -418,6 +418,8 @@ export class ApiService {
   }
 
   // ---------- Mail Center: Inbox and Sent Mail ----------
+  /** Unread received emails the person may see (the Inbox badge). */
+  getInboxUnread(): Observable<any> { return this.http.get(`${this.baseUrl}/emails/inbox/unread`); }
   getInbox(params: { q?: string; read?: string; from?: string; to?: string; page?: number } = {}): Observable<any> {
     return this.http.get(`${this.baseUrl}/emails/inbox`, { params: this.queryParams(params) });
   }

@@ -83,7 +83,7 @@ describe('MailCenterComponent', () => {
     const caps = opts.caps === undefined ? ['mail.view', 'mail.compose', 'mail.send', 'mail.configure'] : opts.caps;
     if (caps) me.flush({ capabilities: caps }); else me.flush({}, { status: 500, statusText: 'x' });
     // The unread count for the Inbox tab badge and the Overview tile.
-    http.expectOne(r => r.url.endsWith('/emails/inbox') && r.params.get('read') === 'unread').flush({ unread: opts.unread ?? 3, emails: [] });
+    http.expectOne(r => r.url.endsWith('/emails/inbox/unread')).flush({ unread: opts.unread ?? 3, emails: [] });
     fixture.detectChanges();
   }
 
@@ -326,7 +326,7 @@ describe('MailCenterComponent', () => {
     comp.drafts = []; comp.draftsState = 'ready'; comp.section = 'deliverability';
     fixture.detectChanges();
     http.expectOne(r => r.url.endsWith('/auth/me')).flush({ capabilities: ['mail.view', 'mail.compose'], mailTabs: ['campaigns'] });
-    http.expectOne(r => r.url.endsWith('/emails/inbox')).flush({ unread: 2, emails: [] });
+    http.expectOne(r => r.url.endsWith('/emails/inbox/unread')).flush({ unread: 2 });
     fixture.detectChanges();
     expect(tabs().map(t => t.textContent!.trim().replace(/\s*\d+$/, ''))).toEqual(['Overview', 'Sent Mail', 'Drafts', 'Approvals', 'Campaigns']);
     expect(comp.active).toBe('overview');

@@ -42,6 +42,10 @@ export class MailCenterComponent implements OnInit {
   @Input() imapReady: boolean | null = null;
   /** Bumped by the shell after mail was sent or synced: Inbox and Sent Mail reload. */
   @Input() mailboxVersion = 0;
+  /** Unread count polled by the app shell: keeps the Inbox badge current while Mail Center is open. */
+  @Input() set unread(v: number | null) { if (typeof v === 'number' && (!this.mailTabs || this.mailTabs.has('inbox'))) this.inboxUnread = v; }
+  /** The Inbox changed the unread count (read/unread, sync): the sidebar badge follows. */
+  @Output() unreadChange = new EventEmitter<number>();
   /** Handed over from elsewhere in the app (product card, Email Templates "Use in"). */
   @Input() draftTemplate: { id: number; name: string } | null = null;
   @Input() draftProduct: { id: number } | null = null;
@@ -102,7 +106,7 @@ export class MailCenterComponent implements OnInit {
 
   loadUnread(): void {
     if (this.mailTabs && !this.mailTabs.has('inbox')) return;
-    this.api.getInbox({ read: 'unread' }).subscribe({
+    this.api.getInboxUnread().subscribe({
       next: (r: any) => { this.inboxUnread = typeof r?.unread === 'number' && (!this.mailTabs || this.mailTabs.has('inbox')) ? r.unread : null; },
       error: () => { this.inboxUnread = null; }
     });

@@ -101,7 +101,7 @@
       <!-- ===== Inbox: received mail only ===== -->
       <app-mail-inbox *ngSwitchCase="'inbox'" [imapReady]="imapReady" [canConfigure]="canConfigure" [refreshKey]="mailboxVersion"
         (reply)="reply.emit($event)" (forward)="forward.emit($event)" (smartReply)="smartReply.emit($event)"
-        (changed)="inboxUnread = $event" (toast)="toast.emit($event)" (openSettings)="go('settings')"></app-mail-inbox>
+        (changed)="inboxUnread = $event; unreadChange.emit($event)" (toast)="toast.emit($event)" (openSettings)="go('settings')"></app-mail-inbox>
 
       <!-- ===== Sent Mail: sent and failed outgoing mail ===== -->
       <app-mail-sent *ngSwitchCase="'sent'" [initialStatus]="sentStatus" [refreshKey]="mailboxVersion"

@@ -10,7 +10,7 @@
  */
 const TABS = [
   { key: 'inbox', label: 'Inbox', description: 'Email received by the company mailbox.',
-    paths: [/^\/api\/(v1\/)?emails\/inbox$/, /^\/api\/(v1\/)?emails\/\d+\/read$/, /^\/api\/(v1\/)?mail\/sync$/] },
+    paths: [/^\/api\/(v1\/)?emails\/inbox(\/unread)?$/, /^\/api\/(v1\/)?emails\/\d+\/read$/, /^\/api\/(v1\/)?mail\/sync$/] },
   { key: 'campaigns', label: 'Campaigns', description: 'Email campaigns and contact lists (Amazon SES).',
     paths: [/^\/api\/v1\/mail\/campaigns(\/|$)/] },
   { key: 'deliverability', label: 'Deliverability', description: 'Delivery, bounce and complaint rates of campaigns.',

@@ -119,7 +119,7 @@ export class AppComponent implements OnInit, OnDestroy {
     const counts: Record<string, number> = {
       products: this.digitalProducts.length,
       leads: this.leadTotal || this.leads.length,
-      emails: this.emails.length,
+      emails: this.inboxUnread ?? 0,
       appointments: this.appointments.length
     };
     return route in counts ? counts[route] : null;
@@ -406,8 +406,29 @@ export class AppComponent implements OnInit, OnDestroy {
   private notifTimer: any = null;
   private readonly onVisible = () => { if (document.visibilityState === 'visible') this.loadNotifications(); };
 
+  // ---------- Inbox badge (sidebar Mail / Inbox and Mail Center's Inbox tab) ----------
+  /** Unread received emails the person may see; null when they have no Inbox. */
+  inboxUnread: number | null = null;
+  private get hasInbox(): boolean {
+    return this.canOpen('emails') && (!this.myCaps || this.myCaps.has('mail.view')) && (!this.myMailTabs || this.myMailTabs.has('inbox'));
+  }
+  loadInboxUnread(): void {
+    if (!this.auth.isLoggedIn || !this.hasInbox || !this.apiService.getInboxUnread) { this.inboxUnread = null; return; }
+    this.apiService.getInboxUnread().subscribe({
+      next: (r: any) => {
+        const n = typeof r?.unread === 'number' ? r.unread : null;
+        // More unread than before: new mail arrived (automatic sync), so open lists reload.
+        if (n !== null && this.inboxUnread !== null && n > this.inboxUnread) this.mailboxVersion++;
+        this.inboxUnread = n;
+      },
+      error: () => { /* keep the last count */ }
+    });
+  }
+  get inboxBadge(): string { return (this.inboxUnread || 0) > 99 ? '99+' : String(this.inboxUnread || 0); }
+
   loadNotifications(): void {
     if (!this.auth.isLoggedIn) return;
+    this.loadInboxUnread();
     this.notifLoading = true;
     this.apiService.getNotifications().subscribe({
       next: (r: any) => { this.notifLoading = false; this.notifications = r.notifications || []; this.notifUnread = r.unread || 0; },
@@ -981,6 +1002,7 @@ export class AppComponent implements OnInit, OnDestroy {
         this.myMailTabs = Array.isArray(me?.mailTabs) ? new Set(me.mailTabs) : null;
         this.impersonatedBy = me?.impersonatedBy || null;
         loadSections();
+        this.loadInboxUnread();
         // Signed in (or switched workspace): reload the sender addresses so the reminder and Compose are current.
         try { this.senderReminderHidden = sessionStorage.getItem(this.senderReminderKey()) === '1'; } catch { this.senderReminderHidden = false; }
         this.loadMySenders();

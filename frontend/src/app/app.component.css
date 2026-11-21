@@ -69,6 +69,8 @@ code { font-family: var(--font-mono); font-size: 0.85em; }
 .nav-label { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .nav-count { font-size: 0.72rem; font-weight: 600; color: var(--text-muted); background: var(--surface-2); border: 1px solid var(--border); padding: 0 7px; border-radius: 999px; line-height: 18px; }
 .nav-item.active .nav-count { color: var(--accent-text); border-color: var(--accent-ring); background: transparent; }
+/* Unread mail: a filled badge, so it stands out from plain counts. */
+.nav-count.nav-count-unread, .nav-item.active .nav-count.nav-count-unread { color: #fff; background: var(--accent); border-color: var(--accent); }
 
 .sidebar-footer { padding: 12px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; }
 .roger-card {
@@ -94,6 +96,9 @@ code { font-family: var(--font-mono); font-size: 0.85em; }
 .app-shell.collapsed .nav-group-label { display: none; }
 .app-shell.collapsed .sidebar-brand { padding: 0; justify-content: center; }
 .app-shell.collapsed .nav-item { justify-content: center; padding: 10px 0; }
+/* Icons only: unread mail stays visible as a dot on the Mail icon. */
+.app-shell.collapsed .nav-item { position: relative; }
+.app-shell.collapsed .nav-item .nav-count-unread { display: block; position: absolute; top: 6px; right: calc(50% - 16px); width: 9px; height: 9px; padding: 0; font-size: 0; line-height: 0; border: 2px solid var(--surface); box-sizing: content-box; }
 .app-shell.collapsed .nav-group { padding-top: 6px; border-top: 1px solid var(--border); }
 .app-shell.collapsed .nav-group:first-child { border-top: 0; padding-top: 0; }
 .app-shell.collapsed .roger-card { justify-content: center; padding: 8px 0; }
@@ -592,7 +597,8 @@ app-email-preview.email-render-frame { height: 520px; }
   .main-area { margin-left: var(--sidebar-w-collapsed); }
   .brand-text, .nav-label, .nav-count, .roger-text, .nav-group-label, .collapse-toggle { display: none; }
   .sidebar-brand { padding: 0; justify-content: center; }
-  .nav-item { justify-content: center; padding: 10px 0; }
+  .nav-item { justify-content: center; padding: 10px 0; position: relative; }
+  .nav-item .nav-count-unread { display: block; position: absolute; top: 6px; right: calc(50% - 16px); width: 9px; height: 9px; padding: 0; font-size: 0; line-height: 0; border: 2px solid var(--surface); box-sizing: content-box; }
   .roger-card { justify-content: center; padding: 8px 0; }
 }
 
