@@ -33,4 +33,24 @@ describe('MySendersComponent ("My sender email")', () => {
     http.expectOne(r => r.method === 'POST' && r.url.endsWith('/mail/senders/1/resend')).flush({});
     http.expectOne(r => r.method === 'GET' && r.url.endsWith('/mail/senders')).flush({ senders: [], required: true });
   });
+
+  it('a verified address can connect its own inbox: the login is that address, the password is sent once and cleared', () => {
+    const c = fixture.componentInstance;
+    c.load();
+    http.expectOne(r => r.method === 'GET' && r.url.endsWith('/mail/senders')).flush({ senders: [{ id: 1, email: 'anita@thrive-co.io', status: 'verified', inbox: { connected: false } }], required: true });
+    fixture.detectChanges();
+    expect(el().textContent).toContain('Connect inbox');
+    c.editInbox(c.senders[0]);
+    expect(c.inboxHost).toBe('imap.zoho.com');
+    c.inboxPassword = 'app-pass';
+    c.saveInbox(c.senders[0]);
+    const req = http.expectOne(r => r.method === 'PUT' && r.url.endsWith('/mail/senders/1/inbox'));
+    expect(req.request.body).toEqual({ host: 'imap.zoho.com', port: 993, tls: true, password: 'app-pass' });
+    req.flush({ sender: { id: 1, email: 'anita@thrive-co.io', status: 'verified', inbox: { connected: true, status: 'connected', host: 'imap.zoho.com', port: 993, login: 'anita@thrive-co.io' } } });
+    expect(c.inboxPassword).toBe('');
+    expect(c.notice).toContain('connected');
+    http.expectOne(r => r.method === 'GET' && r.url.endsWith('/mail/senders')).flush({ senders: [{ id: 1, email: 'anita@thrive-co.io', status: 'verified', inbox: { connected: true, status: 'connected', host: 'imap.zoho.com', port: 993, login: 'anita@thrive-co.io' } }], required: true });
+    fixture.detectChanges();
+    expect(el().textContent).toContain('signs in as anita@thrive-co.io');
+  });
 });

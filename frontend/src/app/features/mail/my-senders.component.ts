@@ -22,7 +22,7 @@ import { SendersUiService } from '../../core/senders-ui.service';
         </span>
         <div class="ms-head-text">
           <h3 id="ms-title">My sender email</h3>
-          <p>The address your campaigns and emails are sent from. We email it a link to confirm it is yours.</p>
+          <p>The address your campaigns and emails are sent from, and its inbox, where replies arrive. We email it a link to confirm it is yours.</p>
         </div>
         <button type="button" class="ms-x" (click)="close.emit()" aria-label="Close">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
@@ -56,6 +56,56 @@ import { SendersUiService } from '../../core/senders-ui.service';
                   <button type="button" class="ms-btn ms-btn-ghost" *ngIf="s.status !== 'verified'" (click)="resend(s)" [disabled]="busy">Send link again</button>
                   <button type="button" class="ms-btn ms-btn-danger" (click)="remove(s)" [disabled]="busy">Remove</button>
                 </span>
+              </div>
+
+              <!-- Inbox of this same address: replies to what you send are synced into Marketech.ai -->
+              <div class="ms-inbox" *ngIf="s.status === 'verified'">
+                <ng-container *ngIf="s.inbox?.connected && inboxFor !== s.id">
+                  <div class="ms-row">
+                    <span class="ms-inbox-title">Inbox</span>
+                    <span class="ms-badge" [class.ok]="s.inbox.status !== 'error'" [class.err]="s.inbox.status === 'error'">{{ s.inbox.status === 'error' ? '⚠ Sync problem' : '✓ Connected' }}</span>
+                    <small class="ms-muted ms-grow">{{ s.inbox.host }}:{{ s.inbox.port }} · signs in as {{ s.inbox.login }}{{ s.inbox.lastSyncedAt ? ' · last synced ' + (s.inbox.lastSyncedAt | date:'medium') : '' }}</small>
+                  </div>
+                  <p class="ms-msg err" *ngIf="s.inbox.error" role="alert">{{ s.inbox.error }}</p>
+                  <div class="ms-row ms-row-end">
+                    <button type="button" class="ms-btn ms-btn-ghost" (click)="syncInbox()" [disabled]="busy">{{ syncing ? 'Syncing…' : 'Sync now' }}</button>
+                    <button type="button" class="ms-btn ms-btn-ghost" (click)="editInbox(s)" [disabled]="busy">Change</button>
+                    <button type="button" class="ms-btn ms-btn-danger" (click)="disconnectInbox(s)" [disabled]="busy">Disconnect</button>
+                  </div>
+                </ng-container>
+
+                <div class="ms-row" *ngIf="!s.inbox?.connected && inboxFor !== s.id">
+                  <span class="ms-inbox-title">Inbox</span>
+                  <small class="ms-muted ms-grow">Not connected. Connect the inbox of {{ s.email }} so replies to your emails appear in Marketech.ai.</small>
+                  <button type="button" class="ms-btn ms-btn-primary" (click)="editInbox(s)" [disabled]="busy">Connect inbox</button>
+                </div>
+
+                <form class="ms-add ms-inbox-form" *ngIf="inboxFor === s.id" (ngSubmit)="saveInbox(s)">
+                  <label>Mail provider
+                    <select name="ms-preset" [(ngModel)]="inboxPreset" (ngModelChange)="applyPreset()">
+                      <option *ngFor="let p of presets" [ngValue]="p.key">{{ p.label }}</option>
+                    </select>
+                  </label>
+                  <label>IMAP server
+                    <input type="text" name="ms-host" [(ngModel)]="inboxHost" placeholder="imap.yourcompany.com" autocomplete="off" required />
+                  </label>
+                  <label>Port
+                    <input type="number" name="ms-port" [(ngModel)]="inboxPort" min="1" max="65535" />
+                  </label>
+                  <label>Sign in as
+                    <input type="email" name="ms-login" [value]="s.email" disabled />
+                  </label>
+                  <label class="ms-span">Password or app password
+                    <input type="password" name="ms-pass" [(ngModel)]="inboxPassword" autocomplete="new-password" required />
+                  </label>
+                  <div class="ms-add-foot">
+                    <small class="ms-muted">The login is always {{ s.email }}. If your mailbox uses two-step sign-in, create an app password for it. It is stored encrypted.</small>
+                    <span class="ms-btns">
+                      <button type="button" class="ms-btn ms-btn-ghost" (click)="inboxFor = null" [disabled]="busy">Cancel</button>
+                      <button type="submit" class="ms-btn ms-btn-primary" [disabled]="busy || !inboxHost.trim() || !inboxPassword">{{ busy ? 'Checking…' : 'Connect' }}</button>
+                    </span>
+                  </div>
+                </form>
               </div>
             </li>
           </ul>
@@ -128,6 +178,15 @@ import { SendersUiService } from '../../core/senders-ui.service';
     .ms-badge { font-size: .75rem; font-weight: 700; padding: 3px 10px; border-radius: 999px; white-space: nowrap; background: var(--warning-soft, #fff7e6); color: var(--warning-text, #92400e); }
     .ms-badge.ok { background: var(--success-soft, #e7f7ee); color: var(--success-text, #157a3c); }
     .ms-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+    .ms-badge.err { background: var(--danger-soft, #fdecec); color: var(--danger-text, #b42318); }
+    .ms-inbox { border-top: 1px dashed var(--border, #e5e7eb); padding-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+    .ms-inbox-title { font-size: .8rem; font-weight: 700; }
+    .ms-grow { flex: 1 1 200px; word-break: break-word; }
+    .ms-row-end { justify-content: flex-end; }
+    .ms-inbox .ms-msg { margin: 0; }
+    .ms-span { grid-column: 1 / -1; }
+    .ms-add select { font: inherit; font-weight: 400; padding: 10px 12px; border: 1px solid var(--border, #d1d5db); border-radius: 10px; background: var(--surface, #fff); color: var(--text, #111827); }
+    .ms-add input:disabled { opacity: .7; }
 
     .ms-add { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
     .ms-add label { display: flex; flex-direction: column; gap: 6px; font-size: .82rem; font-weight: 600; color: var(--text, #111827); }
@@ -215,6 +274,70 @@ export class MySendersComponent implements OnInit {
     this.http.delete<any>(`${this.base}/${s.id}`).subscribe({
       next: () => { this.busy = false; this.load(); },
       error: e => { this.busy = false; this.error = this.err(e); }
+    });
+  }
+
+  // ---------- Inbox of a sender address ----------
+  readonly presets = [
+    { key: 'zoho', label: 'Zoho Mail', host: 'imap.zoho.com', port: 993 },
+    { key: 'zoho_in', label: 'Zoho Mail (India)', host: 'imap.zoho.in', port: 993 },
+    { key: 'google', label: 'Google Workspace', host: 'imap.gmail.com', port: 993 },
+    { key: 'microsoft', label: 'Microsoft 365', host: 'outlook.office365.com', port: 993 },
+    { key: 'other', label: 'Other', host: '', port: 993 }
+  ];
+  inboxFor: number | null = null;
+  inboxPreset = 'zoho';
+  inboxHost = '';
+  inboxPort = 993;
+  inboxPassword = '';
+  syncing = false;
+
+  editInbox(s: any): void {
+    this.error = ''; this.notice = '';
+    this.inboxFor = s.id;
+    this.inboxPassword = '';
+    const known = this.presets.find(p => p.host && p.host === s.inbox?.host);
+    this.inboxPreset = s.inbox?.connected ? (known?.key || 'other') : 'zoho';
+    this.inboxHost = s.inbox?.host || this.presets.find(p => p.key === this.inboxPreset)!.host;
+    this.inboxPort = s.inbox?.port || 993;
+  }
+
+  applyPreset(): void {
+    const p = this.presets.find(x => x.key === this.inboxPreset);
+    if (p && p.host) { this.inboxHost = p.host; this.inboxPort = p.port; }
+    if (p?.key === 'other') this.inboxHost = '';
+  }
+
+  saveInbox(s: any): void {
+    this.busy = true; this.error = ''; this.notice = '';
+    this.http.put<any>(`${this.base}/${s.id}/inbox`, { host: this.inboxHost.trim(), port: Number(this.inboxPort) || 993, tls: true, password: this.inboxPassword }).subscribe({
+      next: r => {
+        this.busy = false; this.inboxFor = null; this.inboxPassword = '';
+        this.notice = r.sender?.inbox?.status === 'error' ? `Connected, but the first sync had a problem: ${r.sender.inbox.error}` : `The inbox of ${s.email} is connected. Replies will appear in Mail Center → Inbox.`;
+        this.load();
+      },
+      error: e => { this.busy = false; this.inboxPassword = ''; this.error = this.err(e); }
+    });
+  }
+
+  disconnectInbox(s: any): void {
+    if (!confirm(`Disconnect the inbox of ${s.email}? New replies will no longer be synced. Emails already synced stay.`)) return;
+    this.busy = true; this.error = ''; this.notice = '';
+    this.http.delete<any>(`${this.base}/${s.id}/inbox`).subscribe({
+      next: () => { this.busy = false; this.load(); },
+      error: e => { this.busy = false; this.error = this.err(e); }
+    });
+  }
+
+  syncInbox(): void {
+    this.busy = true; this.syncing = true; this.error = ''; this.notice = '';
+    this.http.post<any>(`${this.base}/inbox/sync`, {}).subscribe({
+      next: r => {
+        this.busy = false; this.syncing = false;
+        this.senders = r.senders || this.senders;
+        this.notice = r.failed ? 'Sync finished with a problem: see the message on the inbox.' : `Synced: ${r.fetchedCount || 0} new email${r.fetchedCount === 1 ? '' : 's'}.`;
+      },
+      error: e => { this.busy = false; this.syncing = false; this.error = this.err(e); }
     });
   }
 

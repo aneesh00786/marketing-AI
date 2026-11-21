@@ -6,6 +6,7 @@
  *   - drafts they created;
  *   - emails they sent (Compose, drafts, product emails);
  *   - received emails from people they emailed (replies to their own mail or campaigns);
+ *   - everything synced from their own inbox ("My sender email" → Inbox);
  *   - campaigns they created or sent;
  *   - contact lists they created (Mail Center → Campaigns → Contact lists).
  * Mail with no recorded author (e.g. made before authors were recorded, or by an automation) is visible to the
@@ -36,12 +37,12 @@ function emailScope(ctx, a = 'e') {
   if (seesAllMail(ctx)) return { sql: '1 = 1', params: [] };
   const u = me(ctx);
   return {
-    sql: `(${a}.sent_by_user_id = ?
+    sql: `(${a}.sent_by_user_id = ? OR ${a}.mailbox_user_id = ?
       OR (${a}.sent_by_user_id IS NULL AND ${a}.sender_email IS NOT NULL AND ${a}.sender_email <> '' AND (
         LOWER(TRIM(${a}.sender_email)) IN (SELECT LOWER(TRIM(o.recipient_email)) FROM emails o WHERE o.workspace_id = ${a}.workspace_id AND o.sent_by_user_id = ? AND o.recipient_email IS NOT NULL)
         OR LOWER(TRIM(${a}.sender_email)) IN (SELECT LOWER(TRIM(r.email)) FROM mail_campaign_recipients r JOIN mail_campaigns mc ON mc.id = r.campaign_id
           WHERE mc.workspace_id = ${a}.workspace_id AND (mc.created_by = ? OR mc.submitted_by = ?)))))`,
-    params: [u, u, u, u]
+    params: [u, u, u, u, u]
   };
 }
 

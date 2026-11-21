@@ -27,9 +27,16 @@ const isAdmin = ctx => !!ctx?.auth?.capabilities?.has?.('members.manage');
 
 function httpError(status, message, code) { return Object.assign(new Error(message), { status, code }); }
 
+/** The address's own inbox (IMAP), never the password. */
+function presentInbox(r) {
+  if (!r.imap_host || !r.imap_pass) return { connected: false };
+  return { connected: true, host: r.imap_host, port: r.imap_port || 993, tls: Number(r.imap_tls) !== 0, login: r.email,
+    status: r.imap_status || 'connected', error: r.imap_error || null, lastSyncedAt: r.imap_synced_at || null };
+}
+
 function present(r, ses = undefined) {
   return { id: r.id, email: r.email, name: r.display_name || null, status: r.status, verifiedAt: r.verified_at || null, lastSentAt: r.last_sent_at || null, createdAt: r.created_at,
-    ...(ses !== undefined ? { ses } : {}) };
+    inbox: presentInbox(r), ...(ses !== undefined ? { ses } : {}) };
 }
 
 /**
@@ -144,6 +151,53 @@ async function remove(ctx, rawId) {
   return { removed: true };
 }
 
+const inboxSchema = z.object({
+  host: z.string().trim().toLowerCase().min(3).max(255).regex(/^[a-z0-9.-]+$/, 'Enter the IMAP server name, e.g. imap.zoho.com.'),
+  port: z.coerce.number().int().min(1).max(65535).optional(),
+  tls: z.boolean().optional(),
+  password: z.string().min(1, 'Enter the mailbox password or app password.').max(500)
+}).strict();
+
+/**
+ * Connects the inbox (IMAP) of the person's own verified sender address. The login is always that same address,
+ * so replies to what they send are read from it. The settings are saved only after a successful sign-in.
+ */
+async function setInbox(ctx, rawId, input) {
+  const row = await requireMine(ctx, rawId);
+  if (row.status !== 'verified') throw httpError(409, 'Confirm the address first (open the link we emailed), then connect its inbox.', 'NOT_VERIFIED');
+  const v = inboxSchema.parse(input || {});
+  const box = { imap_host: v.host, imap_port: v.port || 993, imap_tls: v.tls === false ? 0 : 1, imap_user: row.email, imap_pass: v.password };
+  const mail = require('../../../services/emailService');
+  try {
+    await mail.testImapLogin(box);
+  } catch (err) {
+    if (err.code === 'UNSAFE_HOST' || err.code === 'MAIL_HOST_UNRESOLVED') throw httpError(400, err.message, err.code);
+    throw httpError(400, `Could not sign in to ${row.email}: ${mail.imapErrorText(err, v.host, 'this form')}`, 'INBOX_LOGIN_FAILED');
+  }
+  const secretBox = require('../../../lib/secretBox');
+  if (!secretBox.isConfigured()) throw httpError(503, 'The server has no encryption key set, so the inbox password cannot be stored safely.', 'ENCRYPTION_NOT_CONFIGURED');
+  await run("UPDATE member_sender_addresses SET imap_host = ?, imap_port = ?, imap_tls = ?, imap_pass = ?, imap_status = 'connected', imap_error = NULL, updated_at = UTC_TIMESTAMP() WHERE id = ?",
+    [box.imap_host, box.imap_port, box.imap_tls, secretBox.encrypt(v.password), row.id]);
+  await audit(ctx, 'mail.sender_inbox_connected', { resourceType: 'sender_address', resourceId: row.id, metadata: { email: row.email, host: box.imap_host } });
+  // First sync right away (a failure is shown on the address, the connection stays saved).
+  await mail.syncMemberInboxes(ws(ctx), { userId: me(ctx) }).catch(() => null);
+  return { sender: present(await get('SELECT * FROM member_sender_addresses WHERE id = ?', [row.id])) };
+}
+
+async function removeInbox(ctx, rawId) {
+  const row = await requireMine(ctx, rawId);
+  await run('UPDATE member_sender_addresses SET imap_host = NULL, imap_port = NULL, imap_pass = NULL, imap_status = NULL, imap_error = NULL, imap_synced_at = NULL, updated_at = UTC_TIMESTAMP() WHERE id = ?', [row.id]);
+  await audit(ctx, 'mail.sender_inbox_removed', { resourceType: 'sender_address', resourceId: row.id, metadata: { email: row.email } });
+  return { sender: present(await get('SELECT * FROM member_sender_addresses WHERE id = ?', [row.id])) };
+}
+
+/** Syncs the person's own inboxes now. */
+async function syncMyInboxes(ctx) {
+  const r = await require('../../../services/emailService').syncMemberInboxes(ws(ctx), { userId: me(ctx) });
+  await require('../productEmails/service').detectUnsubscribeReplies({ workspaceId: ws(ctx) }).catch(() => null);
+  return { ...r, ...(await mine(ctx)) };
+}
+
 /** The link in the email (no sign-in needed: the single-use token is the proof). */
 async function verify(token) {
   if (!/^[a-f0-9]{64}$/.test(String(token || ''))) return { ok: false, reason: 'This link is not valid.' };
@@ -179,4 +233,4 @@ async function senderFor(ctx, preferred = null) {
   throw httpError(403, 'Add and confirm your own email address before sending (Mail Center → My sender email).', 'SENDER_REQUIRED');
 }
 
-module.exports = { mine, add, resend, remove, requestAws, verify, senderFor, ownsVerified, isAdmin, sesStatus, PUBLIC_DOMAINS };
+module.exports = { mine, add, resend, remove, requestAws, verify, setInbox, removeInbox, syncMyInboxes, senderFor, ownsVerified, isAdmin, sesStatus, PUBLIC_DOMAINS };

@@ -665,34 +665,43 @@ async function sendRealEmail(workspaceId, {
   };
 }
 
-async function syncIncomingEmails(workspaceId) {
-  const config = await getRawMailConfig(workspaceId);
-  const isInvalidImapPass = !config.imap_pass || 
-    config.imap_pass === 'demo_app_password_123' || 
-    config.imap_pass.startsWith('Zoho-enczapikey');
+/** A mailbox to read over IMAP: the workspace mailbox, or a member's own inbox (mailboxUserId). */
+function imapBox(cfg) {
+  return { imap_host: cfg.imap_host, imap_port: cfg.imap_port, imap_tls: cfg.imap_tls, imap_user: cfg.imap_user, imap_pass: cfg.imap_pass };
+}
 
-  if (isInvalidImapPass || !config.imap_user || !config.imap_host) {
-    return {
-      success: false,
-      isImapConfigured: false,
-      error: 'Inbound sync needs IMAP settings and an app password in Mail Settings.'
-    };
-  }
+/** What to tell the person when an IMAP login or sync fails (the server's own reply says more than err.message). */
+function imapErrorText(err, host, where = 'Mail Settings') {
+  const fullErr = String(err.response || err.responseText || err.message || '');
+  const isImapDisabled = /enable IMAP|IMAP access is disabled|contact your administrator/i.test(fullErr);
+  const isAuthErr = err.authenticationFailed ||
+    err.serverResponseCode === 'AUTHENTICATIONFAILED' ||
+    fullErr.includes('AUTHENTICATIONFAILED') || fullErr.includes('Invalid credentials') || fullErr.includes('Command failed');
+  if (isImapDisabled) return 'IMAP access is turned off for this mailbox. In Zoho Mail, open Settings > Mail Accounts > IMAP Access and turn it on, then sync again.';
+  if (isAuthErr) return `Mailbox authentication failed. Check the IMAP username and app password in ${where}.`;
+  return `IMAP connection error (${host}): ${err.message}`;
+}
 
-  try {
-    await assertSafeMailHost(config.imap_host);
-  } catch (err) {
-    return { success: false, isImapConfigured: false, error: err.message };
-  }
+/** Signs in to a mailbox and out again: proves the settings work before they are saved. */
+async function testImapLogin(box) {
+  await assertSafeMailHost(box.imap_host);
+  const client = new ImapFlow(imapClientOptions(box));
+  await client.connect();
+  await client.logout().catch(() => null);
+}
 
-  const client = new ImapFlow(imapClientOptions(config));
-
+/**
+ * Reads the latest messages of one mailbox into the workspace's received mail (each once, by Message-ID).
+ * mailboxUserId: the member whose own inbox it is (they see what is synced from it).
+ */
+async function syncMailbox(workspaceId, box, { recipientName = null, mailboxUserId = null } = {}) {
+  await assertSafeMailHost(box.imap_host);
+  const client = new ImapFlow(imapClientOptions(box));
   let fetchedCount = 0;
   const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
 
+  await client.connect();
   try {
-    await client.connect();
-
     // Select INBOX
     const lock = await client.getMailboxLock('INBOX');
     try {
@@ -705,7 +714,7 @@ async function syncIncomingEmails(workspaceId) {
         const range = `${startSeq}:${totalMessages}`;
 
         for await (let msg of client.fetch(range, { envelope: true, source: true, flags: true })) {
-          const messageId = msg.envelope?.messageId || `imap_${msg.seq}_${msg.uid}`;
+          const messageId = msg.envelope?.messageId || `imap_${box.imap_user}_${msg.seq}_${msg.uid}`;
 
           // Check if already saved in emails table
           const existing = await get('SELECT id FROM emails WHERE workspace_id = ? AND message_id = ? LIMIT 1', [workspaceId, messageId]);
@@ -730,18 +739,18 @@ async function syncIncomingEmails(workspaceId) {
             INSERT INTO emails (
               workspace_id, sender, sender_email, recipient_email, recipient_name,
               subject, body, html_body, snippet, ai_summary, ai_priority, ai_replies_json,
-              is_urgent, is_read, status, message_id, smtp_status, received_at
+              is_urgent, is_read, status, message_id, smtp_status, received_at, mailbox_user_id
             ) VALUES (
               ?, ?, ?, ?, ?,
               ?, ?, ?, ?, ?, ?, ?,
-              ?, 0, 'Unread', ?, 'Received via IMAP', ?
+              ?, 0, 'Unread', ?, 'Received via IMAP', ?, ?
             )
           `, [
             workspaceId,
             fromName,
             fromAddr,
-            config.imap_user,
-            config.sender_name || config.imap_user,
+            box.imap_user,
+            recipientName || box.imap_user,
             subject,
             textBody,
             htmlBody,
@@ -751,7 +760,8 @@ async function syncIncomingEmails(workspaceId) {
             JSON.stringify(analysis.ai_replies || []),
             isUrgent,
             messageId,
-            receivedAt
+            receivedAt,
+            mailboxUserId
           ]);
 
           fetchedCount++;
@@ -760,8 +770,69 @@ async function syncIncomingEmails(workspaceId) {
     } finally {
       lock.release();
     }
-
     await client.logout();
+  } catch (err) {
+    await client.logout().catch(() => null);
+    throw err;
+  }
+  return { fetchedCount, syncedAt: now };
+}
+
+/**
+ * Members' own inboxes ("My sender email" → Inbox), each with its own login (the sender address itself).
+ * A failure is recorded on that address and does not stop the others. userId: only that member's.
+ */
+async function syncMemberInboxes(workspaceId, { userId = null } = {}) {
+  const rows = await all(
+    `SELECT id, user_id, email, display_name, imap_host, imap_port, imap_tls, imap_pass FROM member_sender_addresses
+     WHERE workspace_id = ? AND status = 'verified' AND imap_host IS NOT NULL AND imap_pass IS NOT NULL${userId ? ' AND user_id = ?' : ''}`,
+    userId ? [workspaceId, Number(userId)] : [workspaceId]).catch(() => []);
+  const out = { inboxes: rows.length, synced: 0, failed: 0, fetchedCount: 0 };
+  for (const r of rows) {
+    let pass;
+    try { pass = secretBox.decrypt(r.imap_pass); } catch { pass = null; }
+    const box = { imap_host: r.imap_host, imap_port: r.imap_port || 993, imap_tls: Number(r.imap_tls) === 0 ? 0 : 1, imap_user: r.email, imap_pass: pass };
+    try {
+      if (!pass) throw mailError('The saved inbox password cannot be read. Connect the inbox again.', 409, 'INBOX_PASSWORD_UNREADABLE');
+      const res = await syncMailbox(workspaceId, box, { recipientName: r.display_name || null, mailboxUserId: r.user_id });
+      out.synced++; out.fetchedCount += res.fetchedCount;
+      await run("UPDATE member_sender_addresses SET imap_status = 'connected', imap_error = NULL, imap_synced_at = UTC_TIMESTAMP() WHERE id = ?", [r.id]);
+    } catch (err) {
+      out.failed++;
+      const msg = err.code === 'INBOX_PASSWORD_UNREADABLE' || err.code === 'UNSAFE_HOST' ? err.message : imapErrorText(err, r.imap_host, 'My sender email → Inbox');
+      await run("UPDATE member_sender_addresses SET imap_status = 'error', imap_error = ? WHERE id = ?", [String(msg).slice(0, 500), r.id]).catch(() => null);
+    }
+  }
+  return out;
+}
+
+async function syncIncomingEmails(workspaceId) {
+  // Members' own inboxes are synced whether or not the workspace mailbox is set up.
+  const members = await syncMemberInboxes(workspaceId).catch(() => ({ inboxes: 0, synced: 0, failed: 0, fetchedCount: 0 }));
+  const memberNote = members.inboxes ? ` Members' inboxes: ${members.synced} synced${members.failed ? `, ${members.failed} with an error` : ''} (${members.fetchedCount} new).` : '';
+  const config = await getRawMailConfig(workspaceId);
+  const isInvalidImapPass = !config.imap_pass || 
+    config.imap_pass === 'demo_app_password_123' || 
+    config.imap_pass.startsWith('Zoho-enczapikey');
+
+  if (isInvalidImapPass || !config.imap_user || !config.imap_host) {
+    if (members.synced) return { success: true, fetchedCount: members.fetchedCount, memberInboxes: members, message: `The workspace mailbox has no IMAP settings.${memberNote}` };
+    return {
+      success: false,
+      isImapConfigured: false,
+      memberInboxes: members,
+      error: 'Inbound sync needs IMAP settings and an app password in Mail Settings.'
+    };
+  }
+
+  try {
+    await assertSafeMailHost(config.imap_host);
+  } catch (err) {
+    return { success: false, isImapConfigured: false, memberInboxes: members, error: err.message };
+  }
+
+  try {
+    const { fetchedCount, syncedAt: now } = await syncMailbox(workspaceId, imapBox(config), { recipientName: config.sender_name || config.imap_user });
 
     // Update last_synced_at
     await run(
@@ -771,29 +842,18 @@ async function syncIncomingEmails(workspaceId) {
 
     return {
       success: true,
-      fetchedCount,
+      fetchedCount: fetchedCount + members.fetchedCount,
       lastSyncedAt: now,
-      message: `Successfully synchronized ${fetchedCount} new emails from ${config.imap_user}`
+      memberInboxes: members,
+      message: `Successfully synchronized ${fetchedCount} new emails from ${config.imap_user}.${memberNote}`
     };
   } catch (err) {
     console.error('IMAP sync error:', err.message);
-    // The server's own reply (e.g. Zoho's) says more than err.message, such as when IMAP is switched off.
-    const fullErr = String(err.response || err.responseText || err.message || '');
-    const isImapDisabled = /enable IMAP|IMAP access is disabled|contact your administrator/i.test(fullErr);
-    const isAuthErr = err.authenticationFailed ||
-      err.serverResponseCode === 'AUTHENTICATIONFAILED' ||
-      fullErr.includes('AUTHENTICATIONFAILED') || fullErr.includes('Invalid credentials') || fullErr.includes('Command failed');
-
-    const friendlyError = isImapDisabled
-      ? 'IMAP access is turned off for this mailbox. In Zoho Mail, open Settings > Mail Accounts > IMAP Access and turn it on, then sync again.'
-      : isAuthErr
-        ? 'Mailbox authentication failed. Check the IMAP username and app password in Mail Settings.'
-        : `IMAP connection error (${config.imap_host}): ${err.message}`;
-
     return {
       success: false,
       isImapConfigured: false,
-      error: friendlyError
+      memberInboxes: members,
+      error: imapErrorText(err, config.imap_host)
     };
   }
 }
@@ -804,6 +864,9 @@ module.exports = {
   setMarketingApproval,
   smtpTransportOptions,
   imapClientOptions,
+  testImapLogin,
+  imapErrorText,
+  syncMemberInboxes,
   smtpOutcomeUnknown,
   EMAIL_RE,
   isValidRecipient,
