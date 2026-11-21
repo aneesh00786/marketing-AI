@@ -430,9 +430,12 @@ const UNREAD_SQL = "(COALESCE(e.is_read, 0) = 0 AND e.status <> 'Read')";
 const MAILBOX_PAGE = 25;
 const isoDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const likeOf = q => `%${q.replace(/[\\%_]/g, c => `\\${c}`)}%`;
-const dayRange = (col, q, where, params) => {
-  if (q.from) { where.push(`${col} >= ?`); params.push(`${q.from} 00:00:00`); }
-  if (q.to) { where.push(`${col} < DATE_ADD(?, INTERVAL 1 DAY)`); params.push(`${q.to} 00:00:00`); }
+/** "From" / "To" are calendar days where the viewer is (X-Time-Zone); the columns are UTC. */
+const dayRange = (col, q, where, params, req) => {
+  const tz = require('../../lib/time').requestTimeZone(req);
+  const t = require('../../lib/time');
+  if (q.from) { where.push(`${col} >= ?`); params.push(t.dayStartUtc(q.from, tz)); }
+  if (q.to) { where.push(`${col} < ?`); params.push(t.dayStartUtc(t.nextDay(q.to), tz)); }
 };
 function query(schema, req) {
   const r = schema.safeParse(req.query || {});
@@ -464,7 +467,7 @@ emails.get('/inbox', requireCapability('mail.view'), wrap(async (req, res) => {
     where.push('(e.subject LIKE ? OR e.sender LIKE ? OR e.sender_email LIKE ? OR e.recipient_email LIKE ? OR e.body LIKE ?)');
     params.push(like, like, like, like, like);
   }
-  dayRange('e.received_at', q, where, params);
+  dayRange('e.received_at', q, where, params, req);
   const rows = await all(
     `SELECT e.id, e.sender, e.sender_email, e.recipient_email, e.recipient_name, e.subject, e.snippet, LEFT(e.body, 400) AS body,
             e.received_at, e.is_read, e.status, e.is_urgent, e.ai_priority, e.ai_summary, (e.html_body IS NOT NULL AND e.html_body <> '') AS has_html
@@ -507,7 +510,7 @@ emails.get('/sent', requireCapability('mail.view'), wrap(async (req, res) => {
     where.push('(e.subject LIKE ? OR e.recipient_email LIKE ? OR e.recipient_name LIKE ? OR e.body LIKE ?)');
     params.push(like, like, like, like);
   }
-  dayRange('COALESCE(e.sent_at, e.received_at)', q, where, params);
+  dayRange('COALESCE(e.sent_at, e.received_at)', q, where, params, req);
   if (q.status) { where.push(`(${A.DELIVERY_SQL}) = ?`); params.push(q.status); }
   if (q.purpose === 'not_recorded') where.push(`(${A.PURPOSE_SQL}) IS NULL`);
   else if (q.purpose) { where.push(`(${A.PURPOSE_SQL}) = ?`); params.push(q.purpose); }

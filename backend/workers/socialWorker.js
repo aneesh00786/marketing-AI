@@ -131,6 +131,27 @@ async function processProductEmails() {
   }
 }
 
+/**
+ * Inboxes: every workspace mailbox and member inbox is synced automatically (each workspace at most every
+ * few minutes, see outreachSender.syncInboxes), so new mail arrives without pressing Sync.
+ */
+let lastInboxScan = 0;
+async function processInboxes() {
+  if (Date.now() - lastInboxScan < 60 * 1000) return 0;
+  lastInboxScan = Date.now();
+  try {
+    const ids = await require('../services/emailService').inboxWorkspaces();
+    if (ids.length) {
+      await outreachSender.syncInboxes(ids);
+      await require('../modules/mail/productEmails/service').detectUnsubscribeReplies().catch(() => null);
+    }
+    return 0;
+  } catch (err) {
+    log('inbox sync error:', err.message);
+    return 0;
+  }
+}
+
 /** Automation workflows: match recorded events to active workflows, then run due steps. */
 async function processAutomation() {
   try {
@@ -198,7 +219,7 @@ async function loop() {
         await processWorkspacePurge();
         lastSchedule = Date.now();
       }
-      const worked = (await processPublishing()) + (await processProcessing()) + (await processBackground()) + (await processOutreach()) + (await processProductEmails()) + (await processAutomation());
+      const worked = (await processPublishing()) + (await processProcessing()) + (await processBackground()) + (await processOutreach()) + (await processProductEmails()) + (await processInboxes()) + (await processAutomation());
       if (worked > 0) continue;
     } catch (err) {
       log('loop error:', err.message);

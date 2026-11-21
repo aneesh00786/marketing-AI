@@ -8,6 +8,7 @@ import { ContactPickerComponent, PickedContact } from './contact-picker.componen
 import { APPROVAL_STATUSES } from './mail-nav';
 import { EmailPreviewComponent } from './email-preview.component';
 import { EmailTrackingComponent } from './email-tracking.component';
+import { serverTime } from '../../core/time';
 
 type DraftStatus = 'Draft' | 'Approved' | 'Sending' | 'Sent' | 'Needs Review';
 
@@ -195,8 +196,8 @@ export class MailDraftsComponent implements OnInit, OnChanges {
 
   when(value: any): string {
     if (!value) return '';
-    const d = new Date(String(value).includes('T') || String(value).endsWith('Z') ? value : String(value).replace(' ', 'T') + 'Z');
-    if (isNaN(d.getTime())) return String(value).slice(0, 10);
+    const d = serverTime(value);
+    if (!d) return String(value).slice(0, 10);
     const mins = Math.round((Date.now() - d.getTime()) / 60000);
     if (mins < 1) return 'just now';
     if (mins < 60) return `${mins} min ago`;

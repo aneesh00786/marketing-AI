@@ -5,6 +5,7 @@ import { HttpClient } from '@angular/common/http';
 import { apiRoot } from '../../core/api-base';
 import { ComposeRequestService } from '../../core/compose-request.service';
 import { CallService } from '../../shared/calling/call.service';
+import { localDay } from '../../core/time';
 
 type Tab = 'overview' | 'timeline' | 'notes';
 
@@ -102,11 +103,11 @@ export class LeadFollowupsComponent implements OnInit {
 
   private blankFollowup(): any {
     const d = new Date(Date.now() + 24 * 3600000);
-    return { title: '', type: 'call', description: '', assignedUserId: null, date: d.toISOString().slice(0, 10), time: '10:00', priority: 'medium', reminderMinutes: 30 };
+    return { title: '', type: 'call', description: '', assignedUserId: null, date: localDay(d), time: '10:00', priority: 'medium', reminderMinutes: 30 };
   }
   private blankActivity(): any {
     const now = new Date();
-    return { type: 'meeting', title: '', description: '', durationMinutes: null, date: now.toISOString().slice(0, 10), time: now.toTimeString().slice(0, 5), nextDate: '' };
+    return { type: 'meeting', title: '', description: '', durationMinutes: null, date: localDay(now), time: now.toTimeString().slice(0, 5), nextDate: '' };
   }
 
   open(form: 'followup' | 'note' | 'activity'): void {
@@ -140,7 +141,7 @@ export class LeadFollowupsComponent implements OnInit {
 
   startReschedule(f: any): void {
     const d = new Date(f.dueAt);
-    this.editing = { id: f.id, kind: 'followup', dueAt: `${d.toISOString().slice(0, 10)}T${d.toTimeString().slice(0, 5)}` };
+    this.editing = { id: f.id, kind: 'followup', dueAt: `${localDay(d)}T${d.toTimeString().slice(0, 5)}` };
   }
 
   saveReschedule(): void {

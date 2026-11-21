@@ -3,6 +3,7 @@ import { inject } from '@angular/core';
 import { catchError, throwError } from 'rxjs';
 import { APP_REQUEST_HEADER, AuthStateService } from './auth-state.service';
 import { apiRoot } from './api-base';
+import { userTimeZone } from './time';
 
 /**
  * Sends the session cookie with API calls and returns the user to sign-in when it is rejected.
@@ -21,9 +22,10 @@ export const authInterceptor: HttpInterceptorFn = (req, next) => {
     }));
   }
   // The session cookie goes with API calls (also to localhost:8000 during `ng serve`); the app
-  // header lets the server accept cookie-authenticated changes. No token is ever read here.
+  // header lets the server accept cookie-authenticated changes; X-Time-Zone makes days (date filters, daily
+  // charts) the person's own days. No token is ever read here.
   const authed = isApi
-    ? req.clone({ withCredentials: true, setHeaders: APP_REQUEST_HEADER })
+    ? req.clone({ withCredentials: true, setHeaders: { ...APP_REQUEST_HEADER, 'X-Time-Zone': userTimeZone() } })
     : req;
   return next(authed).pipe(
     catchError((err: HttpErrorResponse) => {

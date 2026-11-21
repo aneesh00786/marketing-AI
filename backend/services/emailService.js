@@ -698,6 +698,7 @@ async function syncMailbox(workspaceId, box, { recipientName = null, mailboxUser
   await assertSafeMailHost(box.imap_host);
   const client = new ImapFlow(imapClientOptions(box));
   let fetchedCount = 0;
+  let skipped = 0;
   const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
 
   await client.connect();
@@ -709,62 +710,73 @@ async function syncMailbox(workspaceId, box, { recipientName = null, mailboxUser
       const totalMessages = status.messages || 0;
 
       if (totalMessages > 0) {
-        // Fetch up to 10 latest messages
-        const startSeq = Math.max(1, totalMessages - 9);
+        // The latest messages (newest last); each is saved once, so a longer window only re-checks known ones.
+        const startSeq = Math.max(1, totalMessages - (SYNC_WINDOW - 1));
         const range = `${startSeq}:${totalMessages}`;
 
-        for await (let msg of client.fetch(range, { envelope: true, source: true, flags: true })) {
-          const messageId = msg.envelope?.messageId || `imap_${box.imap_user}_${msg.seq}_${msg.uid}`;
+        // Fetched first, then saved one by one: a message that cannot be saved is skipped, not the ones after it.
+        const fetched = [];
+        for await (let msg of client.fetch(range, { envelope: true, source: true, flags: true })) fetched.push(msg);
+        for (const msg of fetched) {
+          const messageId = msg.envelope?.messageId || `imap_${box.imap_user}_${msg.uid}`;
 
-          // Check if already saved in emails table
-          const existing = await get('SELECT id FROM emails WHERE workspace_id = ? AND message_id = ? LIMIT 1', [workspaceId, messageId]);
-          if (existing) continue;
+          // Already received (a sent email with the same Message-ID, e.g. sent from here to this mailbox, is not).
+          const existing = await get(`SELECT id, mailbox_user_id FROM emails WHERE workspace_id = ? AND message_id = ? AND status NOT IN ('Sent', 'Not Sent') LIMIT 1`, [workspaceId, messageId]);
+          if (existing) {
+            // Also in this member's own inbox (first synced from the workspace mailbox): theirs to see too.
+            if (mailboxUserId && !existing.mailbox_user_id) await run('UPDATE emails SET mailbox_user_id = ? WHERE id = ?', [mailboxUserId, existing.id]).catch(() => null);
+            continue;
+          }
+          try {
+            // Parse full MIME message source
+            const parsed = await simpleParser(msg.source);
+            const fromAddr = parsed.from?.value?.[0]?.address || null;
+            const fromName = parsed.from?.value?.[0]?.name || fromAddr || '(unknown sender)';
+            const subject = parsed.subject || '(No Subject)';
+            const textBody = parsed.text || '';
+            const htmlBody = parsed.html || `<p>${textBody.replace(/\n/g, '<br>')}</p>`;
+            const snippet = textBody.substring(0, 140) || subject;
+            const receivedAt = parsed.date ? new Date(parsed.date).toISOString().replace('T', ' ').substring(0, 19) : now;
 
-          // Parse full MIME message source
-          const parsed = await simpleParser(msg.source);
-          const fromAddr = parsed.from?.value?.[0]?.address || null;
-          const fromName = parsed.from?.value?.[0]?.name || fromAddr || '(unknown sender)';
-          const subject = parsed.subject || '(No Subject)';
-          const textBody = parsed.text || '';
-          const htmlBody = parsed.html || `<p>${textBody.replace(/\n/g, '<br>')}</p>`;
-          const snippet = textBody.substring(0, 140) || subject;
-          const receivedAt = parsed.date ? new Date(parsed.date).toISOString().replace('T', ' ').substring(0, 19) : now;
+            // Auto-run AI Analysis on received email!
+            // Metered to the workspace that owns this mailbox; past the quota it keeps the non-AI summary.
+            const analysis = await aiEngine.analyzeEmail({ subject, body: textBody, sender: fromName }, null, { workspaceId, referenceType: 'email_sync', fallbackOnQuota: true });
+            const isUrgent = analysis.ai_priority === 'Urgent' ? 1 : 0;
 
-          // Auto-run AI Analysis on received email!
-          // Metered to the workspace that owns this mailbox; past the quota it keeps the non-AI summary.
-          const analysis = await aiEngine.analyzeEmail({ subject, body: textBody, sender: fromName }, null, { workspaceId, referenceType: 'email_sync', fallbackOnQuota: true });
-          const isUrgent = analysis.ai_priority === 'Urgent' ? 1 : 0;
+            await run(`
+              INSERT INTO emails (
+                workspace_id, sender, sender_email, recipient_email, recipient_name,
+                subject, body, html_body, snippet, ai_summary, ai_priority, ai_replies_json,
+                is_urgent, is_read, status, message_id, smtp_status, received_at, mailbox_user_id
+              ) VALUES (
+                ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?,
+                ?, 0, 'Unread', ?, 'Received via IMAP', ?, ?
+              )
+            `, [
+              workspaceId,
+              fromName,
+              fromAddr,
+              box.imap_user,
+              recipientName || box.imap_user,
+              subject,
+              textBody,
+              htmlBody,
+              snippet,
+              analysis.ai_summary,
+              analysis.ai_priority,
+              JSON.stringify(analysis.ai_replies || []),
+              isUrgent,
+              messageId,
+              receivedAt,
+              mailboxUserId
+            ]);
 
-          await run(`
-            INSERT INTO emails (
-              workspace_id, sender, sender_email, recipient_email, recipient_name,
-              subject, body, html_body, snippet, ai_summary, ai_priority, ai_replies_json,
-              is_urgent, is_read, status, message_id, smtp_status, received_at, mailbox_user_id
-            ) VALUES (
-              ?, ?, ?, ?, ?,
-              ?, ?, ?, ?, ?, ?, ?,
-              ?, 0, 'Unread', ?, 'Received via IMAP', ?, ?
-            )
-          `, [
-            workspaceId,
-            fromName,
-            fromAddr,
-            box.imap_user,
-            recipientName || box.imap_user,
-            subject,
-            textBody,
-            htmlBody,
-            snippet,
-            analysis.ai_summary,
-            analysis.ai_priority,
-            JSON.stringify(analysis.ai_replies || []),
-            isUrgent,
-            messageId,
-            receivedAt,
-            mailboxUserId
-          ]);
-
-          fetchedCount++;
+            fetchedCount++;
+          } catch (err) {
+            skipped++;
+            console.warn(`IMAP sync: message ${messageId} in ${box.imap_user} was not saved:`, err.message);
+          }
         }
       }
     } finally {
@@ -775,7 +787,17 @@ async function syncMailbox(workspaceId, box, { recipientName = null, mailboxUser
     await client.logout().catch(() => null);
     throw err;
   }
-  return { fetchedCount, syncedAt: now };
+  return { fetchedCount, skipped, syncedAt: now };
+}
+
+/** How many of a mailbox's latest messages each sync looks at. */
+const SYNC_WINDOW = 30;
+
+/** Workspaces with a mailbox to read: the workspace mailbox (IMAP), or a member's own inbox. */
+async function inboxWorkspaces() {
+  const rows = await all(`SELECT workspace_id FROM mail_configurations WHERE imap_host IS NOT NULL AND imap_host <> '' AND imap_user IS NOT NULL AND imap_pass IS NOT NULL AND imap_pass <> ''
+    UNION SELECT workspace_id FROM member_sender_addresses WHERE status = 'verified' AND imap_host IS NOT NULL AND imap_pass IS NOT NULL`).catch(() => []);
+  return rows.map(r => Number(r.workspace_id)).filter(Boolean);
 }
 
 /**
@@ -867,6 +889,7 @@ module.exports = {
   testImapLogin,
   imapErrorText,
   syncMemberInboxes,
+  inboxWorkspaces,
   smtpOutcomeUnknown,
   EMAIL_RE,
   isValidRecipient,

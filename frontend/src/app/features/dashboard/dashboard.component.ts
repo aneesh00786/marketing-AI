@@ -6,6 +6,7 @@ import { IconComponent } from '../../shared/icon.component';
 import { LineChartComponent, LinePoint, compact } from '../../shared/charts/line-chart.component';
 import { BarChartComponent, BarItem } from '../../shared/charts/bar-chart.component';
 import { DonutChartComponent, DonutSegment } from '../../shared/charts/donut-chart.component';
+import { localDayFromToday } from '../../core/time';
 
 export interface DashboardNavigation {
   route: 'social' | 'leads' | 'products' | 'emails' | 'drafts' | 'businesses' | 'voice' | 'appointments';
@@ -85,7 +86,7 @@ export class DashboardComponent implements OnInit {
   }
 
   private isoDay(offset: number): string {
-    return new Date(Date.now() + offset * 86400000).toISOString().slice(0, 10);
+    return localDayFromToday(offset);
   }
 
   setRange(key: string): void {

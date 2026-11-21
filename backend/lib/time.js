@@ -82,7 +82,52 @@ function utcToZonedLocal(date, timeZone) {
   return `${p.year}-${pad(p.month)}-${pad(p.day)}T${pad(p.hour)}:${pad(p.minute)}`;
 }
 
+/**
+ * The viewer's time zone: the browser sends it with every API call (X-Time-Zone, e.g. 'Asia/Kolkata').
+ * Dates people pick ("From", "To") and per-day charts are days where they are; storage stays UTC.
+ */
+function requestTimeZone(req) {
+  const tz = String(req?.headers?.['x-time-zone'] || '').trim();
+  return tz && tz.length <= 64 && isValidTimeZone(tz) ? tz : 'UTC';
+}
+
+/** 'YYYY-MM-DD': the calendar day of an instant in timeZone. */
+function dayInZone(date, timeZone) {
+  return utcToZonedLocal(date, timeZone).slice(0, 10);
+}
+
+/** The UTC DATETIME at which a local calendar day ('YYYY-MM-DD') starts in timeZone. */
+function dayStartUtc(day, timeZone) {
+  // Midnight can be skipped by a daylight-saving change in a few zones: the day then starts at 01:00.
+  for (const t of ['00:00', '01:00']) {
+    try { return toDbDateTime(zonedLocalToUtc(`${day}T${t}`, timeZone)); } catch (e) { if (t === '01:00') throw e; }
+  }
+}
+
+/** The day after 'YYYY-MM-DD' (calendar arithmetic, no time zone). */
+function nextDay(day, n = 1) {
+  const d = new Date(`${day}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * MySQL offset ('+05:30') of timeZone now, for grouping UTC DATETIMEs by local day with CONVERT_TZ
+ * (numeric offsets need no time zone tables; across a daylight-saving change a day can be off by an hour).
+ */
+function sqlOffset(timeZone, at = new Date()) {
+  const mins = Math.round(offsetMs(at, timeZone) / 60000);
+  const sign = mins < 0 ? '-' : '+';
+  const a = Math.abs(mins);
+  return `${sign}${String(Math.floor(a / 60)).padStart(2, '0')}:${String(a % 60).padStart(2, '0')}`;
+}
+
 module.exports = {
+  requestTimeZone,
+  dayInZone,
+  dayStartUtc,
+  nextDay,
+  sqlOffset,
   isValidTimeZone,
   toDbDateTime,
   nowDb,

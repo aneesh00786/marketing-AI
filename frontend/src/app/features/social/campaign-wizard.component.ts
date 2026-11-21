@@ -6,6 +6,7 @@ import { apiRoot } from '../../core/api-base';
 import { SocialApiService } from './social-api.service';
 import { StudioApiService, requestKey } from './studio-api.service';
 import { StudioGeneratorComponent } from './studio-generator.component';
+import { localDayFromToday } from '../../core/time';
 
 type Step = 'product' | 'confirm' | 'details' | 'strategy' | 'content' | 'review' | 'schedule' | 'analytics';
 type Tab = 'poster' | 'video' | 'carousel' | 'post' | 'story';
@@ -95,7 +96,7 @@ export class CampaignWizardComponent implements OnInit, OnDestroy {
 
   // ------------------------------------------------------------ navigation
   blankForm(): any {
-    const d = (n: number) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
+    const d = (n: number) => localDayFromToday(n);
     return { name: '', productId: null, imageAssetIds: [] as number[], duration: '7', objective: 'Product Promotion', targetAudience: '', description: '', keyMessage: '', startDate: d(1), endDate: d(7), platforms: [] as string[], language: 'en', tone: 'Professional', callToAction: '', landingUrl: '' };
   }
   get product(): any { return this.ov?.product || this.products.find(p => p.id === this.form.productId) || null; }

@@ -3,6 +3,7 @@ const mailAccess = require('../../../lib/mailAccess');
 const { z } = require('zod');
 const { all } = require('../../../db/database');
 const { requireCapability } = require('../../../middleware/auth');
+const time = require('../../../lib/time');
 
 /**
  * Mail activity for the Mail Center: chart data for the Overview and the campaign log, plus the
@@ -13,7 +14,6 @@ const { requireCapability } = require('../../../middleware/auth');
 const router = express.Router();
 const wrap = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const ws = req => req.auth.workspaceId;
-const sqlDate = d => d.toISOString().slice(0, 19).replace('T', ' ');
 const PAGE = 50;
 
 function badRequest(parsed) {
@@ -81,10 +81,12 @@ const summaryQuery = z.object({ days: z.enum(['7', '30', '90']).optional() }).st
 /** Overview charts: emails sent per day by channel, received per day, and delivery of tracked emails. */
 router.get('/summary', requireCapability('mail.view'), wrap(async (req, res) => {
   const days = Number(parse(summaryQuery, req.query).days || 30);
-  const today = new Date();
-  const end = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() + 1));
-  const from = new Date(end.getTime() - days * 86400000);
-  const range = [ws(req), sqlDate(from), sqlDate(end)];
+  // Days where the viewer is: the last `days` local days up to today, grouped by local day.
+  const tz = time.requestTimeZone(req);
+  const today = time.dayInZone(new Date(), tz);
+  const firstDay = time.nextDay(today, 1 - days);
+  const range = [ws(req), time.dayStartUtc(firstDay, tz), time.dayStartUtc(time.nextDay(today), tz)];
+  const local = col => `DATE_FORMAT(CONVERT_TZ(${col}, '+00:00', '${time.sqlOffset(tz)}'), '%Y-%m-%d')`;
   // Members who see only their own mail get figures for their own emails and AI Campaigns.
   const es = mailAccess.emailScope(req, 'e');
   const ac = mailAccess.aiCampaignScope(req, 'oc');
@@ -97,15 +99,15 @@ router.get('/summary', requireCapability('mail.view'), wrap(async (req, res) => 
   // Mailbox sends (Compose, drafts, other) — AI campaign sends are counted from outreach_sends below,
   // so an AI campaign email recorded in both tables is counted once.
   const mailbox = await all(
-    `SELECT DATE_FORMAT(e.sent_at, '%Y-%m-%d') AS day, COUNT(*) AS n FROM emails e
+    `SELECT ${local('e.sent_at')} AS day, COUNT(*) AS n FROM emails e
      WHERE e.workspace_id = ? AND e.status = 'Sent' AND e.sent_at >= ? AND e.sent_at < ?
        AND NOT EXISTS (SELECT 1 FROM outreach_sends os WHERE os.workspace_id = e.workspace_id AND os.email_id = e.id) AND ${es.sql}
      GROUP BY day`, [...range, ...es.params]);
   const campaign = await all(
-    `SELECT DATE_FORMAT(sent_at, '%Y-%m-%d') AS day, COUNT(*) AS n FROM outreach_sends
+    `SELECT ${local('sent_at')} AS day, COUNT(*) AS n FROM outreach_sends
      WHERE workspace_id = ? AND status = 'sent' AND sent_at >= ? AND sent_at < ?${aiOwn} GROUP BY day`, [...range, ...aiParams]);
   const received = await all(
-    `SELECT DATE_FORMAT(e.received_at, '%Y-%m-%d') AS day, COUNT(*) AS n FROM emails e
+    `SELECT ${local('e.received_at')} AS day, COUNT(*) AS n FROM emails e
      WHERE e.workspace_id = ? AND e.status NOT IN ('Sent', 'Not Sent') AND e.received_at >= ? AND e.received_at < ? AND ${es.sql}
      GROUP BY day`, [...range, ...es.params]);
   const notSent = await all(
@@ -116,8 +118,7 @@ router.get('/summary', requireCapability('mail.view'), wrap(async (req, res) => 
   const index = rows => new Map(rows.map(r => [String(r.day), num(r.n)]));
   const [m, c, rcv] = [index(mailbox), index(campaign), index(received)];
   const daily = [];
-  for (let t = from.getTime(); t < end.getTime(); t += 86400000) {
-    const day = new Date(t).toISOString().slice(0, 10);
+  for (let day = firstDay; day <= today; day = time.nextDay(day)) {
     daily.push({ date: day, mailbox: m.get(day) || 0, campaigns: c.get(day) || 0, received: rcv.get(day) || 0 });
   }
 
@@ -135,7 +136,7 @@ router.get('/summary', requireCapability('mail.view'), wrap(async (req, res) => 
   const sum = (rows) => rows.reduce((a, r) => a + num(r.n), 0);
   res.json({
     success: true,
-    range: { from: sqlDate(from).slice(0, 10), to: sqlDate(new Date(end - 86400000)).slice(0, 10), days },
+    range: { from: firstDay, to: today, days, timezone: tz },
     totals: {
       sentMailbox: sum(mailbox), sentCampaigns: sum(campaign), received: sum(received),
       notSent: num(notSent[0]?.n), campaignFailed: num(failedCampaign[0]?.n)
@@ -156,11 +157,11 @@ const campaignLogQuery = z.object({
   page: z.coerce.number().int().min(1).max(1000).optional()
 }).strict();
 
-/** "column >= from AND column < to + 1 day" for an optional YYYY-MM-DD range (UTC). */
-function dayRange(col, q) {
+/** "column >= from AND column < to + 1 day" for an optional YYYY-MM-DD range of days where the viewer is. */
+function dayRange(col, q, tz = 'UTC') {
   const where = []; const params = [];
-  if (q.from) { where.push(`${col} >= ?`); params.push(`${q.from} 00:00:00`); }
-  if (q.to) { where.push(`${col} < DATE_ADD(?, INTERVAL 1 DAY)`); params.push(`${q.to} 00:00:00`); }
+  if (q.from) { where.push(`${col} >= ?`); params.push(time.dayStartUtc(q.from, tz)); }
+  if (q.to) { where.push(`${col} < ?`); params.push(time.dayStartUtc(time.nextDay(q.to), tz)); }
   return { sql: where.length ? ` AND ${where.join(' AND ')}` : '', params };
 }
 
@@ -173,7 +174,7 @@ function dayRange(col, q) {
 router.get('/campaigns', requireCapability('mail.view'), wrap(async (req, res) => {
   const q = parse(campaignLogQuery, req.query);
   const page = q.page || 1;
-  const sr = dayRange('s.sent_at', q);
+  const sr = dayRange('s.sent_at', q, time.requestTimeZone(req));
   const ac = mailAccess.aiCampaignScope(req, 'c');
   const mc = mailAccess.campaignScope(req, 'mc');
   const ai = q.type === 'email' ? [] : await all(
@@ -190,7 +191,7 @@ router.get('/campaigns', requireCapability('mail.view'), wrap(async (req, res) =
      WHERE c.workspace_id = ? AND ${ac.sql}
        AND EXISTS (SELECT 1 FROM outreach_sends s WHERE s.workspace_id = c.workspace_id AND s.campaign_id = c.id AND s.status = 'sent'${sr.sql})`,
     [...sr.params, ...sr.params, ...sr.params, ws(req), ...ac.params, ...sr.params]);
-  const er = dayRange('submitted_at', q);
+  const er = dayRange('submitted_at', q, time.requestTimeZone(req));
   const email = q.type === 'ai' ? [] : await all(
     `SELECT id, name, status, zoho_status, report_json, provider_message, created_at, approved_at, submitted_at, updated_at
      FROM mail_campaigns mc WHERE workspace_id = ? AND status = 'submitted' AND submitted_at IS NOT NULL AND ${mc.sql}${er.sql}`,

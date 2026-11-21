@@ -9,6 +9,7 @@ import { BrandKitComponent } from './brand-kit.component';
 import { StudioUsageComponent } from './studio-usage.component';
 import { apiRoot } from '../../core/api-base';
 import { CrmPhoneInputComponent, phoneProblem } from '../crm/crm-phone-input.component';
+import { localDayFromToday } from '../../core/time';
 
 type Section = 'overview' | 'generator' | 'brand' | 'accounts' | 'campaigns' | 'calendar' | 'library' | 'media' | 'queue' | 'analytics' | 'inbox' | 'strategist' | 'settings';
 
@@ -221,7 +222,7 @@ export class SocialHubComponent implements OnInit, OnDestroy {
 
   // ---------- Helpers ----------
   private isoDay(offsetDays: number): string {
-    return new Date(Date.now() + offsetDays * 86400000).toISOString().slice(0, 10);
+    return localDayFromToday(offsetDays);
   }
 
   private fail(err: any, fallback = 'Request failed'): void {
@@ -968,7 +969,7 @@ export class SocialHubComponent implements OnInit, OnDestroy {
   loadAnalytics(): void {
     this.loading = true;
     const f = this.analyticsFilters;
-    this.api.analytics({ ...f, from: f.from ? new Date(`${f.from}T00:00:00Z`).toISOString() : null, to: f.to ? new Date(`${f.to}T23:59:59Z`).toISOString() : null }).subscribe({
+    this.api.analytics({ ...f, from: f.from ? new Date(`${f.from}T00:00:00`).toISOString() : null, to: f.to ? new Date(`${f.to}T23:59:59.999`).toISOString() : null }).subscribe({
       next: r => { this.analytics = r.analytics; this.loading = false; },
       error: e => this.fail(e)
     });
@@ -976,7 +977,7 @@ export class SocialHubComponent implements OnInit, OnDestroy {
 
   exportAnalytics(): void {
     const f = this.analyticsFilters;
-    this.api.exportAnalytics({ ...f, from: f.from ? new Date(`${f.from}T00:00:00Z`).toISOString() : null, to: f.to ? new Date(`${f.to}T23:59:59Z`).toISOString() : null }).subscribe({
+    this.api.exportAnalytics({ ...f, from: f.from ? new Date(`${f.from}T00:00:00`).toISOString() : null, to: f.to ? new Date(`${f.to}T23:59:59.999`).toISOString() : null }).subscribe({
       next: blob => {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');

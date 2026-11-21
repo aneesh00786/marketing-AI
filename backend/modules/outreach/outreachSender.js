@@ -22,7 +22,8 @@ const emitRecipient = (recipient, type) => recipient.lead_id && automationEvents
  *   REPLY_MONITOR_DAYS after the final email.
  */
 const STALE_SENDING_MS = 10 * 60 * 1000;
-const INBOX_SYNC_MS = 15 * 60 * 1000;
+// Each workspace's inboxes are read at most this often (automatic sync; Sync in Mail Center is immediate).
+const INBOX_SYNC_MS = parseInt(process.env.INBOX_SYNC_MINUTES || '5', 10) * 60 * 1000;
 const REPLY_MONITOR_DAYS = 14;
 const lastInboxSync = new Map();
 

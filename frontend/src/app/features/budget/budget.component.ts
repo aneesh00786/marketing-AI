@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { apiRoot } from '../../core/api-base';
+import { localDay, localDayFromToday } from '../../core/time';
 
 /**
  * Budget & ROI for Command Center campaigns. Budget (plan), Actual (provider-synced or entered
@@ -30,8 +31,8 @@ export class BudgetComponent implements OnInit {
   metaAccounts: any[] = [];
 
   setup: any = null;
-  spendForm = { date: new Date().toISOString().slice(0, 10), amount: null as number | null, description: '', evidenceRef: '' };
-  revenueForm = { date: new Date().toISOString().slice(0, 10), amount: null as number | null, description: '', evidenceRef: '' };
+  spendForm = { date: localDay(), amount: null as number | null, description: '', evidenceRef: '' };
+  revenueForm = { date: localDay(), amount: null as number | null, description: '', evidenceRef: '' };
   sourceForm = { socialAccountId: null as number | null, adAccountId: '', campaignIds: '' };
   editForm: any = null;
 
@@ -57,9 +58,9 @@ export class BudgetComponent implements OnInit {
   back(): void { this.view = 'list'; this.b = null; this.editForm = null; this.load(); }
 
   startSetup(p: any): void {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = localDay();
     this.setup = { programId: p.id, name: p.name, amount: p.plannedBudget?.amount ?? null, currency: p.plannedBudget?.currency || 'USD',
-      periodStart: p.startDate || today, periodEnd: p.endDate || new Date(Date.now() + 29 * 86400000).toISOString().slice(0, 10), thresholds: '50, 80, 100', hint: !!p.plannedBudget };
+      periodStart: p.startDate || today, periodEnd: p.endDate || localDayFromToday(29), thresholds: '50, 80, 100', hint: !!p.plannedBudget };
   }
 
   private thresholds(text: string): number[] {

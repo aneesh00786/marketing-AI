@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../services/api.service';
 import { ComposeReportComponent } from './compose-report.component';
+import { localDay } from '../../core/time';
 
 export type LogTab = 'campaigns' | 'emails' | 'audit';
 
@@ -14,7 +15,7 @@ const PURPOSE: Record<string, string> = { transactional: 'Transactional / Direct
 const SOURCE: Record<string, string> = { compose: 'Compose', draft: 'Mail Drafts', ai_campaign: 'AI Campaigns', other: 'Not recorded' };
 const DELIVERY: Record<string, string> = { sent: 'Sent', accepted: 'Accepted', delivered: 'Delivered', opened: 'Opened', clicked: 'Clicked', bounced: 'Bounced' };
 
-const isoDay = (d: Date) => d.toISOString().slice(0, 10);
+const isoDay = (d: Date) => localDay(d);
 
 /**
  * Mail Center → Logs: a record of what was actually sent, filtered by date.

@@ -37,6 +37,7 @@ import { MailCenterComponent } from './features/mail/mail-center.component';
 import { DataState, MAIL_SECTIONS, MailSection, mailSectionFromLink, visibleMailSections } from './features/mail/mail-nav';
 import { EmailPreviewComponent } from './features/mail/email-preview.component';
 import { findTokens, fillTokens, defaultTokenValues } from './features/mail/template-utils';
+import { localDay } from './core/time';
 
 @Component({
   selector: 'app-root',
@@ -1409,7 +1410,7 @@ export class AppComponent implements OnInit, OnDestroy {
         const rows = leadExportRows(res.leads || [], format === 'csv');
         const sheet = XLSX.utils.json_to_sheet(rows);
         sheet['!cols'] = Object.keys(rows[0] || {}).map(k => ({ wch: Math.min(Math.max(k.length, ...rows.map(r => String((r as any)[k] ?? '').length)) + 2, 60) }));
-        const day = new Date().toISOString().slice(0, 10);
+        const day = localDay();
         if (format === 'csv') {
           // A byte-order mark lets Excel open the file with accented names intact.
           const blob = new Blob(['\ufeff' + XLSX.utils.sheet_to_csv(sheet)], { type: 'text/csv;charset=utf-8' });
