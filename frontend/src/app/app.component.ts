@@ -1774,6 +1774,7 @@ export class AppComponent implements OnInit, OnDestroy {
         this.composeTemplate = null;
         this.composeTab = 'visual';
         this.composeReplyTo = null;
+    this.composeQuote = null;
         this.showComposeModal = true;
         this.composeLeadId = lead.id; this.composeLeadEmail = String(d.to || '').trim().toLowerCase();
       },
@@ -1853,7 +1854,7 @@ export class AppComponent implements OnInit, OnDestroy {
 
   private composeKey(): string {
     const c = this.composeEmail;
-    const fingerprint = JSON.stringify([c.recipient_email, c.recipient_name, c.subject, c.body, c.is_html ? c.html_body : '', this.composePurpose, this.composeTemplate?.id ?? null, this.composeReplyTo?.id ?? null]);
+    const fingerprint = JSON.stringify([c.recipient_email, c.recipient_name, c.subject, c.body, c.is_html ? c.html_body : '', this.composePurpose, this.composeTemplate?.id ?? null, this.composeReplyTo?.id ?? null, !!this.composeQuote]);
     if (!this.composeSend || this.composeSend.fingerprint !== fingerprint) {
       const key = typeof crypto !== 'undefined' && 'randomUUID' in crypto
         ? crypto.randomUUID()
@@ -1906,6 +1907,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.composeTokenValues = defaultTokenValues(findTokens(t.html), this.composeEmail.recipient_name);
     this.composeSend = null;
     this.composeReplyTo = null;
+    this.composeQuote = null;
     this.showComposeModal = true;
     this.composeLeadId = null;
   }
@@ -1967,7 +1969,7 @@ export class AppComponent implements OnInit, OnDestroy {
       const html = this.composeEmail.is_html && this.composeEmail.html_body;
       this.apiService.sendLeadEmail(this.composeLeadId!, {
         recipient_email: this.composeEmail.recipient_email, recipient_name: this.composeEmail.recipient_name, subject: this.composeEmail.subject,
-        ...(html ? { html_body: this.composeEmail.html_body, body_text: this.composeEmail.body } : { body: this.composeEmail.body }),
+        ...(html ? { html_body: this.composeHtmlOut, body_text: this.composeBodyOut } : { body: this.composeBodyOut }),
         purpose: this.composePurpose, templateId: this.composeTemplate?.id ?? null, from_email: this.composeFrom,
         reply_to_email_id: this.composeReplyTo?.id ?? null
       } as any, true, key).subscribe(done);
@@ -1978,15 +1980,15 @@ export class AppComponent implements OnInit, OnDestroy {
         recipient_email: this.composeEmail.recipient_email,
         recipient_name: this.composeEmail.recipient_name,
         subject: this.composeEmail.subject,
-        html_body: this.composeEmail.html_body,
-        body_text: this.composeEmail.body,
+        html_body: this.composeHtmlOut,
+        body_text: this.composeBodyOut,
         purpose: this.composePurpose,
         templateId: this.composeTemplate?.id ?? null,
         from_email: this.composeFrom,
         reply_to_email_id: this.composeReplyTo?.id ?? null
       } as any, true, key).subscribe(done);
     } else {
-      this.apiService.sendEmail({ ...this.composeEmail, purpose: this.composePurpose, templateId: this.composeTemplate?.id ?? null, from_email: this.composeFrom, reply_to_email_id: this.composeReplyTo?.id ?? null } as any, true, key).subscribe(done);
+      this.apiService.sendEmail({ ...this.composeEmail, body: this.composeBodyOut, purpose: this.composePurpose, templateId: this.composeTemplate?.id ?? null, from_email: this.composeFrom, reply_to_email_id: this.composeReplyTo?.id ?? null } as any, true, key).subscribe(done);
     }
   }
 
@@ -2003,6 +2005,8 @@ export class AppComponent implements OnInit, OnDestroy {
       is_html: false
     };
     this.composeReplyTo = this.receivedRef(email);
+    this.composeQuote = this.quoteParts(email);
+    this.composeQuoteOpen = false;
     // A reply to an inbound email: direct by default when allowed (the sender can change it; the server re-checks).
     this.composePurpose = this.composeCanTransactional ? 'transactional' : null;
     this.composeTemplate = null;
@@ -2018,11 +2022,14 @@ export class AppComponent implements OnInit, OnDestroy {
       recipient_email: toEmail,
       recipient_name: toName,
       subject: /^re:/i.test(email.subject || '') ? email.subject : `Re: ${email.subject || ''}`,
-      body: `\n\n${this.quoteEmail(email)}`,
+      body: '',
       html_body: '',
       is_html: false
     };
     this.composeReplyTo = this.receivedRef(email);
+    // The earlier message is shown folded under the reply (not as "> " lines to edit) and sent with it.
+    this.composeQuote = this.quoteParts(email);
+    this.composeQuoteOpen = false;
     // A reply to an inbound email: direct by default when allowed (the sender can change it; the server re-checks).
     this.composePurpose = this.composeCanTransactional ? 'transactional' : null;
     this.composeTemplate = null;
@@ -2041,6 +2048,7 @@ export class AppComponent implements OnInit, OnDestroy {
   /** Forward: a new email with the original content; the sender chooses the recipient and purpose. */
   forwardEmail(email: any): void {
     this.composeReplyTo = null;
+    this.composeQuote = null;
     const html = email.html_body || '';
     this.composeEmail = {
       recipient_email: '',
@@ -2074,6 +2082,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.composeSend = null;
     this.composeTab = html ? 'visual' : 'write';
     this.composeReplyTo = null;
+    this.composeQuote = null;
     this.showComposeModal = true;
     this.composeLeadId = null;
   }
@@ -2091,6 +2100,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.composeTouched = false;
     this.composeTab = 'write';
     this.composeReplyTo = null;
+    this.composeQuote = null;
     this.showComposeModal = true;
     this.composeLeadId = null;
     if (r.leadId) { this.composeLeadId = r.leadId; this.composeLeadEmail = String(r.email || '').trim().toLowerCase(); }
@@ -2106,6 +2116,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.composeSend = null;
     this.composeTab = 'write';
     this.composeReplyTo = null;
+    this.composeQuote = null;
     this.showComposeModal = true;
     this.composeLeadId = null;
   }
@@ -2136,6 +2147,31 @@ export class AppComponent implements OnInit, OnDestroy {
     if (hasContent && !this.isSendingCompose && !confirm('Discard this email? What you wrote is not saved.')) return;
     this.showComposeModal = false;
     this.composeTouched = false;
+  }
+
+  /** The earlier message of a reply: "On …, … wrote:" and its text. */
+  composeQuote: { attribution: string; text: string } | null = null;
+  composeQuoteOpen = false;
+  private quoteParts(email: any): { attribution: string; text: string } | null {
+    const text = String(email?.body || email?.snippet || '').trim();
+    if (!text) return null;
+    const head = this.quoteEmail(email).split('\n')[0];
+    return { attribution: head, text };
+  }
+  /** What is sent as text: the reply, then the earlier message quoted the standard way ("> " lines). */
+  get composeBodyOut(): string {
+    const body = String(this.composeEmail?.body || '');
+    const q = this.composeQuote;
+    if (!q) return body;
+    return `${body.replace(/\s+$/, '')}\n\n${q.attribution}\n${q.text.split('\n').map(l => `> ${l}`).join('\n')}`;
+  }
+  /** HTML content with the earlier message as a quote block (as mail apps mark their own). */
+  get composeHtmlOut(): string {
+    const html = String(this.composeEmail?.html_body || '');
+    const q = this.composeQuote;
+    if (!q || !html) return html;
+    const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    return `${html}\n<div class="gmail_quote"><div class="gmail_attr">${esc(q.attribution)}<br></div><blockquote class="gmail_quote" style="margin:0 0 0 .8ex;border-left:1px solid #ccc;padding-left:1ex">${esc(q.text).replace(/\n/g, '<br>')}</blockquote></div>`;
   }
 
   private quoteEmail(email: any, reply = true): string {

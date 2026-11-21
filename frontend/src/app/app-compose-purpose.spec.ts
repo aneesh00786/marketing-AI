@@ -84,12 +84,23 @@ describe('App shell: Compose email purpose', () => {
     app.replyToEmail({ sender_email: 'kim@client.io', sender: 'Kim', subject: 'Question', body: 'What does it cost?', received_at: '2026-10-28 10:00' });
     expect(app.composeEmail.recipient_email).toBe('kim@client.io');
     expect(app.composeEmail.subject).toBe('Re: Question');
-    expect(app.composeEmail.body).toContain('> What does it cost?');
-    expect(app.composeEmail.body).not.toContain('demonstration');
+    // The editor holds only the reply; the original is folded below it and sent quoted.
+    expect(app.composeEmail.body).toBe('');
+    expect(app.composeQuote?.text).toBe('What does it cost?');
+    expect(app.composeQuote?.attribution).toMatch(/Kim <kim@client\.io> wrote:$/);
+    app.composeEmail.body = 'It costs 10 euros.';
+    expect(app.composeBodyOut).toMatch(/^It costs 10 euros\.\n\nOn .*Kim <kim@client\.io> wrote:\n> What does it cost\?$/);
+    expect(app.composeBodyOut).not.toContain('demonstration');
+    app.composeEmail.html_body = '<p>It costs 10 euros.</p>';
+    expect(app.composeHtmlOut).toContain('<blockquote class="gmail_quote"');
+    expect(app.composeHtmlOut).toContain('What does it cost?</blockquote>');
+    app.composeQuote = null;
+    expect(app.composeBodyOut).toBe('It costs 10 euros.');
 
     app.forwardEmail({ sender_email: 'kim@client.io', subject: 'Question', body: 'What does it cost?', html_body: '' });
     expect([app.composeEmail.recipient_email, app.composeEmail.subject, app.composePurpose]).toEqual(['', 'Fwd: Question', null]);
     expect(app.composeEmail.body).toContain('Forwarded message');
+    expect(app.composeQuote).toBeNull();
 
     app.sendEmailAgain({ recipient_email: 'max@client.io', subject: 'Setup', body: 'x', html_body: '<p>x</p>', purpose: 'marketing' });
     expect([app.composeEmail.recipient_email, app.composeEmail.html_body, app.composePurpose, app.showComposeModal]).toEqual(['max@client.io', '<p>x</p>', 'marketing', true]);

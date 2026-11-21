@@ -1146,6 +1146,17 @@
         <div *ngIf="composeTab === 'write'">
           <p class="helper-text compose-mode" *ngIf="composeEmail.html_body">This email has HTML content, which is what the recipient sees. Text written here is the plain-text version for email apps that do not show HTML.</p>
           <textarea class="hud-textarea" rows="10" [(ngModel)]="composeEmail.body" aria-label="Message" placeholder="Write your message…"></textarea>
+          <div class="compose-quote" *ngIf="composeQuote">
+            <div class="compose-quote-bar">
+              <button type="button" class="compose-quote-toggle" (click)="composeQuoteOpen = !composeQuoteOpen" [attr.aria-expanded]="composeQuoteOpen" [attr.aria-label]="composeQuoteOpen ? 'Hide the earlier message' : 'Show the earlier message'">•••</button>
+              <span class="compose-quote-label">Earlier message, sent below your reply</span>
+              <button type="button" class="link-btn" (click)="composeQuote = null">Remove</button>
+            </div>
+            <blockquote class="compose-quote-body" *ngIf="composeQuoteOpen">
+              <div class="compose-quote-attr">{{ composeQuote.attribution }}</div>
+              <div class="compose-quote-text">{{ composeQuote.text }}</div>
+            </blockquote>
+          </div>
         </div>
 
         <div *ngIf="composeTab === 'code'">
@@ -1156,6 +1167,10 @@
           <app-email-preview *ngIf="composeEmail.html_body" class="email-render-frame" [html]="composeEmail.html_body" title="Email preview"></app-email-preview>
           <div *ngIf="!composeEmail.html_body" class="plain-text-preview">
             <p style="white-space: pre-wrap;">{{ composeEmail.body || 'No message yet. Use Write to add one.' }}</p>
+            <blockquote class="compose-quote-body" *ngIf="composeQuote">
+              <div class="compose-quote-attr">{{ composeQuote.attribution }}</div>
+              <div class="compose-quote-text">{{ composeQuote.text }}</div>
+            </blockquote>
           </div>
         </div>
 

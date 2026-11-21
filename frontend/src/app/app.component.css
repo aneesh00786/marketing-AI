@@ -842,3 +842,13 @@ button.dropdown-item:disabled { opacity: 0.6; cursor: default; }
 .compose-from select { flex: 1 1 260px; min-width: 0; }
 .compose-from-warn { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface-2); font-size: 0.85rem; }
 .compose-from-warn.blocking { border-color: rgba(245, 158, 11, 0.45); background: var(--warning-soft); color: var(--warning-text); }
+
+/* Compose reply: the earlier message, folded under the reply (sent as a quote block) */
+.compose-quote { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.compose-quote-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 0.82rem; color: var(--text-muted); }
+.compose-quote-toggle { border: 1px solid var(--border); background: var(--surface-2); color: var(--text-muted); border-radius: 6px; padding: 0 8px; line-height: 18px; font-size: 0.8rem; cursor: pointer; letter-spacing: 1px; }
+.compose-quote-toggle:hover { color: var(--text); }
+.compose-quote-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.compose-quote-body { margin: 0; padding: 4px 0 4px 12px; border-left: 2px solid var(--border); color: var(--text-muted); font-size: 0.86rem; max-height: 260px; overflow: auto; }
+.compose-quote-attr { margin-bottom: 6px; }
+.compose-quote-text { white-space: pre-wrap; overflow-wrap: anywhere; }
