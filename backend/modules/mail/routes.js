@@ -558,7 +558,7 @@ emails.get('/:id(\\d+)', requireCapability('mail.view'), wrap(async (req, res) =
   const direction = e.status === 'Sent' ? 'sent' : e.status === 'Not Sent' ? 'not_sent' : 'received';
   const { t_provider, t_failure_reason, ai_replies_json, imap_uid, imap_folder, mailbox_source, received_key, references_header, ...rest } = e;
   // Files of a received email, and the email of ours it answers (when it is one the person may see).
-  const attachments = await all('SELECT id, filename, content_type, size_bytes, (content IS NOT NULL) AS stored FROM email_attachments WHERE workspace_id = ? AND email_id = ? ORDER BY id', [ws(req), e.id]);
+  const attachments = await all('SELECT id, filename, content_type, size_bytes, (content IS NOT NULL) AS has_content FROM email_attachments WHERE workspace_id = ? AND email_id = ? ORDER BY id', [ws(req), e.id]);
   const inReplyTo = e.reply_to_email_id ? await get(`SELECT e.id, e.subject, e.sent_at, e.status FROM emails e WHERE e.id = ? AND e.workspace_id = ? AND ${scope.sql}`, [e.reply_to_email_id, ws(req), ...scope.params]) : null;
   res.json({
     success: true,
@@ -572,7 +572,7 @@ emails.get('/:id(\\d+)', requireCapability('mail.view'), wrap(async (req, res) =
       provider: t_provider || null,
       failure: direction === 'not_sent' ? (e.smtp_status || null) : (t_failure_reason || null),
       spam: Number(e.is_spam) === 1,
-      attachments: attachments.map(a => ({ id: a.id, filename: a.filename, contentType: a.content_type, size: Number(a.size_bytes) || 0, stored: !!Number(a.stored) })),
+      attachments: attachments.map(a => ({ id: a.id, filename: a.filename, contentType: a.content_type, size: Number(a.size_bytes) || 0, stored: !!Number(a.has_content) })),
       inReplyTo: inReplyTo ? { id: inReplyTo.id, subject: inReplyTo.subject, sentAt: inReplyTo.sent_at, direction: inReplyTo.status === 'Sent' ? 'sent' : 'received' } : null
     }
   });
