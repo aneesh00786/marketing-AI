@@ -68,11 +68,42 @@ function fillPlaceholders({ subject = '', text = '', html = '' }, replacements) 
  * Plain text as email HTML, keeping its layout: a blank line starts a new paragraph, a single line break
  * stays a line break (email apps collapse raw newlines in HTML into spaces). Text is escaped.
  */
+const escHtml = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+function paragraphs(text) {
+  const paras = String(text || '').trim().split(/\n[ \t]*\n+/).filter(p => p.trim());
+  return paras.map(p => `<p style="margin:0 0 1em">${escHtml(p.trim()).replace(/\n/g, '<br>')}</p>`).join('\n');
+}
+
+/** "On <date>, <name> wrote:" (and the usual variants) above a quoted reply. */
+const ATTRIBUTION_RE = /(wrote|writes|schrieb|a écrit|escribió):\s*$/i;
+
+/**
+ * Plain text as simple HTML: paragraphs and line breaks. Quoted text of a reply (lines starting with ">", and the
+ * "On …, … wrote:" line above them) becomes a quote block marked the way Gmail and Outlook mark their own, so mail
+ * apps show and collapse it as the earlier message instead of printing the ">" signs. Nested quotes nest.
+ */
 function textToHtml(text) {
-  const esc = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  const paras = String(text || '').replace(/\r\n?/g, '\n').trim().split(/\n[ \t]*\n+/).filter(p => p.trim());
-  if (!paras.length) return '<p></p>';
-  return paras.map(p => `<p style="margin:0 0 1em">${esc(p.trim()).replace(/\n/g, '<br>')}</p>`).join('\n');
+  const lines = String(text || '').replace(/\r\n?/g, '\n').split('\n');
+  const out = [];
+  let plain = [];
+  const flush = () => { if (plain.join('\n').trim()) out.push(paragraphs(plain.join('\n'))); plain = []; };
+  for (let i = 0; i < lines.length;) {
+    if (!/^\s*>/.test(lines[i])) { plain.push(lines[i]); i++; continue; }
+    const quoted = [];
+    while (i < lines.length && (/^\s*>/.test(lines[i]) || (!lines[i].trim() && /^\s*>/.test(lines[i + 1] || '')))) {
+      quoted.push(lines[i].replace(/^\s*> ?/, '')); i++;
+    }
+    // The attribution line just above the quote goes with it.
+    let attribution = null;
+    while (plain.length && !plain[plain.length - 1].trim()) plain.pop();
+    if (plain.length && ATTRIBUTION_RE.test(plain[plain.length - 1])) attribution = plain.pop().trim();
+    flush();
+    const inner = textToHtml(quoted.join('\n'));
+    out.push(`<div class="gmail_quote">${attribution ? `<div class="gmail_attr">${escHtml(attribution)}<br></div>` : ''}<blockquote class="gmail_quote" style="margin:0 0 0 .8ex;border-left:1px solid #ccc;padding-left:1ex">${inner}</blockquote></div>`);
+  }
+  flush();
+  return out.length ? out.join('\n') : '<p></p>';
 }
 
 module.exports = { textToHtml, PLACEHOLDER_RE, TOKEN_RE, MERGE_TAG_RE, TEMPLATE_TOKENS, isPlaceholderKey, unresolvedPlaceholders, assertNoPlaceholders, fillPlaceholders };

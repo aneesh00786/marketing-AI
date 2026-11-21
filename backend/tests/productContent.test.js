@@ -215,3 +215,13 @@ test('inbox analysis and website extraction invent nothing when the AI is unavai
   assert.deepEqual(extracted.features, ['Order tracking for teams']);
   assert.doesNotMatch(JSON.stringify(extracted), /FMCG|ThriveWoo -|Smart FMCG/);
 });
+
+test('textToHtml: the quoted part of a reply becomes a quote block (no ">" signs), with its "wrote:" line', () => {
+  const { textToHtml } = require('../lib/mailContent');
+  const html = textToHtml('Thanks, will do.\n\nOn Sat, 21 Nov 2026, 3:39 pm, Kim <kim@x.io> wrote:\n> Can you send it?\n>\n> -- \n> Kim\n>> earlier');
+  assert.match(html, /^<p style="margin:0 0 1em">Thanks, will do\.<\/p>/);
+  assert.match(html, /<div class="gmail_quote"><div class="gmail_attr">On Sat, 21 Nov 2026, 3:39 pm, Kim &lt;kim@x\.io&gt; wrote:<br><\/div><blockquote class="gmail_quote"/);
+  assert.ok(!/&gt; Can you|>\s*Can you send/.test(html.replace(/<[^>]+>/g, m => m === '<br>' ? '\n' : '')), 'no ">" before quoted lines');
+  assert.equal((html.match(/<blockquote/g) || []).length, 2, 'nested quote nests');
+  assert.equal(textToHtml('Hi\n\nNo quote.'), '<p style="margin:0 0 1em">Hi</p>\n<p style="margin:0 0 1em">No quote.</p>');
+});

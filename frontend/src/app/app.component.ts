@@ -37,7 +37,7 @@ import { MailCenterComponent } from './features/mail/mail-center.component';
 import { DataState, MAIL_SECTIONS, MailSection, mailSectionFromLink, visibleMailSections } from './features/mail/mail-nav';
 import { EmailPreviewComponent } from './features/mail/email-preview.component';
 import { findTokens, fillTokens, defaultTokenValues } from './features/mail/template-utils';
-import { localDay } from './core/time';
+import { localDay, serverTime } from './core/time';
 
 @Component({
   selector: 'app-root',
@@ -2139,10 +2139,12 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   private quoteEmail(email: any, reply = true): string {
-    const when = email.received_at || email.sent_at || '';
+    // "Sat, 21 Nov 2026, 3:39 pm" in the writer's own time zone (the stored time is UTC).
+    const at = serverTime(email.received_at || email.sent_at);
+    const when = at ? at.toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
     const from = [email.sender, email.sender_email ? `<${email.sender_email}>` : ''].filter(Boolean).join(' ');
     const text = String(email.body || email.snippet || '').trim();
-    const head = reply ? `On ${when}, ${from || 'the sender'} wrote:` : `From: ${from}\nDate: ${when}\nSubject: ${email.subject || ''}\nTo: ${email.recipient_email || ''}\n`;
+    const head = reply ? `${when ? `On ${when}, ` : ''}${from || 'The sender'} wrote:` : `From: ${from}\nDate: ${when}\nSubject: ${email.subject || ''}\nTo: ${email.recipient_email || ''}\n`;
     return reply ? `${head}\n${text.split('\n').map(l => `> ${l}`).join('\n')}` : `${head}\n${text}`;
   }
 
