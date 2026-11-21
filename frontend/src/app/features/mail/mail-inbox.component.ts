@@ -1,4 +1,6 @@
-import { Component, EventEmitter, Input, OnChanges, OnInit, Output, SimpleChanges } from '@angular/core';
+import { Component, EventEmitter, Input, OnChanges, OnDestroy, OnInit, Output, SimpleChanges } from '@angular/core';
+import { Subscription } from 'rxjs';
+import { SendersUiService } from '../../core/senders-ui.service';
 import { CommonModule } from '@angular/common';
 import { IconComponent } from '../../shared/icon.component';
 import { FormsModule } from '@angular/forms';
@@ -7,7 +9,7 @@ import { EmailPreviewComponent } from './email-preview.component';
 import { textToPreviewHtml } from './email-preview';
 
 /**
- * Mail Center → Inbox: messages received by the workspace mailbox (synced over IMAP), with search,
+ * Mail Center → Inbox: messages received by the workspace mailbox and the person's own inbox (synced over IMAP), with search,
  * read/unread and date filters, a reading pane, read/unread, AI analysis, reply and forward.
  * Only received messages are listed (sent mail is in Sent Mail). Reply and forward open Compose,
  * where the purpose, permission and suppression checks apply as usual; nothing is sent from here.
@@ -19,7 +21,7 @@ import { textToPreviewHtml } from './email-preview';
   templateUrl: './mail-inbox.component.html',
   styleUrls: ['../command/command-center.component.css', './mail-ui.css', './mailbox.css']
 })
-export class MailInboxComponent implements OnInit, OnChanges {
+export class MailInboxComponent implements OnInit, OnChanges, OnDestroy {
   /** Whether a reply mailbox (IMAP) is set up; null while unknown. Without one nothing new arrives. */
   @Input() imapReady: boolean | null = null;
   /** Shows the "Set up replies" link (Mail Center → Settings) only to people who may manage mail settings. */
@@ -49,9 +51,37 @@ export class MailInboxComponent implements OnInit, OnChanges {
   analyzing = false;
   private seq = 0;
 
-  constructor(private api: ApiService) {}
+  /** The person's own sender address and its inbox ("My sender email" → Inbox); null until loaded. */
+  myInbox: { email: string | null; connected: boolean; error: string | null; host: string | null } | null = null;
+  private sendersSub?: Subscription;
 
-  ngOnInit(): void { this.load(1); }
+  constructor(private api: ApiService, private senders: SendersUiService = new SendersUiService()) {}
+
+  ngOnInit(): void {
+    this.load(1);
+    this.loadMyInbox();
+    this.sendersSub = this.senders.changed$.subscribe(() => this.loadMyInbox());
+  }
+  ngOnDestroy(): void { this.sendersSub?.unsubscribe(); }
+
+  loadMyInbox(): void {
+    if (!this.api.getMySenders) return;
+    this.api.getMySenders().subscribe({
+      next: (r: any) => {
+        const verified = (r?.senders || []).filter((x: any) => x.status === 'verified');
+        const withInbox = verified.find((x: any) => x.inbox?.connected);
+        const s = withInbox || verified[0] || null;
+        this.myInbox = { email: s?.email || null, connected: !!withInbox, error: withInbox?.inbox?.error || null, host: withInbox?.inbox?.host || null };
+      },
+      error: () => { this.myInbox = null; }
+    });
+  }
+
+  /** Opens "My sender email", where the person connects the inbox of their own address. */
+  setUpMyInbox(): void { this.senders.open(); }
+
+  /** Something can be synced: the workspace mailbox, or the person's own inbox. */
+  get canSync(): boolean { return !!this.imapReady || !!this.myInbox?.connected; }
 
   ngOnChanges(ch: SimpleChanges): void {
     if (ch['refreshKey'] && !ch['refreshKey'].firstChange) this.load(this.page);
@@ -124,11 +154,18 @@ export class MailInboxComponent implements OnInit, OnChanges {
   sync(): void {
     if (this.syncing) return;
     this.syncing = true;
-    this.api.syncCompanyMail().subscribe({
+    // Without a workspace mailbox, only the person's own inbox is synced.
+    const call = this.imapReady ? this.api.syncCompanyMail() : this.api.syncMyInboxes();
+    call.subscribe({
       next: (r: any) => {
         this.syncing = false;
-        this.toast.emit(r?.success ? (r.message || 'Inbox synced.') : (r?.error || 'Inbox sync is not set up.'));
-        if (r?.success) this.load(1);
+        const ownOnly = !this.imapReady;
+        const ok = ownOnly ? !r?.failed : r?.success;
+        this.toast.emit(ownOnly
+          ? (ok ? `Inbox synced: ${r?.fetchedCount || 0} new email${r?.fetchedCount === 1 ? '' : 's'}.` : 'Your inbox could not be synced. Open "My inbox" to see why.')
+          : (ok ? (r.message || 'Inbox synced.') : (r?.error || 'Inbox sync is not set up.')));
+        this.load(1);
+        this.loadMyInbox();
       },
       error: (e: any) => { this.syncing = false; this.toast.emit(`Inbox sync failed: ${e?.error?.error || e?.message || 'error'}`); }
     });

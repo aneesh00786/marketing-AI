@@ -2,15 +2,27 @@
   <header class="mx-head mb-head">
     <div>
       <h2 id="mb-in-title">Inbox <span class="mx-tag info" *ngIf="list?.unread">{{ list.unread }} unread</span></h2>
-      <p class="mx-desc">Email received by your company mailbox. Replies and forwards open Compose; nothing is sent from here.</p>
+      <p class="mx-desc">Email received by your company mailbox and your own inbox. Replies and forwards open Compose; nothing is sent from here.</p>
     </div>
     <div class="mx-actions">
-      <button type="button" class="btn btn-secondary btn-sm" *ngIf="imapReady" (click)="sync()" [disabled]="syncing"><app-icon name="refresh" [size]="15"></app-icon>{{ syncing ? 'Syncing…' : 'Sync inbox' }}</button>
+      <button type="button" class="btn btn-secondary btn-sm" *ngIf="myInbox" (click)="setUpMyInbox()"><app-icon name="settings" [size]="15"></app-icon>{{ myInbox.connected ? 'My inbox' : 'Set up my inbox' }}</button>
+      <button type="button" class="btn btn-secondary btn-sm" *ngIf="canSync" (click)="sync()" [disabled]="syncing"><app-icon name="refresh" [size]="15"></app-icon>{{ syncing ? 'Syncing…' : 'Sync inbox' }}</button>
     </div>
   </header>
 
+  <!-- The person's own inbox: replies to what they send arrive in the mailbox of their sender address. -->
+  <div class="mx-callout warn" *ngIf="myInbox && !myInbox.connected" role="status">
+    <span *ngIf="myInbox.email"><strong>Your inbox is not connected.</strong> Replies to your emails go to {{ myInbox.email }}. Connect its inbox so they appear here.</span>
+    <span *ngIf="!myInbox.email"><strong>Set up your sender email first.</strong> Your emails are sent from it, and its inbox is where replies arrive.</span>
+    <button type="button" class="btn btn-primary btn-sm" (click)="setUpMyInbox()">{{ myInbox.email ? 'Connect my inbox' : 'Set up sender email' }}</button>
+  </div>
+  <div class="mx-callout error" *ngIf="myInbox?.connected && myInbox?.error" role="alert">
+    <span><strong>Your inbox could not be synced.</strong> {{ myInbox?.error }}</span>
+    <button type="button" class="btn btn-secondary btn-sm" (click)="setUpMyInbox()">Fix inbox settings</button>
+  </div>
+
   <!-- Receiving needs a reply mailbox; sending-only services cannot fill an inbox. -->
-  <div class="mx-callout warn" *ngIf="imapReady === false" role="status">
+  <div class="mx-callout warn" *ngIf="imapReady === false && canConfigure && !myInbox?.connected" role="status">
     <span><strong>New mail is not being received.</strong> The inbox fills from your company mailbox over IMAP. ZeptoMail and Amazon SES only send email; they cannot receive it.</span>
     <button *ngIf="canConfigure" type="button" class="btn btn-secondary btn-sm" (click)="openSettings.emit()">Set up replies (IMAP)</button>
   </div>
@@ -34,7 +46,7 @@
       <p class="mb-empty" *ngIf="loading && !list">Loading…</p>
       <p class="mb-empty" *ngIf="list && !emails.length">
         <ng-container *ngIf="filtered">No emails match these filters. <button type="button" class="link-btn" (click)="clearFilters()">Clear filters</button></ng-container>
-        <ng-container *ngIf="!filtered">{{ imapReady === false ? 'No received email yet. Set up replies (IMAP) to receive mail here.' : 'No received email yet. New mail appears after the next sync.' }}</ng-container>
+        <ng-container *ngIf="!filtered">{{ canSync ? 'No received email yet. New mail appears after the next sync.' : 'No received email yet. Connect your inbox to receive replies here.' }}</ng-container>
       </p>
       <button type="button" *ngFor="let e of emails" class="mb-item" role="option" [id]="'mb-in-' + e.id"
         [class.unread]="!e.read" [class.on]="e.id === selectedId" [attr.aria-selected]="e.id === selectedId" (click)="open(e)">

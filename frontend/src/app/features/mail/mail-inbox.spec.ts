@@ -2,6 +2,7 @@ import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testin
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { MailInboxComponent } from './mail-inbox.component';
+import { SendersUiService } from '../../core/senders-ui.service';
 
 const LIST = { page: 1, hasMore: true, unread: 1, emails: [
   { id: 7, from: 'kim@client.io', fromName: 'Kim', to: 'hello@a.io', subject: 'Question about pricing', preview: 'Hi, could you…', receivedAt: '2026-10-28 10:00:00', read: false, urgent: true, hasHtml: false },
@@ -17,14 +18,18 @@ describe('MailInboxComponent', () => {
   const button = (t: string) => Array.from(el().querySelectorAll('button')).find(b => b.textContent!.includes(t)) as HTMLButtonElement | undefined;
   const items = () => Array.from(el().querySelectorAll('.mb-item')) as HTMLButtonElement[];
   const inbox = () => http.expectOne(r => r.url.endsWith('/emails/inbox'));
+  const senders = () => http.expectOne(r => r.url.endsWith('/mail/senders') && r.method === 'GET');
+  const CONNECTED = { senders: [{ id: 1, email: 'anita@a-co.io', status: 'verified', inbox: { connected: true, host: 'imap.zoho.com', status: 'connected', error: null } }] };
+  const NOT_CONNECTED = { senders: [{ id: 1, email: 'anita@a-co.io', status: 'verified', inbox: { connected: false } }] };
 
-  function init(imapReady: boolean | null = true, list: any = LIST): void {
+  function init(imapReady: boolean | null = true, list: any = LIST, mine: any = CONNECTED): void {
     fixture = TestBed.createComponent(MailInboxComponent);
     comp = fixture.componentInstance;
     comp.imapReady = imapReady;
     comp.canConfigure = true;
     fixture.detectChanges();
     inbox().flush(JSON.parse(JSON.stringify(list)));
+    senders().flush(JSON.parse(JSON.stringify(mine)));
     fixture.detectChanges();
   }
   function openFirst(): void {
@@ -109,7 +114,7 @@ describe('MailInboxComponent', () => {
   });
 
   it('without a reply mailbox it explains that nothing is received and links to setup (no sync button)', () => {
-    init(false, { page: 1, hasMore: false, unread: 0, emails: [] });
+    init(false, { page: 1, hasMore: false, unread: 0, emails: [] }, NOT_CONNECTED);
     expect(el().textContent).toContain('New mail is not being received.');
     expect(el().textContent).toContain('ZeptoMail and Amazon SES only send email');
     expect(button('Sync inbox')).toBeUndefined();
@@ -124,6 +129,7 @@ describe('MailInboxComponent', () => {
     comp = fixture.componentInstance;
     fixture.detectChanges();
     inbox().flush({ error: 'Database unavailable' }, { status: 500, statusText: 'x' });
+    senders().flush(CONNECTED);
     fixture.detectChanges();
     expect(el().querySelector('[role=alert]')!.textContent).toContain('Database unavailable');
     button('Try again')!.click();
@@ -135,6 +141,37 @@ describe('MailInboxComponent', () => {
     button('Sync inbox')!.click();
     http.expectOne(r => r.url.endsWith('/mail/sync')).flush({ success: true, message: 'Synced 2' });
     inbox().flush(LIST);
+    senders().flush(CONNECTED);
+  });
+
+  it('without your own inbox connected it says where replies go and opens "My sender email" to connect it', () => {
+    init(true, LIST, NOT_CONNECTED);
+    expect(el().textContent).toContain('Your inbox is not connected.');
+    expect(el().textContent).toContain('Replies to your emails go to anita@a-co.io');
+    const ui = TestBed.inject(SendersUiService);
+    let opened = 0;
+    ui.open$.subscribe(() => opened++);
+    button('Connect my inbox')!.click();
+    button('Set up my inbox')!.click();
+    expect(opened).toBe(2);
+    // Connected in the window: the Inbox reloads it and the reminder goes.
+    ui.changed$.next();
+    senders().flush(CONNECTED);
+    fixture.detectChanges();
+    expect(el().textContent).not.toContain('Your inbox is not connected.');
+    expect(button('My inbox')).toBeDefined();
+  });
+
+  it('with only your own inbox (no workspace mailbox) Sync syncs your inbox; a sync problem is shown with a fix link', () => {
+    init(false, LIST, CONNECTED);
+    expect(el().textContent).not.toContain('New mail is not being received.');
+    button('Sync inbox')!.click();
+    http.expectOne(r => r.url.endsWith('/mail/senders/inbox/sync') && r.method === 'POST').flush({ synced: 1, failed: 0, fetchedCount: 2 });
+    inbox().flush(LIST);
+    senders().flush({ senders: [{ id: 1, email: 'anita@a-co.io', status: 'verified', inbox: { connected: true, status: 'error', error: 'Mailbox authentication failed.' } }] });
+    fixture.detectChanges();
+    expect(el().textContent).toContain('Your inbox could not be synced.');
+    expect(button('Fix inbox settings')).toBeDefined();
   });
 
   it('arrow keys move through the list', fakeAsync(() => {

@@ -365,6 +365,7 @@ export class ApiService {
   // 23. Visual HTML Email & Email AI Analysis
   /** "My sender email": the person's own addresses (verified ones are used to send). */
   getMySenders(): Observable<any> { return this.http.get(`${this.baseUrl}/mail/senders`); }
+  syncMyInboxes(): Observable<any> { return this.http.post(`${this.baseUrl}/mail/senders/inbox/sync`, {}); }
 
   /** Email a lead from Leads ("Email leads"): only to that lead's own address. */
   sendLeadEmail(leadId: number, data: any, confirm: boolean, idempotencyKey: string): Observable<any> {
