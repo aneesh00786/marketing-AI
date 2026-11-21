@@ -65,3 +65,25 @@
 
 .dv-section { margin: 0; font-size: 0.95rem; }
 .dv-card h3 small, .dv-section small { font-weight: 400; font-size: 0.78rem; }
+
+/* Domain setup */
+.dv-domains h3 { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.dv-domains h3 .dv-link { margin-left: auto; }
+.dv-dom { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.dv-dom + .dv-dom { margin-top: 8px; }
+.dv-dom[data-status="error"] { border-color: rgba(239, 68, 68, 0.45); }
+.dv-dom[data-status="warn"] { border-color: rgba(245, 158, 11, 0.45); }
+.dv-dom-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; word-break: break-all; }
+.dv-dom .dv-badge { position: static; }
+.dv-checks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.dv-checks li { display: grid; grid-template-columns: 56px 20px 1fr; gap: 6px; align-items: start; font-size: 0.84rem; }
+.dv-check-name { font-weight: 650; }
+.dv-checks li[data-status="error"] .dv-check-icon, .dv-checks li[data-status="error"] .dv-check-text { color: var(--danger-text); }
+.dv-checks li[data-status="warn"] .dv-check-icon { color: var(--warning-text); }
+.dv-checks li[data-status="ok"] .dv-check-icon { color: var(--success-text); }
+.dv-check-text { min-width: 0; overflow-wrap: anywhere; }
+.dv-fix { display: block; margin-top: 4px; padding: 6px 8px; border-radius: 6px; background: var(--surface-2); color: var(--text); font-size: 0.78rem; white-space: pre-wrap; word-break: break-all; }
+.dv-dom[data-status="ok"] .dv-badge { background: var(--success-soft); color: var(--success-text); }
+.dv-dom[data-status="warn"] .dv-badge { background: var(--warning-soft); color: var(--warning-text); }
+.dv-dom[data-status="error"] .dv-badge { background: var(--danger-soft); color: var(--danger-text); }
+.dv-dom[data-status="unknown"] .dv-badge { background: var(--surface-2); color: var(--text-muted); }

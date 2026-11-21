@@ -78,7 +78,7 @@ async function assertSafeMailHost(host) {
  * workspace only.
  */
 
-async function sendZeptoMail({ to, recipientName = '', subject, html, text = '', fromAddress, fromName, replyTo, token, tracking = null }) {
+async function sendZeptoMail({ to, recipientName = '', subject, html, text = '', fromAddress, fromName, replyTo, token, tracking = null, mimeHeaders = null }) {
   // The caller resolves the token for its own workspace; there is no shared fallback here.
   const authToken = token;
   if (!authToken) {
@@ -102,7 +102,9 @@ async function sendZeptoMail({ to, recipientName = '', subject, html, text = '',
         textbody: text || undefined,
         // Tracked Mail Center emails: our opaque reference, and ZeptoMail's open/click tracking set
         // explicitly from the workspace policy (off unless enabled and reportable).
-        ...(tracking ? { client_reference: tracking.clientReference, track_opens: !!tracking.trackOpens, track_clicks: !!tracking.trackClicks } : {})
+        ...(tracking ? { client_reference: tracking.clientReference, track_opens: !!tracking.trackOpens, track_clicks: !!tracking.trackClicks } : {}),
+        // A reply: In-Reply-To / References, so it stays in the recipient's conversation.
+        ...(mimeHeaders ? { mime_headers: mimeHeaders } : {})
       }),
       signal: AbortSignal.timeout(ZEPTO_TIMEOUT_MS)
     });
@@ -445,7 +447,9 @@ async function sendRealEmail(workspaceId, {
   record = true,
   // A member's own verified sender address ({ email, name }; modules/mail/senders). ZeptoMail and Amazon SES send
   // from it; an SMTP mailbox can only send as itself, so it keeps its address with this name and Reply-To.
-  from = null
+  from = null,
+  // A reply to a received email: { inReplyTo, references, replyToEmailId } (threading headers; the sent row is linked to it).
+  thread = null
 }) {
   const recipient = String(to || '').trim();
   if (!isValidRecipient(recipient)) throw mailError('A valid recipient email address is required (placeholder domains such as example.com are not accepted).', 400, 'INVALID_RECIPIENT');
@@ -481,10 +485,14 @@ async function sendRealEmail(workspaceId, {
 
   // mailtoSelf: a mailto: to the sender address; such replies are detected by the inbox sync.
   const unsubParts = listUnsubscribe ? [listUnsubscribe.url, listUnsubscribe.mailtoSelf ? `mailto:${mailboxEmail}?subject=unsubscribe` : listUnsubscribe.mailto].filter(Boolean) : [];
-  const unsubHeaders = unsubParts.length ? {
-    'List-Unsubscribe': unsubParts.map(u => `<${u}>`).join(', '),
-    ...(listUnsubscribe.url ? { 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' } : {})
+  const threadHeaders = thread?.inReplyTo ? { 'In-Reply-To': thread.inReplyTo, References: thread.references || thread.inReplyTo } : null;
+  const unsubHeaders = unsubParts.length || threadHeaders ? {
+    ...(unsubParts.length ? { 'List-Unsubscribe': unsubParts.map(u => `<${u}>`).join(', ') } : {}),
+    ...(unsubParts.length && listUnsubscribe.url ? { 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' } : {}),
+    ...(threadHeaders || {})
   } : null;
+  // The Message-ID header of what was sent, when known (replies to it are linked back to it).
+  let headerMessageId = null;
 
   // Marketing: an SMTP mailbox approved for marketing, otherwise Amazon SES when it is set up (never ZeptoMail).
   let marketingSes = null;
@@ -521,7 +529,8 @@ async function sendRealEmail(workspaceId, {
         fromName: senderName || senderEmail,
         replyTo: replyTo || senderEmail,
         token: zeptoToken(workspaceId, config),
-        tracking: tracker ? tracker.zeptoOptions() : null
+        tracking: tracker ? tracker.zeptoOptions() : null,
+        mimeHeaders: threadHeaders
       });
       sent = true;
       provider = 'zeptomail';
@@ -547,6 +556,8 @@ async function sendRealEmail(workspaceId, {
       sent = true;
       provider = 'ses';
       messageId = r.messageId;
+      // Amazon SES sets the Message-ID header itself: <id@region.amazonses.com>.
+      headerMessageId = `<${r.messageId}@${(marketingSes || {}).region || 'us-east-1'}.amazonses.com>`;
       smtpStatus = 'Sent via Amazon SES';
       deliveryDetails = { messageId: r.messageId };
     } catch (err) {
@@ -576,6 +587,8 @@ async function sendRealEmail(workspaceId, {
       sent = true;
       provider = 'ses';
       messageId = r.messageId;
+      // Amazon SES sets the Message-ID header itself: <id@region.amazonses.com>.
+      headerMessageId = `<${r.messageId}@${sesCfg.region || 'us-east-1'}.amazonses.com>`;
       smtpStatus = 'Sent via Amazon SES';
       deliveryDetails = { messageId: r.messageId };
     } catch (err) {
@@ -603,6 +616,7 @@ async function sendRealEmail(workspaceId, {
         sent = true;
         provider = 'smtp';
         messageId = info.messageId || null;
+        headerMessageId = info.messageId || null;
         smtpStatus = 'Sent via SMTP';
         deliveryDetails = { response: info.response, accepted: info.accepted };
       } catch (err) {
@@ -633,14 +647,17 @@ async function sendRealEmail(workspaceId, {
     insertRes = await run(`
     INSERT INTO emails (
       workspace_id, campaign_id, client_id, sender, sender_email, recipient_email, recipient_name,
-      subject, body, html_body, snippet, is_urgent, is_read, status, message_id, smtp_status, sent_at
+      subject, body, html_body, snippet, is_urgent, is_read, status, message_id, smtp_status, sent_at,
+      header_message_id, reply_to_email_id
     ) VALUES (
       ?, ?, ?, ?, ?, ?, ?,
-      ?, ?, ?, ?, 0, 1, 'Sent', ?, ?, ?
+      ?, ?, ?, ?, 0, 1, 'Sent', ?, ?, ?,
+      ?, ?
     )
   `, [
     workspaceId, campaignId, clientId, config.sender_name || senderEmail, senderEmail, recipient, recipientName || recipient,
-    subject, plain, html, plain.substring(0, 120), messageId, smtpStatus, now
+    subject, plain, html, plain.substring(0, 120), messageId, smtpStatus, now,
+    headerMessageId ? String(headerMessageId).slice(0, 255) : null, thread?.replyToEmailId || null
   ]);
   } catch (dbErr) {
     // Delivered but not recorded: callers must not send it again.
@@ -690,11 +707,97 @@ async function testImapLogin(box) {
   await client.logout().catch(() => null);
 }
 
+/** Received files kept for download; larger ones are listed but not stored (open them in the mailbox). */
+const ATTACH_MAX = 10 * 1024 * 1024;
+const ATTACH_TOTAL_MAX = 25 * 1024 * 1024;
+/** A folder's first sync reads its newest SYNC_WINDOW messages; later syncs read everything new (at most SYNC_MAX_NEW). */
+const SYNC_WINDOW = 30;
+const SYNC_MAX_NEW = 200;
+
+/** Message-IDs without angle brackets: one, or all in a References header. */
+const bareId = v => String(v || '').trim().replace(/^<|>$/g, '');
+const idList = v => (String(v || '').match(/<[^<>\s]+>/g) || []).map(bareId);
+
+/** The email of ours a received reply answers (by In-Reply-To / References), or null. */
+async function linkReply(workspaceId, inReplyTo, references) {
+  const ids = [...new Set([bareId(inReplyTo), ...idList(references)].filter(Boolean))].slice(-20);
+  if (!ids.length) return null;
+  const variants = ids.flatMap(i => [i, `<${i}>`]);
+  const ph = variants.map(() => '?').join(',');
+  const r = await get(`SELECT id FROM emails WHERE workspace_id = ? AND status = 'Sent' AND (header_message_id IN (${ph}) OR message_id IN (${ph})) ORDER BY id DESC LIMIT 1`,
+    [workspaceId, ...variants, ...variants]).catch(() => null);
+  return r ? r.id : null;
+}
+
+/** The Spam / Junk folder of a mailbox (by its special-use flag, else by a usual name), or null. */
+async function junkFolder(client) {
+  const list = await client.list().catch(() => []);
+  return (list.find(f => f.specialUse === '\\Junk') || list.find(f => /^(spam|junk|junk e-?mail|bulk mail)$/i.test(String(f.name || f.path || ''))))?.path || null;
+}
+
+async function saveAttachments(workspaceId, emailId, attachments) {
+  let total = 0;
+  for (const a of attachments || []) {
+    if (a.related) continue; // pictures shown inside the email body
+    const size = Number(a.size || a.content?.length || 0);
+    const keep = a.content && size <= ATTACH_MAX && total + size <= ATTACH_TOTAL_MAX;
+    if (keep) total += size;
+    const name = String(a.filename || 'attachment').replace(/[\r\n"\\/]/g, '_').slice(0, 255);
+    await run('INSERT INTO email_attachments (workspace_id, email_id, filename, content_type, size_bytes, content, created_at) VALUES (?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())',
+      [workspaceId, emailId, name, String(a.contentType || 'application/octet-stream').slice(0, 150), size, keep ? a.content : null]);
+  }
+}
+
+/** Saves one received message (once per Message-ID in the workspace). Returns true when it was new. */
+async function saveReceived(workspaceId, msg, source, ctx) {
+  const parsed = await simpleParser(source);
+  const messageId = (parsed.messageId || msg.envelope?.messageId || `imap_${ctx.box.imap_user}_${ctx.folder}_${msg.uid}`).slice(0, 255);
+  const fromAddr = parsed.from?.value?.[0]?.address || null;
+  const fromName = parsed.from?.value?.[0]?.name || fromAddr || '(unknown sender)';
+  const subject = String(parsed.subject || '(No Subject)').slice(0, 255);
+  const textBody = parsed.text || '';
+  const htmlBody = parsed.html || `<p>${textBody.replace(/\n/g, '<br>')}</p>`;
+  const snippet = textBody.substring(0, 140) || subject;
+  const receivedAt = parsed.date && !Number.isNaN(new Date(parsed.date).getTime()) ? new Date(parsed.date).toISOString().replace('T', ' ').substring(0, 19) : ctx.now;
+  const inReplyTo = parsed.inReplyTo ? String(parsed.inReplyTo).slice(0, 500) : null;
+  const references = parsed.references ? (Array.isArray(parsed.references) ? parsed.references.map(r => `<${bareId(r)}>`).join(' ') : String(parsed.references)) : null;
+  const seen = msg.flags && typeof msg.flags.has === 'function' ? msg.flags.has('\\Seen') : false;
+
+  // Metered to the workspace that owns this mailbox; past the quota it keeps the non-AI summary.
+  const analysis = ctx.spam
+    ? { ai_summary: null, ai_priority: 'Normal', ai_replies: [] }
+    : await aiEngine.analyzeEmail({ subject, body: textBody, sender: fromName }, null, { workspaceId, referenceType: 'email_sync', fallbackOnQuota: true });
+  const replyTo = await linkReply(workspaceId, inReplyTo, references);
+  let ins;
+  try {
+    ins = await run(`
+      INSERT INTO emails (
+        workspace_id, sender, sender_email, recipient_email, recipient_name,
+        subject, body, html_body, snippet, ai_summary, ai_priority, ai_replies_json,
+        is_urgent, is_read, status, message_id, received_key, smtp_status, received_at, mailbox_user_id,
+        in_reply_to, references_header, reply_to_email_id, mailbox_source, imap_folder, imap_uid, is_spam
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Received via IMAP', ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
+      workspaceId, fromName, fromAddr, ctx.box.imap_user, ctx.recipientName || ctx.box.imap_user,
+      subject, textBody, htmlBody, snippet, analysis.ai_summary, analysis.ai_priority, JSON.stringify(analysis.ai_replies || []),
+      analysis.ai_priority === 'Urgent' ? 1 : 0, seen ? 1 : 0, seen ? 'Read' : 'Unread', messageId, messageId, receivedAt, ctx.mailboxUserId,
+      inReplyTo, references ? references.slice(0, 20000) : null, replyTo, ctx.sourceKey, ctx.folder, msg.uid || null, ctx.spam ? 1 : 0
+    ]);
+  } catch (err) {
+    if (err.code !== 'ER_DUP_ENTRY') throw err;
+    return false; // saved meanwhile by another sync
+  }
+  if (parsed.attachments?.length) await saveAttachments(workspaceId, ins.lastID, parsed.attachments);
+  return true;
+}
+
 /**
- * Reads the latest messages of one mailbox into the workspace's received mail (each once, by Message-ID).
- * mailboxUserId: the member whose own inbox it is (they see what is synced from it).
+ * Reads one mailbox (INBOX and its Spam folder) into the workspace's received mail, each message once (by
+ * Message-ID). The first sync of a folder reads its newest messages; later syncs read everything that arrived
+ * since (IMAP UIDs), so nothing is missed between syncs. A message that cannot be saved is skipped, not the rest.
+ * mailboxUserId: the member whose own inbox it is (they see what is synced from it). sourceKey: 'workspace' or
+ * 'sender:<id>' (which login reads it again, e.g. to mark it read there).
  */
-async function syncMailbox(workspaceId, box, { recipientName = null, mailboxUserId = null } = {}) {
+async function syncMailbox(workspaceId, box, { recipientName = null, mailboxUserId = null, sourceKey = 'workspace' } = {}) {
   await assertSafeMailHost(box.imap_host);
   const client = new ImapFlow(imapClientOptions(box));
   let fetchedCount = 0;
@@ -703,84 +806,54 @@ async function syncMailbox(workspaceId, box, { recipientName = null, mailboxUser
 
   await client.connect();
   try {
-    // Select INBOX
-    const lock = await client.getMailboxLock('INBOX');
-    try {
-      const status = await client.status('INBOX', { messages: true, unseen: true });
-      const totalMessages = status.messages || 0;
-
-      if (totalMessages > 0) {
-        // The latest messages (newest last); each is saved once, so a longer window only re-checks known ones.
-        const startSeq = Math.max(1, totalMessages - (SYNC_WINDOW - 1));
-        const range = `${startSeq}:${totalMessages}`;
-
-        // Fetched first, then saved one by one: a message that cannot be saved is skipped, not the ones after it.
-        const fetched = [];
-        for await (let msg of client.fetch(range, { envelope: true, source: true, flags: true })) fetched.push(msg);
-        for (const msg of fetched) {
-          const messageId = msg.envelope?.messageId || `imap_${box.imap_user}_${msg.uid}`;
-
-          // Already received (a sent email with the same Message-ID, e.g. sent from here to this mailbox, is not).
-          const existing = await get(`SELECT id, mailbox_user_id FROM emails WHERE workspace_id = ? AND message_id = ? AND status NOT IN ('Sent', 'Not Sent') LIMIT 1`, [workspaceId, messageId]);
-          if (existing) {
-            // Also in this member's own inbox (first synced from the workspace mailbox): theirs to see too.
-            if (mailboxUserId && !existing.mailbox_user_id) await run('UPDATE emails SET mailbox_user_id = ? WHERE id = ?', [mailboxUserId, existing.id]).catch(() => null);
-            continue;
-          }
-          try {
-            // Parse full MIME message source
-            const parsed = await simpleParser(msg.source);
-            const fromAddr = parsed.from?.value?.[0]?.address || null;
-            const fromName = parsed.from?.value?.[0]?.name || fromAddr || '(unknown sender)';
-            const subject = parsed.subject || '(No Subject)';
-            const textBody = parsed.text || '';
-            const htmlBody = parsed.html || `<p>${textBody.replace(/\n/g, '<br>')}</p>`;
-            const snippet = textBody.substring(0, 140) || subject;
-            const receivedAt = parsed.date ? new Date(parsed.date).toISOString().replace('T', ' ').substring(0, 19) : now;
-
-            // Auto-run AI Analysis on received email!
-            // Metered to the workspace that owns this mailbox; past the quota it keeps the non-AI summary.
-            const analysis = await aiEngine.analyzeEmail({ subject, body: textBody, sender: fromName }, null, { workspaceId, referenceType: 'email_sync', fallbackOnQuota: true });
-            const isUrgent = analysis.ai_priority === 'Urgent' ? 1 : 0;
-
-            await run(`
-              INSERT INTO emails (
-                workspace_id, sender, sender_email, recipient_email, recipient_name,
-                subject, body, html_body, snippet, ai_summary, ai_priority, ai_replies_json,
-                is_urgent, is_read, status, message_id, smtp_status, received_at, mailbox_user_id
-              ) VALUES (
-                ?, ?, ?, ?, ?,
-                ?, ?, ?, ?, ?, ?, ?,
-                ?, 0, 'Unread', ?, 'Received via IMAP', ?, ?
-              )
-            `, [
-              workspaceId,
-              fromName,
-              fromAddr,
-              box.imap_user,
-              recipientName || box.imap_user,
-              subject,
-              textBody,
-              htmlBody,
-              snippet,
-              analysis.ai_summary,
-              analysis.ai_priority,
-              JSON.stringify(analysis.ai_replies || []),
-              isUrgent,
-              messageId,
-              receivedAt,
-              mailboxUserId
-            ]);
-
-            fetchedCount++;
-          } catch (err) {
-            skipped++;
-            console.warn(`IMAP sync: message ${messageId} in ${box.imap_user} was not saved:`, err.message);
+    const junk = await junkFolder(client);
+    const folders = [{ path: 'INBOX', spam: false }, ...(junk && junk.toUpperCase() !== 'INBOX' ? [{ path: junk, spam: true }] : [])];
+    for (const folder of folders) {
+      const lock = await client.getMailboxLock(folder.path).catch(() => null);
+      if (!lock) continue; // the folder cannot be opened: the others are still read
+      try {
+        const mb = client.mailbox || {};
+        const validity = mb.uidValidity !== undefined && mb.uidValidity !== null ? Number(mb.uidValidity) : null;
+        const state = await get('SELECT uid_validity, last_uid FROM mail_sync_state WHERE workspace_id = ? AND mailbox_key = ? AND folder = ?', [workspaceId, sourceKey, folder.path]).catch(() => null);
+        const fresh = !state || validity === null || Number(state.uid_validity) !== validity;
+        const lastUid = fresh ? 0 : Number(state.last_uid) || 0;
+        const exists = Number(mb.exists || 0);
+        let list = [];
+        if (exists > 0) {
+          const range = fresh ? `${Math.max(1, exists - (SYNC_WINDOW - 1))}:*` : `${lastUid + 1}:*`;
+          for await (const m of client.fetch(range, { uid: true, envelope: true, flags: true }, { uid: !fresh })) {
+            if (m.uid > lastUid) list.push(m);
           }
         }
+        list.sort((x, y) => x.uid - y.uid);
+        if (list.length > SYNC_MAX_NEW) list = list.slice(-SYNC_MAX_NEW);
+        let maxUid = lastUid;
+        for (const m of list) {
+          maxUid = Math.max(maxUid, m.uid);
+          try {
+            const envId = m.envelope?.messageId ? String(m.envelope.messageId).slice(0, 255) : null;
+            if (envId) {
+              const existing = await get('SELECT id, mailbox_user_id FROM emails WHERE workspace_id = ? AND received_key = ? LIMIT 1', [workspaceId, envId]);
+              if (existing) {
+                // Also in this member's own inbox (first synced from the workspace mailbox): theirs to see too.
+                if (mailboxUserId && !existing.mailbox_user_id) await run('UPDATE emails SET mailbox_user_id = ? WHERE id = ?', [mailboxUserId, existing.id]).catch(() => null);
+                continue;
+              }
+            }
+            const full = await client.fetchOne(String(m.uid), { source: true }, { uid: true });
+            if (!full?.source) throw new Error('the message could not be downloaded');
+            if (await saveReceived(workspaceId, m, full.source, { box, folder: folder.path, spam: folder.spam, recipientName, mailboxUserId, sourceKey, now })) fetchedCount++;
+          } catch (err) {
+            skipped++;
+            console.warn(`IMAP sync: message ${m.uid} in ${box.imap_user}/${folder.path} was not saved:`, err.message);
+          }
+        }
+        await run(`INSERT INTO mail_sync_state (workspace_id, mailbox_key, folder, uid_validity, last_uid, updated_at) VALUES (?, ?, ?, ?, ?, UTC_TIMESTAMP())
+          ON DUPLICATE KEY UPDATE uid_validity = VALUES(uid_validity), last_uid = VALUES(last_uid), updated_at = UTC_TIMESTAMP()`,
+        [workspaceId, sourceKey, folder.path, validity, maxUid]);
+      } finally {
+        lock.release();
       }
-    } finally {
-      lock.release();
     }
     await client.logout();
   } catch (err) {
@@ -790,8 +863,42 @@ async function syncMailbox(workspaceId, box, { recipientName = null, mailboxUser
   return { fetchedCount, skipped, syncedAt: now };
 }
 
-/** How many of a mailbox's latest messages each sync looks at. */
-const SYNC_WINDOW = 30;
+/** The login of the mailbox an email was synced from ('workspace' or 'sender:<id>'), or null. */
+async function mailboxLogin(workspaceId, sourceKey) {
+  if (sourceKey === 'workspace') {
+    const c = await getRawMailConfig(workspaceId);
+    return c.imap_host && c.imap_user && c.imap_pass ? imapBox(c) : null;
+  }
+  const m = /^sender:(\d+)$/.exec(String(sourceKey || ''));
+  if (!m) return null;
+  const r = await get("SELECT email, imap_host, imap_port, imap_tls, imap_pass FROM member_sender_addresses WHERE id = ? AND workspace_id = ? AND status = 'verified' AND imap_pass IS NOT NULL", [Number(m[1]), workspaceId]);
+  if (!r) return null;
+  let pass; try { pass = secretBox.decrypt(r.imap_pass); } catch { return null; }
+  return { imap_host: r.imap_host, imap_port: r.imap_port || 993, imap_tls: Number(r.imap_tls) === 0 ? 0 : 1, imap_user: r.email, imap_pass: pass };
+}
+
+/**
+ * Marks a synced email read or unread in the mailbox it came from too (best effort: the app's own state is
+ * already saved; a mailbox that cannot be reached is left as it is).
+ */
+async function setRemoteSeen(workspaceId, email, seen) {
+  if (!email?.imap_uid || !email.imap_folder || !email.mailbox_source) return false;
+  const box = await mailboxLogin(workspaceId, email.mailbox_source);
+  if (!box) return false;
+  await assertSafeMailHost(box.imap_host);
+  const client = new ImapFlow(imapClientOptions(box));
+  await client.connect();
+  try {
+    const lock = await client.getMailboxLock(email.imap_folder);
+    try {
+      if (seen) await client.messageFlagsAdd(String(email.imap_uid), ['\\Seen'], { uid: true });
+      else await client.messageFlagsRemove(String(email.imap_uid), ['\\Seen'], { uid: true });
+    } finally { lock.release(); }
+  } finally {
+    await client.logout().catch(() => null);
+  }
+  return true;
+}
 
 /** Workspaces with a mailbox to read: the workspace mailbox (IMAP), or a member's own inbox. */
 async function inboxWorkspaces() {
@@ -816,7 +923,7 @@ async function syncMemberInboxes(workspaceId, { userId = null } = {}) {
     const box = { imap_host: r.imap_host, imap_port: r.imap_port || 993, imap_tls: Number(r.imap_tls) === 0 ? 0 : 1, imap_user: r.email, imap_pass: pass };
     try {
       if (!pass) throw mailError('The saved inbox password cannot be read. Connect the inbox again.', 409, 'INBOX_PASSWORD_UNREADABLE');
-      const res = await syncMailbox(workspaceId, box, { recipientName: r.display_name || null, mailboxUserId: r.user_id });
+      const res = await syncMailbox(workspaceId, box, { recipientName: r.display_name || null, mailboxUserId: r.user_id, sourceKey: `sender:${r.id}` });
       out.synced++; out.fetchedCount += res.fetchedCount;
       await run("UPDATE member_sender_addresses SET imap_status = 'connected', imap_error = NULL, imap_synced_at = UTC_TIMESTAMP() WHERE id = ?", [r.id]);
     } catch (err) {
@@ -889,6 +996,8 @@ module.exports = {
   testImapLogin,
   imapErrorText,
   syncMemberInboxes,
+  setRemoteSeen,
+  bareId,
   inboxWorkspaces,
   smtpOutcomeUnknown,
   EMAIL_RE,

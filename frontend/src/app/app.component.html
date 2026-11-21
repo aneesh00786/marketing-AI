@@ -1106,8 +1106,8 @@
         <!-- Required email purpose (validated again by the server against the content and template) -->
         <fieldset class="compose-purpose">
           <legend>Email purpose <span class="req" aria-hidden="true">*</span><span class="sr-only">(required)</span></legend>
-          <label class="purpose-opt" [class.disabled]="composeTemplateIsMarketing || !canSendTransactional">
-            <input type="radio" name="composePurpose" value="transactional" [(ngModel)]="composePurpose" [disabled]="composeTemplateIsMarketing || !canSendTransactional" />
+          <label class="purpose-opt" [class.disabled]="composeTemplateIsMarketing || !composeCanTransactional">
+            <input type="radio" name="composePurpose" value="transactional" [(ngModel)]="composePurpose" [disabled]="composeTemplateIsMarketing || !composeCanTransactional" />
             <span><strong>Transactional / Direct</strong><small>A reply, receipt, notification or one-to-one service message. Sent through your transactional mail service.</small></span>
           </label>
           <label class="purpose-opt">
@@ -1115,7 +1115,8 @@
             <span><strong>Marketing</strong><small>Promotions, newsletters or offers. Needs an SMTP mailbox approved for marketing; adds an unsubscribe link; unsubscribed or opted-out contacts are not emailed.</small></span>
           </label>
           <p class="purpose-note" *ngIf="composeTemplateIsMarketing">This email uses a {{ composeTemplate?.category }} template, so it is sent as marketing.</p>
-          <p class="purpose-note" *ngIf="!canSendTransactional">Your role sends Compose email as marketing. Workspace Owners and Admins can send transactional email.</p>
+          <p class="purpose-note" *ngIf="!composeCanTransactional">Your role sends Compose email as marketing. Workspace Owners and Admins can send transactional email. A reply to the person who wrote to you can always be sent as transactional.</p>
+          <p class="purpose-note" *ngIf="composeAnswersSender && !canSendTransactional">This is a reply to {{ composeReplyTo?.email }}, so it can be sent as transactional.</p>
           <p class="purpose-note">Emails with promotional content are always sent as marketing, whatever is selected.</p>
         </fieldset>
 

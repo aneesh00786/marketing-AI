@@ -104,6 +104,14 @@ async function identityVerified(cfg, email) {
   return { verified: false, identity: null };
 }
 
+/** An identity (address or domain) as SES has it, with its DKIM attributes; null when SES does not know it. */
+async function identityDetails(cfg, id) {
+  try { return await request(cfg, 'GET', `/v2/email/identities/${encodeURIComponent(id)}`); } catch (err) {
+    if (err.providerCode === 'NotFoundException') return null;
+    throw err;
+  }
+}
+
 /**
  * Sends one raw MIME email to one recipient. tags: SES message tags (letters, digits, _ and -),
  * returned with every SES event, so events can be matched to the campaign and recipient.
@@ -134,4 +142,4 @@ async function createEmailIdentity(cfg, email) {
   }
 }
 
-module.exports = { sign, getAccount, identityVerified, createEmailIdentity, sendRaw, sesError, REGION_RE };
+module.exports = { sign, getAccount, identityVerified, identityDetails, createEmailIdentity, sendRaw, sesError, REGION_RE };

@@ -344,6 +344,8 @@ async function sendDraftCore(ctx, draft) {
       purpose: 'marketing',
       suppressionPolicy: 'marketing',
       from,
+      // A Compose reply sent as marketing still continues the conversation.
+      thread: ctx.mailThread || null,
       track: { draftId: draft.id, consentOk }
     });
   } catch (err) {
@@ -448,6 +450,8 @@ const listPage = (rows, page) => ({ page, hasMore: rows.length > MAILBOX_PAGE, r
 const inboxQuery = z.object({
   q: z.string().trim().max(120).optional(),
   read: z.enum(['read', 'unread']).optional(),
+  // 'spam': mail synced from the mailbox's Spam folder (kept out of the Inbox and its badge).
+  folder: z.enum(['inbox', 'spam']).optional(),
   from: isoDay.optional(),
   to: isoDay.optional(),
   page: z.coerce.number().int().min(1).max(1000).optional()
@@ -456,7 +460,7 @@ const inboxQuery = z.object({
 /** Unread received emails the person may see: the Inbox badge (polled by the app, so kept to one count). */
 emails.get('/inbox/unread', requireCapability('mail.view'), wrap(async (req, res) => {
   const scope = mailAccess.emailScope(req, 'e');
-  const r = await get(`SELECT COUNT(*) AS n FROM emails e WHERE e.workspace_id = ? AND ${RECEIVED_SQL} AND ${UNREAD_SQL} AND ${scope.sql}`, [ws(req), ...scope.params]);
+  const r = await get(`SELECT COUNT(*) AS n FROM emails e WHERE e.workspace_id = ? AND ${RECEIVED_SQL} AND ${UNREAD_SQL} AND e.is_spam = 0 AND ${scope.sql}`, [ws(req), ...scope.params]);
   res.json({ success: true, unread: Number(r?.n) || 0 });
 }));
 
@@ -465,7 +469,7 @@ emails.get('/inbox', requireCapability('mail.view'), wrap(async (req, res) => {
   const q = query(inboxQuery, req);
   const page = q.page || 1;
   const scope = mailAccess.emailScope(req, 'e');
-  const where = ['e.workspace_id = ?', RECEIVED_SQL, scope.sql];
+  const where = ['e.workspace_id = ?', RECEIVED_SQL, scope.sql, q.folder === 'spam' ? 'e.is_spam = 1' : 'e.is_spam = 0'];
   const params = [ws(req), ...scope.params];
   if (q.read === 'unread') where.push(UNREAD_SQL);
   else if (q.read === 'read') where.push(`NOT ${UNREAD_SQL}`);
@@ -477,17 +481,19 @@ emails.get('/inbox', requireCapability('mail.view'), wrap(async (req, res) => {
   dayRange('e.received_at', q, where, params, req);
   const rows = await all(
     `SELECT e.id, e.sender, e.sender_email, e.recipient_email, e.recipient_name, e.subject, e.snippet, LEFT(e.body, 400) AS body,
-            e.received_at, e.is_read, e.status, e.is_urgent, e.ai_priority, e.ai_summary, (e.html_body IS NOT NULL AND e.html_body <> '') AS has_html
+            e.received_at, e.is_read, e.status, e.is_urgent, e.ai_priority, e.ai_summary, (e.html_body IS NOT NULL AND e.html_body <> '') AS has_html,
+            e.is_spam, (SELECT COUNT(*) FROM email_attachments a WHERE a.workspace_id = e.workspace_id AND a.email_id = e.id) AS attachments
      FROM emails e WHERE ${where.join(' AND ')}
      ORDER BY e.received_at DESC, e.id DESC LIMIT ${MAILBOX_PAGE + 1} OFFSET ${(page - 1) * MAILBOX_PAGE}`, params);
-  const unread = await get(`SELECT COUNT(*) AS n FROM emails e WHERE e.workspace_id = ? AND ${RECEIVED_SQL} AND ${UNREAD_SQL} AND ${scope.sql}`, [ws(req), ...scope.params]);
+  const unread = await get(`SELECT COUNT(*) AS n FROM emails e WHERE e.workspace_id = ? AND ${RECEIVED_SQL} AND ${UNREAD_SQL} AND e.is_spam = 0 AND ${scope.sql}`, [ws(req), ...scope.params]);
   const p = listPage(rows, page);
   res.json({
     success: true, page, hasMore: p.hasMore, unread: Number(unread?.n) || 0,
     emails: p.rows.map(e => ({
       id: e.id, from: e.sender_email || null, fromName: e.sender || null, to: e.recipient_email || null,
       subject: e.subject, preview: preview(e), receivedAt: e.received_at, read: Number(e.is_read) === 1 || e.status === 'Read',
-      urgent: Number(e.is_urgent) === 1 || e.ai_priority === 'Urgent', priority: e.ai_priority || null, hasHtml: !!Number(e.has_html)
+      urgent: Number(e.is_urgent) === 1 || e.ai_priority === 'Urgent', priority: e.ai_priority || null, hasHtml: !!Number(e.has_html),
+      spam: Number(e.is_spam) === 1, attachments: Number(e.attachments) || 0
     }))
   });
 }));
@@ -550,7 +556,10 @@ emails.get('/:id(\\d+)', requireCapability('mail.view'), wrap(async (req, res) =
      FROM emails e ${mailActivity.TRACKING_JOIN} ${mailActivity.LINKS_JOIN} WHERE e.id = ? AND e.workspace_id = ? AND ${scope.sql}`, [ws(req), ws(req), ws(req), req.params.id, ws(req), ...scope.params]);
   if (!e) throw httpError('Email not found.', 404, 'NOT_FOUND');
   const direction = e.status === 'Sent' ? 'sent' : e.status === 'Not Sent' ? 'not_sent' : 'received';
-  const { t_provider, t_failure_reason, ai_replies_json, ...rest } = e;
+  const { t_provider, t_failure_reason, ai_replies_json, imap_uid, imap_folder, mailbox_source, received_key, references_header, ...rest } = e;
+  // Files of a received email, and the email of ours it answers (when it is one the person may see).
+  const attachments = await all('SELECT id, filename, content_type, size_bytes, (content IS NOT NULL) AS stored FROM email_attachments WHERE workspace_id = ? AND email_id = ? ORDER BY id', [ws(req), e.id]);
+  const inReplyTo = e.reply_to_email_id ? await get(`SELECT e.id, e.subject, e.sent_at, e.status FROM emails e WHERE e.id = ? AND e.workspace_id = ? AND ${scope.sql}`, [e.reply_to_email_id, ws(req), ...scope.params]) : null;
   res.json({
     success: true,
     email: {
@@ -561,20 +570,44 @@ emails.get('/:id(\\d+)', requireCapability('mail.view'), wrap(async (req, res) =
       purpose: direction === 'received' ? null : (e.purpose || null),
       source: e.source || null,
       provider: t_provider || null,
-      failure: direction === 'not_sent' ? (e.smtp_status || null) : (t_failure_reason || null)
+      failure: direction === 'not_sent' ? (e.smtp_status || null) : (t_failure_reason || null),
+      spam: Number(e.is_spam) === 1,
+      attachments: attachments.map(a => ({ id: a.id, filename: a.filename, contentType: a.content_type, size: Number(a.size_bytes) || 0, stored: !!Number(a.stored) })),
+      inReplyTo: inReplyTo ? { id: inReplyTo.id, subject: inReplyTo.subject, sentAt: inReplyTo.sent_at, direction: inReplyTo.status === 'Sent' ? 'sent' : 'received' } : null
     }
   });
+}));
+
+/** Types a browser may show inline; anything else downloads as a file (never rendered as a page of this app). */
+const SAFE_ATTACHMENT_TYPES = /^(application\/pdf|image\/(png|jpe?g|gif|webp)|text\/plain|text\/csv)$/i;
+
+/** A file of a received email the person may see. */
+emails.get('/:id(\\d+)/attachments/:aid(\\d+)', requireCapability('mail.view'), wrap(async (req, res) => {
+  await requireEmail(ws(req), req.params.id, req);
+  const a = await get('SELECT filename, content_type, content FROM email_attachments WHERE id = ? AND email_id = ? AND workspace_id = ?', [Number(req.params.aid), Number(req.params.id), ws(req)]);
+  if (!a) throw httpError('Attachment not found.', 404, 'NOT_FOUND');
+  if (!a.content) throw httpError('This file was too large to keep. Open it in the mailbox it was sent to.', 410, 'ATTACHMENT_NOT_STORED');
+  const type = SAFE_ATTACHMENT_TYPES.test(String(a.content_type || '')) ? String(a.content_type).toLowerCase() : 'application/octet-stream';
+  const name = String(a.filename || 'attachment').replace(/[^\w.\- ()]+/g, '_').slice(0, 150) || 'attachment';
+  res.setHeader('Content-Type', type);
+  res.setHeader('Content-Disposition', `attachment; filename="${name}"; filename*=UTF-8''${encodeURIComponent(a.filename || name)}`);
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.send(Buffer.isBuffer(a.content) ? a.content : Buffer.from(a.content));
 }));
 
 /** Mark a received message read or unread (the workspace's shared mailbox state). Sent mail has no read state. */
 emails.put('/:id(\\d+)/read', requireCapability('mail.view'), body(z.object({ read: z.boolean() }).strict()), wrap(async (req, res) => {
   const scope = mailAccess.emailScope(req, 'e');
-  const e = await get(`SELECT e.id, e.status FROM emails e WHERE e.id = ? AND e.workspace_id = ? AND ${scope.sql}`, [req.params.id, ws(req), ...scope.params]);
+  const e = await get(`SELECT e.id, e.status, e.imap_uid, e.imap_folder, e.mailbox_source FROM emails e WHERE e.id = ? AND e.workspace_id = ? AND ${scope.sql}`, [req.params.id, ws(req), ...scope.params]);
   if (!e) throw httpError('Email not found.', 404, 'NOT_FOUND');
   if (['Sent', 'Not Sent'].includes(e.status)) throw httpError('Only received emails can be marked read or unread.', 409, 'NOT_RECEIVED');
   const read = req.valid.read;
   await run('UPDATE emails SET is_read = ?, status = ? WHERE id = ? AND workspace_id = ?', [read ? 1 : 0, read ? 'Read' : 'Unread', e.id, ws(req)]);
   res.json({ success: true, id: e.id, read });
+  // The mailbox it came from shows it read (or unread) too; after the response, so the screen never waits on it.
+  emailService.setRemoteSeen(ws(req), e, read).catch(err => console.warn('Could not update the read state in the mailbox:', err.message));
 }));
 
 const sendSchema = z.object({
@@ -589,6 +622,8 @@ const sendSchema = z.object({
   templateId: z.coerce.number().int().positive().optional().nullable(),
   // Which of the sender's own verified addresses to send from (default: their first).
   from_email: z.string().trim().toLowerCase().max(255).optional().nullable(),
+  // A reply: the received email it answers (threading headers; answering its sender may be transactional).
+  reply_to_email_id: z.coerce.number().int().positive().optional().nullable(),
   confirm: confirmed
 }).passthrough();
 
@@ -683,6 +718,21 @@ async function sendDirect(req, res, { requireHtml }) {
   const html = v.html_body || null;
   assertNoPlaceholders({ subject: v.subject, text, html: html || '' });
 
+  // A reply to a received email the person can see: it continues that conversation (In-Reply-To / References).
+  let replyOf = null;
+  if (v.reply_to_email_id) {
+    replyOf = await requireEmail(ws(req), v.reply_to_email_id, req);
+    if (['Sent', 'Not Sent'].includes(replyOf.status)) throw httpError('Only a received email can be replied to.', 400, 'NOT_A_RECEIVED_EMAIL');
+    const mid = emailService.bareId(replyOf.message_id);
+    req.mailThread = mid && !/^imap_/.test(mid) ? {
+      inReplyTo: `<${mid}>`,
+      references: [...new Set([...(String(replyOf.references_header || '').match(/<[^<>\s]+>/g) || []), `<${mid}>`])].slice(-20).join(' '),
+      replyToEmailId: replyOf.id
+    } : { replyToEmailId: replyOf.id };
+  }
+  // Answering the person who wrote: a one-to-one reply, which anyone who may send email may send as transactional.
+  const answersSender = !!replyOf && String(replyOf.sender_email || '').trim().toLowerCase() === String(v.recipient_email || '').trim().toLowerCase();
+
   // Purpose: declared by the sender, validated here against the message and the template. Missing,
   // contradictory or marketing-looking content gets the stricter marketing rule.
   const cls = await mailPurpose.classify(ws(req), { declared: v.purpose, subject: v.subject, html, text, templateId: v.templateId });
@@ -691,7 +741,7 @@ async function sendDirect(req, res, { requireHtml }) {
   // Authorization, separate from classification: sending as transactional (which may reach contacts
   // who opted out of marketing) needs mail.send_transactional. Content the server treats as
   // marketing follows the marketing safeguards instead and needs no extra permission.
-  if (cls.purpose === 'transactional' && !req.auth.capabilities.has('mail.send_transactional')) {
+  if (cls.purpose === 'transactional' && !req.auth.capabilities.has('mail.send_transactional') && !answersSender) {
     await audit(req, 'mail.send_blocked', { resourceType: 'email', resourceId: null, metadata: { path: 'compose', reason: 'transactional_not_permitted', purpose: purposeMeta } });
     throw httpError('Your role cannot send transactional email. Send it as marketing, or ask a workspace Owner or Admin.', 403, 'TRANSACTIONAL_NOT_PERMITTED');
   }
@@ -728,6 +778,7 @@ async function sendDirect(req, res, { requireHtml }) {
         purpose: 'transactional',
         suppressionPolicy: 'transactional',
         from: own,
+        thread: req.mailThread || null,
         track: {}
       });
   } catch (err) {
@@ -738,7 +789,7 @@ async function sendDirect(req, res, { requireHtml }) {
   await run("UPDATE mail_send_requests SET status = 'sent', email_id = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?", [sendRes.emailId, claim.id]);
   // Who sent it (staff performance and lead contact history); Compose, including the lead panel's "Send email".
   if (sendRes.emailId) await run('UPDATE emails SET sent_by_user_id = ? WHERE id = ? AND workspace_id = ?', [req.auth.userId || null, sendRes.emailId, ws(req)]).catch(() => null);
-  await audit(req, 'mail.sent', { resourceType: 'email', resourceId: sendRes.emailId, metadata: { purpose: purposeMeta } });
+  await audit(req, 'mail.sent', { resourceType: 'email', resourceId: sendRes.emailId, metadata: { purpose: purposeMeta, ...(replyOf ? { replyTo: replyOf.id } : {}) } });
   if (cls.reclassified) await audit(req, 'mail.purpose_reclassified', { resourceType: 'email', resourceId: sendRes.emailId, metadata: purposeMeta });
   res.json({
     success: true,

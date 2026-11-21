@@ -17,6 +17,26 @@ const wrap = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch
 router.get('/settings', requireCapability('mail.view'), wrap(async (req, res) => res.json({ success: true, ...(await settings.getSettings(req)) })));
 router.put('/settings', requireCapability('mail.configure'), wrap(async (req, res) => res.json({ success: true, ...(await settings.saveSettings(req, req.body || {})) })));
 router.get('/deliverability', requireCapability('mail.view'), wrap(async (req, res) => res.json({ success: true, ...(await require('./deliverability').dashboard(req.auth.workspaceId, { days: req.query.days })) })));
+/**
+ * Email authentication (SPF, DKIM, DMARC, MX) of the domains this person's email is sent from: the workspace
+ * address and their own sender addresses (Owners/Admins: every member's). Public DNS, read-only.
+ */
+router.get('/domains', requireCapability('mail.view'), wrap(async (req, res) => {
+  const { all } = require('../../../db/database');
+  const emailService = require('../../../services/emailService');
+  const { PUBLIC_DOMAINS } = require('../senders/senderService');
+  const ws = req.auth.workspaceId;
+  const cfg = await emailService.getRawMailConfig(ws);
+  const everyone = require('../../../lib/mailAccess').seesAllMail(req);
+  const own = await all(`SELECT DISTINCT email FROM member_sender_addresses WHERE workspace_id = ? AND status = 'verified'${everyone ? '' : ' AND user_id = ?'}`,
+    everyone ? [ws] : [ws, Number(req.auth.userId)]).catch(() => []);
+  const domains = [...new Set([cfg.sender_email, ...own.map(r => r.email)]
+    .filter(Boolean).filter(e => !PUBLIC_DOMAINS.test(e)).map(e => String(e).split('@')[1].toLowerCase()))].slice(0, 10);
+  const sesCfg = await settings.sesConfig(ws).catch(() => null);
+  const providers = { smtpHost: cfg.provider === 'zeptomail' ? null : cfg.smtp_host, zepto: cfg.provider === 'zeptomail', sesCfg };
+  const check = require('../../../lib/mailDomainCheck');
+  res.json({ success: true, domains: await Promise.all(domains.map(d => check.checkDomain(d, providers))) });
+}));
 router.post('/test', requireCapability('mail.configure'), wrap(async (req, res) => res.json({ success: true, ...(await settings.testConnection(req)) })));
 
 /** Public: Amazon SNS posts SES events here (text/plain JSON), verified by SNS signature. */

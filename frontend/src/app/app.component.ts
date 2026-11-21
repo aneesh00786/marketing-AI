@@ -1773,6 +1773,7 @@ export class AppComponent implements OnInit, OnDestroy {
         this.composePurpose = null; // an email to a lead: the sender must choose the purpose
         this.composeTemplate = null;
         this.composeTab = 'visual';
+        this.composeReplyTo = null;
         this.showComposeModal = true;
         this.composeLeadId = lead.id; this.composeLeadEmail = String(d.to || '').trim().toLowerCase();
       },
@@ -1835,6 +1836,14 @@ export class AppComponent implements OnInit, OnDestroy {
   myCaps: Set<string> | null = null;
   /** Sending Compose email as transactional needs mail.send_transactional (Owners/Admins by default). */
   get canSendTransactional(): boolean { return this.myCaps === null || this.myCaps.has('mail.send_transactional'); }
+  /** The received email Compose is replying to (threading; answering its sender may be transactional). */
+  composeReplyTo: { id: number; email: string } | null = null;
+  /** A reply to the person who wrote: anyone who may send email may send it as transactional (the server re-checks). */
+  get composeAnswersSender(): boolean {
+    const r = this.composeReplyTo;
+    return !!r && String(this.composeEmail?.recipient_email || '').trim().toLowerCase() === r.email;
+  }
+  get composeCanTransactional(): boolean { return this.canSendTransactional || this.composeAnswersSender; }
 
   /** Templates whose category is not Transactional, Welcome or Custom are marketing (as on the server). */
   get composeTemplateIsMarketing(): boolean {
@@ -1844,7 +1853,7 @@ export class AppComponent implements OnInit, OnDestroy {
 
   private composeKey(): string {
     const c = this.composeEmail;
-    const fingerprint = JSON.stringify([c.recipient_email, c.recipient_name, c.subject, c.body, c.is_html ? c.html_body : '', this.composePurpose, this.composeTemplate?.id ?? null]);
+    const fingerprint = JSON.stringify([c.recipient_email, c.recipient_name, c.subject, c.body, c.is_html ? c.html_body : '', this.composePurpose, this.composeTemplate?.id ?? null, this.composeReplyTo?.id ?? null]);
     if (!this.composeSend || this.composeSend.fingerprint !== fingerprint) {
       const key = typeof crypto !== 'undefined' && 'randomUUID' in crypto
         ? crypto.randomUUID()
@@ -1896,6 +1905,7 @@ export class AppComponent implements OnInit, OnDestroy {
     else if (!keepRecipient) this.composePurpose = null;
     this.composeTokenValues = defaultTokenValues(findTokens(t.html), this.composeEmail.recipient_name);
     this.composeSend = null;
+    this.composeReplyTo = null;
     this.showComposeModal = true;
     this.composeLeadId = null;
   }
@@ -1958,8 +1968,9 @@ export class AppComponent implements OnInit, OnDestroy {
       this.apiService.sendLeadEmail(this.composeLeadId!, {
         recipient_email: this.composeEmail.recipient_email, recipient_name: this.composeEmail.recipient_name, subject: this.composeEmail.subject,
         ...(html ? { html_body: this.composeEmail.html_body, body_text: this.composeEmail.body } : { body: this.composeEmail.body }),
-        purpose: this.composePurpose, templateId: this.composeTemplate?.id ?? null, from_email: this.composeFrom
-      }, true, key).subscribe(done);
+        purpose: this.composePurpose, templateId: this.composeTemplate?.id ?? null, from_email: this.composeFrom,
+        reply_to_email_id: this.composeReplyTo?.id ?? null
+      } as any, true, key).subscribe(done);
       return;
     }
     if (this.composeEmail.is_html && this.composeEmail.html_body) {
@@ -1971,10 +1982,11 @@ export class AppComponent implements OnInit, OnDestroy {
         body_text: this.composeEmail.body,
         purpose: this.composePurpose,
         templateId: this.composeTemplate?.id ?? null,
-        from_email: this.composeFrom
+        from_email: this.composeFrom,
+        reply_to_email_id: this.composeReplyTo?.id ?? null
       } as any, true, key).subscribe(done);
     } else {
-      this.apiService.sendEmail({ ...this.composeEmail, purpose: this.composePurpose, templateId: this.composeTemplate?.id ?? null, from_email: this.composeFrom } as any, true, key).subscribe(done);
+      this.apiService.sendEmail({ ...this.composeEmail, purpose: this.composePurpose, templateId: this.composeTemplate?.id ?? null, from_email: this.composeFrom, reply_to_email_id: this.composeReplyTo?.id ?? null } as any, true, key).subscribe(done);
     }
   }
 
@@ -1990,8 +2002,9 @@ export class AppComponent implements OnInit, OnDestroy {
       html_body: '',
       is_html: false
     };
+    this.composeReplyTo = this.receivedRef(email);
     // A reply to an inbound email: direct by default when allowed (the sender can change it; the server re-checks).
-    this.composePurpose = this.canSendTransactional ? 'transactional' : null;
+    this.composePurpose = this.composeCanTransactional ? 'transactional' : null;
     this.composeTemplate = null;
     this.composeTab = 'write';
     this.showComposeModal = true;
@@ -2009,8 +2022,9 @@ export class AppComponent implements OnInit, OnDestroy {
       html_body: '',
       is_html: false
     };
+    this.composeReplyTo = this.receivedRef(email);
     // A reply to an inbound email: direct by default when allowed (the sender can change it; the server re-checks).
-    this.composePurpose = this.canSendTransactional ? 'transactional' : null;
+    this.composePurpose = this.composeCanTransactional ? 'transactional' : null;
     this.composeTemplate = null;
     this.composeSend = null;
     this.composeTab = 'write';
@@ -2018,8 +2032,15 @@ export class AppComponent implements OnInit, OnDestroy {
     this.composeLeadId = null;
   }
 
+  /** A received email Compose can reply to (threading), or null for sent mail and unknown rows. */
+  private receivedRef(email: any): { id: number; email: string } | null {
+    const received = email?.direction ? email.direction === 'received' : !['Sent', 'Not Sent'].includes(email?.status);
+    return received && Number(email?.id) && email?.sender_email ? { id: Number(email.id), email: String(email.sender_email).trim().toLowerCase() } : null;
+  }
+
   /** Forward: a new email with the original content; the sender chooses the recipient and purpose. */
   forwardEmail(email: any): void {
+    this.composeReplyTo = null;
     const html = email.html_body || '';
     this.composeEmail = {
       recipient_email: '',
@@ -2052,6 +2073,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.composeTemplate = null;
     this.composeSend = null;
     this.composeTab = html ? 'visual' : 'write';
+    this.composeReplyTo = null;
     this.showComposeModal = true;
     this.composeLeadId = null;
   }
@@ -2068,6 +2090,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.composeSend = null;
     this.composeTouched = false;
     this.composeTab = 'write';
+    this.composeReplyTo = null;
     this.showComposeModal = true;
     this.composeLeadId = null;
     if (r.leadId) { this.composeLeadId = r.leadId; this.composeLeadEmail = String(r.email || '').trim().toLowerCase(); }
@@ -2082,6 +2105,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.composeTemplateName = '';
     this.composeSend = null;
     this.composeTab = 'write';
+    this.composeReplyTo = null;
     this.showComposeModal = true;
     this.composeLeadId = null;
   }

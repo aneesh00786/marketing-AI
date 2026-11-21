@@ -14,7 +14,7 @@ const TABS = [
   { key: 'campaigns', label: 'Campaigns', description: 'Email campaigns and contact lists (Amazon SES).',
     paths: [/^\/api\/v1\/mail\/campaigns(\/|$)/] },
   { key: 'deliverability', label: 'Deliverability', description: 'Delivery, bounce and complaint rates of campaigns.',
-    paths: [/^\/api\/v1\/mail\/ses\/deliverability$/] },
+    paths: [/^\/api\/v1\/mail\/ses\/(deliverability|domains)$/] },
   { key: 'templates', label: 'Email Templates', description: 'Create, edit and delete templates. (Everyone can still use them.)',
     paths: [/^\/api\/v1\/mail\/templates(\/|$)/], writeOnly: true },
   { key: 'logs', label: 'Logs', description: 'What was sent: the campaign log.',

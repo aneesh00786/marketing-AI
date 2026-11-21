@@ -96,7 +96,7 @@ describe('MailInboxComponent', () => {
 
   it('search, read filter and dates go to the server; empty results offer to clear filters', () => {
     init();
-    comp.filters = { q: 'pricing', read: 'unread', from: '2026-10-01', to: '2026-10-28' };
+    comp.filters = { q: 'pricing', read: 'unread', folder: '', from: '2026-10-01', to: '2026-10-28' };
     button('Search')!.click();
     const req = inbox();
     expect(['q', 'read', 'from', 'to'].map(k => req.request.params.get(k))).toEqual(['pricing', 'unread', '2026-10-01', '2026-10-28']);
@@ -183,4 +183,24 @@ describe('MailInboxComponent', () => {
     http.expectOne(r => r.url.endsWith('/emails/5')).flush({ email: { ...DETAIL, id: 5, read: true, subject: 'Thanks' } });
     expect(comp.selectedId).toBe(5);
   }));
+
+  it('Spam is a folder of its own; an email shows its attachments, which download as files', () => {
+    init();
+    comp.filters.folder = 'spam';
+    comp.load(1);
+    expect(inbox().request.params.get('folder')).toBe('spam');
+    items()[0].click();
+    http.expectOne(r => r.url.endsWith('/emails/7') && r.method === 'GET').flush({ email: { ...DETAIL, spam: true, inReplyTo: { id: 3, subject: 'Our offer', sentAt: '2026-10-20T10:00:00Z' },
+      attachments: [{ id: 11, filename: 'invoice.pdf', contentType: 'application/pdf', size: 2048, stored: true }, { id: 12, filename: 'huge.zip', size: 40 * 1024 * 1024, stored: false }] } });
+    http.expectOne(r => r.url.endsWith('/emails/7/read')).flush({ success: true });
+    fixture.detectChanges();
+    expect(el().textContent).toContain('was in the Spam folder');
+    expect(el().textContent).toContain('Your email “Our offer”');
+    expect(el().textContent).toContain('too large to keep here');
+    spyOn(URL, 'createObjectURL').and.returnValue('blob:x');
+    button('invoice.pdf')!.click();
+    const dl = http.expectOne(r => r.url.endsWith('/emails/7/attachments/11'));
+    expect(dl.request.responseType).toBe('blob');
+    dl.flush(new Blob(['%PDF']));
+  });
 });

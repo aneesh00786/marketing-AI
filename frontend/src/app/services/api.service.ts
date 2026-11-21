@@ -420,7 +420,11 @@ export class ApiService {
   // ---------- Mail Center: Inbox and Sent Mail ----------
   /** Unread received emails the person may see (the Inbox badge). */
   getInboxUnread(): Observable<any> { return this.http.get(`${this.baseUrl}/emails/inbox/unread`); }
-  getInbox(params: { q?: string; read?: string; from?: string; to?: string; page?: number } = {}): Observable<any> {
+  /** A file of a received email (downloaded as a blob, with the session cookie). */
+  getEmailAttachment(emailId: number, attachmentId: number): Observable<Blob> {
+    return this.http.get(`${this.baseUrl}/emails/${emailId}/attachments/${attachmentId}`, { responseType: 'blob' });
+  }
+  getInbox(params: { q?: string; read?: string; folder?: string; from?: string; to?: string; page?: number } = {}): Observable<any> {
     return this.http.get(`${this.baseUrl}/emails/inbox`, { params: this.queryParams(params) });
   }
 

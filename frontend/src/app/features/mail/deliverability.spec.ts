@@ -20,14 +20,28 @@ describe('DeliverabilityComponent', () => {
   let fixture: ComponentFixture<DeliverabilityComponent>;
   let http: HttpTestingController;
   const el = () => fixture.nativeElement as HTMLElement;
+  const DOMAINS = [{ domain: 'thrivewoo.com', status: 'error',
+    spf: { status: 'error', message: '2 SPF records.', fix: 'v=spf1 include:zohomail.com include:zcsend.net ~all' },
+    dkim: { status: 'unknown', message: 'Check DKIM in ZeptoMail.' }, dmarc: { status: 'ok', message: 'DMARC is set.' }, mx: { status: 'ok', message: 'MX ok.' } }];
 
   beforeEach(() => {
     TestBed.configureTestingModule({ imports: [DeliverabilityComponent], providers: [provideHttpClient(), provideHttpClientTesting()] });
     http = TestBed.inject(HttpTestingController);
     fixture = TestBed.createComponent(DeliverabilityComponent);
     fixture.detectChanges();
+    http.expectOne('/api/v1/mail/ses/domains').flush({ domains: DOMAINS });
   });
   afterEach(() => http.verify());
+
+  it('domain setup: each sending domain with SPF, DKIM, DMARC and MX, and the record to set when one is wrong', () => {
+    http.expectOne('/api/v1/mail/ses/deliverability?days=30').flush(DATA());
+    fixture.detectChanges();
+    const card = el().querySelector('.dv-domains')!;
+    expect(card.textContent).toContain('thrivewoo.com');
+    expect(card.textContent).toContain('⛔ Fix needed');
+    expect(card.textContent).toContain('Set: v=spf1 include:zohomail.com include:zcsend.net ~all');
+    expect(card.querySelectorAll('.dv-checks li').length).toBe(4);
+  });
 
   it('shows the rates with their level, warm-up and the warning; delivered is never called inbox', () => {
     http.expectOne('/api/v1/mail/ses/deliverability?days=30').flush(DATA());

@@ -31,6 +31,29 @@ type Level = 'good' | 'warning' | 'critical' | 'none';
     </div>
   </header>
 
+  <!-- Email authentication of the sending domains: problems here send mail to spam -->
+  <section class="dv-card dv-domains" aria-labelledby="dv-dom-title">
+    <h3 id="dv-dom-title">Domain setup <small class="dv-muted">SPF, DKIM, DMARC and MX, read from public DNS</small>
+      <button type="button" class="dv-link" (click)="loadDomains()" [disabled]="domainsLoading">{{ domainsLoading ? 'Checking…' : 'Check again' }}</button></h3>
+    <p class="dv-muted" *ngIf="domainsLoading && !domains">Checking…</p>
+    <p class="dv-muted" *ngIf="domains && !domains.length">No company sending address yet (Mail Settings or My sender email).</p>
+    <div class="dv-error" *ngIf="domainsError" role="alert">{{ domainsError }}</div>
+    <div class="dv-dom" *ngFor="let x of domains || []" [attr.data-status]="x.status">
+      <div class="dv-dom-head"><b>{{ x.domain }}</b>
+        <em class="dv-badge">{{ x.status === 'ok' ? '✓ Set up' : x.status === 'error' ? '⛔ Fix needed' : x.status === 'warn' ? '⚠ Check' : 'Unknown' }}</em></div>
+      <p class="dv-error" *ngIf="x.error">{{ x.error }}</p>
+      <ul class="dv-checks" *ngIf="!x.error">
+        <li *ngFor="let c of checksOf(x)" [attr.data-status]="c.check.status">
+          <span class="dv-check-name">{{ c.label }}</span>
+          <span class="dv-check-icon" aria-hidden="true">{{ c.check.status === 'ok' ? '✓' : c.check.status === 'error' ? '⛔' : c.check.status === 'warn' ? '⚠' : '?' }}</span>
+          <span class="dv-check-text">{{ c.check.message }}
+            <code class="dv-fix" *ngIf="c.check.fix">Set: {{ c.check.fix }}</code>
+          </span>
+        </li>
+      </ul>
+    </div>
+  </section>
+
   <p class="dv-muted" *ngIf="loading && !d">Loading…</p>
   <div class="dv-error" *ngIf="error" role="alert">{{ error }} <button type="button" class="dv-link" (click)="load()">Try again</button></div>
 
@@ -153,7 +176,22 @@ export class DeliverabilityComponent implements OnInit {
 
   constructor(private http: HttpClient) {}
 
-  ngOnInit(): void { this.load(); }
+  ngOnInit(): void { this.load(); this.loadDomains(); }
+
+  domains: any[] | null = null;
+  domainsLoading = false;
+  domainsError: string | null = null;
+  loadDomains(): void {
+    this.domainsLoading = true;
+    this.domainsError = null;
+    this.http.get<any>('/api/v1/mail/ses/domains').subscribe({
+      next: r => { this.domainsLoading = false; this.domains = r.domains || []; },
+      error: e => { this.domainsLoading = false; this.domainsError = e?.error?.error || 'Could not check the domain setup.'; }
+    });
+  }
+  checksOf(x: any): { label: string; check: any }[] {
+    return [{ label: 'SPF', check: x.spf }, { label: 'DKIM', check: x.dkim }, { label: 'DMARC', check: x.dmarc }, { label: 'MX', check: x.mx }].filter(c => c.check);
+  }
 
   setRange(r: number): void { this.days = r; this.load(); }
 

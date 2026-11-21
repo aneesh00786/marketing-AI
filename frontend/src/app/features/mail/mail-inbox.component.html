@@ -36,6 +36,11 @@
     </label>
     <label>From <input class="hud-input" type="date" name="from" [(ngModel)]="filters.from" (change)="load(1)" /></label>
     <label>To <input class="hud-input" type="date" name="to" [(ngModel)]="filters.to" (change)="load(1)" /></label>
+    <label>Folder
+      <select class="hud-input" name="folder" [(ngModel)]="filters.folder" (ngModelChange)="load(1)">
+        <option value="">Inbox</option><option value="spam">Spam</option>
+      </select>
+    </label>
     <button type="submit" class="btn btn-secondary btn-sm" [disabled]="loading">Search</button>
   </form>
 
@@ -46,7 +51,8 @@
       <p class="mb-empty" *ngIf="loading && !list">Loading…</p>
       <p class="mb-empty" *ngIf="list && !emails.length">
         <ng-container *ngIf="filtered">No emails match these filters. <button type="button" class="link-btn" (click)="clearFilters()">Clear filters</button></ng-container>
-        <ng-container *ngIf="!filtered">{{ canSync ? 'No received email yet. New mail appears after the next sync.' : 'No received email yet. Connect your inbox to receive replies here.' }}</ng-container>
+        <ng-container *ngIf="!filtered && inSpam">No email in Spam.</ng-container>
+        <ng-container *ngIf="!filtered && !inSpam">{{ canSync ? 'No received email yet. New mail appears after the next sync.' : 'No received email yet. Connect your inbox to receive replies here.' }}</ng-container>
       </p>
       <button type="button" *ngFor="let e of emails" class="mb-item" role="option" [id]="'mb-in-' + e.id"
         [class.unread]="!e.read" [class.on]="e.id === selectedId" [attr.aria-selected]="e.id === selectedId" (click)="open(e)">
@@ -55,7 +61,9 @@
         <span class="mb-when">{{ e.receivedAt | date:'MMM d, h:mm a' }}</span>
         <span class="mb-subj">{{ e.subject || '(no subject)' }}</span>
         <span class="mb-prev">{{ e.preview }}</span>
-        <span class="mb-tags" *ngIf="e.urgent || e.hasHtml">
+        <span class="mb-tags" *ngIf="e.urgent || e.hasHtml || e.spam || e.attachments">
+          <span class="mx-tag warn" *ngIf="e.spam">Spam</span>
+          <span class="mx-tag" *ngIf="e.attachments" [attr.aria-label]="e.attachments + ' attachment' + (e.attachments === 1 ? '' : 's')">📎 {{ e.attachments }}</span>
           <span class="mx-tag bad" *ngIf="e.urgent">Urgent</span>
           <span class="mx-tag" *ngIf="e.hasHtml">HTML</span>
         </span>
@@ -79,7 +87,9 @@
             <dt>From</dt><dd>{{ detail.sender ? detail.sender + ' · ' : '' }}{{ detail.sender_email || '—' }}</dd>
             <dt>To</dt><dd>{{ detail.recipient_email || '—' }}</dd>
             <dt>Received</dt><dd>{{ detail.received_at ? (detail.received_at | date:'medium') : '—' }}</dd>
+            <ng-container *ngIf="detail.inReplyTo"><dt>Reply to</dt><dd>Your email “{{ detail.inReplyTo.subject }}”{{ detail.inReplyTo.sentAt ? ' (' + (detail.inReplyTo.sentAt | date:'mediumDate') + ')' : '' }}</dd></ng-container>
           </dl>
+          <div class="mx-callout warn" *ngIf="detail.spam" role="status"><span>This email was in the <strong>Spam</strong> folder of the mailbox. Check the sender before you open links or files.</span></div>
           <div class="mb-actions">
             <button type="button" class="btn btn-primary btn-sm" (click)="reply.emit(detail)" [disabled]="!detail.sender_email"><app-icon name="reply" [size]="15"></app-icon>Reply</button>
             <button type="button" class="btn btn-secondary btn-sm" (click)="forward.emit(detail)"><app-icon name="forward" [size]="15"></app-icon>Forward</button>
@@ -95,6 +105,15 @@
               <span class="muted small">Suggested replies (open Compose to review):</span>
               <button type="button" class="btn btn-secondary btn-sm" *ngFor="let r of detail.ai_replies" (click)="smartReply.emit({ reply: r, email: detail })">{{ r.label || r }}</button>
             </div>
+          </div>
+          <div class="mb-files" *ngIf="detail.attachments?.length">
+            <span class="muted small">{{ detail.attachments.length }} attachment{{ detail.attachments.length === 1 ? '' : 's' }}</span>
+            <ul>
+              <li *ngFor="let a of detail.attachments">
+                <button type="button" class="btn btn-secondary btn-sm" *ngIf="a.stored" (click)="download(a)" [disabled]="downloadingId === a.id">📎 {{ a.filename }} <span class="muted small">{{ fileSize(a.size) }}</span>{{ downloadingId === a.id ? ' …' : '' }}</button>
+                <span class="mb-file-missing" *ngIf="!a.stored">📎 {{ a.filename }} <span class="muted small">{{ fileSize(a.size) }} · too large to keep here, open it in the mailbox</span></span>
+              </li>
+            </ul>
           </div>
           <app-email-preview *ngIf="detail.html_body; else plain" [html]="previewHtml(detail)" [contentKey]="detail.id" [title]="'Email: ' + (detail.subject || '')" emptyText="This email has no content."></app-email-preview>
           <ng-template #plain><p class="mb-text">{{ detail.body || '(no content)' }}</p></ng-template>

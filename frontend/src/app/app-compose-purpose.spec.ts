@@ -164,4 +164,20 @@ describe('App shell: Compose email purpose', () => {
     app.closeCompose();
     expect(window.confirm).withContext('an empty email closes without asking').not.toHaveBeenCalled();
   });
+
+  it('a reply to a received email links it, and answering its sender may be transactional without the permission; a forward may not', () => {
+    app.myCaps = new Set(['mail.view', 'mail.send']);
+    app.replyToEmail({ id: 42, direction: 'received', sender: 'Kim', sender_email: 'Kim@Client.io', subject: 'Question', body: 'Hi?' });
+    expect(app.composeReplyTo).toEqual({ id: 42, email: 'kim@client.io' });
+    expect(app.composeCanTransactional).toBeTrue();
+    expect(app.composePurpose).toBe('transactional');
+    app.sendOutboundEmail();
+    expect(api.sendEmail.calls.mostRecent().args[0].reply_to_email_id).toBe(42);
+    // Sent to someone else, it is no longer an answer to the sender.
+    app.composeEmail.recipient_email = 'boss@client.io';
+    expect(app.composeCanTransactional).toBeFalse();
+    app.forwardEmail({ id: 42, sender_email: 'kim@client.io', subject: 'Question', body: 'Hi?' });
+    expect(app.composeReplyTo).toBeNull();
+    expect(app.composeCanTransactional).toBeFalse();
+  });
 });

@@ -53,3 +53,9 @@ app-email-preview { height: 460px; }
   .mb.reading .mb-bar, .mb.reading > .mx-callout, .mb.reading .mb-hint, .mb.reading .mb-head .mx-desc { display: none; }
 }
 .mb-head h2 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* Files of a received email */
+.mb-files { display: flex; flex-direction: column; gap: 6px; }
+.mb-files ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.mb-files .btn { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mb-file-missing { font-size: 0.82rem; color: var(--text-muted); }

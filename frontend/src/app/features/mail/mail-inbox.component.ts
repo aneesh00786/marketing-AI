@@ -36,7 +36,7 @@ export class MailInboxComponent implements OnInit, OnChanges, OnDestroy {
   @Output() toast = new EventEmitter<string>();
   @Output() openSettings = new EventEmitter<void>();
 
-  filters = { q: '', read: '', from: '', to: '' };
+  filters = { q: '', read: '', folder: '', from: '', to: '' };
   page = 1;
   list: any = null;
   loading = false;
@@ -89,6 +89,31 @@ export class MailInboxComponent implements OnInit, OnChanges, OnDestroy {
 
   get emails(): any[] { return this.list?.emails || []; }
   get filtered(): boolean { return !!(this.filters.q || this.filters.read || this.filters.from || this.filters.to); }
+  get inSpam(): boolean { return this.filters.folder === 'spam'; }
+
+  /** Downloads a file of the open email. */
+  downloadingId: number | null = null;
+  download(a: any): void {
+    if (!this.detail || !a?.stored || this.downloadingId) return;
+    this.downloadingId = a.id;
+    this.api.getEmailAttachment(this.detail.id, a.id).subscribe({
+      next: (blob: Blob) => {
+        this.downloadingId = null;
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url; link.download = a.filename || 'attachment';
+        document.body.appendChild(link); link.click(); link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      },
+      error: () => { this.downloadingId = null; this.toast.emit(`${a.filename} could not be downloaded.`); }
+    });
+  }
+  fileSize(n: number): string {
+    if (!n) return '';
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+    return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  }
 
   load(page = 1): void {
     const mine = ++this.seq;
@@ -102,7 +127,7 @@ export class MailInboxComponent implements OnInit, OnChanges, OnDestroy {
   }
 
   clearFilters(): void {
-    this.filters = { q: '', read: '', from: '', to: '' };
+    this.filters = { q: '', read: '', folder: '', from: '', to: '' };
     this.load(1);
   }
 

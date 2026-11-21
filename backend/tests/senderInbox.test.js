@@ -6,25 +6,17 @@ const h = require('./helpers');
 // the password is stored encrypted, and what is synced from it is visible to that member.
 // IMAP is stubbed (ImapFlow's prototype): nothing connects to a real server.
 const db = () => h.db();
-const { ImapFlow } = require('imapflow');
 const ai = require('../services/aiEngine');
+const fake = require('./fakeImap');
 
 let W; let MEM; let OTHER; let SENDER_ID; let ADDR;
-const imap = { logins: [], fail: null, messages: [] };
-const raw = (from, subject, id) => Buffer.from(`From: Kim <${from}>\r\nTo: x\r\nSubject: ${subject}\r\nMessage-ID: <${id}>\r\nDate: Fri, 20 Nov 2026 10:00:00 +0000\r\n\r\nThanks, sounds good.\r\n`);
+let imap;
+const raw = (from, subject, id) => fake.rawEmail({ from, subject, id });
 
 test.before(async () => {
   await h.prepareDatabase();
   process.env.MAIL_ALLOW_PRIVATE_HOSTS = 'true'; // no DNS lookups of the stub host
-  const proto = ImapFlow.prototype;
-  proto.connect = async function () {
-    imap.logins.push({ host: this.options.host, user: this.options.auth.user, pass: this.options.auth.pass });
-    if (imap.fail) { const e = new Error('Command failed'); e.authenticationFailed = true; throw e; }
-  };
-  proto.logout = async () => {};
-  proto.getMailboxLock = async () => ({ release() {} });
-  proto.status = async () => ({ messages: imap.messages.length, unseen: imap.messages.length });
-  proto.fetch = async function* () { let seq = 0; for (const m of imap.messages) yield { seq: ++seq, uid: seq, envelope: { messageId: m.id }, source: m.source }; };
+  imap = fake.install();
   ai.analyzeEmail = async () => ({ ai_summary: 'Reply', ai_priority: 'Normal', ai_replies: [] });
 
   W = await h.createWorkspace({ name: 'Sender inbox' });
@@ -45,7 +37,7 @@ test('connecting an inbox signs in as the sender address itself; a failed sign-i
   assert.equal((await db().get('SELECT imap_host FROM member_sender_addresses WHERE id = ?', [SENDER_ID])).imap_host, null);
 
   imap.fail = null; imap.logins = [];
-  imap.messages = [{ id: 'reply-1@kimco.io', source: raw('kim@kimco.io', 'Re: Spring range', 'reply-1@kimco.io') }];
+  imap.push('INBOX', { id: 'reply-1@kimco.io', source: raw('kim@kimco.io', 'Re: Spring range', 'reply-1@kimco.io') });
   const ok = await api(MEM, 'PUT', `/${SENDER_ID}/inbox`, { host: 'imap.zoho.com', port: 993, password: 'app-pass-1' });
   assert.equal(ok.status, 200, JSON.stringify(ok.data));
   assert.ok(imap.logins.every(l => l.user === ADDR && l.host === 'imap.zoho.com'), 'login is always the sender address');
@@ -67,7 +59,7 @@ test('what is synced from a member inbox is theirs to see (not other members\');
   assert.ok(!(await inbox(OTHER)).data.emails.some(e => e.subject === 'Re: Spring range'));
   assert.ok((await inbox(W)).data.emails.some(e => e.subject === 'Re: Spring range'), 'Owners see all mail');
 
-  imap.messages.push({ id: 'reply-2@kimco.io', source: raw('kim@kimco.io', 'Re: Prices', 'reply-2@kimco.io') });
+  imap.push('INBOX', { id: 'reply-2@kimco.io', source: raw('kim@kimco.io', 'Re: Prices', 'reply-2@kimco.io') });
   const s = await api(MEM, 'POST', '/inbox/sync');
   assert.equal(s.status, 200, JSON.stringify(s.data));
   assert.equal(s.data.fetchedCount, 1);
@@ -80,10 +72,9 @@ test('a message that cannot be saved does not stop newer ones; a sent email with
   await db().run("INSERT INTO emails (workspace_id, sender, sender_email, recipient_email, subject, body, status, message_id, smtp_status, sent_at) VALUES (?, 'Me', 'me@x.io', ?, 'Self test', 'x', 'Sent', 'self-1@x.io', 'Sent via SMTP', UTC_TIMESTAMP())", [W.workspaceId, ADDR]);
   const analyze = ai.analyzeEmail;
   ai.analyzeEmail = async e => { if (e.subject === 'Broken one') throw new Error('cannot analyse'); return analyze(e); };
-  imap.messages.push(
-    { id: 'broken-1@kimco.io', source: raw('kim@kimco.io', 'Broken one', 'broken-1@kimco.io') },
-    { id: 'self-1@x.io', source: raw('me@x.io', 'Self test', 'self-1@x.io') },
-    { id: 'reply-3@kimco.io', source: raw('kim@kimco.io', 'Newest reply', 'reply-3@kimco.io') });
+  imap.push('INBOX', { id: 'broken-1@kimco.io', source: raw('kim@kimco.io', 'Broken one', 'broken-1@kimco.io') });
+  imap.push('INBOX', { id: 'self-1@x.io', source: raw('me@x.io', 'Self test', 'self-1@x.io') });
+  imap.push('INBOX', { id: 'reply-3@kimco.io', source: raw('kim@kimco.io', 'Newest reply', 'reply-3@kimco.io') });
   try {
     const s = await api(MEM, 'POST', '/inbox/sync');
     assert.equal(s.status, 200, JSON.stringify(s.data));
