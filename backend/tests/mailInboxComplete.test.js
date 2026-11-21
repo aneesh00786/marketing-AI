@@ -162,3 +162,16 @@ test('domain check: two SPF records are an error with one merged record to set; 
   assert.equal(r.status, 200, JSON.stringify(r.data));
   assert.ok(Array.isArray(r.data.domains));
 });
+
+test('mail status: a member without "Manage mail settings" sees their own address, what sends and their inbox (no secrets)', async () => {
+  assert.equal((await h.api('GET', '/api/v1/mail/config', { token: MEM.token })).status, 403, 'settings stay for Owners/Admins');
+  const r = await h.api('GET', '/api/v1/mail/status', { token: MEM.token });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.from, ADDR);
+  assert.equal(r.data.sending.transactional, 'zeptomail');
+  assert.equal(r.data.replies.ownInbox, 'connected');
+  assert.equal(r.data.replies.ownInboxAddress, ADDR);
+  assert.ok(!/zepto-W|pw|pass/i.test(JSON.stringify(r.data)), 'no secrets');
+  const other = await h.api('GET', '/api/v1/mail/status', { token: OTHER.token });
+  assert.deepEqual([other.data.from, other.data.replies.ownInbox], [null, null], 'no address yet');
+});

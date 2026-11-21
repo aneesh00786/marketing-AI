@@ -69,6 +69,8 @@ export class MailActivityChartsComponent implements OnInit {
     const idx = Array.from(new Set([0, Math.floor((n - 1) / 2), n - 1]));
     return idx.map(i => ({ i, text: this.short(this.daily[i].date) }));
   }
+  /** Days are the viewer's own (the server groups by their time zone): e.g. "Asia/Kolkata". */
+  get zoneLabel(): string { return this.data?.range?.timezone || 'UTC'; }
   short(iso: string): string {
     const d = new Date(`${iso}T00:00:00Z`);
     return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' });

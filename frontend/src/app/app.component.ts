@@ -827,6 +827,7 @@ export class AppComponent implements OnInit, OnDestroy {
         this.pendingSenders = (r.senders || []).filter((x: any) => x.status !== 'verified').length;
         this.sendersRequired = !!r.required;
         this.sendersLoaded = true;
+        this.loadMailStatus();
         if (!this.composeFrom || !this.mySenders.some(x => x.email === this.composeFrom)) this.composeFrom = this.mySenders[0]?.email || null;
       },
       error: () => { this.sendersLoaded = false; }
@@ -2358,8 +2359,26 @@ export class AppComponent implements OnInit, OnDestroy {
   // ==========================================
   // 9. COMPANY MAIL AUTHORIZATION (SMTP & IMAP)
   // ==========================================
+  /** The person's mail status (their address, what sends, where replies are read): readable by everyone in Mail Center. */
+  mailStatus: any = null;
+  loadMailStatus(): void {
+    if (!this.hasModule('mail') || !this.apiService.getMailStatus) return;
+    this.apiService.getMailStatus().subscribe({ next: (r: any) => { this.mailStatus = r; }, error: () => { this.mailStatus = null; } });
+  }
+  get statusSendingLabel(): string {
+    const s = this.mailStatus?.sending;
+    if (!s) return '';
+    const t = s.transactional === 'zeptomail' ? 'ZeptoMail' : s.transactional === 'smtp' ? 'SMTP mailbox' : '';
+    const m = s.marketing === 'ses' ? 'Amazon SES' : s.marketing === 'smtp' ? 'SMTP mailbox' : '';
+    if (t && m && t !== m) return `✓ ${t} · marketing via ${m}`;
+    return t || m ? `✓ ${t || m}` : '';
+  }
+
   loadMailConfig(): void {
+    this.loadMailStatus();
     if (!this.hasModule('mail')) return;
+    // Mail settings themselves are for people who may manage them; everyone else gets the status above.
+    if (this.myCaps && !this.myCaps.has('mail.configure')) return;
     this.apiService.getMailConfig().subscribe({
       next: (res) => {
         if (res.config) {

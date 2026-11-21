@@ -499,19 +499,25 @@
     @defer (on immediate) {
       <app-mail-center class="hud-panel full-width-panel" [(section)]="mailSection" [productEmailsEnabled]="!!serverStatus?.features?.productEmails"
         [products]="digitalProducts" [drafts]="drafts" [draftsState]="draftsState"
-        [imapReady]="mailConfigLoaded ? !!mailConfig.has_imap_auth : null" [mailboxVersion]="mailboxVersion" [unread]="inboxUnread" (unreadChange)="inboxUnread = $event"
+        [imapReady]="mailStatus ? !!mailStatus.replies?.workspaceInbox : (mailConfigLoaded ? !!mailConfig.has_imap_auth : null)" [mailboxVersion]="mailboxVersion" [unread]="inboxUnread" (unreadChange)="inboxUnread = $event"
         (compose)="openCompose()" (reply)="replyToEmail($event)" (forward)="forwardEmail($event)" (smartReply)="applySmartReply($event.reply, $event.email)" (sendAgain)="sendEmailAgain($event)"
         [draftTemplate]="draftTemplate" (templateConsumed)="draftTemplate = null" [draftProduct]="draftProduct" (productConsumed)="draftProduct = null"
         [campaignStartTemplate]="campaignStartTemplate" (templateUse)="onTemplateUse($event)"
         (toast)="showToast($event)" (draftsChanged)="loadDrafts()" (mailSent)="onMailboxChanged()" (settingsChanged)="loadMailConfig(); onMailboxChanged()">
-        <div mcStatus class="mail-auth-status-bar" [class.connected]="mailConfig.has_smtp_auth">
+        <div mcStatus class="mail-auth-status-bar" [class.connected]="!!statusSendingLabel">
           <div class="status-left">
-            <span class="status-dot" [class.green]="mailConfig.has_smtp_auth"></span>
-            <span>
-              From: <strong>{{ mailConfig.sender_email || 'not set' }}</strong>
-              &bull; Sending: <span class="badge" [class.badge-ok]="mailConfig.has_smtp_auth" [class.badge-off]="!mailConfig.has_smtp_auth">{{ !mailConfig.has_smtp_auth ? 'Not set up' : (mailConfig.provider === 'zeptomail' ? '✓ ZeptoMail' : '✓ SMTP mailbox') }}</span>
-              &bull; Replies: <span class="badge" [class.badge-ok]="mailConfig.has_imap_auth" [class.badge-off]="!mailConfig.has_imap_auth">{{ mailConfig.has_imap_auth ? '✓ IMAP set up' : 'IMAP not set up' }}</span>
+            <span class="status-dot" [class.green]="!!statusSendingLabel && !!mailStatus?.from"></span>
+            <span *ngIf="mailStatus; else statusLoading">
+              From: <strong>{{ mailStatus.from || 'not set' }}</strong>
+              <button *ngIf="!mailStatus.from" type="button" class="link-btn" (click)="openSenders()">Set up</button>
+              &bull; Sending: <span class="badge" [class.badge-ok]="!!statusSendingLabel" [class.badge-off]="!statusSendingLabel">{{ statusSendingLabel || 'Not set up' }}</span>
+              &bull; Replies: <span class="badge" [class.badge-ok]="mailStatus.replies?.ownInbox === 'connected' || mailStatus.replies?.workspaceInbox" [class.badge-off]="!(mailStatus.replies?.ownInbox === 'connected' || mailStatus.replies?.workspaceInbox)">{{
+                mailStatus.replies?.ownInbox === 'connected' ? '✓ Your inbox' + (mailStatus.replies?.workspaceInbox ? ' + workspace inbox' : '')
+                : mailStatus.replies?.ownInbox === 'error' ? '⚠ Your inbox has a sync problem'
+                : mailStatus.replies?.workspaceInbox ? '✓ Workspace inbox' : 'Inbox not connected' }}</span>
+              <button *ngIf="mailStatus.from && !mailStatus.replies?.ownInbox" type="button" class="link-btn" (click)="openSenders()">Connect your inbox</button>
             </span>
+            <ng-template #statusLoading><span class="muted">Checking mail setup…</span></ng-template>
           </div>
           <div class="status-right">
             <button *ngIf="myCaps?.has('mail.configure')" class="btn btn-sm" [class.btn-primary]="!mailConfig.has_smtp_auth" [class.btn-secondary]="mailConfig.has_smtp_auth" type="button" (click)="mailSection = 'settings'">

@@ -2,7 +2,7 @@
   <header class="ma-head">
     <div>
       <h3 id="ma-title">Activity</h3>
-      <p class="ma-sub" *ngIf="data">{{ short(data.range.from) }} – {{ short(data.range.to) }} (UTC)</p>
+      <p class="ma-sub" *ngIf="data">{{ short(data.range.from) }} – {{ short(data.range.to) }} ({{ zoneLabel }})</p>
     </div>
     <div class="ma-controls">
       <div class="ma-range" role="group" aria-label="Time range">

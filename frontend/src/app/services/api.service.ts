@@ -508,6 +508,8 @@ export class ApiService {
   }
 
   // 26. Company Mail Authorization (SMTP & IMAP)
+  /** How mail works for the signed-in person (no settings or secrets): the Mail Center status line. */
+  getMailStatus(): Observable<any> { return this.http.get(`${this.root}/api/v1/mail/status`); }
   getMailConfig(): Observable<any> {
     return this.http.get(`${this.root}/api/mail/config`);
   }

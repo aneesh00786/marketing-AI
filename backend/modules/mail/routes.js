@@ -891,6 +891,31 @@ settings.post('/test-smtp', requireCapability('mail.configure'), body(z.object({
 
 // Marketing email (Product Emails) delivery: status for everyone who reads mail; approving an SMTP
 // mailbox for marketing is an Owner/Admin decision, recorded and audited.
+/**
+ * How mail works for the person, for the Mail Center status line (anyone who may open Mail Center; no settings or
+ * secrets): the address they send from (their own verified one), what sends transactional and marketing email, and
+ * where replies are read (their own inbox and/or the workspace mailbox).
+ */
+settings.get('/status', requireCapability('mail.view'), wrap(async (req, res) => {
+  const cfg = await emailService.getSafeMailConfig(ws(req));
+  const marketing = await emailService.marketingDeliveryStatus(ws(req)).catch(() => ({ marketingVia: null }));
+  const mine = await all("SELECT email, imap_host, imap_pass, imap_status, imap_error FROM member_sender_addresses WHERE workspace_id = ? AND user_id = ? AND status = 'verified' ORDER BY id",
+    [ws(req), Number(req.auth.userId)]).catch(() => []);
+  const inbox = mine.find(r => r.imap_host && r.imap_pass) || null;
+  const transactional = cfg.has_smtp_auth ? (cfg.provider === 'zeptomail' ? 'zeptomail' : 'smtp') : null;
+  res.json({
+    success: true,
+    from: mine[0]?.email || null,
+    workspaceAddress: cfg.sender_email || null,
+    sending: { transactional, marketing: marketing.marketingVia || null },
+    replies: {
+      ownInbox: inbox ? (inbox.imap_status === 'error' ? 'error' : 'connected') : null,
+      ownInboxAddress: inbox?.email || null,
+      workspaceInbox: !!cfg.has_imap_auth
+    }
+  });
+}));
+
 settings.get('/marketing', requireCapability('mail.view'), wrap(async (req, res) => {
   res.json({ success: true, marketing: await emailService.marketingDeliveryStatus(ws(req)) });
 }));
